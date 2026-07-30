@@ -11,7 +11,7 @@
  * It also settles the question the roadmap flagged and would not assume:
  * whether `toArrayBuffer` attaches a deallocator to Rust-owned memory.
  */
-import { Align, Display, EventKind, FlexDirection, Justify, NodeFlags, NodeKind, Status }
+import { Align, Display, EventKind, FlexDirection, Justify, NodeFlags, NodeKind, Predicate, Status }
   from "./protocol/generated.ts";
 import { Engine, writeString } from "./engine/host.ts";
 
@@ -35,14 +35,15 @@ const engine = Engine.open({
   height: 200,
   nodes: 8,
   styles: 3,
-  states: 1,
+  variants: 1,
+  variantSlots: 4,
   lists: 1,
   strings: 4,
   stringBytes: 256,
   windowed: false,
 });
 
-const { nodes, styles, states, layout } = engine.tables;
+const { nodes, styles, variants, layout } = engine.tables;
 
 /**
  * Every style field has to be written: the arenas are zeroed, and zero is a real
@@ -105,11 +106,12 @@ nodes.nextSibling[1] = 2;
 nodes.parent[1] = 0;
 nodes.parent[2] = 0;
 
-// One sparse interaction-state row, for the node that is interactive.
-states.node[0] = 1;
-states.hover[0] = 1;
-states.active[0] = 1;
-states.focus[0] = -1;
+// One conditional node: it reads hover and active, so its run is four entries
+// long — base, hover, active, hover+active — indexed by the compacted bits.
+variants.node[0] = 1;
+variants.mask[0] = Predicate.HOVER | Predicate.ACTIVE;
+variants.runStart[0] = 0;
+engine.tables.variantSlots.style.set([1, 1, 1, 1]);
 
 console.log(`engine: protocol v${Status.OK === 0 ? "1" : "?"}, font ${engine.fontFamily()}\n`);
 

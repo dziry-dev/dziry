@@ -88,7 +88,7 @@ function rustTable(table: Table): string {
   const names = table.fields.map((f) => `"${f.name}"`).join(", ");
 
   return `/// ${table.doc}
-pub mod ${table.name} {
+pub mod ${snake(table.name)} {
     /// Field indices, in descriptor order.
 ${consts}
 
@@ -116,10 +116,10 @@ function emitRust(): string {
   const enums = ENUMS.map(rustEnum).join("\n\n");
   const enumVariants = TABLES.map((t, i) => `    ${cap(t.name)} = ${i},`).join("\n");
   const tableNames = TABLES.map((t) => `"${t.name}"`).join(", ");
-  const fieldCounts = TABLES.map((t) => `${t.name}::FIELD_COUNT`).join(", ");
+  const fieldCounts = TABLES.map((t) => `${snake(t.name)}::FIELD_COUNT`).join(", ");
   const sizedBy = TABLES.map((t) => `"${t.sizedBy}"`).join(", ");
-  const elemSizeArms = TABLES.map((t, i) => `        ${i} => &${t.name}::ELEM_SIZES,`).join("\n");
-  const fieldNameArms = TABLES.map((t, i) => `        ${i} => &${t.name}::FIELD_NAMES,`).join("\n");
+  const elemSizeArms = TABLES.map((t, i) => `        ${i} => &${snake(t.name)}::ELEM_SIZES,`).join("\n");
+  const fieldNameArms = TABLES.map((t, i) => `        ${i} => &${snake(t.name)}::FIELD_NAMES,`).join("\n");
 
   return `${BANNER("src/protocol/schema.ts")}
 //! Shared-memory layout. Struct-of-arrays: every field is its own contiguous

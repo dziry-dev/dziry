@@ -15,6 +15,7 @@ import {
   Justify as SchemaJustify,
   NodeKind as SchemaNodeKind,
   Position as SchemaPosition,
+  Predicate as SchemaPredicate,
 } from "./protocol/generated.ts";
 
 /**
@@ -48,6 +49,7 @@ export const Align = {
   BASELINE: SchemaAlign.BASELINE,
 } as const;
 
+export const Predicate = SchemaPredicate;
 export const Display = SchemaDisplay;
 export const FlexWrap = SchemaFlexWrap;
 export const Position = SchemaPosition;
@@ -250,7 +252,7 @@ export type NodeTable = {
 };
 
 /**
- * Interaction-state styles, stored sparsely.
+ * Conditional styling as a predicate mask, stored sparsely.
  *
  * Dense per-node arrays were nearly all `-1`: on a 300-item todo page only 3 of
  * 1215 nodes have any state style. Sparse costs nothing at run time because at
@@ -265,17 +267,26 @@ export type NodeTable = {
  * per-property when both apply. Correct merging needs compiled state
  * combinations, which is deliberately not done yet.
  */
-export type StateTable = {
+export type VariantTable = {
   count: number;
+  /** Sorted ascending, for binary search. */
   node: Int32Array;
-  hover: Int32Array;
-  active: Int32Array;
-  focus: Int32Array;
+  /** Predicate bits this node's styling reads. */
+  mask: Uint32Array;
+  /** First entry of this node's run in `variantSlots`. */
+  runStart: Int32Array;
+  /** Concatenated runs: one style id per predicate combination. */
+  slots: Uint16Array;
 };
 
-export function emptyStateTable(): StateTable {
-  const none = new Int32Array(0);
-  return { count: 0, node: none, hover: none, active: none, focus: none };
+export function emptyVariantTable(): VariantTable {
+  return {
+    count: 0,
+    node: new Int32Array(0),
+    mask: new Uint32Array(0),
+    runStart: new Int32Array(0),
+    slots: new Uint16Array(0),
+  };
 }
 
 /**
@@ -360,7 +371,7 @@ export type CompiledUi = {
   strings: string[];
   styles: StyleTable;
   nodes: NodeTable;
-  states: StateTable;
+  variants: VariantTable;
   textBindings: TextBinding[];
   handlers: HandlerBinding[];
   /**

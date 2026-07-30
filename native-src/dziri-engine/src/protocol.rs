@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,24 +15,25 @@ pub const PROTOCOL_VERSION: u32 = 1;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x24ce8fc9;
+pub const SCHEMA_HASH: u32 = 0xeecbb418;
 
-pub const TABLE_COUNT: usize = 6;
+pub const TABLE_COUNT: usize = 7;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
 pub const MAX_FIELD_COUNT: usize = 48;
-pub const TABLE_NAMES: [&str; TABLE_COUNT] = ["nodes", "styles", "states", "lists", "layout", "strings"];
+pub const TABLE_NAMES: [&str; TABLE_COUNT] = ["nodes", "styles", "variants", "variantSlots", "lists", "layout", "strings"];
 
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Table {
     Nodes = 0,
     Styles = 1,
-    States = 2,
-    Lists = 3,
-    Layout = 4,
-    Strings = 5,
+    Variants = 2,
+    VariantSlots = 3,
+    Lists = 4,
+    Layout = 5,
+    Strings = 6,
 }
 
 impl Table {
@@ -41,21 +42,22 @@ impl Table {
     }
 }
 
-pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [nodes::FIELD_COUNT, styles::FIELD_COUNT, states::FIELD_COUNT, lists::FIELD_COUNT, layout::FIELD_COUNT, strings::FIELD_COUNT];
+pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [nodes::FIELD_COUNT, styles::FIELD_COUNT, variants::FIELD_COUNT, variant_slots::FIELD_COUNT, lists::FIELD_COUNT, layout::FIELD_COUNT, strings::FIELD_COUNT];
 
 /// How each table is sized, so the engine can turn a capacity request into byte
 /// spans without a hand-written mapping that could drift from the schema.
-pub const SIZED_BY: [&str; TABLE_COUNT] = ["nodes", "styles", "own", "own", "nodes", "strings"];
+pub const SIZED_BY: [&str; TABLE_COUNT] = ["nodes", "styles", "own", "own", "own", "nodes", "strings"];
 
 /// Element size per field, indexed by table. Empty for an unknown table.
 pub fn elem_sizes(table: usize) -> &'static [usize] {
     match table {
         0 => &nodes::ELEM_SIZES,
         1 => &styles::ELEM_SIZES,
-        2 => &states::ELEM_SIZES,
-        3 => &lists::ELEM_SIZES,
-        4 => &layout::ELEM_SIZES,
-        5 => &strings::ELEM_SIZES,
+        2 => &variants::ELEM_SIZES,
+        3 => &variant_slots::ELEM_SIZES,
+        4 => &lists::ELEM_SIZES,
+        5 => &layout::ELEM_SIZES,
+        6 => &strings::ELEM_SIZES,
         _ => &[],
     }
 }
@@ -65,10 +67,11 @@ pub fn field_names(table: usize) -> &'static [&'static str] {
     match table {
         0 => &nodes::FIELD_NAMES,
         1 => &styles::FIELD_NAMES,
-        2 => &states::FIELD_NAMES,
-        3 => &lists::FIELD_NAMES,
-        4 => &layout::FIELD_NAMES,
-        5 => &strings::FIELD_NAMES,
+        2 => &variants::FIELD_NAMES,
+        3 => &variant_slots::FIELD_NAMES,
+        4 => &lists::FIELD_NAMES,
+        5 => &layout::FIELD_NAMES,
+        6 => &strings::FIELD_NAMES,
         _ => &[],
     }
 }
@@ -148,17 +151,26 @@ pub mod styles {
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["bg", "fg", "borderColor", "borderWidth", "radius", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflow"];
 }
 
-/// Sparse interaction-state styles, sorted by node for binary search.
-pub mod states {
+/// Per-node predicate mask and where that node's style run begins.
+pub mod variants {
     /// Field indices, in descriptor order.
     pub const NODE: usize = 0;
-    pub const HOVER: usize = 1;
-    pub const ACTIVE: usize = 2;
-    pub const FOCUS: usize = 3;
+    pub const MASK: usize = 1;
+    pub const RUN_START: usize = 2;
 
-    pub const FIELD_COUNT: usize = 4;
-    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 4, 4, 4];
-    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["node", "hover", "active", "focus"];
+    pub const FIELD_COUNT: usize = 3;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 4, 4];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["node", "mask", "runStart"];
+}
+
+/// Dense style-slot runs, indexed by compacted live predicate bits.
+pub mod variant_slots {
+    /// Field indices, in descriptor order.
+    pub const STYLE: usize = 0;
+
+    pub const FIELD_COUNT: usize = 1;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [2];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["style"];
 }
 
 /// List arenas: homogeneous item subtrees addressed by stride.
@@ -269,6 +281,14 @@ pub mod overflow {
     pub const HIDDEN: u8 = 1;
     pub const ELLIPSIS: u8 = 2;
     pub const SCROLL: u8 = 3;
+}
+
+/// Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care.
+pub mod predicate {
+    pub const HOVER: u32 = 1;
+    pub const ACTIVE: u32 = 2;
+    pub const FOCUS: u32 = 4;
+    pub const FIRST_GLOBAL: u32 = 256;
 }
 
 /// Engine → Bun. Drained after `tick()`; `0` means the queue is empty.

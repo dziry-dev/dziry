@@ -139,17 +139,53 @@ const STYLES: Table = {
   ],
 };
 
-/** Interaction-state styles, sparse: only nodes with a `:hover`/`:active`/`:focus` style. */
-const STATES: Table = {
-  name: "states",
-  doc: "Sparse interaction-state styles, sorted by node for binary search.",
+/**
+ * Conditional styling, as a predicate mask rather than named roles.
+ *
+ * This replaces a fixed `(hover, active, focus)` triple, which could express
+ * exactly one thing: "one style per named role, pick by precedence". Three
+ * consequences of that shape, all of them wrong:
+ *
+ * 1. **It cannot merge.** With both `:hover` and `:focus` matching, the runtime
+ *    picked *one* precompiled style; CSS combines them per property. Hover beat
+ *    focus outright.
+ * 2. **It cannot grow.** `group-*`, `peer-*`, `data-[state=open]:` and media
+ *    predicates are all "style depends on a condition", and none of them is
+ *    hover, active or focus. A1 has committed to all four.
+ * 3. **The role names were replicated** across the IR, the schema, the Rust
+ *    protocol, the painter and the variant compiler — five places to edit to add
+ *    a fourth condition.
+ *
+ * The replacement: each conditional node declares a `mask` of the predicate bits
+ * its styling actually depends on, and owns a dense run of `1 << popcount(mask)`
+ * style slots. The painter computes which predicates are live for that node,
+ * intersects with the mask, compacts the result to a run index, and reads one
+ * `u16`. Merging falls out — the compiler resolves each combination as a full
+ * cascade, which it already knew how to do.
+ */
+const VARIANTS: Table = {
+  name: "variants",
+  doc: "Per-node predicate mask and where that node's style run begins.",
   sizedBy: "own",
   fields: [
-    { name: "node", type: "i32" },
-    { name: "hover", type: "i32" },
-    { name: "active", type: "i32" },
-    { name: "focus", type: "i32" },
+    { name: "node", type: "i32", doc: "Sorted ascending, for binary search" },
+    { name: "mask", type: "u32", doc: "Predicate bits this node's styling reads" },
+    { name: "runStart", type: "i32", doc: "First entry in variantSlots" },
   ],
+};
+
+/**
+ * The runs themselves, concatenated.
+ *
+ * Entry `runStart + i` is the style for the predicate combination whose compacted
+ * bits equal `i`; entry 0 is therefore always the node's base style. A node
+ * reading two predicates costs four `u16`s.
+ */
+const VARIANT_SLOTS: Table = {
+  name: "variantSlots",
+  doc: "Dense style-slot runs, indexed by compacted live predicate bits.",
+  sizedBy: "own",
+  fields: [{ name: "style", type: "u16" }],
 };
 
 /** Dynamic list arenas — the one place node count is a runtime value. */
@@ -193,7 +229,7 @@ const STRINGS: Table = {
   ],
 };
 
-export const TABLES: Table[] = [NODES, STYLES, STATES, LISTS, LAYOUT, STRINGS];
+export const TABLES: Table[] = [NODES, STYLES, VARIANTS, VARIANT_SLOTS, LISTS, LAYOUT, STRINGS];
 
 // ---------------------------------------------------------------------------
 // Enumerations
@@ -281,6 +317,36 @@ export const ENUMS: EnumDef[] = [
     values: { VISIBLE: 0, HIDDEN: 1, ELLIPSIS: 2, SCROLL: 3 },
   },
   {
+    name: "Predicate",
+    doc:
+      "Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are " +
+      "global, so the engine can flip them without knowing which nodes care.",
+    ty: "u32",
+    values: {
+      /** This node is under the cursor. */
+      HOVER: 1 << 0,
+      /** The mouse went down on this node and has not been released. */
+      ACTIVE: 1 << 1,
+      /** This node holds focus. */
+      FOCUS: 1 << 2,
+
+      /**
+       * The first bit the *engine* owns rather than the input state.
+       *
+       * Everything from here up is a global condition — a media query, a colour
+       * scheme, a reduced-motion preference — evaluated once per frame and
+       * intersected with every node's mask. `md:flex` and
+       * `@media (min-width: 768px)` are the same mechanism reached from two
+       * syntaxes, and neither costs Bun a round trip: the engine owns the window,
+       * so it re-evaluates these between a resize and the relayout.
+       *
+       * The compiler assigns them in order of first use and emits the thresholds
+       * alongside; nothing here hardcodes a breakpoint.
+       */
+      FIRST_GLOBAL: 1 << 8,
+    },
+  },
+  {
     name: "EventKind",
     doc: "Engine → Bun. Drained after `tick()`; `0` means the queue is empty.",
     ty: "u32",
@@ -324,7 +390,7 @@ export const ENUMS: EnumDef[] = [
  * Bumped on any change to the tables above. The engine refuses to start on a
  * mismatch rather than rendering garbage.
  */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

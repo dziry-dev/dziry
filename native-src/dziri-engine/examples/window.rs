@@ -14,14 +14,15 @@
 
 use dziri_engine::engine::{Engine, EngineConfig};
 use dziri_engine::protocol::{
-    self, align, display, event_kind, flags, flex_direction, justify, node_kind, nodes, states,
-    styles, Table,
+    self, align, display, event_kind, flags, flex_direction, justify, node_kind, nodes,
+    predicate, styles, variant_slots, variants, Table,
 };
 use dziri_engine::tables::Tables;
 
 const NODES: usize = Table::Nodes as usize;
 const STYLES: usize = Table::Styles as usize;
-const STATES: usize = Table::States as usize;
+const VARIANTS: usize = Table::Variants as usize;
+const VARIANT_SLOTS: usize = Table::VariantSlots as usize;
 
 /// Style slots, in the shape the compiler's interning produces.
 const ROOT: usize = 0;
@@ -126,7 +127,8 @@ fn main() {
         style_capacity: STYLE_SLOTS as u32,
         // Exactly one node has interaction states, and the row count is the
         // capacity — this table is never headroom.
-        state_capacity: 1,
+        variant_capacity: 1,
+        variant_slot_capacity: 8,
         list_capacity: 1,
         string_capacity: 4,
         string_bytes: 256,
@@ -218,11 +220,16 @@ fn main() {
         link(t, 0, &[1]);
         link(t, 1, &[2, 3, 4]);
 
-        // The sparse state table: one row, sorted by node.
-        t.set_i32(STATES, states::NODE, 0, 4);
-        t.set_i32(STATES, states::HOVER, 0, BUTTON_HOVER as i32);
-        t.set_i32(STATES, states::ACTIVE, 0, BUTTON_ACTIVE as i32);
-        t.set_i32(STATES, states::FOCUS, 0, -1);
+        // One conditional node. It reads hover and active, so its run is four
+        // entries — base, hover, active, hover+active — indexed by those bits
+        // compacted down. Pressing while hovering now has its own entry rather
+        // than losing one of the two.
+        t.set_i32(VARIANTS, variants::NODE, 0, 4);
+        t.set_u32(VARIANTS, variants::MASK, 0, predicate::HOVER | predicate::ACTIVE);
+        t.set_i32(VARIANTS, variants::RUN_START, 0, 0);
+        for (i, slot) in [BUTTON, BUTTON_HOVER, BUTTON_ACTIVE, BUTTON_ACTIVE].iter().enumerate() {
+            t.set_u16(VARIANT_SLOTS, variant_slots::STYLE, i, *slot as u16);
+        }
     }
 
     println!(

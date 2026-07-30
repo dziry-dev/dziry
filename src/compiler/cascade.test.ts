@@ -11,7 +11,7 @@
  */
 import { expect, test } from "bun:test";
 import { compile, toCompiledUi } from "./compile.ts";
-import { INITIAL_STYLE, UNSET, type StyleField } from "../ir.ts";
+import { INITIAL_STYLE, Predicate, UNSET, type StyleField } from "../ir.ts";
 
 /** The computed value of one field on the node matching `tag`. */
 function styleOf(html: string, css: string, field: StyleField, tag = "div"): number {
@@ -101,6 +101,54 @@ test("inline only overrides what it declares", () => {
 // ---------------------------------------------------------------------------
 // Inheritance
 // ---------------------------------------------------------------------------
+
+test("hover and focus merge per property instead of one winning", () => {
+  // The reason the state table stopped being three named columns.
+  //
+  // With `(hover, active, focus)` the runtime *picked* one precompiled style, so
+  // a node that was hovered and focused at once got whichever role ranked higher
+  // and lost the other's declarations entirely — hover beat focus outright. CSS
+  // combines them per property.
+  const html = `<body><div class="btn"></div></body>`;
+  const css = `
+    .btn { background: #000000; border-color: #000000 }
+    .btn:hover { background: #ff0000 }
+    .btn:focus { border-color: #00ff00 }
+  `;
+
+  const ui = toCompiledUi(compile(html, css));
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const { variants } = ui;
+
+  expect(variants.count).toBe(1);
+  const mask = variants.mask[0]!;
+  expect(mask).toBe(Predicate.HOVER | Predicate.FOCUS);
+
+  // Two predicates, so four entries: base, hover, focus, hover+focus.
+  const start = variants.runStart[0]!;
+  const run = Array.from(variants.slots.subarray(start, start + 4));
+  expect(run.length).toBe(4);
+
+  const bg = (slot: number) => styles.bg[slot]!;
+  const border = (slot: number) => styles.borderColor[slot]!;
+
+  expect(bg(run[0]!)).toBe(0xff000000);
+  expect(bg(run[1]!)).toBe(0xffff0000); // hover only
+  expect(border(run[2]!)).toBe(0xff00ff00); // focus only
+
+  // Both at once: red background *and* green border. Neither declaration is lost.
+  expect(bg(run[3]!)).toBe(0xffff0000);
+  expect(border(run[3]!)).toBe(0xff00ff00);
+});
+
+test("a node whose states resolve to its base style is not conditional", () => {
+  // A `:hover` rule that changes nothing must not put the node in the variant
+  // table, or every frame pays a binary search to learn there is nothing to do.
+  const html = `<body><div class="btn"></div></body>`;
+  const css = `.btn { background: #ff0000 } .btn:hover { background: #ff0000 }`;
+
+  expect(toCompiledUi(compile(html, css)).variants.count).toBe(0);
+});
 
 test("an unsupported selector is refused, not silently rewritten", () => {
   // Each of these used to parse into a *different, plausible* selector, because

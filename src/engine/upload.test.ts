@@ -34,7 +34,7 @@ function load(): {
     strings: [...generated.strings],
     styles: generated.styles,
     nodes: generated.nodes,
-    states: generated.states,
+    variants: generated.variants,
     interactive: generated.interactive,
     textBindings: generated.textBindings,
     handlers: generated.handlers,

@@ -10,13 +10,40 @@
 
 use skia_safe::{Canvas, Color, Paint, PaintStyle, Rect};
 
-use crate::protocol::{self, node_kind};
+use crate::protocol::{self, node_kind, predicate};
 use crate::tables::Tables;
 use crate::text::Measurer;
 
 const NODES: usize = protocol::Table::Nodes as usize;
 const STYLES: usize = protocol::Table::Styles as usize;
-const STATES: usize = protocol::Table::States as usize;
+const VARIANTS: usize = protocol::Table::Variants as usize;
+const VARIANT_SLOTS: usize = protocol::Table::VariantSlots as usize;
+
+/// Gathers the bits of `value` that are set in `mask` down to a dense index.
+///
+/// A run holds one entry per *combination* of the predicates a node reads, so a
+/// node reading bits 0 and 8 needs four entries rather than 257. This is the
+/// `pext` instruction in software: walk the mask's set bits low to high, and for
+/// each one shift the corresponding bit of `value` into the next output position.
+///
+/// Masks are tiny — three bits today, a handful after A1 — so the loop runs a few
+/// times per interacting node, and only for nodes that are actually interacting.
+fn compact(value: u32, mask: u32) -> u32 {
+    let mut out = 0u32;
+    let mut bit = 0;
+    let mut remaining = mask;
+
+    while remaining != 0 {
+        let lowest = remaining & remaining.wrapping_neg();
+        if value & lowest != 0 {
+            out |= 1 << bit;
+        }
+        bit += 1;
+        remaining &= remaining - 1;
+    }
+
+    out
+}
 
 /// Which node is under the cursor, pressed, and focused.
 ///
@@ -43,9 +70,25 @@ impl InputState {
 pub struct Painter {
     fill: Paint,
     stroke: Paint,
+    /// Predicate bits that hold for every node this frame.
+    ///
+    /// Media queries and colour scheme land here. They are the engine's to
+    /// evaluate, not the host's: the engine owns the window, so it re-evaluates
+    /// them between a resize and the relayout, and a resize repaints correctly
+    /// even while Bun is busy.
+    globals: u32,
 }
 
 impl Painter {
+    /// Sets the globally-true predicates for subsequent frames.
+    pub fn set_globals(&mut self, globals: u32) {
+        self.globals = globals;
+    }
+
+    pub fn globals(&self) -> u32 {
+        self.globals
+    }
+
     pub fn new() -> Self {
         let mut fill = Paint::default();
         fill.set_anti_alias(true);
@@ -55,15 +98,21 @@ impl Painter {
         stroke.set_anti_alias(true);
         stroke.set_style(PaintStyle::Stroke);
 
-        Self { fill, stroke }
+        Self { fill, stroke, globals: 0 }
     }
 
     /// Resolves which precompiled style a node wears right now.
     ///
-    /// The early return is what makes the sparse state table free: at most three
-    /// nodes are involved in an interaction, so every other node skips the lookup
-    /// entirely. Precedence is pressed → hover → focus → base, each falling
-    /// through when it has no style of its own.
+    /// The node declares a `mask` of the predicates its styling depends on and
+    /// owns a run of `1 << popcount(mask)` styles. This intersects the live
+    /// predicates with that mask, compacts the result to a run index, and reads
+    /// one `u16` — so a node styled by both `:hover` and `:focus` gets the entry
+    /// the compiler resolved for *both*, rather than whichever the old precedence
+    /// order happened to rank first.
+    ///
+    /// Still free for the nodes that do not participate: the early return means
+    /// only nodes that are actually hovered, pressed or focused — or that read a
+    /// global predicate — reach the binary search.
     fn style_for(&self, tables: &Tables, node: usize, state: &InputState) -> usize {
         let base = tables
             .u16s(NODES, protocol::nodes::STYLE)
@@ -72,35 +121,51 @@ impl Painter {
             .unwrap_or(0) as usize;
 
         let i = node as i32;
-        if i != state.pressed && i != state.hovered && i != state.focused {
+
+        // Which predicates hold for *this* node right now. The per-node ones come
+        // from the input state; the global ones (media queries, colour scheme)
+        // are the same for everybody and were evaluated once this frame.
+        let mut live = self.globals;
+        if i == state.hovered {
+            live |= predicate::HOVER;
+        }
+        if i == state.pressed {
+            live |= predicate::ACTIVE;
+        }
+        if i == state.focused {
+            live |= predicate::FOCUS;
+        }
+
+        if live == 0 {
             return base;
         }
 
-        let ids = tables.i32s(STATES, protocol::states::NODE);
+        let ids = tables.i32s(VARIANTS, protocol::variants::NODE);
         let row = match ids.binary_search(&i) {
             Ok(r) => r,
             Err(_) => return base,
         };
 
-        let hover = tables.i32s(STATES, protocol::states::HOVER)[row];
-        let active = tables.i32s(STATES, protocol::states::ACTIVE)[row];
-        let focus = tables.i32s(STATES, protocol::states::FOCUS)[row];
-
-        if i == state.pressed && i == state.hovered {
-            if active >= 0 {
-                return active as usize;
-            }
-            if hover >= 0 {
-                return hover as usize;
-            }
-        } else if i == state.hovered && hover >= 0 {
-            return hover as usize;
-        }
-        if i == state.focused && focus >= 0 {
-            return focus as usize;
+        let mask = tables.u32s(VARIANTS, protocol::variants::MASK)[row];
+        let selected = live & mask;
+        if selected == 0 {
+            // The node is conditional, but none of *its* conditions hold.
+            return base;
         }
 
-        base
+        let run_start = tables.i32s(VARIANTS, protocol::variants::RUN_START)[row];
+        if run_start < 0 {
+            return base;
+        }
+
+        let index = compact(selected, mask) as usize;
+        let slots = tables.u16s(VARIANT_SLOTS, protocol::variant_slots::STYLE);
+
+        match slots.get(run_start as usize + index) {
+            Some(&slot) => slot as usize,
+            // A short run is a host-side bug, not a reason to stop drawing.
+            None => base,
+        }
     }
 
     pub fn paint(

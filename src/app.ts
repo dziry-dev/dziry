@@ -64,7 +64,7 @@ const ui: CompiledUi = {
   strings: generated.strings,
   styles: generated.styles,
   nodes: generated.nodes,
-  states: generated.states,
+  variants: generated.variants,
   interactive: generated.interactive,
   textBindings: generated.textBindings,
   handlers: generated.handlers,
@@ -135,7 +135,7 @@ function upload(): void {
   }
 
   uploader.uploadStyles();
-  uploader.uploadStates();
+  uploader.uploadVariants();
   uploader.uploadLists();
   uploader.uploadNodes();
   uploader.uploadStrings();

@@ -18,6 +18,7 @@ import {
   INHERITED_FIELDS,
   emptyListTable,
   NodeKind,
+  Predicate,
   STYLE_FIELDS,
   type CompiledUi,
   type ComputedStyle,
@@ -239,14 +240,65 @@ class StyleInterner {
 type BuiltNode = {
   kind: number;
   style: number;
-  /** Style ids per interaction state, or -1 when the state adds nothing. */
+  /**
+   * Style ids per interaction state, or -1 when the state adds nothing.
+   *
+   * Kept as the *single-predicate* view of `run`, because the variant compiler
+   * interns across toggles per role. `run` is what ships.
+   */
   hover: number;
   active: number;
   focus: number;
+  /** Predicate bits this node's styling depends on. */
+  mask: number;
+  /**
+   * One style id per combination of the predicates in `mask`, indexed by those
+   * bits compacted down. `run[0]` is the base style.
+   *
+   * Each entry is resolved as a **full cascade with that combination of states
+   * active**, which is what makes `:hover` and `:focus` merge per property
+   * instead of one winning outright. `collectDecls` already accepted a set of
+   * states; nothing else knew to ask it for more than one at a time.
+   */
+  run: number[];
   text: number;
   parent: number;
   children: number[];
 };
+
+/** Predicate bit ↔ the pseudo-class that sets it. */
+const PREDICATE_PSEUDO: Array<[number, Pseudo]> = [
+  [Predicate.HOVER, "hover"],
+  [Predicate.ACTIVE, "active"],
+  [Predicate.FOCUS, "focus"],
+];
+
+/** Gathers the bits of `value` set in `mask` down to a dense index. */
+function compactBits(value: number, mask: number): number {
+  let out = 0;
+  let bit = 0;
+  let remaining = mask;
+
+  while (remaining !== 0) {
+    const lowest = remaining & -remaining;
+    if ((value & lowest) !== 0) out |= 1 << bit;
+    bit++;
+    remaining &= remaining - 1;
+  }
+  return out;
+}
+
+/** The bits of `mask`, low to high. */
+function maskBits(mask: number): number[] {
+  const bits: number[] = [];
+  let remaining = mask;
+  while (remaining !== 0) {
+    const lowest = remaining & -remaining;
+    bits.push(lowest);
+    remaining &= remaining - 1;
+  }
+  return bits;
+}
 
 const KIND_BY_TAG: Record<string, number> = {
   button: NodeKind.BUTTON,
@@ -426,45 +478,65 @@ export function compileTree(doc: Element, css: string): CompileResult {
     // Precomputed variants: the compiler emits finished styles and the runtime
     // only picks an index. Each state is resolved as a full cascade from
     // scratch, not as a patch over the base — see collectDecls.
-    //
-    // Pressing implies hovering, so the active state cascades none+hover+active.
-    // Focus is resolved independently; the runtime picks one style by precedence
-    // rather than merging hover with focus, which CSS would do per-property.
-    const hoverStyle = hasPseudoRule(rules, path, "hover")
-      ? applyDecls(
-          inherited,
-          withInline(collectDecls(rules, path, ["none", "hover"]), el),
-          `${where}:hover`,
-        )
-      : null;
-    const activeStyle = hasPseudoRule(rules, path, "active")
-      ? applyDecls(
-          inherited,
-          withInline(collectDecls(rules, path, ["none", "hover", "active"]), el),
-          `${where}:active`,
-        )
-      : null;
-    const focusStyle = hasPseudoRule(rules, path, "focus")
-      ? applyDecls(
-          inherited,
-          withInline(collectDecls(rules, path, ["none", "focus"]), el),
-          `${where}:focus`,
-        )
-      : null;
-
     const styleId = styles.intern(style);
-    const hoverId = hoverStyle ? styles.intern(hoverStyle) : -1;
-    const activeId = activeStyle ? styles.intern(activeStyle) : -1;
-    const focusId = focusStyle ? styles.intern(focusStyle) : -1;
+
+    // Which predicates this node's styling actually reads.
+    let mask = 0;
+    for (const [bit, pseudo] of PREDICATE_PSEUDO) {
+      if (hasPseudoRule(rules, path, pseudo)) mask |= bit;
+    }
+
+    // One entry per *combination*, each resolved as a full cascade with exactly
+    // those states active.
+    //
+    // This is where hover∧focus stops being a precedence question. The old shape
+    // resolved three named roles and made the runtime pick one, so a node that
+    // was both hovered and focused got whichever role ranked higher and lost the
+    // other's declarations entirely. Asking `collectDecls` for `["none", "hover",
+    // "focus"]` gets the merge CSS specifies, per property, for free — it always
+    // took a *set* of states; nothing ever passed it more than the one.
+    //
+    // Cost is `2^popcount(mask)` cascades for the handful of interactive nodes,
+    // and interning collapses the combinations that resolve identically — which
+    // is most of them, since real rules touch disjoint properties.
+    const bits = maskBits(mask);
+    const run: number[] = new Array(1 << bits.length).fill(styleId);
+
+    for (let combo = 1; combo < 1 << bits.length; combo++) {
+      const states: Pseudo[] = ["none"];
+      let label = where;
+      for (let b = 0; b < bits.length; b++) {
+        if ((combo & (1 << b)) === 0) continue;
+        const pseudo = PREDICATE_PSEUDO.find(([bit]) => bit === bits[b])![1];
+        states.push(pseudo);
+        label += `:${pseudo}`;
+      }
+
+      const resolved = applyDecls(
+        inherited,
+        withInline(collectDecls(rules, path, states), el),
+        label,
+      );
+      run[combo] = styles.intern(resolved);
+    }
+
+    /** The run entry for exactly one predicate, or -1 when it adds nothing. */
+    const soleEntry = (bit: number): number => {
+      if ((mask & bit) === 0) return -1;
+      const id = run[compactBits(bit, mask)]!;
+      return id === styleId ? -1 : id;
+    };
 
     const self = nodes.length;
     nodes.push({
       kind: KIND_BY_TAG[el.tag] ?? NodeKind.BOX,
       style: styleId,
       // A state that resolves to the base style adds nothing to paint.
-      hover: hoverId === styleId ? -1 : hoverId,
-      active: activeId === styleId ? -1 : activeId,
-      focus: focusId === styleId ? -1 : focusId,
+      hover: soleEntry(Predicate.HOVER),
+      active: soleEntry(Predicate.ACTIVE),
+      focus: soleEntry(Predicate.FOCUS),
+      mask,
+      run,
       text: -1,
       parent,
       children: [],
@@ -509,6 +581,8 @@ export function compileTree(doc: Element, css: string): CompileResult {
       hover: -1,
       active: -1,
       focus: -1,
+      mask: 0,
+      run: [],
       text: -1,
       parent,
       children: [],
@@ -581,6 +655,8 @@ export function compileTree(doc: Element, css: string): CompileResult {
           hover: src.hover,
           active: src.active,
           focus: src.focus,
+          mask: src.mask,
+          run: [...src.run],
           text: src.text,
           parent: k === 0 ? self : src.parent + shift,
           children: src.children.map((c) => c + shift),
@@ -631,6 +707,8 @@ export function compileTree(doc: Element, css: string): CompileResult {
         hover: -1,
         active: -1,
         focus: -1,
+        mask: 0,
+        run: [],
         text: slot,
         parent,
         children: [],
@@ -705,21 +783,49 @@ const CTORS = {
  * nodes qualify — and because the runtime only consults it for the at-most-three
  * nodes currently hovered, pressed or focused.
  */
-function buildStates(nodes: BuiltNode[]): {
-  node: number[];
-  hover: number[];
-  active: number[];
-  focus: number[];
-} {
-  const out = { node: [] as number[], hover: [] as number[], active: [] as number[], focus: [] as number[] };
+/**
+ * The variant table: which predicates each conditional node reads, and its run.
+ *
+ * Sparse in the same way the old state table was — on the sample, 21 of 126
+ * nodes are conditional — but the sparseness now costs nothing to *extend*: a
+ * node that reads a media predicate joins this table exactly like a hovered one,
+ * with no new column and no protocol change.
+ *
+ * Runs are deduplicated. Real stylesheets give every button the same
+ * `(base, hover, active)` triple, so the 21 conditional nodes on the sample share
+ * a handful of distinct runs.
+ */
+function buildVariants(
+  nodes: BuiltNode[],
+  runOf: (node: number) => { mask: number; run: number[] },
+): { node: number[]; mask: number[]; runStart: number[]; slots: number[] } {
+  const out = {
+    node: [] as number[],
+    mask: [] as number[],
+    runStart: [] as number[],
+    slots: [] as number[],
+  };
+  const byRun = new Map<string, number>();
 
   for (let i = 0; i < nodes.length; i++) {
-    const n = nodes[i]!;
-    if (n.hover < 0 && n.active < 0 && n.focus < 0) continue;
+    const { mask, run } = runOf(i);
+    if (mask === 0 || run.length <= 1) continue;
+
+    // A node whose every combination resolves to its base style is not
+    // conditional, whatever its selectors said.
+    if (run.every((id) => id === run[0])) continue;
+
+    const key = run.join(",");
+    let start = byRun.get(key);
+    if (start === undefined) {
+      start = out.slots.length;
+      out.slots.push(...run);
+      byRun.set(key, start);
+    }
+
     out.node.push(i);
-    out.hover.push(n.hover);
-    out.active.push(n.active);
-    out.focus.push(n.focus);
+    out.mask.push(mask);
+    out.runStart.push(start);
   }
 
   return out;
@@ -794,7 +900,10 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     styles[field] = new CTORS[ctor](result.styles.map((s) => s[field]));
   }
 
-  const states = buildStates(result.nodes);
+  const variants = buildVariants(result.nodes, (i) => {
+    const n = result.nodes[i]!;
+    return { mask: n.mask, run: n.run };
+  });
 
   return {
     strings: result.strings,
@@ -810,12 +919,12 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
       list: new Int16Array(result.nodes.length).fill(-1),
       hidden: new Uint8Array(result.nodes.length),
     },
-    states: {
-      count: states.node.length,
-      node: new Int32Array(states.node),
-      hover: new Int32Array(states.hover),
-      active: new Int32Array(states.active),
-      focus: new Int32Array(states.focus),
+    variants: {
+      count: variants.node.length,
+      node: new Int32Array(variants.node),
+      mask: new Uint32Array(variants.mask),
+      runStart: new Int32Array(variants.runStart),
+      slots: new Uint16Array(variants.slots),
     },
     interactive: new Int32Array(buildInteractive(result.nodes, result.handlers, result.lists)),
     // Bindings are resolved and emitted only on the generated-module path; the
@@ -858,22 +967,59 @@ export function emit(
   const { strings, nodes, root } = result;
 
   const { firstChild, nextSibling } = flattenLinks(nodes);
-  const states = variants
-    ? {
-        node: nodes.map((_, i) => i).filter((i) => hasState(variants, i)),
-        hover: [] as number[],
-        active: [] as number[],
-        focus: [] as number[],
-      }
-    : buildStates(nodes);
 
-  if (variants) {
-    for (const i of states.node) {
-      states.hover.push(variants.hover[i]!);
-      states.active.push(variants.active[i]!);
-      states.focus.push(variants.focus[i]!);
+  /**
+   * A node's predicate mask and style run, in whichever style space applies.
+   *
+   * Without toggles the run computed during `walk` is already right — each entry
+   * is a full cascade with that combination of states active.
+   *
+   * With toggles, style ids were re-interned over the *vector* of their values
+   * across every variant, so `walk`'s ids no longer address the shipped table and
+   * the run has to be rebuilt from the variant compiler's per-role pointers.
+   * Those are still three named roles, so combined entries fall back to the old
+   * precedence — meaning **hover∧focus merges correctly only when no conditional
+   * class is present**. Generalising `variant-compile.ts` from roles to
+   * combinations is the remaining half of this change; the protocol, the engine
+   * and the non-toggle path are already there, so it is a compiler-only edit.
+   */
+  const runOf = (i: number): { mask: number; run: number[] } => {
+    const n = nodes[i]!;
+    if (!variants) return { mask: n.mask, run: n.run };
+
+    const base = variants.base[i]!;
+    const roles: Array<[number, number]> = [
+      [Predicate.HOVER, variants.hover[i]!],
+      [Predicate.ACTIVE, variants.active[i]!],
+      [Predicate.FOCUS, variants.focus[i]!],
+    ];
+
+    let mask = 0;
+    for (const [bit, id] of roles) if (id >= 0) mask |= bit;
+    if (mask === 0) return { mask: 0, run: [] };
+
+    const bits = maskBits(mask);
+    const run: number[] = new Array(1 << bits.length).fill(base);
+
+    for (let combo = 1; combo < run.length; combo++) {
+      let live = 0;
+      for (let b = 0; b < bits.length; b++) {
+        if ((combo & (1 << b)) !== 0) live |= bits[b]!;
+      }
+
+      // Pressed beats hovered beats focused, as the runtime used to decide.
+      const active = variants.active[i]!;
+      const hover = variants.hover[i]!;
+      const focus = variants.focus[i]!;
+      if ((live & Predicate.ACTIVE) !== 0 && active >= 0) run[combo] = active;
+      else if ((live & Predicate.HOVER) !== 0 && hover >= 0) run[combo] = hover;
+      else if ((live & Predicate.FOCUS) !== 0 && focus >= 0) run[combo] = focus;
     }
-  }
+
+    return { mask, run };
+  };
+
+  const variantTable = buildVariants(nodes, runOf);
 
   const interactive = buildInteractive(nodes, result.handlers, result.lists, variants);
   const styleCount = variants ? variants.slotCount : result.styles.length;
@@ -984,7 +1130,7 @@ export function emit(
 // Do not edit. No CSS, no selectors, no property names — just indices.
 //
 // ${nodes.length} nodes, ${styleCount} style slots, ${strings.length} strings,
-// ${states.node.length} nodes with interaction states, ${interactive.length} interactive,
+// ${variantTable.node.length} conditional nodes (${variantTable.slots.length} variant slots), ${interactive.length} interactive,
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 /** Mutable past the static entries: text bindings overwrite their own slots. */
@@ -1008,13 +1154,19 @@ export const nodes = {
   hidden: new Uint8Array(${nodes.length}),
 };
 
-/** Sparse: only nodes with a :hover / :active / :focus style. Sorted by node id. */
-export const states = {
-  count: ${states.node.length},
-  node: ${typedArray("Int32Array", states.node)},
-  hover: ${typedArray("Int32Array", states.hover)},
-  active: ${typedArray("Int32Array", states.active)},
-  focus: ${typedArray("Int32Array", states.focus)},
+/**
+ * Conditional styling, sparse and sorted by node.
+ *
+ * mask is the predicate bits a node reads; slots[runStart + i] is its style for
+ * the combination whose compacted bits equal i. Runs are shared between nodes
+ * that resolve identically.
+ */
+export const variants = {
+  count: ${variantTable.node.length},
+  node: ${typedArray("Int32Array", variantTable.node)},
+  mask: ${typedArray("Uint32Array", variantTable.mask)},
+  runStart: ${typedArray("Int32Array", variantTable.runStart)},
+  slots: ${typedArray("Uint16Array", variantTable.slots)},
 };
 
 /** Nodes that can receive input, sorted. Emitted, never inferred. */

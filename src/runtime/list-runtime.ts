@@ -84,23 +84,26 @@ function growI16(a: Int16Array, n: number, fill = 0): Int16Array {
  * is rare because capacity doubles.
  */
 function growArena(ui: CompiledUi, ref: ListBindingRef, needed: number): void {
-  const { nodes, lists, states } = ui;
+  const { nodes, lists, variants } = ui;
   const oldStart = lists.arenaStart[ref.list]!;
   const stride = lists.stride[ref.list]!;
   const oldCapacity = lists.capacity[ref.list]!;
   const capacity = Math.max(needed, oldCapacity * 2);
 
-  // Which offsets inside an item carry interaction states or accept input.
-  const stateOffsets: { offset: number; hover: number; active: number; focus: number }[] = [];
+  // Which offsets inside an item are conditionally styled, or accept input.
+  const variantOffsets: { offset: number; mask: number; runStart: number }[] = [];
   const interactiveOffsets: number[] = [];
   for (let k = 0; k < stride; k++) {
-    const row = findRow(states.node, oldStart + k);
+    const row = findRow(variants.node, oldStart + k);
     if (row >= 0) {
-      stateOffsets.push({
+      variantOffsets.push({
         offset: k,
-        hover: states.hover[row]!,
-        active: states.active[row]!,
-        focus: states.focus[row]!,
+        mask: variants.mask[row]!,
+        // Every replica *shares* the template's run: the rows are compiled from
+        // one template, so their conditional styles are identical by
+        // construction. Growing an arena therefore adds rows to `variants` and
+        // nothing at all to `slots`.
+        runStart: variants.runStart[row]!,
       });
     }
     if (findRow(ui.interactive, oldStart + k) >= 0) interactiveOffsets.push(k);
@@ -152,32 +155,29 @@ function growArena(ui: CompiledUi, ref: ListBindingRef, needed: number): void {
 
   // Extend the sparse tables. New ids are all larger than existing ones, so
   // appending keeps both arrays sorted.
-  if (stateOffsets.length > 0) {
-    const rows = capacity * stateOffsets.length;
-    const node = new Int32Array(states.count + rows);
-    const hover = new Int32Array(states.count + rows);
-    const active = new Int32Array(states.count + rows);
-    const focus = new Int32Array(states.count + rows);
-    node.set(states.node);
-    hover.set(states.hover);
-    active.set(states.active);
-    focus.set(states.focus);
+  if (variantOffsets.length > 0) {
+    const rows = capacity * variantOffsets.length;
+    const node = new Int32Array(variants.count + rows);
+    const mask = new Uint32Array(variants.count + rows);
+    const runStart = new Int32Array(variants.count + rows);
+    node.set(variants.node);
+    mask.set(variants.mask);
+    runStart.set(variants.runStart);
 
-    let at = states.count;
+    let at = variants.count;
     for (let item = 0; item < capacity; item++) {
-      for (const s of stateOffsets) {
-        node[at] = newStart + item * stride + s.offset;
-        hover[at] = s.hover;
-        active[at] = s.active;
-        focus[at] = s.focus;
+      for (const v of variantOffsets) {
+        node[at] = newStart + item * stride + v.offset;
+        mask[at] = v.mask;
+        runStart[at] = v.runStart;
         at++;
       }
     }
-    states.node = node;
-    states.hover = hover;
-    states.active = active;
-    states.focus = focus;
-    states.count = node.length;
+    variants.node = node;
+    variants.mask = mask;
+    variants.runStart = runStart;
+    variants.count = node.length;
+    // `variants.slots` is deliberately untouched — see the comment above.
   }
 
   if (interactiveOffsets.length > 0) {

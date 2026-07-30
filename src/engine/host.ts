@@ -131,7 +131,8 @@ export type EngineOptions = {
   nodes: number;
   styles: number;
   /** Exact row counts, not headroom — every row is searched. */
-  states: number;
+  variants: number;
+  variantSlots: number;
   lists: number;
   strings: number;
   stringBytes: number;
@@ -200,13 +201,14 @@ export class Engine {
     u32v[2] = options.height ?? 420;
     u32v[3] = options.nodes;
     u32v[4] = options.styles;
-    u32v[5] = options.states;
-    u32v[6] = options.lists;
-    u32v[7] = options.strings;
-    u32v[8] = options.stringBytes;
-    u32v[9] = options.root ?? 0;
-    u8v[40] = options.windowed === false ? 0 : 1;
-    u8v[41] = options.decorated === false ? 0 : 1;
+    u32v[5] = options.variants;
+    u32v[6] = options.variantSlots;
+    u32v[7] = options.lists;
+    u32v[8] = options.strings;
+    u32v[9] = options.stringBytes;
+    u32v[10] = options.root ?? 0;
+    u8v[44] = options.windowed === false ? 0 : 1;
+    u8v[45] = options.decorated === false ? 0 : 1;
     /* The title pointer sits at byte 48, not 44: `#[repr(C)]` aligns it to 8. */
     u64v[6] = BigInt(ptr(title));
     u32v[14] = title.length;
@@ -427,19 +429,21 @@ export class Engine {
   grow(caps: {
     nodes: number;
     styles: number;
-    states: number;
+    variants: number;
+    variantSlots: number;
     lists: number;
     strings: number;
     stringBytes: number;
   }): boolean {
     /* Matches `Capacities` in `tables.rs`: six `u32`, no padding. */
-    const buf = new Uint32Array(6);
+    const buf = new Uint32Array(7);
     buf[0] = caps.nodes;
     buf[1] = caps.styles;
-    buf[2] = caps.states;
-    buf[3] = caps.lists;
-    buf[4] = caps.strings;
-    buf[5] = caps.stringBytes;
+    buf[2] = caps.variants;
+    buf[3] = caps.variantSlots;
+    buf[4] = caps.lists;
+    buf[5] = caps.strings;
+    buf[6] = caps.stringBytes;
 
     check(engine.dziri_engine_grow(this.#handle, ptr(buf) as Pointer), "dziri_engine_grow");
 

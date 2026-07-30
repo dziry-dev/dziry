@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,13 +19,14 @@ export const PROTOCOL_VERSION = 1;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x24ce8fc9;
+export const SCHEMA_HASH = 0xeecbb418;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
   nodes: [1, 2, 4, 4, 4, 4, 2, 1, 1],
   styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1],
-  states: [4, 4, 4, 4],
+  variants: [4, 4, 4],
+  variantSlots: [2],
   lists: [4, 4, 4, 4, 4],
   layout: [4, 4, 4, 4],
   strings: [4, 4],
@@ -35,13 +36,14 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
 export const FIELD_NAMES: Record<TableName, string[]> = {
   nodes: ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags"],
   styles: ["bg", "fg", "borderColor", "borderWidth", "radius", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflow"],
-  states: ["node", "hover", "active", "focus"],
+  variants: ["node", "mask", "runStart"],
+  variantSlots: ["style"],
   lists: ["node", "arenaStart", "stride", "capacity", "active"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
 };
 
-export const TABLE_NAMES = ["nodes", "styles", "states", "lists", "layout", "strings"] as const;
+export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "lists", "layout", "strings"] as const;
 export type TableName = (typeof TABLE_NAMES)[number];
 
 /** Field index per table, in descriptor order. */
@@ -109,12 +111,15 @@ export const F = {
     lineClamp: 46, // 0 = unlimited; drives SkParagraph maxLines
     overflow: 47, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
   },
-  /** Sparse interaction-state styles, sorted by node for binary search. */
-  states: {
-    node: 0,
-    hover: 1,
-    active: 2,
-    focus: 3,
+  /** Per-node predicate mask and where that node's style run begins. */
+  variants: {
+    node: 0, // Sorted ascending, for binary search
+    mask: 1, // Predicate bits this node's styling reads
+    runStart: 2, // First entry in variantSlots
+  },
+  /** Dense style-slot runs, indexed by compacted live predicate bits. */
+  variantSlots: {
+    style: 0,
   },
   /** List arenas: homogeneous item subtrees addressed by stride. */
   lists: {
@@ -142,7 +147,8 @@ export const F = {
 export const FIELD_COUNTS: Record<TableName, number> = {
   nodes: 9,
   styles: 48,
-  states: 4,
+  variants: 3,
+  variantSlots: 1,
   lists: 5,
   layout: 4,
   strings: 2,
@@ -152,7 +158,8 @@ export const FIELD_COUNTS: Record<TableName, number> = {
 export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   nodes: [Uint8Array, Uint16Array, Int32Array, Int32Array, Int32Array, Int32Array, Int16Array, Uint8Array, Uint8Array],
   styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array],
-  states: [Int32Array, Int32Array, Int32Array, Int32Array],
+  variants: [Int32Array, Uint32Array, Int32Array],
+  variantSlots: [Uint16Array],
   lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
   layout: [Float32Array, Float32Array, Float32Array, Float32Array],
   strings: [Uint32Array, Uint32Array],
@@ -221,11 +228,13 @@ export type SharedTables = {
     lineClamp: Uint16Array;
     overflow: Uint8Array;
   };
-  states: {
+  variants: {
     node: Int32Array;
-    hover: Int32Array;
-    active: Int32Array;
-    focus: Int32Array;
+    mask: Uint32Array;
+    runStart: Int32Array;
+  };
+  variantSlots: {
+    style: Uint16Array;
   };
   lists: {
     node: Int32Array;
@@ -324,6 +333,15 @@ export const Overflow = {
   SCROLL: 3,
 } as const;
 export type Overflow = (typeof Overflow)[keyof typeof Overflow];
+
+/** Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care. */
+export const Predicate = {
+  HOVER: 1,
+  ACTIVE: 2,
+  FOCUS: 4,
+  FIRST_GLOBAL: 256,
+} as const;
+export type Predicate = (typeof Predicate)[keyof typeof Predicate];
 
 /** Engine → Bun. Drained after `tick()`; `0` means the queue is empty. */
 export const EventKind = {

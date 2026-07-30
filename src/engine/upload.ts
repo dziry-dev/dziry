@@ -91,7 +91,8 @@ const ARENA_HEADROOM = 4;
 export type Capacities = {
   nodes: number;
   styles: number;
-  states: number;
+  variants: number;
+  variantSlots: number;
   lists: number;
   strings: number;
   stringBytes: number;
@@ -107,7 +108,8 @@ export function capacitiesFor(ui: CompiledUi): Capacities {
     // Style slots are fixed by the compiler: interning happens at build time and
     // patches rewrite values in place, never adding slots.
     styles: Math.max(ui.styles.count, 1),
-    states: Math.max(ui.states.count, 1),
+    variants: Math.max(ui.variants.count, 1),
+    variantSlots: Math.max(ui.variants.slots.length, 1),
     lists: Math.max(ui.lists.count, 1),
     strings: Math.ceil(ui.strings.length * STRING_HEADROOM) + 16,
     stringBytes: Math.max(bytes * ARENA_HEADROOM, 4096),
@@ -155,7 +157,7 @@ export class Uploader {
   /** Everything. Used on the first frame and after the tables are reallocated. */
   uploadAll(): void {
     this.uploadStyles();
-    this.uploadStates();
+    this.uploadVariants();
     this.uploadLists();
     this.uploadNodes();
     this.uploadStrings(true);
@@ -233,17 +235,19 @@ export class Uploader {
     // honest value for both: no clamp, `overflow: visible`.
   }
 
-  uploadStates(): void {
-    const { states } = this.#ui;
-    const t = this.#tables.states;
-    const count = Math.min(states.count, t.node.length);
-    t.node.set(states.node.subarray(0, count));
-    t.hover.set(states.hover.subarray(0, count));
-    t.active.set(states.active.subarray(0, count));
-    t.focus.set(states.focus.subarray(0, count));
+  uploadVariants(): void {
+    const { variants } = this.#ui;
+    const t = this.#tables.variants;
+    const count = Math.min(variants.count, t.node.length);
+    t.node.set(variants.node.subarray(0, count));
+    t.mask.set(variants.mask.subarray(0, count));
+    t.runStart.set(variants.runStart.subarray(0, count));
 
     // Spare rows must not answer a binary search for node 0.
     t.node.fill(-1, count);
+
+    const slots = this.#tables.variantSlots.style;
+    slots.set(variants.slots.subarray(0, Math.min(variants.slots.length, slots.length)));
   }
 
   uploadLists(): void {

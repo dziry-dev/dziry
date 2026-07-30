@@ -67,7 +67,8 @@ pub struct SpanDesc {
 pub struct Capacities {
     pub nodes: u32,
     pub styles: u32,
-    pub states: u32,
+    pub variants: u32,
+    pub variant_slots: u32,
     pub lists: u32,
     pub strings: u32,
     pub string_bytes: u32,
@@ -84,7 +85,8 @@ impl Capacities {
             // two, and they are matched by name because the schema does not say
             // which "own" is which.
             _ => match protocol::TABLE_NAMES[table] {
-                "states" => self.states,
+                "variants" => self.variants,
+                "variantSlots" => self.variant_slots,
                 "lists" => self.lists,
                 other => unreachable!("table {other} has no capacity rule"),
             },
@@ -545,8 +547,10 @@ impl Tables {
             return;
         }
 
-        if span.table as usize == protocol::Table::States as usize {
-            diff.states = true;
+        if span.table as usize == protocol::Table::Variants as usize
+            || span.table as usize == protocol::Table::VariantSlots as usize
+        {
+            diff.variants = true;
             return;
         }
 
@@ -612,7 +616,7 @@ pub struct Diff {
     pub node_styles: bool,
     /// Style values changed in place; `changed_styles` says which slots.
     pub styles: bool,
-    pub states: bool,
+    pub variants: bool,
     /// Text changed, so measured advance widths are stale.
     pub text: bool,
     pub changed_styles: Vec<u32>,
@@ -723,7 +727,8 @@ impl Tables {
         let caps = Capacities {
             nodes: self.caps.nodes.max(want.nodes),
             styles: self.caps.styles.max(want.styles),
-            states: self.caps.states.max(want.states),
+            variants: self.caps.variants.max(want.variants),
+            variant_slots: self.caps.variant_slots.max(want.variant_slots),
             lists: self.caps.lists.max(want.lists),
             strings: self.caps.strings.max(want.strings),
             string_bytes: self.caps.string_bytes.max(want.string_bytes),
@@ -769,7 +774,8 @@ mod tests {
         Capacities {
             nodes: 8,
             styles: 4,
-            states: 2,
+            variants: 2,
+            variant_slots: 8,
             lists: 1,
             strings: 4,
             string_bytes: 64,
