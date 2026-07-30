@@ -120,6 +120,28 @@ export function parseSelector(src: string): Selector {
     const tokens = part.match(/[#.:]?[A-Za-z0-9_-]+/g);
     if (!tokens) throw new CssError(`could not parse compound selector "${part}"`);
 
+    // The tokens must *cover* the input, not merely be found in it.
+    //
+    // `match` skips anything it does not recognise, so an unsupported selector
+    // did not fail — it quietly became a different, plausible one.
+    // `input[type="text"]` yielded the tokens `input`, `type`, `text`, each
+    // overwriting `tag` in turn, leaving the selector `text`: it matched nothing,
+    // or worse, something else. `div > span` became `div span`, silently widening
+    // a child combinator into a descendant one.
+    //
+    // Attribute selectors are on the critical path for A1 (`data-[state=open]:`
+    // is used throughout shadcn); until they are implemented, refusing them is
+    // the only honest answer.
+    if (tokens.join("") !== part) {
+      throw new CssError(
+        `unsupported selector syntax in "${part}".\n` +
+          `  Supported: type, .class, #id, the descendant combinator, and ` +
+          `:hover/:active/:focus on the subject.\n` +
+          `  Not yet supported: attribute selectors, child (>) and sibling (+ ~) ` +
+          `combinators, and *.`,
+      );
+    }
+
     for (const token of tokens) {
       if (token.startsWith("#")) {
         compound.id = token.slice(1);

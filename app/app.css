@@ -7,16 +7,10 @@ body {
     color: #e4e4e7;
     font-size: 14px;
     padding: 18px;
-    /* Without this the whole page shrink-wraps to its content: a column's
-     children take their own width unless the cross axis stretches them, so the
-     grid below would size to max-content and `flex: 1` would find no free space
-     to grow into. */
-    align-items: stretch;
 }
 
 .app {
     gap: 14px;
-    align-items: stretch;
 }
 
 /* ---- header: flex row, space-between ------------------------------------- */
@@ -53,7 +47,6 @@ body {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
     gap: 14px;
-    align-items: stretch;
 }
 
 .card {
@@ -62,7 +55,6 @@ body {
     border-radius: 10px;
     padding: 14px;
     gap: 10px;
-    align-items: stretch;
 }
 
 .card-title {
@@ -77,7 +69,6 @@ body {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 10px;
-    align-items: stretch;
 }
 
 .stat {
@@ -257,7 +248,6 @@ body {
 
 .list {
     gap: 4px;
-    align-items: stretch;
 }
 
 .todo {

@@ -11,7 +11,7 @@
  */
 import { expect, test } from "bun:test";
 import { compile, toCompiledUi } from "./compile.ts";
-import type { StyleField } from "../ir.ts";
+import { INITIAL_STYLE, UNSET, type StyleField } from "../ir.ts";
 
 /** The computed value of one field on the node matching `tag`. */
 function styleOf(html: string, css: string, field: StyleField, tag = "div"): number {
@@ -101,6 +101,40 @@ test("inline only overrides what it declares", () => {
 // ---------------------------------------------------------------------------
 // Inheritance
 // ---------------------------------------------------------------------------
+
+test("an unsupported selector is refused, not silently rewritten", () => {
+  // Each of these used to parse into a *different, plausible* selector, because
+  // the token scanner searched the string instead of covering it.
+  const cases: Array<[string, string]> = [
+    [`input[type="text"] { width: 1px }`, "attribute selector became the type selector `text`"],
+    [`div > span { width: 1px }`, "child combinator became a descendant one"],
+    [`div + span { width: 1px }`, "sibling combinator became a descendant one"],
+    [`* { width: 1px }`, "universal selector matched nothing"],
+  ];
+
+  for (const [css, why] of cases) {
+    expect(() => compile(`<body><div></div></body>`, css), why).toThrow();
+  }
+});
+
+test("align-items defaults to stretch, as CSS's `normal` does", () => {
+  // This was `flex-start`, and the cost was paid in stylesheets: the sample
+  // carried six `align-items: stretch` declarations purely to undo it. Removing
+  // the default *and* all six produced a byte-identical render, which is the
+  // evidence that they only ever existed to cancel this.
+  //
+  // A column's child with no width of its own should fill the cross axis.
+  const html = `<body><div class="card"></div></body>`;
+  const css = `body { width: 200px } .card { height: 10px }`;
+  const ui = toCompiledUi(compile(html, css));
+
+  expect(INITIAL_STYLE.align).toBe(UNSET);
+  // Nothing in the sheet sets `align-items`, so the child inherits the default
+  // and the engine leaves Taffy's — which is per-display-mode, and is why this
+  // is UNSET rather than literally STRETCH.
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  expect(styles.align[ui.nodes.style[1]!]).toBe(UNSET);
+});
 
 test("inherited properties pass down, non-inherited do not", () => {
   const html = `<body><div class="card"></div></body>`;

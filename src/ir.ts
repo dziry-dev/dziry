@@ -186,7 +186,16 @@ export const INITIAL_STYLE: ComputedStyle = {
   direction: Direction.COLUMN,
   wrap: FlexWrap.NO_WRAP,
   justify: Justify.START,
-  align: Align.START,
+  // CSS's initial `align-items` is `normal`, which behaves as `stretch` in flex
+  // and grid. `flex-start` was wrong and its cost was paid in stylesheets: the
+  // sample needed six `align-items: stretch` declarations purely to undo it, and
+  // without them a column's children shrink-wrapped, a grid's cells collapsed,
+  // and `flex: 1` found no free space to grow into.
+  //
+  // `UNSET` rather than `STRETCH` because the engine already maps it to Taffy's
+  // own default, which is per-display-mode — the right answer for grid is not
+  // literally the same value as for flex.
+  align: UNSET,
   // Unset rather than START: these are per-item overrides, and defaulting them
   // to `flex-start` would silently override the parent's `align-items`.
   alignSelf: UNSET,

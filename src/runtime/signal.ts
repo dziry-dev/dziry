@@ -160,6 +160,19 @@ export function computed<T>(compute: () => T): ReadonlySignal<T> {
       return readValue(self, cached!);
     },
     subscribe(fn: Subscriber): () => void {
+      // Priming, and it is load-bearing.
+      //
+      // A computed registers `invalidate` with its dependencies only *inside*
+      // the `value` getter — that is what makes an unread computed free. So
+      // subscribing to one that has never been read attaches `fn` to a signal
+      // that is itself subscribed to nothing: the dependency changes, nothing
+      // invalidates, and the subscriber never fires.
+      //
+      // The app did not show this because `applyTextBindings` reads every bound
+      // signal before `subscribeBindings` runs. Reverse those two lines and the
+      // UI silently stops updating, with no error anywhere.
+      void self.value;
+
       subs.add(fn);
       return () => subs.delete(fn);
     },
