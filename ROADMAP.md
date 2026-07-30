@@ -613,6 +613,82 @@ Document boundaries as features: no floats, no assistive-tech bridge yet, logic 
 
 ---
 
+## Routing, windows and residency — future, decided in outline
+
+Not scheduled, but the shape is settled enough to write down, because the router's
+API has to be designed against it rather than around it.
+
+**Structure**: `windows/main/index.tsx` with a `windows/main/pages/` file-based
+router. The route tree is static, which is the whole point — matching a path
+becomes an integer switch with each page's node range precomputed, not a matcher
+running at startup.
+
+### Residency: keep the tables eager
+
+**Measured first, decided second.** The sample's entire compiled UI is ~51 KB
+across all three copies, against 2.22 MB for one window's pixel buffer — 2 %. Per
+node it is ~100 bytes, so 10,000 nodes is ~1 MB. Lazy-loading the *tables* would
+be optimising the cheapest thing in the process, so:
+
+1. **All routes in one table set, inactive ones `hidden`.** `hidden` already
+   excludes a subtree from layout, paint and hit-testing, so an unvisited route
+   costs memory and nothing else. This is the v1 answer.
+2. **Split the *module*, not the tables.** `ui.gen.ts` is JavaScript Bun parses at
+   startup — 18 KB for one screen, so twenty routes is ~360 KB parsed before the
+   first frame, plus every route's handlers and signals imported eagerly. That is
+   the cost worth deferring, behind an ordinary dynamic `import()`, appending the
+   route's rows through the same growth path list arenas already use.
+3. **A table set per window.** Needed for multi-window anyway, and the only clean
+   way to *unload*: node ids are indices, and focus, the variant table, the
+   interactive set and list arenas are all keyed by them, so a route's rows can be
+   appended but never removed. Dropping a whole set invalidates nothing.
+
+**Prerequisite.** "Resident but hidden" is only free if inactive nodes cost nothing
+per frame, and today they do not quite: a structural change rebuilds the whole
+Taffy tree and `apply_all_styles` walks table *capacity*. Twenty resident routes
+would pay for twenty on every relink. The review's `changed_links` /
+`changed_nodes` work comes first.
+
+### Preloading: intent at run time, targets at compile time
+
+Once the module is lazy (step 2), navigation has a cost worth hiding.
+
+```
+MOUSE_MOVE  → preload(route)   // idempotent, cached promise
+MOUSE_DOWN  → preload(route)   // no-op if in flight; covers touch and keyboard
+CLICK       → navigate(route)
+```
+
+**Hover first, press as the fallback.** Hover-to-click on a deliberate target is
+200–500 ms; press-to-release is 80–150 ms. Same hook, same cache, three times the
+budget. The engine already emits both events with the node id, so this needs no
+new plumbing.
+
+Three things fall out of the existing design:
+
+- **Drag-off is already handled.** `CLICK` fires only when press and release land
+  on the same node, so pressing and dragging away preloads a route that is never
+  visited — wasted work, not a bug, and the cache keeps it.
+- **A slow preload does not freeze the window.** Bun can be busy importing while
+  the engine keeps repainting hover, press and resize, because it renders from
+  `live` while Bun writes `staged`.
+- **Preload cannot remove layout.** An appended-but-hidden route is
+  `display: none`, so Taffy skips it and the work lands on the flip. Avoiding that
+  would need offscreen layout — a second pass over a tree not in the window — and
+  a full frame here is ~4 ms, so it is not worth it. `navigate()` costs one
+  relayout.
+
+**Never `await` on click.** Keep the current route visible and flip `hidden` when
+the new subtree is ready. Late navigation then looks like a slightly slow click
+rather than a hang — and it is the same mechanism a route-level loading state
+would use, which is worth noticing before designing a second one.
+
+**Which nodes are links, and what they point at, is compiler output** — a table,
+so `MOUSE_MOVE` → route id is an array lookup rather than a selector match. The
+set of routes worth preloading eagerly comes from the static route graph too.
+Runtime intent decides *when*; the compiler already knows *what*, and a heuristic
+is what you reach for when you have lost that information.
+
 ## Not planned
 
 - **Web target.** Technically easier than native — we already have HTML and CSS as input, so it

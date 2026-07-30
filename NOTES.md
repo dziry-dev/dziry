@@ -201,6 +201,35 @@ the engine landed. It also means the argument that chose SDL3 over winit, which 
 never been exercised. `SDL_SetTextInputArea` still needs the focused editable's rect and
 belongs with the caret in A5.
 
+### How much memory a compiled UI actually is
+
+Measured on the sample (126 nodes, 48 style slots, 48 strings), because the answer
+decides whether lazy-loading routes is worth building:
+
+| | |
+| --- | --- |
+| JS-side IR — the imported module's typed arrays + strings | 10.9 KB |
+| Engine `staged` arena | 18.4 KB |
+| Engine `live` arena | 18.4 KB |
+| Layout output (`bounds`) | 3.2 KB |
+| **Everything, three copies** | **~51 KB** |
+| One 1040×560 pixel buffer, for scale | **2.22 MB** |
+
+The whole document is **2 % of a single window's pixels**. Per node it is 23 bytes
+in `nodes` plus 16 in `layout` — about 100 bytes across all three copies — so
+10,000 nodes is ~1 MB and it would take roughly 300,000 before the tables cost as
+much as one window at 1040×560.
+
+The style table does **not** scale with nodes: it is one entry per *interned*
+style, and interning is over the value-vector across variants, which was measured
+at 16→16 slots on a 1215-node page. It is the largest table here (6.8 KB) purely
+because an entry is 146 bytes wide.
+
+Three copies is deliberate, not waste. The JS side is the source of truth that
+`bindings.ts`, `patches.ts` and `list-runtime.ts` mutate; `staged` is what Bun
+writes; `live` is what the engine reads on its own schedule. Comparing the last
+two is also what turns "some bytes changed" into a narrow patch.
+
 ### The Bun side of the protocol
 
 `src/engine/host.ts` opens the library, reads the descriptor, and hands back typed arrays
