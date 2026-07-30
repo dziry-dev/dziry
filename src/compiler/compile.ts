@@ -575,14 +575,17 @@ export function compileTree(doc: Element, css: string): CompileResult {
    */
   function walkList(node: DynList, path: Element[], parentStyle: ComputedStyle, parent: number): number {
     const self = nodes.length;
+    const listStyle = styles.intern(passThrough(parentStyle));
     nodes.push({
       kind: NodeKind.LIST,
-      style: styles.intern(passThrough(parentStyle)),
+      style: listStyle,
       hover: -1,
       active: -1,
       focus: -1,
       mask: 0,
-      run: [],
+      // Every run holds at least its base style, so an unconditional node is a
+      // one-entry run rather than an empty one. `expand` indexes it directly.
+      run: [listStyle],
       text: -1,
       parent,
       children: [],
@@ -701,14 +704,15 @@ export function compileTree(doc: Element, css: string): CompileResult {
 
       const slot = node.type === "text" ? internString(initial) : reserveSlot(initial);
 
+      const textStyleId = styles.intern(textStyle(parentStyle));
       nodes.push({
         kind: NodeKind.TEXT,
-        style: styles.intern(textStyle(parentStyle)),
+        style: textStyleId,
         hover: -1,
         active: -1,
         focus: -1,
         mask: 0,
-        run: [],
+        run: [textStyleId],
         text: slot,
         parent,
         children: [],
@@ -871,16 +875,11 @@ function buildInteractive(
   const out: number[] = [];
   for (let i = 0; i < nodes.length; i++) {
     const n = nodes[i]!;
-    // Either source counts: the baseline for a node styled by `:hover` directly,
-    // the variant table for one that only gains a state while a toggle is on.
-    const stateful =
-      n.hover >= 0 ||
-      n.active >= 0 ||
-      n.focus >= 0 ||
-      (variants !== undefined &&
-        ((variants.hover[i] ?? -1) >= 0 ||
-          (variants.active[i] ?? -1) >= 0 ||
-          (variants.focus[i] ?? -1) >= 0));
+    // Either source counts: the baseline mask for a node styled by `:hover`
+    // directly, the variant mask for one that only gains a state while a toggle
+    // is on. The second used to be missed, which emitted a correct hover style
+    // onto a node that could never be hovered.
+    const stateful = n.mask !== 0 || (variants !== undefined && (variants.masks[i] ?? 0) !== 0);
 
     if (n.kind === NodeKind.BUTTON || stateful || withHandler.has(i)) out.push(i);
   }
@@ -971,52 +970,16 @@ export function emit(
   /**
    * A node's predicate mask and style run, in whichever style space applies.
    *
-   * Without toggles the run computed during `walk` is already right — each entry
-   * is a full cascade with that combination of states active.
-   *
-   * With toggles, style ids were re-interned over the *vector* of their values
-   * across every variant, so `walk`'s ids no longer address the shipped table and
-   * the run has to be rebuilt from the variant compiler's per-role pointers.
-   * Those are still three named roles, so combined entries fall back to the old
-   * precedence — meaning **hover∧focus merges correctly only when no conditional
-   * class is present**. Generalising `variant-compile.ts` from roles to
-   * combinations is the remaining half of this change; the protocol, the engine
-   * and the non-toggle path are already there, so it is a compiler-only edit.
+   * Both paths now produce the same thing. Without toggles it is the run `walk`
+   * computed; with toggles it is the run `compileVariants` re-interned over the
+   * value vector across every variant. Either way each entry is a full cascade
+   * resolved with exactly that combination of states active — so hover∧focus
+   * merges per property in both, which is the point.
    */
   const runOf = (i: number): { mask: number; run: number[] } => {
     const n = nodes[i]!;
     if (!variants) return { mask: n.mask, run: n.run };
-
-    const base = variants.base[i]!;
-    const roles: Array<[number, number]> = [
-      [Predicate.HOVER, variants.hover[i]!],
-      [Predicate.ACTIVE, variants.active[i]!],
-      [Predicate.FOCUS, variants.focus[i]!],
-    ];
-
-    let mask = 0;
-    for (const [bit, id] of roles) if (id >= 0) mask |= bit;
-    if (mask === 0) return { mask: 0, run: [] };
-
-    const bits = maskBits(mask);
-    const run: number[] = new Array(1 << bits.length).fill(base);
-
-    for (let combo = 1; combo < run.length; combo++) {
-      let live = 0;
-      for (let b = 0; b < bits.length; b++) {
-        if ((combo & (1 << b)) !== 0) live |= bits[b]!;
-      }
-
-      // Pressed beats hovered beats focused, as the runtime used to decide.
-      const active = variants.active[i]!;
-      const hover = variants.hover[i]!;
-      const focus = variants.focus[i]!;
-      if ((live & Predicate.ACTIVE) !== 0 && active >= 0) run[combo] = active;
-      else if ((live & Predicate.HOVER) !== 0 && hover >= 0) run[combo] = hover;
-      else if ((live & Predicate.FOCUS) !== 0 && focus >= 0) run[combo] = focus;
-    }
-
-    return { mask, run };
+    return { mask: variants.masks[i]!, run: variants.runs[i]! };
   };
 
   const variantTable = buildVariants(nodes, runOf);

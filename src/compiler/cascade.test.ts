@@ -10,8 +10,10 @@
  * specificity, inheritance and expansion together rather than a seam.
  */
 import { expect, test } from "bun:test";
-import { compile, toCompiledUi } from "./compile.ts";
-import { INITIAL_STYLE, Predicate, UNSET, type StyleField } from "../ir.ts";
+import { compile, compileTree, toCompiledUi } from "./compile.ts";
+import { compileVariants, findToggles } from "./variant-compile.ts";
+import { parseHtml } from "./html.ts";
+import { compactBits, INITIAL_STYLE, Predicate, UNSET, type StyleField } from "../ir.ts";
 
 /** The computed value of one field on the node matching `tag`. */
 function styleOf(html: string, css: string, field: StyleField, tag = "div"): number {
@@ -139,6 +141,60 @@ test("hover and focus merge per property instead of one winning", () => {
   // Both at once: red background *and* green border. Neither declaration is lost.
   expect(bg(run[3]!)).toBe(0xffff0000);
   expect(border(run[3]!)).toBe(0xff00ff00);
+});
+
+test("hover and focus still merge when a conditional class is present", () => {
+  // The gap this closes. `compileVariants` re-interns every style over the
+  // vector of its values across variants, so with a toggle in the document the
+  // run had to be rebuilt from its output — and its output was three named
+  // roles, so combined entries fell back to precedence.
+  //
+  // Which meant the merge above held only for documents with no conditional
+  // class. This app has two, so the fix applied nowhere real until now.
+  // No `theme` in the class attribute: the toggle *adds* it, so the baseline and
+  // the variant actually differ and a patch exists to inspect.
+  const html = `<body><div class="btn"></div></body>`;
+  const css = `
+    .btn { color: #111111; background: #222222; border-color: #333333 }
+    .btn:hover { color: #ff0000 }
+    .btn:focus { background: #0000ff }
+    .theme .btn { border-color: #444444 }
+  `;
+
+  // This has to go through `compileVariants`, so the tree needs a `classWhen` —
+  // which the HTML front-end cannot express. Attaching one by hand is what a
+  // `className={cn({ theme: isDark })}` would have produced.
+  const doc = parseHtml(html);
+  const signal = { fake: "signal" };
+  doc.children[0]!.type === "element" && (doc.children[0]!.classWhen = { theme: signal });
+
+  const toggles = findToggles(doc);
+  expect(toggles.length).toBe(1);
+
+  const baseline = compileTree(doc, css);
+  const compiled = compileVariants(doc, css, baseline, toggles);
+
+  // The button is the only conditional node.
+  const node = compiled.masks.findIndex((m) => m !== 0);
+  expect(node).toBeGreaterThan(0);
+  expect(compiled.masks[node]!).toBe(Predicate.HOVER | Predicate.FOCUS);
+
+  const run = compiled.runs[node]!;
+  const both = run[compactBits(Predicate.HOVER | Predicate.FOCUS, compiled.masks[node]!)]!;
+
+  // Read out of the variant compiler's own table, which is what ships.
+  const field = (f: StyleField, slot: number) => compiled.table[f][slot]!;
+
+  // Neither declaration is dropped. Before this, `both` was whichever single
+  // role precedence ranked highest, so one of these two was the base value.
+  expect(field("fg", both)).toBe(0xffff0000);
+  expect(field("bg", both)).toBe(0xff0000ff);
+
+  // And the toggle still patches the same slot: `.theme .btn` raises the border
+  // colour when it is on, which is a patch entry rather than a second slot.
+  const borderPatch = compiled.patches[0]!.entries.find((e) => e.field === "borderColor");
+  expect(borderPatch).toBeDefined();
+  expect(borderPatch!.on).toContain(0xff444444);
 });
 
 test("a node whose states resolve to its base style is not conditional", () => {

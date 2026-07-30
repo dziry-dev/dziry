@@ -19,7 +19,9 @@
  * rather than silently producing the wrong cascade.
  */
 import {
+  compactBits,
   LAYOUT_FIELDS,
+  maskBits,
   STYLE_FIELDS,
   type ComputedStyle,
   type StyleField,
@@ -57,11 +59,12 @@ export type VariantCompiled = {
   /** Baseline style table, slot-major per field. */
   table: Record<StyleField, number[]>;
   slotCount: number;
-  /** Per node: slot ids. State roles are -1 when they add nothing. */
+  /** Per node: the slot its base style resolved to. */
   base: number[];
-  hover: number[];
-  active: number[];
-  focus: number[];
+  /** Predicate bits each node reads, unioned across every variant. */
+  masks: number[];
+  /** Per node, one interned slot per predicate combination. */
+  runs: number[][];
   patches: TogglePatch[];
   warnings: string[];
 };
@@ -144,23 +147,41 @@ function changedFields(a: ComputedStyle, b: ComputedStyle): StyleField[] {
 }
 
 /**
- * Effective style per role, mirroring how the runtime resolves them: an absent
- * hover falls back to base, an absent active to hover, an absent focus to base.
- * Without that, a toggle *introducing* a state style would look structural.
+ * One variant's predicate mask and its resolved style per combination.
+ *
+ * This replaced a fixed `(base, hover, active, focus)` record with a fallback
+ * chain — absent hover falling back to base, absent active to hover. The chain
+ * was an approximation of what the runtime then did, which was *pick* one role;
+ * and picking is the bug. With both `:hover` and `:focus` matching, CSS merges
+ * them per property, so a node that is hovered and focused needs a style resolved
+ * with **both** states active, not whichever role ranked higher.
+ *
+ * `walk` already resolves every combination as a full cascade, so this just reads
+ * what the node was compiled with.
  */
-type Roles = { base: ComputedStyle; hover: ComputedStyle; active: ComputedStyle; focus: ComputedStyle };
+type Run = { mask: number; styles: ComputedStyle[] };
 
-function rolesOf(result: CompileResult, node: number): Roles {
+function runOf(result: CompileResult, node: number): Run {
   const n = result.nodes[node]!;
-  const base = result.styles[n.style]!;
-  const hover = n.hover >= 0 ? result.styles[n.hover]! : base;
-  const active = n.active >= 0 ? result.styles[n.active]! : hover;
-  const focus = n.focus >= 0 ? result.styles[n.focus]! : base;
-  return { base, hover, active, focus };
+  return { mask: n.mask, styles: n.run.map((id) => result.styles[id]!) };
 }
 
-const ROLE_NAMES = ["base", "hover", "active", "focus"] as const;
-type RoleName = (typeof ROLE_NAMES)[number];
+/**
+ * A run re-indexed against a wider mask.
+ *
+ * The masks are not the same across variants: a toggle can *introduce* a state
+ * the baseline lacks (`body.light .todo:hover`), so the node's real mask is the
+ * union, and each variant has to answer for combinations it does not itself read.
+ * It answers by ignoring the bits it has no rules for — which is exactly what
+ * intersecting with its own mask does.
+ */
+function expand(run: Run, combo: number, unionBits: number[]): ComputedStyle {
+  let live = 0;
+  for (let b = 0; b < unionBits.length; b++) {
+    if ((combo & (1 << b)) !== 0) live |= unionBits[b]!;
+  }
+  return run.styles[compactBits(live & run.mask, run.mask)] ?? run.styles[0]!;
+}
 
 // ---------------------------------------------------------------------------
 
@@ -214,30 +235,29 @@ export function compileVariants(
   };
 
   const base = new Array<number>(nodeCount).fill(-1);
-  const hover = new Array<number>(nodeCount).fill(-1);
-  const active = new Array<number>(nodeCount).fill(-1);
-  const focus = new Array<number>(nodeCount).fill(-1);
-  const pointers = { base, hover, active, focus };
+  const masks = new Array<number>(nodeCount).fill(0);
+  const runs: number[][] = new Array(nodeCount);
 
   for (let n = 0; n < nodeCount; n++) {
-    const perVariantRoles = variants.map((v) => rolesOf(v, n));
+    const perVariant = variants.map((v) => runOf(v, n));
 
-    for (const role of ROLE_NAMES) {
-      const styles = perVariantRoles.map((r) => r[role]);
+    // The union, because a toggle can introduce a state the baseline lacks. The
+    // node then reads that predicate in *every* variant, which is what keeps the
+    // run's shape — and so `nodes.style` — immutable across a toggle.
+    const mask = perVariant.reduce((m, r) => m | r.mask, 0);
+    const unionBits = maskBits(mask);
+    masks[n] = mask;
 
-      if (role !== "base") {
-        // A state slot is only needed where it differs from its fallback in some
-        // variant. Where it does, the pointer must exist in *every* variant so
-        // `nodes.hover` itself stays immutable.
-        const fallback: RoleName = role === "active" ? "hover" : "base";
-        const differs = perVariantRoles.some(
-          (r, i) => changedFields(r[fallback], styles[i]!).length > 0,
-        );
-        if (!differs) continue;
-      }
-
-      pointers[role][n] = internSlot(styles);
+    const run: number[] = new Array(1 << unionBits.length);
+    for (let combo = 0; combo < run.length; combo++) {
+      // Interned over the vector across variants, exactly as before — two nodes
+      // share a slot only if they agree in every variant. That is what lets a
+      // toggle rewrite the style *table* instead of node pointers.
+      run[combo] = internSlot(perVariant.map((r) => expand(r, combo, unionBits)));
     }
+
+    base[n] = run[0]!;
+    runs[n] = run;
   }
 
   const slotCount = slotStyles.length;
@@ -299,10 +319,10 @@ export function compileVariants(
     }
   }
 
-  return { table, slotCount, base, hover, active, focus, patches, warnings };
+  return { table, slotCount, base, masks, runs, patches, warnings };
 }
 
-/** Whether a node needs a row in the sparse state table. */
+/** Whether a node is conditionally styled at all. */
 export function hasState(v: VariantCompiled, node: number): boolean {
-  return v.hover[node]! >= 0 || v.active[node]! >= 0 || v.focus[node]! >= 0;
+  return v.masks[node]! !== 0;
 }

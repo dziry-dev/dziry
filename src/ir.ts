@@ -67,6 +67,40 @@ export const UNSET = SchemaAlign.UNSET;
 export const AUTO = NaN;
 
 /**
+ * Gathers the bits of `value` that are set in `mask` down to a dense index.
+ *
+ * A variant run holds one entry per *combination* of the predicates a node reads,
+ * so a node reading bits 0 and 8 needs four entries rather than 257. Mirrors
+ * `compact` in the engine's `paint.rs`; both sides must agree, because one builds
+ * the run and the other indexes it.
+ */
+export function compactBits(value: number, mask: number): number {
+  let out = 0;
+  let bit = 0;
+  let remaining = mask;
+
+  while (remaining !== 0) {
+    const lowest = remaining & -remaining;
+    if ((value & lowest) !== 0) out |= 1 << bit;
+    bit++;
+    remaining &= remaining - 1;
+  }
+  return out;
+}
+
+/** The set bits of `mask`, low to high. */
+export function maskBits(mask: number): number[] {
+  const bits: number[] = [];
+  let remaining = mask;
+  while (remaining !== 0) {
+    const lowest = remaining & -remaining;
+    bits.push(lowest);
+    remaining &= remaining - 1;
+  }
+  return bits;
+}
+
+/**
  * Style fields in emit order: [name, typed-array constructor, inherited,
  * affectsLayout].
  *
