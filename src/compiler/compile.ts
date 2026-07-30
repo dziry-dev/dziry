@@ -1,0 +1,1144 @@
+/**
+ * The compiler: HTML + CSS in, IR out.
+ *
+ * Everything expensive and static happens here — tokenizing, selector matching,
+ * specificity, the cascade, inheritance, shorthand expansion, unit resolution,
+ * style deduplication, and `:hover`/`:active` variant generation. What comes out
+ * the far side is integers and typed arrays.
+ *
+ * The runtime that consumes this has no idea CSS exists.
+ */
+import {
+  Align,
+  CONTAINER_FIELDS,
+  Direction,
+  Display,
+  Justify,
+  INITIAL_STYLE,
+  INHERITED_FIELDS,
+  emptyListTable,
+  NodeKind,
+  STYLE_FIELDS,
+  type CompiledUi,
+  type ComputedStyle,
+  type StyleField,
+} from "../ir.ts";
+import { parseHtml, type DynList, type Element, type Node, type TextPart } from "./html.ts";
+import { isItemSentinel, ItemExpressionError } from "./item-path.ts";
+import { hasState, type VariantCompiled } from "./variant-compile.ts";
+import {
+  compareCascade,
+  expandDeclaration,
+  parseCss,
+  parseInlineStyle,
+  type Pseudo,
+  type Rule,
+  type Selector,
+} from "./css.ts";
+
+// ---------------------------------------------------------------------------
+// Selector matching
+// ---------------------------------------------------------------------------
+
+function matchCompound(el: Element, c: { tag: string | null; id: string | null; classes: string[] }): boolean {
+  if (c.tag !== null && c.tag !== el.tag) return false;
+  if (c.id !== null && c.id !== el.id) return false;
+  for (const cls of c.classes) {
+    if (!el.classes.includes(cls)) return false;
+  }
+  return true;
+}
+
+/**
+ * Matches right-to-left along the ancestor path. Greedy consumption is correct
+ * here because the descendant combinator is transitive — with no child or
+ * sibling combinators there is nothing to backtrack for.
+ */
+function matches(sel: Selector, path: Element[]): boolean {
+  let ci = sel.compounds.length - 1;
+  let pi = path.length - 1;
+
+  if (ci < 0 || pi < 0) return false;
+  if (!matchCompound(path[pi]!, sel.compounds[ci]!)) return false;
+  ci--;
+  pi--;
+
+  while (ci >= 0) {
+    let found = false;
+    while (pi >= 0) {
+      const el = path[pi]!;
+      pi--;
+      if (matchCompound(el, sel.compounds[ci]!)) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) return false;
+    ci--;
+  }
+
+  return true;
+}
+
+type Candidate = { specificity: [number, number, number]; order: number; decls: Map<string, string> };
+
+/**
+ * Declarations applying to `path`'s subject when the given pseudo-class states
+ * are active.
+ *
+ * `states` is a set, not a single value, because CSS puts pseudo-class rules in
+ * the *same* cascade as everything else. While hovering, `.btn:hover` (0,2,0)
+ * and `.btn.primary` (0,2,0) tie on specificity and source order decides — so
+ * hover declarations do not automatically beat base ones. Resolving hover as a
+ * patch over the finished base style would get that backwards.
+ */
+function collectDecls(rules: Rule[], path: Element[], states: Pseudo[]): Map<string, string> {
+  const candidates: Candidate[] = [];
+
+  for (const rule of rules) {
+    for (const sel of rule.selectors) {
+      if (!states.includes(sel.pseudo)) continue;
+      if (!matches(sel, path)) continue;
+      candidates.push({ specificity: sel.specificity, order: rule.order, decls: rule.decls });
+    }
+  }
+
+  candidates.sort(compareCascade);
+
+
+  // Applied in ascending cascade order, so the winner is written last.
+  //
+  // `delete` before `set` is load-bearing, not tidiness. `Map.set` on an existing
+  // key updates the value but keeps the key's *original* position, and the caller
+  // expands this map in iteration order — so a shorthand would expand where it
+  // first appeared rather than where it won:
+  //
+  //   .card      { padding: 14px }      <- `padding` takes position 0
+  //   .card      { padding-left: 4px }  <- `padding-left` takes position 1
+  //   .x .card   { padding: 2px }       <- updates position 0, does not move
+  //
+  // Iterating then expands `padding: 2px` first and `padding-left: 4px` second,
+  // giving `padL = 4` — even though `.x .card` outranks `.card`. Re-inserting
+  // moves the key to the end, so cascade order and expansion order agree.
+  const winning = new Map<string, string>();
+  for (const c of candidates) {
+    for (const [prop, value] of c.decls) {
+      winning.delete(prop);
+      winning.set(prop, value);
+    }
+  }
+  return winning;
+}
+
+/** Whether any rule targeting this node uses the given pseudo-class. */
+function hasPseudoRule(rules: Rule[], path: Element[], pseudo: Pseudo): boolean {
+  for (const rule of rules) {
+    for (const sel of rule.selectors) {
+      if (sel.pseudo === pseudo && matches(sel, path)) return true;
+    }
+  }
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Computing styles
+// ---------------------------------------------------------------------------
+
+const DISPLAY_VALUES: Record<string, number> = {
+  flex: Display.FLEX,
+  grid: Display.GRID,
+  block: Display.BLOCK,
+  none: Display.NONE,
+};
+
+function inheritFrom(parent: ComputedStyle): ComputedStyle {
+  const style = { ...INITIAL_STYLE };
+  for (const field of INHERITED_FIELDS) style[field] = parent[field];
+  return style;
+}
+
+/**
+ * The style of a node that stands in for its parent's children.
+ *
+ * A LIST node is a wrapper the author never wrote: `<div class="list">` says how
+ * its rows arrange, but the rows are children of the LIST node, not of the div.
+ * So the LIST node takes the div's *container* properties — direction, gaps,
+ * alignment, grid tracks — and nothing else. Copying paint or box properties
+ * would double the padding and paint the background twice; copying none of them,
+ * which is what this used to do, silently dropped `align-items` and `gap`.
+ */
+function passThrough(parent: ComputedStyle): ComputedStyle {
+  const style = inheritFrom(parent);
+  for (const field of CONTAINER_FIELDS) style[field] = parent[field];
+  return style;
+}
+
+function applyDecls(base: ComputedStyle, decls: Map<string, string>, where: string): ComputedStyle {
+  const patch: Partial<Record<StyleField, number>> = {};
+
+  for (const [prop, value] of decls) {
+    try {
+      expandDeclaration(prop, value, patch);
+    } catch (e) {
+      throw new Error(`${where}: ${prop}: ${value} — ${(e as Error).message}`);
+    }
+  }
+
+  // `display` is resolved here rather than in the expander because it interacts
+  // with `flex-direction`: HTML's block default stacks children vertically, so a
+  // box with no `display` behaves like a COLUMN, while `display: flex` alone
+  // means ROW as CSS says.
+  const display = decls.get("display")?.trim().toLowerCase();
+  if (display !== undefined) {
+    const value = DISPLAY_VALUES[display];
+    if (value === undefined) throw new Error(`${where}: unsupported display "${display}"`);
+    patch.display = value;
+
+    if (display === "flex" && !decls.has("flex-direction")) {
+      patch.direction = Direction.ROW;
+    }
+  }
+
+  return { ...base, ...patch };
+}
+
+/** Style for a text node: inherited properties only, everything else initial. */
+function textStyle(parent: ComputedStyle): ComputedStyle {
+  return inheritFrom(parent);
+}
+
+// ---------------------------------------------------------------------------
+// Style table
+// ---------------------------------------------------------------------------
+
+class StyleInterner {
+  private readonly byKey = new Map<string, number>();
+  readonly list: ComputedStyle[] = [];
+
+  /** Identical computed styles collapse to one id — the point of a style table. */
+  intern(style: ComputedStyle): number {
+    // Built by hand rather than JSON.stringify because that turns NaN and
+    // Infinity — both meaningful here — into null.
+    let key = "";
+    for (const [field] of STYLE_FIELDS) key += String(style[field]) + "|";
+
+    const existing = this.byKey.get(key);
+    if (existing !== undefined) return existing;
+
+    const id = this.list.length;
+    this.byKey.set(key, id);
+    this.list.push(style);
+    return id;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Building the node tree
+// ---------------------------------------------------------------------------
+
+type BuiltNode = {
+  kind: number;
+  style: number;
+  /** Style ids per interaction state, or -1 when the state adds nothing. */
+  hover: number;
+  active: number;
+  focus: number;
+  text: number;
+  parent: number;
+  children: number[];
+};
+
+const KIND_BY_TAG: Record<string, number> = {
+  button: NodeKind.BUTTON,
+};
+
+/**
+ * Compiler-side bindings. `source` holds the signal object as authored; the
+ * resolve pass replaces it with `export`, the name the generated module imports.
+ */
+export type BuiltTextBinding = {
+  node: number;
+  slot: number;
+  parts: TextPart[];
+};
+
+export type BuiltHandler = {
+  node: number;
+  /** As authored: a function in JSX, or a name from an HTML `onclick`. */
+  ref: unknown;
+  /** Filled in by the resolve pass. */
+  name: string;
+};
+
+/** A bound text run inside a list item, addressed relative to the item root. */
+export type BuiltItemBinding = {
+  /** Node offset within the item subtree. */
+  offset: number;
+  /** String-slot offset within the item's slot block. */
+  slotOffset: number;
+  parts: TextPart[];
+};
+
+/**
+ * A click handler inside a list item, addressed by offset within the item.
+ *
+ * Per-row rather than per-node because every row shares the template: the runtime
+ * turns the clicked node back into (slot, offset), then calls the handler with the
+ * item that slot is currently rendering.
+ */
+export type BuiltItemHandler = {
+  offset: number;
+  ref: unknown;
+  name: string;
+};
+
+export type BuiltList = {
+  node: number;
+  source: unknown;
+  /** Filled in by the reference-resolution pass. */
+  exportName: string;
+  arenaStart: number;
+  stride: number;
+  capacity: number;
+  keyPath: (string | number)[];
+  bindings: BuiltItemBinding[];
+  itemHandlers: BuiltItemHandler[];
+  /** First string slot of item 0's block; each item owns `bindings.length` slots. */
+  slotStart: number;
+};
+
+/** A node that routes keystrokes into a string signal while focused. */
+export type BuiltEditable = {
+  node: number;
+  ref: unknown;
+  name: string;
+};
+
+export type CompileResult = {
+  strings: string[];
+  styles: ComputedStyle[];
+  nodes: BuiltNode[];
+  root: number;
+  textBindings: BuiltTextBinding[];
+  handlers: BuiltHandler[];
+  editables: BuiltEditable[];
+  lists: BuiltList[];
+  /** Diagnostics worth surfacing but not worth failing over. */
+  warnings: string[];
+};
+
+export function compile(html: string, css: string): CompileResult {
+  return compileTree(parseHtml(html), css);
+}
+
+/**
+ * Compiles an already-parsed document container. The HTML parser and the JSX
+ * runtime both produce this shape, so both authoring front-ends share every
+ * downstream stage — cascade, variants, interning, emit.
+ */
+export function compileTree(doc: Element, css: string): CompileResult {
+  const rules = parseCss(css);
+
+  // `body`, when present, *is* the root container — it receives the window rect,
+  // so `body { background: ... }` fills the window as an author expects.
+  const elementChildren = doc.children.filter((c): c is Element => c.type === "element");
+  const rootEl =
+    elementChildren.length === 1 && elementChildren[0]!.tag === "body" ? elementChildren[0]! : doc;
+
+  const styles = new StyleInterner();
+  const strings: string[] = [];
+  const stringIds = new Map<string, number>();
+  const nodes: BuiltNode[] = [];
+  const warnings: string[] = [];
+  const textBindings: BuiltTextBinding[] = [];
+  const handlers: BuiltHandler[] = [];
+  const lists: BuiltList[] = [];
+  const editables: BuiltEditable[] = [];
+
+  /**
+   * The one place text can enter the IR, and therefore the one place worth
+   * checking that it is text an author actually wrote.
+   *
+   * A stringified recording proxy is the only way a non-authored string reaches
+   * here, and it would otherwise intern cleanly and render as a frozen constant
+   * in every row.
+   */
+  const checkAuthored = (s: string): string => {
+    if (isItemSentinel(s)) throw new ItemExpressionError(s);
+    return s;
+  };
+
+  const internString = (s: string): number => {
+    checkAuthored(s);
+    const existing = stringIds.get(s);
+    if (existing !== undefined) return existing;
+    const id = strings.length;
+    strings.push(s);
+    stringIds.set(s, id);
+    return id;
+  };
+
+  /**
+   * Dynamic text gets its own string slot, never shared with an interned literal —
+   * the runtime overwrites it, and sharing would corrupt unrelated nodes.
+   */
+  const reserveSlot = (initial: string): number => {
+    checkAuthored(initial);
+    const id = strings.length;
+    strings.push(initial);
+    return id;
+  };
+
+  const describe = (path: Element[]) =>
+    path
+      .map((e) => e.tag + (e.id ? `#${e.id}` : "") + e.classes.map((c) => `.${c}`).join(""))
+      .join(" > ");
+
+  /**
+   * The matched rules for `el`, with its inline declarations layered on top.
+   *
+   * Inline beats every selector regardless of specificity, which is what a
+   * browser does and what an author expects. It applies to the state cascades
+   * too: an inline `color` outranks a `:hover` rule's colour, because that is
+   * also what CSS says.
+   */
+  const withInline = (decls: Map<string, string>, el: Element): Map<string, string> => {
+    if (!el.style) return decls;
+    for (const [prop, value] of parseInlineStyle(el.style)) {
+      // Re-inserted for the same reason as in `collectDecls`: an inline
+      // `padding: 0` that merely *replaced* a value would still expand at the
+      // cascade's position for `padding`, and a longhand from any matched rule
+      // would then apply after it and win — the exact opposite of what inline
+      // precedence means.
+      decls.delete(prop);
+      decls.set(prop, value);
+    }
+    return decls;
+  };
+
+  /** Returns the index of the node created for `el`. */
+  function walk(el: Element, path: Element[], parentStyle: ComputedStyle, parent: number): number {
+    const where = describe(path);
+
+    const inherited = inheritFrom(parentStyle);
+    const style = applyDecls(inherited, withInline(collectDecls(rules, path, ["none"]), el), where);
+
+    // Precomputed variants: the compiler emits finished styles and the runtime
+    // only picks an index. Each state is resolved as a full cascade from
+    // scratch, not as a patch over the base — see collectDecls.
+    //
+    // Pressing implies hovering, so the active state cascades none+hover+active.
+    // Focus is resolved independently; the runtime picks one style by precedence
+    // rather than merging hover with focus, which CSS would do per-property.
+    const hoverStyle = hasPseudoRule(rules, path, "hover")
+      ? applyDecls(
+          inherited,
+          withInline(collectDecls(rules, path, ["none", "hover"]), el),
+          `${where}:hover`,
+        )
+      : null;
+    const activeStyle = hasPseudoRule(rules, path, "active")
+      ? applyDecls(
+          inherited,
+          withInline(collectDecls(rules, path, ["none", "hover", "active"]), el),
+          `${where}:active`,
+        )
+      : null;
+    const focusStyle = hasPseudoRule(rules, path, "focus")
+      ? applyDecls(
+          inherited,
+          withInline(collectDecls(rules, path, ["none", "focus"]), el),
+          `${where}:focus`,
+        )
+      : null;
+
+    const styleId = styles.intern(style);
+    const hoverId = hoverStyle ? styles.intern(hoverStyle) : -1;
+    const activeId = activeStyle ? styles.intern(activeStyle) : -1;
+    const focusId = focusStyle ? styles.intern(focusStyle) : -1;
+
+    const self = nodes.length;
+    nodes.push({
+      kind: KIND_BY_TAG[el.tag] ?? NodeKind.BOX,
+      style: styleId,
+      // A state that resolves to the base style adds nothing to paint.
+      hover: hoverId === styleId ? -1 : hoverId,
+      active: activeId === styleId ? -1 : activeId,
+      focus: focusId === styleId ? -1 : focusId,
+      text: -1,
+      parent,
+      children: [],
+    });
+
+    if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "" });
+    if (el.bindValue) editables.push({ node: self, ref: el.bindValue, name: "" });
+
+    // A button whose content is a single static text run keeps the label on the
+    // button itself, so paint can centre it without a child node to lay out.
+    // A *dynamic* label stays a child node, since the binding addresses a node.
+    const kids = el.children;
+    const onlyText =
+      kids.length === 1 && kids[0]!.type === "text" ? (kids[0] as { value: string }).value : null;
+
+    if (nodes[self]!.kind === NodeKind.BUTTON && onlyText !== null) {
+      nodes[self]!.text = internString(onlyText);
+      return self;
+    }
+
+    for (const child of kids) {
+      const childIndex = walkChild(child, path, style, self);
+      if (childIndex !== -1) nodes[self]!.children.push(childIndex);
+    }
+
+    return self;
+  }
+
+  /**
+   * Compiles a list into a LIST node plus an arena of identical item subtrees.
+   *
+   * The template is compiled once through the ordinary `walk`, so items get the
+   * same cascade, inheritance and variants as anything else — the arena is only a
+   * layout of node *slots*. Replication then copies those nodes with their links
+   * shifted by one stride, which is what keeps item-internal traversal ordinary.
+   */
+  function walkList(node: DynList, path: Element[], parentStyle: ComputedStyle, parent: number): number {
+    const self = nodes.length;
+    nodes.push({
+      kind: NodeKind.LIST,
+      style: styles.intern(passThrough(parentStyle)),
+      hover: -1,
+      active: -1,
+      focus: -1,
+      text: -1,
+      parent,
+      children: [],
+    });
+
+    // Item 0 is compiled normally; its bindings are captured relative to it.
+    const arenaStart = nodes.length;
+    const bindingsBefore = textBindings.length;
+    const templateRoot = walkChild(node.template, path, parentStyle, self);
+    const stride = nodes.length - arenaStart;
+
+    if (templateRoot !== arenaStart) {
+      throw new Error("list template did not compile to a contiguous subtree");
+    }
+
+    // Handlers inside the template belong to the row, not to a fixed node.
+    const itemHandlers: BuiltItemHandler[] = [];
+    for (let h = handlers.length - 1; h >= 0; h--) {
+      const handler = handlers[h]!;
+      if (handler.node < arenaStart || handler.node >= arenaStart + stride) continue;
+      itemHandlers.unshift({ offset: handler.node - arenaStart, ref: handler.ref, name: "" });
+      handlers.splice(h, 1);
+    }
+
+    // Item bindings were recorded as ordinary text bindings; lift them out.
+    const raw = textBindings.splice(bindingsBefore);
+
+    // A template that reads nothing from its item is always a mistake.
+    //
+    // `key` is mandatory precisely because rows have identity, so a keyed list
+    // whose rows neither display item data nor handle a per-row event is a row
+    // of constants repeated `capacity` times. The usual cause is an expression
+    // the recorder cannot see through — the sentinel catches the ones that reach
+    // a string, and this catches the rest (a `.filter()`, a destructure, an
+    // early return).
+    if (raw.length === 0 && itemHandlers.length === 0) {
+      throw new Error(
+        `list template reads nothing from its item, so every row would render the same\n` +
+          `  constants. The callback runs once at build time against a recording proxy: it\n` +
+          `  can record a bare property read like \`{t.title}\`, but not a value computed\n` +
+          `  from one. If the row genuinely has no dynamic content, use a plain array —\n` +
+          `  \`[...items].map(…)\` compiles to literal nodes with no arena.`,
+      );
+    }
+    const slotStart = strings.length;
+    const bindings: BuiltItemBinding[] = raw.map((b, i) => ({
+      offset: b.node - arenaStart,
+      slotOffset: i,
+      parts: b.parts,
+    }));
+
+    // Re-point item 0's own text slots into its slot block, then reserve blocks
+    // for the remaining items so every row has its own mutable strings.
+    for (const [i, b] of raw.entries()) {
+      nodes[b.node]!.text = reserveSlot(strings[b.slot] ?? "");
+      void i;
+    }
+    for (let item = 1; item < node.capacity; item++) {
+      for (let b = 0; b < bindings.length; b++) reserveSlot("");
+    }
+
+    // Replicate item 0 into the rest of the arena.
+    for (let item = 1; item < node.capacity; item++) {
+      const shift = item * stride;
+      for (let k = 0; k < stride; k++) {
+        const src = nodes[arenaStart + k]!;
+        nodes.push({
+          kind: src.kind,
+          style: src.style,
+          hover: src.hover,
+          active: src.active,
+          focus: src.focus,
+          text: src.text,
+          parent: k === 0 ? self : src.parent + shift,
+          children: src.children.map((c) => c + shift),
+        });
+      }
+      // Each replica's bound slots live in its own block.
+      for (const b of bindings) {
+        nodes[arenaStart + shift + b.offset]!.text = slotStart + item * bindings.length + b.slotOffset;
+      }
+    }
+
+    lists.push({
+      node: self,
+      source: node.source,
+      exportName: "",
+      arenaStart,
+      stride,
+      capacity: node.capacity,
+      keyPath: node.keyPath,
+      bindings,
+      itemHandlers,
+      slotStart,
+    });
+
+    // The LIST node owns the arena; `firstChild` is set by the runtime, which
+    // decides how many slots are live and in what order.
+    nodes[self]!.children = [];
+    return self;
+  }
+
+  function walkChild(node: Node, path: Element[], parentStyle: ComputedStyle, parent: number): number {
+    if (node.type === "dynlist") return walkList(node, path, parentStyle, parent);
+
+    if (node.type === "text" || node.type === "dyntext") {
+      const self = nodes.length;
+
+      // Dynamic runs render their literals only until the first `update(state)`.
+      const initial =
+        node.type === "text"
+          ? node.value
+          : node.parts.map((p) => ("literal" in p ? p.literal : "")).join("");
+
+      const slot = node.type === "text" ? internString(initial) : reserveSlot(initial);
+
+      nodes.push({
+        kind: NodeKind.TEXT,
+        style: styles.intern(textStyle(parentStyle)),
+        hover: -1,
+        active: -1,
+        focus: -1,
+        text: slot,
+        parent,
+        children: [],
+      });
+
+      if (node.type === "dyntext") {
+        textBindings.push({ node: self, slot, parts: node.parts });
+      }
+      return self;
+    }
+    return walk(node, [...path, node], parentStyle, parent);
+  }
+
+  const rootIndex =
+    rootEl.type === "element" && rootEl.tag !== "#root"
+      ? walk(rootEl, [rootEl], INITIAL_STYLE, -1)
+      : walk(rootEl, [], INITIAL_STYLE, -1);
+
+  if (rootEl.tag === "#root" && elementChildren.length > 1) {
+    warnings.push(
+      `document has ${elementChildren.length} top-level elements; they were wrapped in a synthetic root`,
+    );
+  }
+
+  return {
+    strings,
+    styles: styles.list,
+    nodes,
+    root: rootIndex,
+    textBindings,
+    handlers,
+    editables,
+    lists,
+    warnings,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Flattening
+// ---------------------------------------------------------------------------
+
+/**
+ * Turns per-node child arrays into first-child / next-sibling links, which is
+ * all a tree walk needs and costs two ints per node instead of an array each.
+ */
+function flattenLinks(nodes: BuiltNode[]): { firstChild: number[]; nextSibling: number[] } {
+  const firstChild = new Array<number>(nodes.length).fill(-1);
+  const nextSibling = new Array<number>(nodes.length).fill(-1);
+
+  for (let i = 0; i < nodes.length; i++) {
+    const kids = nodes[i]!.children;
+    if (kids.length > 0) firstChild[i] = kids[0]!;
+    for (let k = 0; k < kids.length - 1; k++) nextSibling[kids[k]!] = kids[k + 1]!;
+  }
+
+  return { firstChild, nextSibling };
+}
+
+const CTORS = {
+  Uint8Array,
+  Uint16Array,
+  Uint32Array,
+  Int16Array,
+  Int32Array,
+  Float32Array,
+} as const;
+
+/**
+ * Collects the nodes that have any interaction-state style.
+ *
+ * Sparse because it is overwhelmingly empty — on a 300-item todo page, 3 of 1215
+ * nodes qualify — and because the runtime only consults it for the at-most-three
+ * nodes currently hovered, pressed or focused.
+ */
+function buildStates(nodes: BuiltNode[]): {
+  node: number[];
+  hover: number[];
+  active: number[];
+  focus: number[];
+} {
+  const out = { node: [] as number[], hover: [] as number[], active: [] as number[], focus: [] as number[] };
+
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]!;
+    if (n.hover < 0 && n.active < 0 && n.focus < 0) continue;
+    out.node.push(i);
+    out.hover.push(n.hover);
+    out.active.push(n.active);
+    out.focus.push(n.focus);
+  }
+
+  return out;
+}
+
+/**
+ * Nodes that can receive input.
+ *
+ * Emitted explicitly because inferring it from `hover >= 0` was wrong: a
+ * clickable list row with no `:hover` rule would be excluded, and a node whose
+ * hover style happens to equal its base collapses to -1.
+ *
+ * Currently a button, or anything with a state style. Event handlers will join
+ * this set once they exist.
+ */
+/**
+ * Nodes that can receive input.
+ *
+ * `variants` matters and is not optional in the emit path: a toggle can
+ * *introduce* a state style the baseline lacks (`body.light .btn:hover`), and the
+ * node's real state pointers then live in `variants`, not on the baseline node.
+ * Reading only the baseline emitted a correct hover slot attached to a node that
+ * could never be hovered — the style existed, the interaction did not.
+ */
+function buildInteractive(
+  nodes: BuiltNode[],
+  handlers: BuiltHandler[],
+  lists: BuiltList[] = [],
+  variants?: VariantCompiled,
+): number[] {
+  const withHandler = new Set(handlers.map((h) => h.node));
+
+  // Per-row handlers live at an offset inside every replica, so each replica's
+  // node has to be interactive — the template's single entry is not enough.
+  for (const list of lists) {
+    for (const h of list.itemHandlers) {
+      for (let item = 0; item < list.capacity; item++) {
+        withHandler.add(list.arenaStart + item * list.stride + h.offset);
+      }
+    }
+  }
+
+  const out: number[] = [];
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]!;
+    // Either source counts: the baseline for a node styled by `:hover` directly,
+    // the variant table for one that only gains a state while a toggle is on.
+    const stateful =
+      n.hover >= 0 ||
+      n.active >= 0 ||
+      n.focus >= 0 ||
+      (variants !== undefined &&
+        ((variants.hover[i] ?? -1) >= 0 ||
+          (variants.active[i] ?? -1) >= 0 ||
+          (variants.focus[i] ?? -1) >= 0));
+
+    if (n.kind === NodeKind.BUTTON || stateful || withHandler.has(i)) out.push(i);
+  }
+  return out;
+}
+
+/**
+ * Builds the IR in memory, skipping the emit/import round trip. Used by tests
+ * and by dev-mode recompilation; the app itself imports the generated module so
+ * the shipping path is the one being validated.
+ */
+export function toCompiledUi(result: CompileResult): CompiledUi {
+  const { firstChild, nextSibling } = flattenLinks(result.nodes);
+
+  const styles = { count: result.styles.length } as Record<string, unknown>;
+  for (const [field, ctor] of STYLE_FIELDS) {
+    styles[field] = new CTORS[ctor](result.styles.map((s) => s[field]));
+  }
+
+  const states = buildStates(result.nodes);
+
+  return {
+    strings: result.strings,
+    styles: styles as CompiledUi["styles"],
+    nodes: {
+      count: result.nodes.length,
+      kind: new Uint8Array(result.nodes.map((n) => n.kind)),
+      style: new Uint16Array(result.nodes.map((n) => n.style)),
+      text: new Int32Array(result.nodes.map((n) => n.text)),
+      parent: new Int32Array(result.nodes.map((n) => n.parent)),
+      firstChild: new Int32Array(firstChild),
+      nextSibling: new Int32Array(nextSibling),
+      list: new Int16Array(result.nodes.length).fill(-1),
+      hidden: new Uint8Array(result.nodes.length),
+    },
+    states: {
+      count: states.node.length,
+      node: new Int32Array(states.node),
+      hover: new Int32Array(states.hover),
+      active: new Int32Array(states.active),
+      focus: new Int32Array(states.focus),
+    },
+    interactive: new Int32Array(buildInteractive(result.nodes, result.handlers, result.lists)),
+    // Bindings are resolved and emitted only on the generated-module path; the
+    // in-memory IR is used by tests and the variant probe, which are static.
+    textBindings: [],
+    handlers: [],
+    lists: emptyListTable(),
+    root: result.root,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Emit
+// ---------------------------------------------------------------------------
+
+/** JS source for a numeric literal, preserving NaN and Infinity. */
+function num(v: number): string {
+  if (Number.isNaN(v)) return "NaN";
+  if (v === Infinity) return "Infinity";
+  if (v === -Infinity) return "-Infinity";
+  return String(v);
+}
+
+function typedArray(ctor: string, values: number[]): string {
+  return `new ${ctor}([${values.map(num).join(",")}])`;
+}
+
+export function emit(
+  result: CompileResult,
+  source: { html: string; css: string },
+  /** Import specifier -> names, from the reference-resolution pass. */
+  imports: Map<string, Set<string>> = new Map(),
+  /**
+   * Present when the document has conditional classes. Its slot-interned style
+   * table and node pointers replace the baseline ones, so a toggle can patch the
+   * table without any node pointer changing.
+   */
+  variants?: VariantCompiled,
+): string {
+  const { strings, nodes, root } = result;
+
+  const { firstChild, nextSibling } = flattenLinks(nodes);
+  const states = variants
+    ? {
+        node: nodes.map((_, i) => i).filter((i) => hasState(variants, i)),
+        hover: [] as number[],
+        active: [] as number[],
+        focus: [] as number[],
+      }
+    : buildStates(nodes);
+
+  if (variants) {
+    for (const i of states.node) {
+      states.hover.push(variants.hover[i]!);
+      states.active.push(variants.active[i]!);
+      states.focus.push(variants.focus[i]!);
+    }
+  }
+
+  const interactive = buildInteractive(nodes, result.handlers, result.lists, variants);
+  const styleCount = variants ? variants.slotCount : result.styles.length;
+  const nodeStyle = variants ? variants.base : nodes.map((n) => n.style);
+
+  // Signals and handlers are imported by name, so the emitted bindings hold the
+  // real objects rather than keys to look up.
+  const importLines = [...imports]
+    .map(([specifier, names]) => `import { ${[...names].sort().join(", ")} } from ${JSON.stringify(specifier)};`)
+    .join("\n");
+
+  /**
+   * Every identifier interpolated into the generated module goes through here.
+   *
+   * The emitter writes JavaScript source, so an unresolved name does not produce
+   * a wrong value — it produces `{ node: 1, fn:  }`, a module that cannot parse,
+   * written to disk beside a "compiled" success line. The failure then surfaces
+   * as a syntax error in generated code, pointing nowhere near the cause.
+   *
+   * `partSource` already refused an unresolved text part; handlers, list signals
+   * and patch signals did not, which is how the HTML front-end shipped an
+   * unparseable artifact for any `onclick`.
+   */
+  const identifier = (name: string, what: string): string => {
+    if (!/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) {
+      throw new Error(
+        `${what} did not resolve to an importable name (got ${JSON.stringify(name)}).\n` +
+          `  Signals and handlers must be module-level exports of the entry file or its\n` +
+          `  sibling state.ts, because the generated module imports them by name — that is\n` +
+          `  the only way a reference survives the compiler/runtime file boundary.`,
+      );
+    }
+    return name;
+  };
+
+  const partSource = (part: TextPart): string => {
+    if ("literal" in part) return `{ literal: ${JSON.stringify(part.literal)} }`;
+    if ("export" in part) return `{ signal: ${identifier(part.export, "a text binding")} }`;
+    if ("item" in part) return `{ path: ${JSON.stringify(part.item)} }`;
+    throw new Error("unresolved text binding — resolveRefs was not run");
+  };
+
+  const textBindingSource = result.textBindings
+    .map(
+      (b) =>
+        `  { node: ${b.node}, slot: ${b.slot}, parts: [${b.parts.map(partSource).join(", ")}] },`,
+    )
+    .join("\n");
+
+  const handlerSource = result.handlers
+    .map((h) => `  { node: ${h.node}, fn: ${identifier(h.name, `the handler on node ${h.node}`)} },`)
+    .join("\n");
+
+  const listBindingSource = result.lists
+    .map((l) => {
+      const binds = l.bindings
+        .map(
+          (b) =>
+            `      { offset: ${b.offset}, slotOffset: ${b.slotOffset}, ` +
+            `parts: [${b.parts.map(partSource).join(", ")}] },`,
+        )
+        .join("\n");
+      const rowHandlers = l.itemHandlers
+        .map((h) => `      { offset: ${h.offset}, fn: ${h.name} },`)
+        .join("\n");
+
+      return (
+        `  {\n` +
+        `    list: ${result.lists.indexOf(l)},\n` +
+        `    signal: ${identifier(l.exportName, `the list on node ${l.node}`)},\n` +
+        `    keyPath: ${JSON.stringify(l.keyPath)},\n` +
+        `    slotStart: ${l.slotStart},\n` +
+        `    slotsPerItem: ${l.bindings.length},\n` +
+        `    bindings: [\n${binds}\n    ],\n` +
+        `    itemHandlers: [\n${rowHandlers}\n    ],\n` +
+        `  },`
+      );
+    })
+    .join("\n");
+
+  const styleArrays = STYLE_FIELDS.map(([field, ctor]) => {
+    const values = variants ? variants.table[field] : result.styles.map((s) => s[field]);
+    return `  ${field}: ${typedArray(ctor, values)},`;
+  }).join("\n");
+
+  // Patches address (field, slot) pairs. Slot values are written in place, which
+  // is why the style table's typed arrays are mutable and node pointers are not.
+  const patchSource = (variants?.patches ?? [])
+    .map((p) => {
+      const entries = p.entries
+        .map(
+          (e) =>
+            `      { field: ${JSON.stringify(e.field)}, slots: ${typedArray("Uint16Array", e.slots)}, ` +
+            `on: ${typedArray("Float64Array", e.on)}, off: ${typedArray("Float64Array", e.off)} },`,
+        )
+        .join("\n");
+      return (
+        `  {\n` +
+        `    signal: ${identifier(p.exportName, "a conditional class")},\n` +
+        `    affectsLayout: ${p.affectsLayout},\n` +
+        `    entries: [\n${entries}\n    ],\n` +
+        `  },`
+      );
+    })
+    .join("\n");
+
+  return `// GENERATED by src/compile.ts from ${source.html} + ${source.css}
+// Do not edit. No CSS, no selectors, no property names — just indices.
+//
+// ${nodes.length} nodes, ${styleCount} style slots, ${strings.length} strings,
+// ${states.node.length} nodes with interaction states, ${interactive.length} interactive,
+// ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
+${importLines ? "\n" + importLines + "\n" : ""}
+/** Mutable past the static entries: text bindings overwrite their own slots. */
+export const strings = ${JSON.stringify(strings)};
+
+/** Mutable: style patches write field values in place. Node pointers never change. */
+export const styles = {
+  count: ${styleCount},
+${styleArrays}
+};
+
+export const nodes = {
+  count: ${nodes.length},
+  kind: ${typedArray("Uint8Array", nodes.map((n) => n.kind))},
+  style: ${typedArray("Uint16Array", nodeStyle)},
+  text: ${typedArray("Int32Array", nodes.map((n) => n.text))},
+  parent: ${typedArray("Int32Array", nodes.map((n) => n.parent))},
+  firstChild: ${typedArray("Int32Array", firstChild)},
+  nextSibling: ${typedArray("Int32Array", nextSibling)},
+  list: new Int16Array(${nodes.length}).fill(-1),
+  hidden: new Uint8Array(${nodes.length}),
+};
+
+/** Sparse: only nodes with a :hover / :active / :focus style. Sorted by node id. */
+export const states = {
+  count: ${states.node.length},
+  node: ${typedArray("Int32Array", states.node)},
+  hover: ${typedArray("Int32Array", states.hover)},
+  active: ${typedArray("Int32Array", states.active)},
+  focus: ${typedArray("Int32Array", states.focus)},
+};
+
+/** Nodes that can receive input, sorted. Emitted, never inferred. */
+export const interactive = ${typedArray("Int32Array", interactive)};
+
+/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
+export const textBindings = [
+${textBindingSource}
+];
+
+/** Click handlers, as direct references to the app's exported functions. */
+export const handlers = [
+${handlerSource}
+];
+
+/** Nodes that route keystrokes into a string signal while focused. */
+export const editables = [
+${result.editables.map((e) => `  { node: ${e.node}, signal: ${e.name} },`).join("\n")}
+];
+
+/**
+ * Conditional classes, compiled to style-table writes.
+ *
+ * Each entry writes field values for the slots the class actually changes — no
+ * class names, no cascade, and node style pointers untouched. affectsLayout says
+ * whether applying it requires a relayout or only a repaint.
+ */
+export const stylePatches = [
+${patchSource}
+];
+
+/**
+ * Dynamic lists. Each owns a contiguous arena of identical item subtrees; the
+ * runtime rewrites the child chain and the bound slots, never the nodes.
+ */
+export const lists = {
+  count: ${result.lists.length},
+  node: ${typedArray("Int32Array", result.lists.map((l) => l.node))},
+  arenaStart: ${typedArray("Int32Array", result.lists.map((l) => l.arenaStart))},
+  stride: ${typedArray("Int32Array", result.lists.map((l) => l.stride))},
+  capacity: ${typedArray("Int32Array", result.lists.map((l) => l.capacity))},
+  active: new Int32Array(${result.lists.length}),
+  dataOffset: new Int32Array(${result.lists.length}),
+};
+
+/** Per-list: the array signal, key path, and where each item's bound slots live. */
+export const listBindings = [
+${listBindingSource}
+];
+
+export const root = ${root};
+`;
+}
+
+// ---------------------------------------------------------------------------
+// Human-readable dump — M2a's verification artifact
+// ---------------------------------------------------------------------------
+
+const KIND_NAMES = ["box", "text", "button"];
+const DIRECTION_NAMES = ["row", "column"];
+const JUSTIFY_NAMES = ["start", "center", "end", "space-between", "space-around"];
+const ALIGN_NAMES = ["start", "center", "end", "stretch"];
+
+function hex(argb: number): string {
+  if ((argb >>> 24) === 0) return "transparent";
+  const rgb = (argb & 0xffffff).toString(16).padStart(6, "0");
+  const a = argb >>> 24;
+  return a === 255 ? `#${rgb}` : `#${rgb}@${(a / 255).toFixed(2)}`;
+}
+
+/** Only the fields that differ from the initial value, so output stays readable. */
+function describeStyle(s: ComputedStyle): string {
+  const parts: string[] = [];
+  for (const [field] of STYLE_FIELDS) {
+    const v = s[field];
+    const init = INITIAL_STYLE[field];
+    const same = Number.isNaN(v) && Number.isNaN(init) ? true : v === init;
+    if (same) continue;
+
+    if (field === "bg" || field === "fg" || field === "borderColor") {
+      parts.push(`${field}=${hex(v)}`);
+    } else if (field === "direction") {
+      parts.push(`${field}=${DIRECTION_NAMES[v]}`);
+    } else if (field === "justify") {
+      parts.push(`${field}=${JUSTIFY_NAMES[v]}`);
+    } else if (field === "align") {
+      parts.push(`${field}=${ALIGN_NAMES[v]}`);
+    } else {
+      parts.push(`${field}=${Number.isNaN(v) ? "auto" : v}`);
+    }
+  }
+  return parts.length ? parts.join(" ") : "(initial)";
+}
+
+export function dump(result: CompileResult): string {
+  const { nodes, styles, strings, root } = result;
+  const lines: string[] = [];
+
+  const walk = (i: number, depth: number): void => {
+    const n = nodes[i]!;
+    const indent = "  ".repeat(depth);
+    const label = n.text >= 0 ? ` ${JSON.stringify(strings[n.text])}` : "";
+    const variants = [
+      n.hover >= 0 ? `hover=${n.hover}` : null,
+      n.active >= 0 ? `active=${n.active}` : null,
+      n.focus >= 0 ? `focus=${n.focus}` : null,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
+    lines.push(
+      `${indent}#${i} ${KIND_NAMES[n.kind]}${label}  style=${n.style}${variants ? " " + variants : ""}`,
+    );
+    for (const c of n.children) walk(c, depth + 1);
+  };
+
+  lines.push("tree");
+  walk(root, 1);
+
+  lines.push("", `styles (${styles.length} unique)`);
+  styles.forEach((s, i) => lines.push(`  ${String(i).padStart(3)}  ${describeStyle(s)}`));
+
+  lines.push("", `strings (${strings.length})`);
+  strings.forEach((s, i) => lines.push(`  ${String(i).padStart(3)}  ${JSON.stringify(s)}`));
+
+  return lines.join("\n");
+}

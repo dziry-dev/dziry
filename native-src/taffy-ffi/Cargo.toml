@@ -1,0 +1,23 @@
+[package]
+name = "taffy-ffi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# A C ABI over Taffy, so bun:ffi can drive it. Users never need Rust — we ship the
+# built library per platform, the same model as libSkiaSharp.
+[lib]
+name = "taffy_ffi"
+crate-type = ["cdylib"]
+
+[dependencies]
+taffy = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# NOT `panic = "abort"`. A panic crossing the FFI boundary must be caught with
+# `catch_unwind` at every entry point and reported to the host as a structured
+# error — aborting turns a bad grid definition into a segfault Bun cannot report.
+panic = "unwind"

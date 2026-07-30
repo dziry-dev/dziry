@@ -1,0 +1,126 @@
+/**
+ * Applies state to the IR.
+ *
+ * This is the whole of what the runtime does about dynamic values: build each
+ * bound text run from its parts, write it into the string slot the compiler
+ * reserved, and report whether anything changed. No diffing, no reconciliation,
+ * no dependency discovery — the compiler already decided which node reads which
+ * signal.
+ */
+import type { CompiledUi } from "../ir.ts";
+import { batch, type Signal } from "./signal.ts";
+
+export const Dirty = { NONE: 0, PAINT: 1, LAYOUT: 2 } as const;
+export type Dirty = (typeof Dirty)[keyof typeof Dirty];
+
+/**
+ * Recomputes every bound text run, appending the nodes whose text changed to
+ * `changed`.
+ *
+ * A changed string means a changed advance width, so those nodes need measuring
+ * again — but only those, and their ancestors. Reporting *which* nodes changed is
+ * what lets the caller avoid re-measuring the whole tree.
+ *
+ * `changed` is caller-owned so the steady state allocates nothing.
+ */
+export function applyTextBindings(ui: CompiledUi, changed?: number[]): Dirty {
+  let dirty: Dirty = Dirty.NONE;
+
+  for (const binding of ui.textBindings) {
+    let next = "";
+    for (const part of binding.parts) {
+      next += "literal" in part ? part.literal : String(part.signal.value);
+    }
+
+    if (ui.strings[binding.slot] !== next) {
+      ui.strings[binding.slot] = next;
+      changed?.push(binding.node);
+      dirty = Dirty.LAYOUT;
+    }
+  }
+
+  return dirty;
+}
+
+/**
+ * Subscribes `onChange` to every signal any binding reads.
+ *
+ * Deliberately coarse: one callback for the whole document rather than per-node
+ * effects. Recomputing all bindings is a handful of string builds, while the
+ * bookkeeping to track which binding to revisit would cost more than it saves at
+ * this scale. Per-binding effects become worthwhile only if binding counts grow
+ * by orders of magnitude.
+ */
+export function subscribeBindings(ui: CompiledUi, onChange: () => void): () => void {
+  const seen = new Set<unknown>();
+  const unsubscribes: (() => void)[] = [];
+
+  for (const binding of ui.textBindings) {
+    for (const part of binding.parts) {
+      if ("literal" in part || seen.has(part.signal)) continue;
+      seen.add(part.signal);
+      unsubscribes.push(part.signal.subscribe(onChange));
+    }
+  }
+
+  return () => {
+    for (const off of unsubscribes) off();
+  };
+}
+
+export type EditableRef = { node: number; signal: Signal<string> };
+
+/**
+ * Routes a keystroke into the focused editable.
+ *
+ * The minimum that makes typing work: append text, delete on backspace. No caret,
+ * no selection, no clipboard — those need a text-editing model this does not have.
+ * Returns true if the key was consumed.
+ */
+export function typeInto(
+  editables: EditableRef[],
+  focused: number,
+  input: { text: string | null; backspace: boolean },
+): boolean {
+  const target = editables.find((e) => e.node === focused);
+  if (!target) return false;
+
+  if (input.backspace) {
+    batch(() => {
+      target.signal.value = target.signal.value.slice(0, -1);
+    });
+    return true;
+  }
+
+  if (input.text) {
+    batch(() => {
+      target.signal.value += input.text;
+    });
+    return true;
+  }
+
+  return false;
+}
+
+/** The handler bound to a node, or null. */
+export function handlerFor(ui: CompiledUi, node: number): (() => void) | null {
+  for (const h of ui.handlers) {
+    if (h.node === node) return h.fn;
+  }
+  return null;
+}
+
+/**
+ * Runs a node's handler, if it has one, as a single batch.
+ *
+ * Batching belongs here rather than in each handler: one user action should cost
+ * one repaint, however many signals the handler happens to write. Without it, a
+ * handler touching two signals asks for three repaints (the second write plus the
+ * computed's invalidation).
+ */
+export function dispatch(ui: CompiledUi, node: number): boolean {
+  const fn = handlerFor(ui, node);
+  if (!fn) return false;
+  batch(fn);
+  return true;
+}

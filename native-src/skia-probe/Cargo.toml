@@ -1,0 +1,11 @@
+[package]
+name = "skia-probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Gating question for the Rust engine: does skia-safe build on this machine, and
+# does its `textlayout` feature expose SkParagraph? A2 (text wrapping, ellipsis,
+# bidi, font fallback) leans heavily on the answer being yes.
+[dependencies]
+skia-safe = { version = "0.87", features = ["textlayout"] }

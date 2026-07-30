@@ -1,0 +1,12 @@
+# LF everywhere, in the repo and in the working tree.
+#
+# `core.autocrlf` is on for this machine, which would check every file out as
+# CRLF while storing LF — so the bytes on disk differ from the bytes committed.
+# That is invisible until something reads the file as text and the offsets no
+# longer match, and it would make every mac/linux CI checkout a whole-file diff.
+* text=auto eol=lf
+
+*.png binary
+*.dll binary
+*.nupkg binary
+*.zip binary

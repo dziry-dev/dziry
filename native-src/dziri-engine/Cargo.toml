@@ -1,0 +1,41 @@
+[package]
+name = "dziri-engine"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# The engine: window, layout, paint and text in one native library. Bun loads it
+# through `bun:ffi`, writes the shared tables directly, and calls `tick()`.
+#
+# `rlib` is there so the Rust tests can link the crate normally; `cdylib` is what
+# Bun opens.
+[lib]
+name = "dziri_engine"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pinned to what `native-src/skia-probe` verified: raster surface, platform font
+# manager, and SkParagraph via `textlayout`.
+skia-safe = { version = "0.87", features = ["textlayout"] }
+taffy = "0.9"
+# SDL3 rather than winit: winit's IME is documented as unstable for CJK, and an
+# input abstraction cannot fix events that never arrive. Built from source and
+# linked statically so distribution stays one artifact.
+#
+# `unsafe_textures` drops the lifetime linking a texture to its creator. Without
+# it, the canvas, the texture creator and the texture cannot live in one struct —
+# the classic self-referential borrow — and the workarounds are worse than owning
+# one `destroy` call on resize.
+sdl3 = { version = "0.18", features = ["build-from-source-static", "unsafe_textures"] }
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+# NOT `panic = "abort"`. Every FFI entry point wraps in `catch_unwind` and reports
+# a structured error; aborting would turn a bad grid definition into a segfault
+# Bun cannot report.
+panic = "unwind"
+
+[profile.dev]
+panic = "unwind"

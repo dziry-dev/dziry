@@ -1,0 +1,32 @@
+# Rust build output. This is 622 MB of the tree and the single reason the repo
+# had to be initialised before anything was ever committed.
+target/
+
+node_modules/
+
+# Prebuilt natives, fetched or vendored — never source.
+# Nothing needs these any more: the engine links SDL3 and Skia statically. They
+# are ignored rather than merely deleted so a stale copy cannot come back.
+native/
+*.dll
+*.dylib
+*.so
+*.lib
+*.pdb
+
+# Vendored archives. The SkiaSharp nupkg alone was 76 MB.
+*.nupkg
+*.zip
+*.tar.gz
+
+# Generated screenshots — `bun run shot` rewrites them.
+engine-demo.png
+engine-demo-light.png
+*.out.png
+
+# The generated IR is a build artifact of `bun run compile`. Tracked would mean
+# every style change shows up as a 18 KB diff of integer arrays.
+app/ui.gen.ts
+
+.DS_Store
+Thumbs.db
