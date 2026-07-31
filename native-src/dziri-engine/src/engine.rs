@@ -302,51 +302,76 @@ impl Engine {
     ///
     /// The whole point of staging is here: a colour-only theme patch touches no
     /// geometry, so it reaches paint without Taffy hearing about it at all.
+    ///
+    /// A full rebuild is now reserved for the two cases that genuinely need one
+    /// — the first tick, and a capacity change, which appends a fresh larger
+    /// arena and so needs ids that do not exist yet. Everything else works from
+    /// the changed index set. Before this, *any* link write allocated a new
+    /// `TaffyTree` with a leaf per node and pushed a style per node, over table
+    /// capacity, for one appended list row.
     fn resync(&mut self, diff: &Diff) -> Result<(), String> {
-        if self.fresh || diff.structure || self.tree.node_count() != self.tables.capacities().nodes as usize {
+        if self.fresh || self.tree.node_count() != self.tables.capacities().nodes as usize {
             self.tree.rebuild(&self.tables, self.root)?;
             self.tree.apply_all_styles(&self.tables)?;
             self.fresh = false;
             return Ok(());
         }
 
-        if diff.node_styles {
-            // Which node points where changed; every node's style is suspect.
-            self.tree.apply_all_styles(&self.tables)?;
-        } else if diff.styles && !diff.changed_styles.is_empty() {
+        if !diff.changed_links.is_empty() {
+            self.tree.relink_nodes(&self.tables, &diff.changed_links)?;
+        }
+
+        // Restyling is a union rather than a chain of `else if`: one frame can
+        // move a node's style pointer *and* change the value of a slot some
+        // other node wears, and those are two reasons for the same call rather
+        // than two competing ones. The old code took the first branch it
+        // matched, and the first branch was "restyle everything".
+        let mut restyle = diff.changed_nodes.clone();
+
+        if !diff.changed_styles.is_empty() {
             // Only nodes wearing a changed slot need re-pushing. `nodes.style` is
             // immutable by design, so this is a scan rather than a lookup — and a
             // scan over one `u16` column is cheaper than a map that has to be
             // maintained.
-            let slots = self.tables.u16s(
-                protocol::Table::Nodes as usize,
-                protocol::nodes::STYLE,
-            );
+            let slots = self
+                .tables
+                .u16s(protocol::Table::Nodes as usize, protocol::nodes::STYLE);
             let changed = &diff.changed_styles;
-            let affected: Vec<usize> = (0..slots.len())
-                .filter(|&i| changed.binary_search(&(slots[i] as u32)).is_ok())
-                .collect();
-            for node in affected {
-                self.tree.apply_style(&self.tables, node)?;
-            }
+            restyle.extend(
+                (0..slots.len())
+                    .filter(|&i| changed.binary_search(&(slots[i] as u32)).is_ok())
+                    .map(|i| i as u32),
+            );
         }
 
-        if diff.text {
-            // A changed string has a changed advance width, so its node needs
-            // re-measuring — and nothing else does.
+        if !restyle.is_empty() {
+            restyle.sort_unstable();
+            restyle.dedup();
+            self.tree.apply_styles_of(&self.tables, &restyle)?;
+        }
+
+        // A stale *measurement* has three causes, and they narrow differently.
+        let mut stale = diff.changed_texts.clone();
+        if diff.string_bytes && diff.changed_strings.is_empty() {
+            // Bytes rewritten underneath unchanged `(offset, length)` slots.
+            // Nothing points at what moved, so every node with text is suspect.
+            let text = self
+                .tables
+                .i32s(protocol::Table::Nodes as usize, protocol::nodes::TEXT);
+            stale.extend((0..text.len()).filter(|&i| text[i] >= 0).map(|i| i as u32));
+        } else if !diff.changed_strings.is_empty() {
             let text = self
                 .tables
                 .i32s(protocol::Table::Nodes as usize, protocol::nodes::TEXT);
             let changed = &diff.changed_strings;
-            let stale: Vec<usize> = (0..text.len())
-                .filter(|&i| {
-                    let slot = text[i];
-                    slot >= 0 && (changed.is_empty() || changed.binary_search(&(slot as u32)).is_ok())
-                })
-                .collect();
-            for node in stale {
-                self.tree.mark_dirty(node);
-            }
+            stale.extend(
+                (0..text.len())
+                    .filter(|&i| text[i] >= 0 && changed.binary_search(&(text[i] as u32)).is_ok())
+                    .map(|i| i as u32),
+            );
+        }
+        for node in stale {
+            self.tree.mark_dirty(node as usize);
         }
 
         Ok(())

@@ -34,6 +34,14 @@ pub struct LayoutTree {
     ids: Vec<NodeId>,
     /// Absolute bounds, row-major, published to the layout table after compute.
     bounds: Vec<[f32; 4]>,
+    /// Who this tree last linked each node under, or `-1`.
+    ///
+    /// Deliberately **not** `nodes.parent`. Nothing in the engine reads that
+    /// column — the chains are the tree — and letting host memory decide *which*
+    /// node to relink would turn one wrong integer into a Taffy tree silently
+    /// disagreeing with the chains. This is the engine's own record of what it
+    /// did, so it cannot be wrong about it.
+    parents: Vec<i32>,
     root: usize,
 }
 
@@ -43,6 +51,7 @@ impl LayoutTree {
             tree: TaffyTree::new(),
             ids: Vec::new(),
             bounds: Vec::new(),
+            parents: Vec::new(),
             root: 0,
         }
     }
@@ -57,8 +66,12 @@ impl LayoutTree {
 
     /// Rebuilds the tree's shape from `nodes.firstChild` / `nextSibling`.
     ///
-    /// Called on the first commit and whenever a commit reports a structural
-    /// change — which, for a dynamic list, is a relink of one node's children.
+    /// Reserved for the first commit and for a capacity change: growth appends a
+    /// fresh, larger arena past the end of the node arrays, so every id has to
+    /// exist before anything can be linked to it. An ordinary structural change
+    /// goes through [`relink_nodes`](Self::relink_nodes) instead — this
+    /// allocates a whole `TaffyTree`, and its caller then pushes a style per
+    /// node, both over table *capacity*.
     pub fn rebuild(&mut self, tables: &Tables, root: usize) -> Result<(), String> {
         let count = tables.capacities().nodes as usize;
         self.root = root;
@@ -66,6 +79,7 @@ impl LayoutTree {
         self.tree = TaffyTree::with_capacity(count);
         self.ids = Vec::with_capacity(count);
         self.bounds = vec![[0.0; 4]; count];
+        self.parents = vec![-1; count];
 
         for i in 0..count {
             let id = self
@@ -95,30 +109,109 @@ impl LayoutTree {
         let mut budget = count.saturating_mul(2) + 16;
 
         for i in 0..count {
-            children.clear();
-            let mut c = first.get(i).copied().unwrap_or(-1);
-            while c >= 0 {
-                let ci = c as usize;
-                if ci >= count {
-                    return Err(format!("node {i} has child {c}, past the {count}-node table"));
-                }
-                if budget == 0 {
-                    return Err(format!(
-                        "child chain from node {i} exceeded its budget — a cycle in \
-                         firstChild/nextSibling"
-                    ));
-                }
-                budget -= 1;
-                children.push(self.ids[ci]);
-                c = next.get(ci).copied().unwrap_or(-1);
-            }
-
-            self.tree
-                .set_children(self.ids[i], &children)
-                .map_err(|e| format!("taffy set_children on node {i}: {e:?}"))?;
+            self.relink_one(first, next, i, &mut children, &mut budget)?;
         }
 
         Ok(())
+    }
+
+    /// Rewrites only the child lists a commit could have moved.
+    ///
+    /// The set is `changed` plus, for each of them, the parent *this tree* last
+    /// linked them under — [`Self::parents`], never the host's `nodes.parent`.
+    ///
+    /// That it is sufficient is the part worth arguing, because a missed parent
+    /// is a Taffy tree quietly disagreeing with the chains. A node's child list
+    /// can only differ if its own `firstChild` moved — it is then in `changed`
+    /// itself — or if some node already on its chain got a new `nextSibling`,
+    /// and that node's recorded parent is exactly this one. A node *joining* a
+    /// chain is the same argument backwards: either the parent's `firstChild`
+    /// was rewritten, or a node already in the chain was, and both are covered.
+    ///
+    /// Note what this deliberately does *not* do: style the nodes it links. A
+    /// node linked for the first time already carries its real style, because
+    /// [`Self::apply_all_styles`] walks table capacity rather than the reachable
+    /// tree. That is the invariant this rests on; the comment there says so.
+    pub fn relink_nodes(&mut self, tables: &Tables, changed: &[u32]) -> Result<(), String> {
+        let count = self.ids.len();
+        if count == 0 {
+            return Ok(());
+        }
+
+        // Not skippable on this path. It is the only thing between
+        // `firstChild[root] = root` and a stack overflow inside
+        // `compute_layout`, which `catch_unwind` cannot contain — and the walk
+        // is a DFS over the live tree, which is what a rebuild cost *before*
+        // allocating anything.
+        validate_tree(tables, self.root, count)?;
+
+        let mut affected: Vec<usize> = Vec::with_capacity(changed.len() * 2);
+        for &node in changed {
+            let node = node as usize;
+            if node >= count {
+                return Err(format!(
+                    "changed node {node} is past the {count}-node table"
+                ));
+            }
+            affected.push(node);
+            // Read before the relink loop overwrites it: this has to be the
+            // parent as of the *last* link, so a node leaving a chain still
+            // relinks the chain it left.
+            if self.parents[node] >= 0 {
+                affected.push(self.parents[node] as usize);
+            }
+        }
+        affected.sort_unstable();
+        affected.dedup();
+
+        let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
+        let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
+        let mut children: Vec<NodeId> = Vec::with_capacity(16);
+        let mut budget = count.saturating_mul(2) + 16;
+
+        for node in affected {
+            self.relink_one(first, next, node, &mut children, &mut budget)?;
+        }
+
+        Ok(())
+    }
+
+    /// One node's child list, from its chain. The buffers are the caller's so a
+    /// full relink does not allocate per node.
+    fn relink_one(
+        &mut self,
+        first: &[i32],
+        next: &[i32],
+        node: usize,
+        children: &mut Vec<NodeId>,
+        budget: &mut usize,
+    ) -> Result<(), String> {
+        let count = self.ids.len();
+        children.clear();
+
+        let mut c = first.get(node).copied().unwrap_or(-1);
+        while c >= 0 {
+            let ci = c as usize;
+            if ci >= count {
+                return Err(format!(
+                    "node {node} has child {c}, past the {count}-node table"
+                ));
+            }
+            if *budget == 0 {
+                return Err(format!(
+                    "child chain from node {node} exceeded its budget — a cycle in \
+                     firstChild/nextSibling"
+                ));
+            }
+            *budget -= 1;
+            children.push(self.ids[ci]);
+            self.parents[ci] = node as i32;
+            c = next.get(ci).copied().unwrap_or(-1);
+        }
+
+        self.tree
+            .set_children(self.ids[node], children)
+            .map_err(|e| format!("taffy set_children on node {node}: {e:?}"))
     }
 
     /// Pushes a node's resolved style into Taffy.
@@ -129,6 +222,30 @@ impl LayoutTree {
             .map_err(|e| format!("taffy set_style on node {node}: {e:?}"))
     }
 
+    /// Pushes the resolved style of each listed node, and nothing else.
+    pub fn apply_styles_of(&mut self, tables: &Tables, nodes: &[u32]) -> Result<(), String> {
+        for &node in nodes {
+            let node = node as usize;
+            // Every caller derives these from a span whose capacity is the node
+            // capacity, and a capacity change rebuilds instead — so this is an
+            // engine invariant, not host data, and it fails loudly in debug.
+            debug_assert!(node < self.ids.len(), "node {node} is past the tree");
+            if node < self.ids.len() {
+                self.apply_style(tables, node)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Styles every node in the table, **including unreachable ones**.
+    ///
+    /// Walking the reachable tree instead looks like an obvious saving and is
+    /// not one: spare capacity is where a list's next rows come from, and
+    /// [`Self::relink_nodes`] links them without styling them. It is entitled to
+    /// do that only because they were styled here, back when they were spare.
+    /// A row whose `nodes.style` never changes — appended into a slot that
+    /// already held the same value — would otherwise lay out with Taffy's
+    /// `Style::default()` and no write anywhere to blame.
     pub fn apply_all_styles(&mut self, tables: &Tables) -> Result<(), String> {
         for i in 0..self.ids.len() {
             self.apply_style(tables, i)?;

@@ -643,11 +643,17 @@ be optimising the cheapest thing in the process, so:
    interactive set and list arenas are all keyed by them, so a route's rows can be
    appended but never removed. Dropping a whole set invalidates nothing.
 
-**Prerequisite.** "Resident but hidden" is only free if inactive nodes cost nothing
-per frame, and today they do not quite: a structural change rebuilds the whole
-Taffy tree and `apply_all_styles` walks table *capacity*. Twenty resident routes
-would pay for twenty on every relink. The review's `changed_links` /
-`changed_nodes` work comes first.
+**Prerequisite — met, 2026-07-31.** "Resident but hidden" is only free if inactive
+nodes cost nothing per frame, and they did not: a structural change rebuilt the whole
+Taffy tree and `apply_all_styles` walked table *capacity*, so twenty resident routes
+paid for twenty on every relink. The diff now carries changed node indices rather
+than two booleans, and a full rebuild is reserved for the first tick and a capacity
+change.
+
+Measured on exactly this shape — 10,021 nodes across twenty routes, nineteen hidden,
+one row dropped out of the visible route's chain: **6.04 ms → 1.39 ms**. The residual
+is the relayout and repaint that change genuinely causes; what went away was the
+nineteen hidden routes' share of it.
 
 ### Preloading: intent at run time, targets at compile time
 

@@ -524,25 +524,42 @@ impl Tables {
     }
 
     /// Turns "this span differs" into "this is what the engine must redo".
+    ///
+    /// Each arm names the *narrowest* consequence, because the engine can now
+    /// act on an index set rather than a verb. Two of these used to be wrong in
+    /// the expensive direction: `kind` is read by paint and by nothing in
+    /// layout, and `list` is read by nobody at all, yet both were filed as
+    /// structural and so cost a whole new Taffy tree.
     fn classify(&self, span: &SpanPlan, diff: &mut Diff, nodes: usize, styles: usize) {
         use protocol::nodes as n;
 
         if span.table as usize == nodes {
             match span.field as usize {
-                // Structure: the Taffy tree's shape is wrong until it is rebuilt.
-                n::KIND | n::PARENT | n::FIRST_CHILD | n::NEXT_SIBLING | n::LIST => {
-                    diff.structure = true
+                // The chains *are* the tree. `parent` is not read here either —
+                // relink derives everything from `firstChild`/`nextSibling` —
+                // but a host that moves a node writes it, and counting it keeps
+                // "rewrite the description, the engine re-derives" true for the
+                // price of relinking one extra node.
+                n::FIRST_CHILD | n::NEXT_SIBLING | n::PARENT => {
+                    self.collect_changed_slots(span, &mut diff.changed_links)
                 }
                 // `hidden` maps to `display: none`, which is a style, not a shape.
-                n::STYLE | n::HIDDEN | n::FLAGS => diff.node_styles = true,
-                n::TEXT => diff.text = true,
+                n::STYLE | n::HIDDEN | n::FLAGS => {
+                    self.collect_changed_slots(span, &mut diff.changed_nodes)
+                }
+                // Repointing a node at a *different* slot changes its measured
+                // size even when no string moved, so this is its own set rather
+                // than a flag folded into the string one.
+                n::TEXT => self.collect_changed_slots(span, &mut diff.changed_texts),
+                // Paint-only, and read-by-nobody, respectively. `any` is already
+                // true, and that is what schedules the repaint.
+                n::KIND | n::LIST => {}
                 _ => {}
             }
             return;
         }
 
         if span.table as usize == styles {
-            diff.styles = true;
             self.collect_changed_slots(span, &mut diff.changed_styles);
             return;
         }
@@ -555,12 +572,11 @@ impl Tables {
         }
 
         if span.table == REGION && span.field == REGION_STRING_BYTES {
-            diff.text = true;
+            diff.string_bytes = true;
             return;
         }
 
         if span.table as usize == protocol::Table::Strings as usize {
-            diff.text = true;
             self.collect_changed_slots(span, &mut diff.changed_strings);
         }
     }
@@ -607,20 +623,39 @@ const _: () = {
 };
 
 /// What a commit changed, in the terms the engine acts on.
+///
+/// Three of these were bare booleans, and a boolean leaves the engine no
+/// response but "redo everything, over table *capacity*": a fresh `TaffyTree`
+/// with a leaf per node, then a style push per node. One appended list row paid
+/// for the whole document, and the routing plan's twenty resident routes would
+/// have paid for twenty on every relink.
+///
+/// The index set was already in hand. [`Tables::collect_changed_slots`] computed
+/// it for style slots and string slots and is generic over spans; these are the
+/// same call against the node columns.
 #[derive(Default, Debug)]
 pub struct Diff {
     pub any: bool,
-    /// The tree's shape moved: rebuild Taffy's children.
-    pub structure: bool,
-    /// Nodes point at different styles, or became hidden: restyle every node.
-    pub node_styles: bool,
-    /// Style values changed in place; `changed_styles` says which slots.
-    pub styles: bool,
-    pub variants: bool,
-    /// Text changed, so measured advance widths are stale.
-    pub text: bool,
+    /// Nodes whose child-chain description moved. Relink these, and whoever
+    /// last owned them.
+    pub changed_links: Vec<u32>,
+    /// Nodes whose own Taffy style is stale: `style`, `hidden` or `flags`.
+    pub changed_nodes: Vec<u32>,
+    /// Style *slots* whose values moved; every node wearing one is stale.
     pub changed_styles: Vec<u32>,
+    /// Nodes repointed at a different string slot.
+    pub changed_texts: Vec<u32>,
+    /// String slots whose `(offset, length)` moved.
     pub changed_strings: Vec<u32>,
+    /// The string arena's bytes moved. On its own — with no slot entry changing
+    /// — it means content was rewritten *underneath* unchanged slots, which is
+    /// the one text case no index set narrows.
+    pub string_bytes: bool,
+    /// No consumer, deliberately: paint reads the variant tables out of live
+    /// memory every frame, so a change to them needs exactly the repaint that
+    /// `any` already schedules. Recorded because the alternative is a silent
+    /// arm in `classify` that reads as an oversight.
+    pub variants: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -815,9 +850,11 @@ mod tests {
         bg[4..8].copy_from_slice(&0xff112233u32.to_le_bytes());
 
         let diff = tables.commit();
-        assert!(diff.styles);
-        assert!(!diff.structure, "a style value is not a structural change");
         assert_eq!(diff.changed_styles, vec![1], "only slot 1 moved");
+        assert!(
+            diff.changed_links.is_empty(),
+            "a style value is not a structural change"
+        );
         assert_eq!(
             tables.u32s(Table::Styles as usize, protocol::styles::BG)[1],
             0xff112233
@@ -825,7 +862,7 @@ mod tests {
     }
 
     #[test]
-    fn relinking_children_is_structural() {
+    fn relinking_children_names_the_node_that_moved() {
         let mut tables = Tables::new(caps());
         tables.commit();
 
@@ -833,8 +870,45 @@ mod tests {
         first[0..4].copy_from_slice(&3i32.to_le_bytes());
 
         let diff = tables.commit();
-        assert!(diff.structure);
-        assert!(!diff.styles);
+        assert_eq!(diff.changed_links, vec![0], "node 0's chain, and no other");
+        assert!(diff.changed_styles.is_empty());
+        assert!(diff.changed_nodes.is_empty());
+    }
+
+    #[test]
+    fn a_paint_only_node_column_is_not_a_relink() {
+        let mut tables = Tables::new(caps());
+        tables.commit();
+
+        // `kind` is read by paint and by nothing in layout; `list` by nobody at
+        // all. Both used to be filed as structural, which cost a whole new Taffy
+        // tree and a style push per node.
+        let kind = tables.staged_mut(Table::Nodes as usize, protocol::nodes::KIND);
+        kind[2] = protocol::node_kind::BUTTON;
+        let list = tables.staged_mut(Table::Nodes as usize, protocol::nodes::LIST);
+        list[0..2].copy_from_slice(&1i16.to_le_bytes());
+
+        let diff = tables.commit();
+        assert!(diff.any, "the frame still repaints");
+        assert!(diff.changed_links.is_empty(), "neither column is a chain");
+        assert!(diff.changed_nodes.is_empty(), "nor a Taffy style");
+    }
+
+    #[test]
+    fn repointing_a_node_at_another_slot_is_a_text_change() {
+        let mut tables = Tables::new(caps());
+        tables.commit();
+
+        // The string arena is untouched, so nothing narrows this except the
+        // node column itself — which is why it needs its own set rather than a
+        // flag shared with the string slots.
+        let text = tables.staged_mut(Table::Nodes as usize, protocol::nodes::TEXT);
+        text[4..8].copy_from_slice(&2i32.to_le_bytes());
+
+        let diff = tables.commit();
+        assert_eq!(diff.changed_texts, vec![1]);
+        assert!(diff.changed_strings.is_empty());
+        assert!(!diff.string_bytes);
     }
 
     #[test]

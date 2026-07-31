@@ -46,10 +46,27 @@ src/lib.rs        the C ABI
 
 **Three arenas, not one.** `staged` is what Bun writes; `live` is what the engine reads;
 `bounds` is layout output flowing the other way. `commit()` memcmps span by span, copies
-staged over live, and returns a **diff** — and that diff is what earns the memory. A
-colour-only theme patch reports `styles` with two changed slots and never reaches Taffy;
-a list relink reports `structure` and rebuilds the child chains. Without the split there
-would be nothing to compare against.
+staged over live, and returns a **diff** — and that diff is what earns the memory.
+Without the split there would be nothing to compare against.
+
+**The diff carries index sets, not verbs.** A colour-only theme patch names the two style
+*slots* that moved, and only nodes wearing them are restyled; a list relink names the
+*nodes* whose chain description moved, and only they and the parents the engine last
+linked them under are re-linked. The parents come from the engine's own record rather
+than from `nodes.parent`, which nothing here reads: letting host memory choose which node
+to relink would turn one wrong integer into a Taffy tree silently disagreeing with the
+chains.
+
+This started as three booleans, and a boolean leaves only one answer — redo everything,
+over table *capacity*. A full rebuild is now reserved for the first tick and for a
+capacity change, which appends a fresh larger arena and so needs ids that do not exist
+yet. Measured on twenty routes of 500 nodes with nineteen hidden, dropping one row from
+the visible one: 6.04 ms → 1.39 ms.
+
+Two columns turned out to be filed under the expensive answer for no reason: `kind` is
+read by paint and by nothing in layout, and `list` is read by nobody at all, yet both
+cost a whole new Taffy tree. Neither schedules any work now; the repaint they need is the
+one every non-empty commit already gets.
 
 **The descriptor reports absolute pointers.** Three arenas means three bases, so
 `(base, byteOffset)` would add one more thing for the two sides to agree about. Bun wraps

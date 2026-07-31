@@ -332,6 +332,147 @@ fn relinking_children_reorders_without_moving_nodes() {
 }
 
 #[test]
+fn removing_a_row_relinks_the_parent_it_left() {
+    // The case an incremental relink gets wrong if it only relinks the nodes
+    // whose own bytes moved. Dropping the middle row rewrites exactly one
+    // integer — `nextSibling[1]` — and node 1 is a leaf, so relinking *it*
+    // achieves nothing. What has to be relinked is node 0, which nothing in the
+    // diff mentions. The engine finds it from its own record of who it last
+    // linked node 1 under, rather than from the host's `nodes.parent`.
+    let mut engine = Engine::new(&config(4, 4)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..4 {
+            init_style(t, slot);
+        }
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+        for (slot, height) in [(1, 20.0), (2, 30.0), (3, 25.0)] {
+            t.set_f32(STYLES, styles::WIDTH, slot, 50.0);
+            t.set_f32(STYLES, styles::HEIGHT, slot, height);
+        }
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 2);
+        leaf(t, 3, 3);
+        link(t, 0, &[1, 2, 3]);
+    }
+    engine.tick().expect("tick");
+    assert_eq!(bound(&engine, 3)[1], 50.0, "third row starts below the first two");
+
+    {
+        // `firstChild[0]` is untouched: the chain still starts at node 1.
+        let t = engine.tables_mut();
+        t.set_i32(NODES, nodes::NEXT_SIBLING, 1, 3);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(bound(&engine, 3)[1], 20.0, "the third row took the second's place");
+}
+
+#[test]
+fn a_node_moved_between_parents_relinks_both() {
+    let mut engine = Engine::new(&config(4, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 100.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 40.0);
+        t.set_f32(STYLES, styles::WIDTH, 2, 20.0);
+        t.set_f32(STYLES, styles::HEIGHT, 2, 10.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1); // container A, at y = 0
+        leaf(t, 2, 1); // container B, at y = 40
+        leaf(t, 3, 2); // the child that moves
+        link(t, 0, &[1, 2]);
+        link(t, 1, &[3]);
+    }
+    engine.tick().expect("tick");
+    assert_eq!(bound(&engine, 3)[1], 0.0, "the child starts inside A");
+
+    {
+        let t = engine.tables_mut();
+        t.set_i32(NODES, nodes::FIRST_CHILD, 1, -1);
+        link(t, 2, &[3]);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(bound(&engine, 3)[1], 40.0, "and lands inside B");
+}
+
+#[test]
+fn a_cycle_introduced_after_the_first_tick_is_still_refused() {
+    // The acyclicity proof used to live inside `rebuild`, and a structural
+    // change used to mean a rebuild. Now it does not, so the check has to be on
+    // the incremental path too — and if it were not, this test would take the
+    // process down with it rather than fail, because a stack overflow is not a
+    // panic and `catch_unwind` cannot contain one.
+    let mut engine = Engine::new(&config(3, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 50.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 1);
+        link(t, 0, &[1, 2]);
+    }
+    engine.tick().expect("tick");
+
+    {
+        let t = engine.tables_mut();
+        t.set_i32(NODES, nodes::FIRST_CHILD, 1, 0);
+    }
+    let result = engine.tick();
+    assert!(result.is_err(), "the root became its own descendant");
+}
+
+#[test]
+fn repointing_a_node_at_another_style_slot_relayouts() {
+    // `nodes.style` is the pointer, not the value: no style slot changed here,
+    // so the slot-value path sees nothing and this has to come from the node
+    // column's own changed set.
+    let mut engine = Engine::new(&config(2, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 50.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+        t.set_f32(STYLES, styles::WIDTH, 2, 70.0);
+        t.set_f32(STYLES, styles::HEIGHT, 2, 35.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+    }
+    engine.tick().expect("tick");
+    assert_eq!(bound(&engine, 1), [0.0, 0.0, 50.0, 20.0]);
+
+    {
+        let t = engine.tables_mut();
+        t.set_u16(NODES, nodes::STYLE, 1, 2);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(bound(&engine, 1), [0.0, 0.0, 70.0, 35.0], "it wears slot 2 now");
+}
+
+#[test]
 fn a_cycle_in_the_child_chain_is_an_error_not_a_hang() {
     let mut engine = Engine::new(&config(3, 1)).expect("engine");
     {
