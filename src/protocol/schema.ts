@@ -165,6 +165,16 @@ const STYLES: Table = {
     // `overflow-y: auto` either a lie about the other axis or unexpressible.
     { name: "overflowX", type: "u8", affects: "layout", doc: "0 visible, 1 hidden, 2 ellipsis, 3 scroll" },
     { name: "overflowY", type: "u8", affects: "layout", doc: "0 visible, 1 hidden, 2 ellipsis, 3 scroll" },
+    // `scrollbar-width`, and paint-only *because* the gutter is not reserved:
+    // dziri's bars are overlay, so thickness changes what is covered rather than
+    // what fits. It stops being paint-only the day a gutter exists.
+    { name: "scrollbarWidth", type: "u8", affects: "paint", doc: "0 auto, 1 thin, 2 none" },
+    // `scrollbar-color`, thumb then track, exactly as CSS orders them. Alpha 0
+    // means "not specified" — the same convention `borderColor` uses — so `auto`
+    // needs no separate field. See css.ts `scrollbarColor` for the one divergence
+    // that costs.
+    { name: "scrollbarThumb", type: "u32", affects: "paint" },
+    { name: "scrollbarTrack", type: "u32", affects: "paint" },
   ],
 };
 
@@ -351,6 +361,15 @@ export const ENUMS: EnumDef[] = [
     values: { VISIBLE: 0, HIDDEN: 1, ELLIPSIS: 2, SCROLL: 3, CLIP: 4 },
   },
   {
+    name: "ScrollbarWidth",
+    doc:
+      "`styles.scrollbarWidth`. The whole grammar: Chromium 151 rejects `thick` and a " +
+      "`<length>` outright, measured — MDN's scrollbars guide is wrong about both. `NONE` hides " +
+      "the bar without disabling the wheel, which is exactly what the property means.",
+    ty: "u8",
+    values: { AUTO: 0, THIN: 1, NONE: 2 },
+  },
+  {
     name: "Predicate",
     doc:
       "Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are " +
@@ -426,6 +445,10 @@ export const ENUMS: EnumDef[] = [
  *
  * v5 splits `overflow` into `overflowX`/`overflowY`.
  *
+ * v6 adds `scrollbarWidth`, `scrollbarThumb` and `scrollbarTrack`, so the two standard
+ * scrollbar properties can be authored instead of the engine's own defaults being the
+ * only answer.
+ *
  * Also bumped when the *C ABI* changes shape, even though the tables did not —
  * v4 is where the engine handle stopped being a pointer and became a `u32` token
  * into a handle table. `SCHEMA_HASH` cannot cover that: it hashes the tables, and
@@ -434,7 +457,7 @@ export const ENUMS: EnumDef[] = [
  * call that is safe to make against a binary of unknown vintage — which is why the
  * ABI's own version lives here.
  */
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

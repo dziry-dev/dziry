@@ -17,6 +17,7 @@ import {
   Overflow as SchemaOverflow,
   Position as SchemaPosition,
   Predicate as SchemaPredicate,
+  ScrollbarWidth as SchemaScrollbarWidth,
 } from "./protocol/generated.ts";
 
 /**
@@ -55,6 +56,7 @@ export const Display = SchemaDisplay;
 export const FlexWrap = SchemaFlexWrap;
 export const Position = SchemaPosition;
 export const Overflow = SchemaOverflow;
+export const ScrollbarWidth = SchemaScrollbarWidth;
 
 /**
  * "The author said nothing" for an enum field.
@@ -181,6 +183,18 @@ export const STYLE_FIELDS = [
   // vertically and never horizontally.
   ["overflowX", "Uint8Array", false, true],
   ["overflowY", "Uint8Array", false, true],
+  // The two standard scrollbar properties, and they disagree about inheritance —
+  // measured, and confirmed against `mdn-data`. `scrollbar-color` inherits;
+  // `scrollbar-width` does not. Easy to get wrong in one breath because they are
+  // always described together, so the asymmetry is written down here where the
+  // cascade reads it.
+  //
+  // Paint-only, both of them, and only because the gutter is not reserved: dziri's
+  // bars are overlay, so their thickness changes what is covered rather than what
+  // fits. `scrollbarWidth` moves to `affects: "layout"` the day a gutter exists.
+  ["scrollbarWidth", "Uint8Array", false, false],
+  ["scrollbarThumb", "Uint32Array", true, false],
+  ["scrollbarTrack", "Uint32Array", true, false],
 ] as const;
 
 export type StyleField = (typeof STYLE_FIELDS)[number][0];
@@ -254,6 +268,11 @@ export const INITIAL_STYLE: ComputedStyle = {
   fontWeight: 400,
   overflowX: Overflow.VISIBLE,
   overflowY: Overflow.VISIBLE,
+  scrollbarWidth: ScrollbarWidth.AUTO,
+  // `scrollbar-color: auto`, spelled as alpha 0 — the convention `borderColor`
+  // already uses for "nothing was said here".
+  scrollbarThumb: 0x00000000,
+  scrollbarTrack: 0x00000000,
 };
 
 /** Shape of the generated module, so the runtime can type its import. */

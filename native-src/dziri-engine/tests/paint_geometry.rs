@@ -547,6 +547,60 @@ fn a_row_scrolled_into_view_is_actually_drawn() {
     );
 }
 
+/// `scrollbar-color` is used as written, and paints a track when one is asked for.
+///
+/// The distinction that matters: an *unauthored* bar borrows the container's foreground
+/// at 35% alpha, because it has to invent a colour that works over unknown content. An
+/// authored one is used as given — someone who writes `scrollbar-color: blue red` means
+/// blue, not 35% of it — and the track, which dziri otherwise never draws, appears
+/// because they named a second colour.
+#[test]
+fn scrollbar_color_paints_the_colours_it_was_given() {
+    let mut engine = scrolling_rows(protocol::overflow::SCROLL, 3);
+    {
+        let t = engine.tables_mut();
+        // Blue thumb on a red track, over rows that are also red — so "the track was
+        // drawn" is not readable from the track's own colour alone, and the thumb's is.
+        t.set_u32(STYLES, styles::SCROLLBAR_THUMB, 0, BORDER);
+        t.set_u32(STYLES, styles::SCROLLBAR_TRACK, 0, BG);
+    }
+    engine.tick().expect("tick");
+
+    // On the thumb, near the top of the track: opaque blue, not a blend.
+    assert_eq!(
+        pixel(&mut engine, THUMB_X, 20),
+        BORDER,
+        "an authored thumb colour is used as written, alpha included"
+    );
+
+    // Below the thumb, still on the bar: the track's red, over red content — which the
+    // next assertion is what makes meaningful.
+    assert_eq!(
+        pixel(&mut engine, THUMB_X, 100),
+        BG,
+        "the rest of the bar is the track colour"
+    );
+
+    // Without a track colour, the same pixel is untouched content rather than a track.
+    // Together these two say the track is drawn *because* it was asked for.
+    let mut bare = scrolling_rows(protocol::overflow::SCROLL, 3);
+    {
+        let t = bare.tables_mut();
+        t.set_u32(STYLES, styles::SCROLLBAR_THUMB, 0, BORDER);
+    }
+    bare.tick().expect("tick");
+    assert_eq!(
+        pixel(&mut bare, THUMB_X, 20),
+        BORDER,
+        "the thumb is still honoured on its own"
+    );
+    assert_eq!(
+        red_at(&mut bare, THUMB_X, 100),
+        red_at(&mut bare, 60, 100),
+        "and with no track colour nothing is drawn behind it"
+    );
+}
+
 /// The red channel at a point.
 ///
 /// The thumb is translucent black over red content, so "is there a thumb here" is

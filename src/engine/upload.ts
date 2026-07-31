@@ -83,6 +83,9 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
   ["fontWeight", "fontWeight"],
   ["overflowX", "overflowX"],
   ["overflowY", "overflowY"],
+  ["scrollbarWidth", "scrollbarWidth"],
+  ["scrollbarThumb", "scrollbarThumb"],
+  ["scrollbarTrack", "scrollbarTrack"],
 ];
 
 /** How much room to leave beyond what the IR needs right now. */

@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 5;
+export const PROTOCOL_VERSION = 6;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,12 +19,12 @@ export const PROTOCOL_VERSION = 5;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xcd08e76a;
+export const SCHEMA_HASH = 0x49274de5;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
   nodes: [1, 2, 4, 4, 4, 4, 2, 1, 1],
-  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1],
+  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4],
   variants: [4, 4, 4],
   variantSlots: [2],
   lists: [4, 4, 4, 4, 4, 4, 4],
@@ -35,7 +35,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
 /** Field names per table, in descriptor order — used to name a mismatch. */
 export const FIELD_NAMES: Record<TableName, string[]> = {
   nodes: ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags"],
-  styles: ["bg", "fg", "borderColor", "borderWidth", "radius", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY"],
+  styles: ["bg", "fg", "borderColor", "borderWidth", "radius", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack"],
   variants: ["node", "mask", "runStart"],
   variantSlots: ["style"],
   lists: ["container", "anchorPrev", "anchorNext", "arenaStart", "stride", "capacity", "active"],
@@ -51,7 +51,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
  * can be checked against it rather than trusted to agree.
  */
 export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
-  styles: [false, false, false, true, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  styles: [false, false, false, true, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false],
 };
 
 export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "lists", "layout", "strings"] as const;
@@ -122,6 +122,9 @@ export const F = {
     lineClamp: 46, // 0 = unlimited; drives SkParagraph maxLines
     overflowX: 47, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
     overflowY: 48, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
+    scrollbarWidth: 49, // 0 auto, 1 thin, 2 none
+    scrollbarThumb: 50,
+    scrollbarTrack: 51,
   },
   /** Per-node predicate mask and where that node's style run begins. */
   variants: {
@@ -160,7 +163,7 @@ export const F = {
 /** Field counts, asserted against the engine's descriptor at startup. */
 export const FIELD_COUNTS: Record<TableName, number> = {
   nodes: 9,
-  styles: 49,
+  styles: 52,
   variants: 3,
   variantSlots: 1,
   lists: 7,
@@ -171,7 +174,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
 /** Typed-array constructor per field, used to wrap the engine's memory. */
 export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   nodes: [Uint8Array, Uint16Array, Int32Array, Int32Array, Int32Array, Int32Array, Int16Array, Uint8Array, Uint8Array],
-  styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array],
+  styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array],
   variants: [Int32Array, Uint32Array, Int32Array],
   variantSlots: [Uint16Array],
   lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
@@ -242,6 +245,9 @@ export type SharedTables = {
     lineClamp: Uint16Array;
     overflowX: Uint8Array;
     overflowY: Uint8Array;
+    scrollbarWidth: Uint8Array;
+    scrollbarThumb: Uint32Array;
+    scrollbarTrack: Uint32Array;
   };
   variants: {
     node: Int32Array;
@@ -350,6 +356,14 @@ export const Overflow = {
   CLIP: 4,
 } as const;
 export type Overflow = (typeof Overflow)[keyof typeof Overflow];
+
+/** `styles.scrollbarWidth`. The whole grammar: Chromium 151 rejects `thick` and a `<length>` outright, measured — MDN's scrollbars guide is wrong about both. `NONE` hides the bar without disabling the wheel, which is exactly what the property means. */
+export const ScrollbarWidth = {
+  AUTO: 0,
+  THIN: 1,
+  NONE: 2,
+} as const;
+export type ScrollbarWidth = (typeof ScrollbarWidth)[keyof typeof ScrollbarWidth];
 
 /** Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care. */
 export const Predicate = {

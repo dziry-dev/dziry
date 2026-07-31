@@ -318,6 +318,88 @@ fn pressing_the_bar_does_not_click_through() {
     );
 }
 
+/// `scrollbar-width: none` removes the bar from input too, and keeps the wheel.
+///
+/// The property's whole meaning: no scrollbar, still scrollable. Suppressing only the
+/// *drawing* would leave an invisible 16 px strip that swallows presses aimed at the
+/// content — which is why the width is read in `bars_of`, the one function both paint and
+/// input go through, rather than at the draw call.
+#[test]
+fn scrollbar_width_none_hides_the_bar_without_disabling_scrolling() {
+    let mut engine = rows(3, true);
+    {
+        let t = engine.tables_mut();
+        t.set_u8(
+            STYLES,
+            styles::SCROLLBAR_WIDTH,
+            0,
+            protocol::scrollbar_width::NONE,
+        );
+    }
+    engine.tick().expect("tick");
+
+    engine.mouse_move(ON_BAR_X, 50.0);
+    assert!(
+        engine.input_state().bar.is_none(),
+        "there is no bar to hover"
+    );
+
+    engine.mouse_down(ON_BAR_X, 50.0);
+    assert_eq!(
+        engine.input_state().pressed,
+        1,
+        "and the row under that strip takes the press, as it would anywhere else"
+    );
+    assert_eq!(
+        engine.scroll_of(0),
+        [0.0, 0.0],
+        "the press was not a page either"
+    );
+
+    engine.mouse_up(ON_BAR_X, 50.0);
+    assert!(
+        engine.scroll_at(60.0, 60.0, 0.0, 50.0),
+        "and the wheel still scrolls — hidden is not the same as unscrollable"
+    );
+}
+
+/// `scrollbar-width: thin` is thinner, and still grows towards the pointer.
+#[test]
+fn scrollbar_width_thin_is_thinner_than_auto() {
+    let wide = rows(3, false);
+    let mut narrow = rows(3, false);
+    {
+        let t = narrow.tables_mut();
+        t.set_u8(
+            STYLES,
+            styles::SCROLLBAR_WIDTH,
+            0,
+            protocol::scrollbar_width::THIN,
+        );
+    }
+    narrow.tick().expect("tick");
+
+    let thickness = |engine: &Engine| {
+        let (_, bar) = engine.bars_of(0);
+        bar.expect("a vertical bar").thumb.width()
+    };
+
+    let auto = thickness(&wide);
+    let thin = thickness(&narrow);
+    assert!(
+        thin < auto,
+        "thin must be thinner than auto, got {thin} against {auto}"
+    );
+
+    // And it still comes to meet the pointer, rather than jumping to `auto`'s width.
+    narrow.mouse_move(ON_BAR_X, 20.0);
+    let hovered = thickness(&narrow);
+    assert!(
+        hovered > thin && hovered < auto * 1.4,
+        "a hovered thin bar grows but stays thin, got {hovered}"
+    );
+}
+
 /// A box with nothing to scroll has no bar to grab, and the content keeps the press.
 #[test]
 fn there_is_nothing_to_grab_where_there_is_no_bar() {

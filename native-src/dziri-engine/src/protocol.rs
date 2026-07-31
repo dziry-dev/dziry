@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 5;
+pub const PROTOCOL_VERSION: u32 = 6;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,13 +15,13 @@ pub const PROTOCOL_VERSION: u32 = 5;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0xcd08e76a;
+pub const SCHEMA_HASH: u32 = 0x49274de5;
 
 pub const TABLE_COUNT: usize = 7;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
-pub const MAX_FIELD_COUNT: usize = 49;
+pub const MAX_FIELD_COUNT: usize = 52;
 pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "nodes",
     "styles",
@@ -173,11 +173,14 @@ pub mod styles {
     pub const LINE_CLAMP: usize = 46;
     pub const OVERFLOW_X: usize = 47;
     pub const OVERFLOW_Y: usize = 48;
+    pub const SCROLLBAR_WIDTH: usize = 49;
+    pub const SCROLLBAR_THUMB: usize = 50;
+    pub const SCROLLBAR_TRACK: usize = 51;
 
-    pub const FIELD_COUNT: usize = 49;
+    pub const FIELD_COUNT: usize = 52;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [
         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2,
-        2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1,
+        2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4,
     ];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
         "bg",
@@ -229,6 +232,9 @@ pub mod styles {
         "lineClamp",
         "overflowX",
         "overflowY",
+        "scrollbarWidth",
+        "scrollbarThumb",
+        "scrollbarTrack",
     ];
 
     /// Whether a change to this field can move a box.
@@ -241,7 +247,7 @@ pub mod styles {
         false, false, false, true, false, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
-        true, true, true, true, true,
+        true, true, true, true, true, false, false, false,
     ];
 }
 
@@ -385,6 +391,13 @@ pub mod overflow {
     pub const ELLIPSIS: u8 = 2;
     pub const SCROLL: u8 = 3;
     pub const CLIP: u8 = 4;
+}
+
+/// `styles.scrollbarWidth`. The whole grammar: Chromium 151 rejects `thick` and a `<length>` outright, measured — MDN's scrollbars guide is wrong about both. `NONE` hides the bar without disabling the wheel, which is exactly what the property means.
+pub mod scrollbar_width {
+    pub const AUTO: u8 = 0;
+    pub const THIN: u8 = 1;
+    pub const NONE: u8 = 2;
 }
 
 /// Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care.

@@ -19,6 +19,7 @@ import {
   Justify,
   Overflow,
   Position,
+  ScrollbarWidth,
   UNSET,
   type StyleField,
 } from "../ir.ts";
@@ -310,6 +311,32 @@ export function parseColor(raw: string): number {
   }
 
   throw new CssError(`unsupported color "${raw}"`);
+}
+
+/**
+ * Splits on whitespace that is not inside parentheses.
+ *
+ * `value.split(/\s+/)` is wrong the moment a component can be a function:
+ * `scrollbar-color: red rgb(0 128 0)` is two colours, and the naive split makes it
+ * four tokens. Modern CSS colour syntax is space-separated inside the parens, so this
+ * is not a hypothetical — it is the form `getComputedStyle` hands back.
+ */
+export function splitTopLevel(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of value.trim()) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    if (depth === 0 && /\s/.test(ch)) {
+      if (current) parts.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  if (current) parts.push(current);
+  return parts;
 }
 
 /** Parses a length to px. `auto` becomes NaN; percentages are unsupported. */
@@ -816,6 +843,51 @@ export function expandDeclaration(
     case "overflow-y":
       out.overflowY = overflowKeyword(value.trim().toLowerCase(), value);
       return;
+
+    // The two standard scrollbar properties. Both grammars are measured rather than
+    // remembered, and one of them refuted its own documentation — MDN's *Scrollbars
+    // styling* guide summarises `scrollbar-width` as `auto | thin | thick | <length>`,
+    // and Chromium 151 rejects `thick` and a length outright. See BROWSER-FACTS.md,
+    // "Which scrollbar declarations the parser keeps".
+    case "scrollbar-width": {
+      const keyword = value.trim().toLowerCase();
+      switch (keyword) {
+        case "auto":
+          out.scrollbarWidth = ScrollbarWidth.AUTO;
+          return;
+        case "thin":
+          out.scrollbarWidth = ScrollbarWidth.THIN;
+          return;
+        case "none":
+          out.scrollbarWidth = ScrollbarWidth.NONE;
+          return;
+        default:
+          throw new CssError(
+            `scrollbar-width takes auto, thin or none, got "${value}" ` +
+              `(thick and <length> are not part of the property)`,
+          );
+      }
+    }
+
+    case "scrollbar-color": {
+      if (value.trim().toLowerCase() === "auto") {
+        out.scrollbarThumb = 0x00000000;
+        out.scrollbarTrack = 0x00000000;
+        return;
+      }
+      // Exactly two colours, thumb then track. One colour is not a partial
+      // declaration in CSS, it is an invalid one — Chromium drops the whole thing —
+      // so this refuses rather than guessing which half was meant.
+      const parts = splitTopLevel(value);
+      if (parts.length !== 2) {
+        throw new CssError(
+          `scrollbar-color takes two colours, thumb then track, got "${value}"`,
+        );
+      }
+      out.scrollbarThumb = parseColor(parts[0]!);
+      out.scrollbarTrack = parseColor(parts[1]!);
+      return;
+    }
 
     case "display":
       return; // handled by the caller

@@ -29,7 +29,7 @@ use skia_safe::{
 use crate::error::EngineError;
 use crate::layout::LayoutTree;
 use crate::paint::{
-    hit_test, is_scrollable, scrollable_at, BarHover, Geometry, InputState, Painter,
+    hit_test, is_scrollable, scrollable_at, Bar, BarHover, Geometry, InputState, Painter,
 };
 use crate::protocol::{self, event_kind};
 use crate::tables::{Capacities, Diff, SpanDesc, Tables};
@@ -898,6 +898,17 @@ impl Engine {
             y,
             ..Default::default()
         });
+    }
+
+    /// A node's two scrollbars, `(horizontal, vertical)`, exactly as this frame draws
+    /// them.
+    ///
+    /// The same call paint and hit-testing make, exposed so a test can assert on the
+    /// geometry rather than infer it from pixels — a thumb's thickness is a two-pixel
+    /// claim that antialiasing makes miserable to read back.
+    pub fn bars_of(&self, node: usize) -> (Option<Bar>, Option<Bar>) {
+        self.painter
+            .bars_of(&self.tables, self.geometry(), &self.state, node)
     }
 
     /// What scrollbar is under `(px, py)`, as hover state.

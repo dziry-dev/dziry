@@ -17,6 +17,13 @@ body {
        Only `overflow-y`: a window too narrow still overflows sideways, and that
        needs a horizontal scrollbar rather than a silently clipped right edge. */
     overflow-y: auto;
+    /* Thumb then track, in that order, which is what CSS says. `scrollbar-color`
+       inherits and `scrollbar-width` does not — measured, and the asymmetry is easy
+       to miss because the two properties are always described together. Declared here
+       to exercise the authored path: with neither property the engine picks its own
+       overlay colours from `color` above, which is the interesting default but not
+       proof that an author can override it. */
+    scrollbar-color: #52525b #27272a;
 }
 
 .app {

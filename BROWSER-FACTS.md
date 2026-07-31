@@ -55,6 +55,35 @@ keying focus to the logical item is **better than** the platform, not equivalent
 
 ---
 
+## An omitted border colour is `currentcolor`, not transparent
+
+**Found by `bun run spec-audit` (mdn-data), confirmed by measurement 2026-07-31 · Chromium 151.**
+
+```css
+.probe { color: #ff0000; border: 2px solid; }   /* no colour given */
+```
+
+| computed | Chrome |
+|---|---|
+| `border-top-color` | **rgb(255, 0, 0)** — the element's `color` |
+| `border-top-width` | 2px |
+| `border-top-style` | solid |
+
+`border-color`'s initial value is `currentcolor`, which resolves to the element's computed
+`color`. dziri's `INITIAL_STYLE.borderColor` is `0` — fully transparent.
+
+**Bearing on dziri:** `border: 2px solid` with no colour is invisible in dziri and text-coloured
+in a browser. Together with the `border-style` gap below, borders diverge in *both* directions —
+one paints when it should not, the other does not paint when it should. Both are things a web
+developer hits on their first stylesheet.
+
+The fix is cheap and on-thesis: `currentcolor` looks dynamic but is not. The cascade already
+resolves `color` per node at build time, so `currentcolor` is just that node's `fg`. It costs a
+resolution step in the cascade and nothing at runtime — question 1 of the compile-time gate,
+answered yes.
+
+---
+
 ## `border-width` does nothing without `border-style`
 
 **Measured 2026-07-31 · Chromium 151 · `bun run conformance` (first run, found immediately).**
@@ -178,3 +207,44 @@ That is the measured reason dziri draws an **overlay** scrollbar over the conten
 value that tells `auto` from `scroll` *and* a second layout pass, and buys only the case where
 content fits. Overlay scrollbars are also what this measurement cannot see: Chromium draws them
 when `--enable-features=OverlayScrollbar` is on, and they reserve nothing by design.
+
+### Which scrollbar declarations the parser keeps, and which inherit
+
+**Measured 2026-07-31 · Chromium 151 (via Edge 151) · same probe, two runs.** `kept` is whether
+the CSSOM held the declaration at all; a dropped one reads back as the initial value.
+
+| Declaration | kept | computed |
+|---|---|---|
+| `scrollbar-width: auto` / `thin` / `none` | yes | as written (gutter 15 / 10 / 0) |
+| `scrollbar-width: thick` | **no** | `auto` |
+| `scrollbar-width: 12px` | **no** | `auto` |
+| `scrollbar-color: auto` | yes | `auto` |
+| `scrollbar-color: red orange` | yes | `rgb(255, 0, 0) rgb(255, 165, 0)` |
+| `scrollbar-color: red` (one colour) | **no** | `auto` |
+| `scrollbar-color: currentcolor transparent` | yes | `rgb(0, 0, 0) rgba(0, 0, 0, 0)` |
+| `scrollbar-gutter: stable both-edges` | yes | gutter **30** — both edges |
+| `scroll-behavior: smooth` | yes | `smooth` |
+
+Inheritance, from a parent declaring both onto a nested scroller:
+
+| Property | inherited |
+|---|---|
+| `scrollbar-color` | **yes** |
+| `scrollbar-width` | **no** |
+
+1. **`scrollbar-width` is `auto | thin | none` and nothing else.** MDN's *Scrollbars styling*
+   guide summarises it as `auto | thin | thick | <length>`; Chromium 151 rejects both of those
+   outright. The Scrollbars Level 1 grammar is the one that is real. **This refuted the source it
+   came from** — the guide the request cited — so it is recorded rather than assumed.
+2. **`scrollbar-color` takes exactly two colours, thumb then track.** One colour is not a partial
+   declaration, it is an invalid one, and the whole thing is dropped.
+3. **The two properties differ on inheritance**, which is easy to get wrong in the same breath
+   because they are always described together. Only the colour inherits.
+4. `currentcolor` resolves against the element's own colour, and `transparent` survives as
+   `rgba(0,0,0,0)` — so a fully transparent thumb is expressible and distinct from `auto`.
+
+**Bearing on dziri.** `scrollbarColor` goes in the cascade's inherited set and `scrollbarWidth`
+does not. `thin` and `none` are honoured against dziri's own overlay thickness rather than
+Chromium's gutter widths, because the gutter is not reserved here at all (see above) — `none` means
+no bar drawn *and* nothing to grab, while the wheel keeps working, which is exactly what the
+property means.

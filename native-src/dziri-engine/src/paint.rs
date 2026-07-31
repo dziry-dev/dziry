@@ -41,13 +41,24 @@ const VARIANT_SLOTS: usize = protocol::Table::VariantSlots as usize;
 /// displacing it, so its cost is what it hides.
 const THUMB_THICKNESS: f32 = 8.0;
 
-/// How thick a thumb gets once the pointer is on it, or dragging it.
+/// `scrollbar-width: thin`, against dziri's own default rather than a native gutter.
+///
+/// Chromium's `thin` is 10 of its 15 (measured), and 5 of 8 is the same ratio — the
+/// property asks for "thinner than the platform default", and 8 *is* this platform's
+/// default. Copying Chromium's 10 would be wider than dziri's `auto`, which is the one
+/// answer that is definitely wrong.
+const THUMB_THICKNESS_THIN: f32 = 5.0;
+
+/// How much a thumb grows once the pointer is on it, or dragging it.
 ///
 /// Overlay bars are deliberately unobtrusive, which makes them hard to *aim* at. The
 /// answer every overlay implementation reaches is the same: stay thin until the pointer
-/// is there, then become a control. The grab region is wider still — see
-/// [`Bar::hot`] — so this is about looking grabbable rather than being grabbable.
-const THUMB_THICKNESS_ACTIVE: f32 = 11.0;
+/// is there, then become a control. The grab region is wider still — see [`Bar::hot`] —
+/// so this is about looking grabbable rather than being grabbable.
+///
+/// A ratio rather than a second constant, so `scrollbar-width: thin` grows too instead
+/// of jumping to the same width as `auto` the moment it is hovered.
+const THUMB_GROWTH: f32 = 1.375;
 
 /// The gap between a thumb and the padding-box edge it runs along.
 const THUMB_INSET: f32 = 2.0;
@@ -107,6 +118,35 @@ fn thumb(track: f32, viewport: f32, extent: f32, offset: f32) -> Option<(f32, f3
         0.0
     };
     Some(((track - length) * progress, length))
+}
+
+/// What colour to fill a thumb with, honouring `scrollbar-color` if it was set.
+///
+/// Two sources, and the author's wins outright. An authored colour is used as written,
+/// including its alpha — someone who says `scrollbar-color: red orange` means opaque red
+/// and would not thank us for 35% of it. Only the *unauthored* case reaches for the
+/// container's foreground at a phase alpha, because only then is there a colour to
+/// invent, and the foreground is the one colour a box already contrasts against its own
+/// background — so an overlay bar reads correctly in a dark theme with no second colour
+/// to keep in sync.
+///
+/// A hover still has to show through an authored colour, so the phase applies as a
+/// *lightening of the alpha floor* rather than a replacement: an opaque thumb stays
+/// opaque, a semi-transparent one firms up.
+fn thumb_paint(authored: u32, tables: &Tables, slot: usize, phase: BarPhase) -> u32 {
+    if authored >> 24 != 0 {
+        let alpha = (authored >> 24).max(u32::from(phase.alpha()));
+        return (authored & 0x00ff_ffff) | (alpha.min(255) << 24);
+    }
+
+    let fg = tables
+        .u32s(STYLES, protocol::styles::FG)
+        .get(slot)
+        .copied()
+        .unwrap_or(0);
+    // The alpha is *replaced* rather than scaled: a bar over transparent text still has
+    // to be visible.
+    (fg & 0x00ff_ffff) | (u32::from(phase.alpha()) << 24)
 }
 
 /// One scrollbar: what is drawn, what can be grabbed, and what it maps onto.
@@ -332,12 +372,23 @@ pub enum BarPhase {
 }
 
 impl BarPhase {
-    fn thickness(self) -> f32 {
+    /// How thick a bar of this `scrollbar-width` is in this phase.
+    ///
+    /// `thin` scales the growth as well as the resting size, so a thin bar still comes to
+    /// meet the pointer — just proportionately. `none` never gets here: it has no bar at
+    /// all, which is decided in `bars_of` because it must suppress the hit region too.
+    fn thickness(self, width: u8) -> f32 {
+        let base = match width {
+            protocol::scrollbar_width::THIN => THUMB_THICKNESS_THIN,
+            // `AUTO` and anything unrecognised: the platform default, which here is
+            // dziri's own overlay thickness rather than a native gutter width.
+            _ => THUMB_THICKNESS,
+        };
         match self {
-            BarPhase::Idle => THUMB_THICKNESS,
+            BarPhase::Idle => base,
             // Both grown states are the same width: a thumb that changed size at the
             // moment you pressed it would move under the cursor mid-grab.
-            BarPhase::Hovered | BarPhase::Held => THUMB_THICKNESS_ACTIVE,
+            BarPhase::Hovered | BarPhase::Held => base * THUMB_GROWTH,
         }
     }
 
@@ -701,23 +752,32 @@ impl Painter {
         node: usize,
     ) {
         let (bar_x, bar_y) = self.bars_of(tables, geometry, state, node);
+        if bar_x.is_none() && bar_y.is_none() {
+            return;
+        }
+
         let slot = self.style_for(tables, node, state);
-        // The container's own text colour, at the phase's alpha instead of its own.
-        // Nothing in the schema describes a scrollbar, and the foreground is the one
-        // colour a box is already guaranteed to contrast against its own background —
-        // so this reads correctly in a dark theme without a second colour to keep in
-        // sync with it. Its alpha is *replaced* rather than scaled: a bar over
-        // transparent text still has to be visible.
-        let fg = tables
-            .u32s(STYLES, protocol::styles::FG)
-            .get(slot)
-            .copied()
-            .unwrap_or(0);
+        let colour =
+            |field: usize| -> u32 { tables.u32s(STYLES, field).get(slot).copied().unwrap_or(0) };
+
+        let thumb_colour = colour(protocol::styles::SCROLLBAR_THUMB);
+        let track_colour = colour(protocol::styles::SCROLLBAR_TRACK);
 
         for bar in [bar_y, bar_x].into_iter().flatten() {
-            let alpha = state.bar_state(node, bar.vertical).alpha();
+            let phase = state.bar_state(node, bar.vertical);
+
+            // A track is drawn only when `scrollbar-color` asked for one. Left to
+            // itself dziri draws a thumb and nothing else — a track would have to be a
+            // second colour that contrasts with an unknown background — but an author
+            // who names two colours has said what they want behind the thumb.
+            if track_colour >> 24 != 0 {
+                self.fill.set_color(Color::from(track_colour));
+                let radius = bar.track.width().min(bar.track.height()) / 2.0;
+                canvas.draw_round_rect(bar.track, radius, radius, &self.fill);
+            }
+
             self.fill
-                .set_color(Color::from((fg & 0x00ff_ffff) | ((alpha as u32) << 24)));
+                .set_color(Color::from(thumb_paint(thumb_colour, tables, slot, phase)));
             // Fully round ends: the radius is half the short side, so the thumb is a
             // capsule at every thickness rather than a rect with hinted corners.
             let radius = bar.thumb.width().min(bar.thumb.height()) / 2.0;
@@ -746,6 +806,19 @@ impl Painter {
         // bar that does nothing.
         let (may_scroll_x, may_scroll_y) = scrollable_axes(tables, node);
         if !may_scroll_x && !may_scroll_y {
+            return NONE;
+        }
+
+        // `scrollbar-width: none` is the whole property gone: no bar drawn, and — because
+        // this is also what the input path asks — nothing to hover or grab. The wheel is
+        // untouched, which is exactly what the property means and why it is not spelled
+        // `overflow: hidden`.
+        let bar_width = tables
+            .u8s(STYLES, protocol::styles::SCROLLBAR_WIDTH)
+            .get(self.style_for(tables, node, state))
+            .copied()
+            .unwrap_or(protocol::scrollbar_width::AUTO);
+        if bar_width == protocol::scrollbar_width::NONE {
             return NONE;
         }
 
@@ -781,8 +854,8 @@ impl Painter {
         let offset = geometry.scroll_of(node);
         // Each thickness comes from that bar's own phase, so hovering the vertical bar
         // does not fatten the horizontal one.
-        let thick_x = state.bar_state(node, false).thickness();
-        let thick_y = state.bar_state(node, true).thickness();
+        let thick_x = state.bar_state(node, false).thickness(bar_width);
+        let thick_y = state.bar_state(node, true).thickness(bar_width);
 
         let mut out = NONE;
 

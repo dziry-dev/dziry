@@ -262,6 +262,52 @@ test("overflow is per axis, which is the case that matters", () => {
 });
 
 /**
+ * `scrollbar-width`, whose grammar is the one MDN's own guide got wrong.
+ *
+ * The guide the request cited summarises it as `auto | thin | thick | <length>`.
+ * Chromium 151 rejects `thick` and `12px` outright, MDN's own property page lists three
+ * keywords, and `mdn-data` agrees — see BROWSER-FACTS.md, "Which scrollbar declarations
+ * the parser keeps". So the two extra values are refused here on purpose, and this test
+ * is the record of why: accepting them would be implementing documentation rather than
+ * CSS.
+ */
+test("scrollbar-width takes exactly auto, thin and none", () => {
+  expect(expand("scrollbar-width", "auto")).toEqual({ scrollbarWidth: 0 });
+  expect(expand("scrollbar-width", "thin")).toEqual({ scrollbarWidth: 1 });
+  expect(expand("scrollbar-width", "none")).toEqual({ scrollbarWidth: 2 });
+
+  expect(() => expand("scrollbar-width", "thick")).toThrow(CssError);
+  expect(() => expand("scrollbar-width", "12px")).toThrow(CssError);
+});
+
+test("scrollbar-color takes two colours, thumb then track", () => {
+  expect(expand("scrollbar-color", "red orange")).toEqual({
+    scrollbarThumb: 0xffff0000,
+    scrollbarTrack: 0xffffa500,
+  });
+
+  // `auto` is both of them unset, which is alpha 0 — the same "nothing was said here"
+  // convention `borderColor` uses.
+  expect(expand("scrollbar-color", "auto")).toEqual({
+    scrollbarThumb: 0x00000000,
+    scrollbarTrack: 0x00000000,
+  });
+
+  // A colour can contain spaces, so splitting the value on whitespace is wrong. This is
+  // the form `getComputedStyle` hands back, not a contrived one.
+  expect(expand("scrollbar-color", "#ff0000 rgb(0 128 0)")).toEqual({
+    scrollbarThumb: 0xffff0000,
+    scrollbarTrack: 0xff008000,
+  });
+
+  // One colour is an invalid declaration in CSS rather than a partial one — Chromium
+  // drops the whole thing — so guessing which half was meant would be worse than
+  // refusing.
+  expect(() => expand("scrollbar-color", "red")).toThrow(CssError);
+  expect(() => expand("scrollbar-color", "red orange blue")).toThrow(CssError);
+});
+
+/**
  * The `visible`-to-`auto` coercion, against what Chromium 151 was measured doing.
  *
  * Every row here corresponds to a row of the table in BROWSER-FACTS.md

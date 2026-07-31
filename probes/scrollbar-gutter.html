@@ -67,5 +67,57 @@
   log("=== scale ===");
   log("devicePixelRatio = " + devicePixelRatio);
 
+  // Which values the parser actually keeps. MDN's guide lists `thick` and
+  // `<length>` for scrollbar-width; the Scrollbars Level 1 spec says
+  // `auto | thin | none`. A declaration the parser drops reads back as the
+  // initial value, so the computed value says which of the two is true here.
+  log("");
+  log("=== what the parser accepts ===");
+  const DECLS = [
+    ["scrollbar-width", "auto"],
+    ["scrollbar-width", "thin"],
+    ["scrollbar-width", "none"],
+    ["scrollbar-width", "thick"],
+    ["scrollbar-width", "12px"],
+    ["scrollbar-color", "auto"],
+    ["scrollbar-color", "red orange"],
+    ["scrollbar-color", "red"],
+    ["scrollbar-color", "#ff0000 rgb(0 128 0)"],
+    ["scrollbar-color", "currentcolor transparent"],
+    ["scrollbar-gutter", "stable"],
+    ["scrollbar-gutter", "stable both-edges"],
+    ["scroll-behavior", "smooth"],
+  ];
+  for (const [prop, value] of DECLS) {
+    mount(`<div id="b" style="width:100px;height:100px;overflow-y:auto">
+             <div style="height:400px"></div></div>`);
+    const b = document.getElementById("b");
+    // Set through the CSSOM so an invalid value is visibly refused rather than
+    // silently absent from the attribute.
+    b.style.setProperty(prop, value);
+    await frame();
+    const computed = getComputedStyle(b).getPropertyValue(prop);
+    const gutter = b.offsetWidth - b.clientWidth;
+    log(
+      (prop + ": " + value).padEnd(40) +
+        " kept=" + String(b.style.getPropertyValue(prop) !== "").padEnd(6) +
+        " computed=" + String(computed || "(none)").padEnd(26) +
+        " gutter=" + gutter,
+    );
+  }
+
+  // Whether a nested scroller picks these up from an ancestor. Decides whether they
+  // belong in the cascade's inherited set, which is not something paint can fix later.
+  log("");
+  log("=== inherited? ===");
+  mount(`<div id="outer" style="scrollbar-width:thin;scrollbar-color:red orange">
+           <div id="inner" style="width:100px;height:100px;overflow-y:auto">
+             <div style="height:400px"></div></div></div>`);
+  await frame();
+  const inner = document.getElementById("inner");
+  log("child scrollbar-width  = " + getComputedStyle(inner).scrollbarWidth);
+  log("child scrollbar-color  = " + getComputedStyle(inner).scrollbarColor);
+  log("child gutter           = " + (inner.offsetWidth - inner.clientWidth));
+
   report();
 </script>
