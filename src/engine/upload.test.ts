@@ -421,3 +421,42 @@ test("a capacity request is a power of two", () => {
   expect(Number.isInteger(Math.log2(bytes))).toBe(true);
   expect(bytes).toBeGreaterThanOrEqual(5000 * 3);
 });
+
+/**
+ * A short viewport must not compress the content.
+ *
+ * CSS's initial `min-height` is `auto`, which for a flex item resolves to its
+ * content size — the rule that stops a column from squeezing its children when the
+ * container runs out of room. `INITIAL_STYLE` had `minH: 0`, so the sample's list
+ * rows silently got shorter as the window got shorter, and text started colliding
+ * with its own box. What should happen instead is that the content keeps its size
+ * and overflows, which is what a scroll container is then for.
+ *
+ * Asserted on the real app at two viewport heights, because that is how it was
+ * noticed: resize the window and watch the rows shrink.
+ */
+test("a short viewport overflows rather than squeezing the rows", () => {
+  const { ui } = load();
+  const row = ui.lists.arenaStart[0]!;
+
+  const measure = (height: number): number => {
+    const engine = Engine.open({
+      ...capacitiesFor(ui),
+      width: WIDTH,
+      height,
+      root: ui.root,
+      windowed: false,
+    });
+    new Uploader(engine, ui).uploadAll();
+    engine.tick();
+    const rowHeight = engine.bounds(row)[3];
+    engine.close();
+    return rowHeight;
+  };
+
+  const roomy = measure(HEIGHT);
+  const cramped = measure(220);
+
+  expect(roomy).toBeGreaterThan(0);
+  expect(cramped).toBeCloseTo(roomy, 0);
+});

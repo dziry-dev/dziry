@@ -337,3 +337,25 @@ test("the IR for one small document is exactly this", () => {
     ].join("\n"),
   );
 });
+
+/**
+ * `min-width` and `min-height` are `auto` when nobody sets them.
+ *
+ * CSS's initial value, and for a flex item `auto` resolves to the content size —
+ * which is the rule that stops a column from shrinking its children when the
+ * container is too small. `INITIAL_STYLE` said `0`, which is a *different* and
+ * legal value meaning "may shrink to nothing", and the symptom was list rows
+ * compressing as the window got shorter (see upload.test.ts). Pinned here because
+ * this is where the value is decided, not where it is felt.
+ */
+test("an unset min-size is auto, not zero", () => {
+  const html = `<body><div class="a"></div></body>`;
+  const css = `.a { width: 10px }`;
+
+  expect(Number.isNaN(styleOf(html, css, "minW"))).toBe(true);
+  expect(Number.isNaN(styleOf(html, css, "minH"))).toBe(true);
+
+  // A declared one still wins, including an explicit zero.
+  expect(styleOf(html, `.a { min-height: 0 }`, "minH")).toBe(0);
+  expect(styleOf(html, `.a { min-height: 24px }`, "minH")).toBe(24);
+});
