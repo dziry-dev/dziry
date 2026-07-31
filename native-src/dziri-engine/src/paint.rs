@@ -84,6 +84,12 @@ pub struct Painter {
     globals: u32,
 }
 
+impl Default for Painter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Painter {
     /// Sets the globally-true predicates for subsequent frames.
     pub fn set_globals(&mut self, globals: u32) {
@@ -224,8 +230,10 @@ impl Painter {
         use protocol::styles as f;
 
         let slot = self.style_for(tables, node, state);
-        let g = |field: usize| -> f32 { tables.f32s(STYLES, field).get(slot).copied().unwrap_or(0.0) };
-        let c = |field: usize| -> u32 { tables.u32s(STYLES, field).get(slot).copied().unwrap_or(0) };
+        let g =
+            |field: usize| -> f32 { tables.f32s(STYLES, field).get(slot).copied().unwrap_or(0.0) };
+        let c =
+            |field: usize| -> u32 { tables.u32s(STYLES, field).get(slot).copied().unwrap_or(0) };
 
         let [x, y, w, h] = bounds[node];
         // Sanitised once: both the fill and the border ring build round rects from

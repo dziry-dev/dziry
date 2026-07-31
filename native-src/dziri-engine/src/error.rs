@@ -95,7 +95,10 @@ pub struct EngineError {
 
 impl EngineError {
     pub fn new(status: i32, detail: impl Into<String>) -> Self {
-        Self { status, detail: detail.into() }
+        Self {
+            status,
+            detail: detail.into(),
+        }
     }
 
     /// Skia refused: surface allocation, encoding, no readable pixels.
@@ -173,7 +176,8 @@ pub unsafe fn read_last_error(buf: *mut u8, len: u32) -> u32 {
             n -= 1;
         }
 
-        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n);
+        // SAFETY: the caller promises `len` writable bytes, and `n <= len`.
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n) };
         n as u32
     })
 }

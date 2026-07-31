@@ -30,16 +30,35 @@ use crate::error::EngineError;
 #[derive(Debug, Clone)]
 pub enum RawInput {
     Quit,
-    Resized { width: u32, height: u32 },
-    MouseMotion { x: f32, y: f32 },
-    MouseDown { x: f32, y: f32 },
-    MouseUp { x: f32, y: f32 },
+    Resized {
+        width: u32,
+        height: u32,
+    },
+    MouseMotion {
+        x: f32,
+        y: f32,
+    },
+    MouseDown {
+        x: f32,
+        y: f32,
+    },
+    MouseUp {
+        x: f32,
+        y: f32,
+    },
     /// `mods` is SDL's modifier bitmask. Without it a host cannot tell `A` from
     /// `Ctrl-A`, which makes every shortcut unimplementable.
-    KeyDown { keycode: i32, mods: u16 },
-    Text { text: String },
+    KeyDown {
+        keycode: i32,
+        mods: u16,
+    },
+    Text {
+        text: String,
+    },
     /// The window gained or lost keyboard focus; a caret should stop blinking.
-    FocusChanged { focused: bool },
+    FocusChanged {
+        focused: bool,
+    },
 }
 
 pub struct Window {
@@ -56,7 +75,9 @@ pub struct Window {
 impl Window {
     pub fn new(title: &str, width: u32, height: u32, decorated: bool) -> Result<Self, EngineError> {
         let sdl = sdl3::init().map_err(|e| EngineError::sdl(format!("SDL_Init: {e}")))?;
-        let video = sdl.video().map_err(|e| EngineError::sdl(format!("SDL video subsystem: {e}")))?;
+        let video = sdl
+            .video()
+            .map_err(|e| EngineError::sdl(format!("SDL video subsystem: {e}")))?;
 
         let mut builder = video.window(title, width, height);
         builder.position_centered().resizable();
@@ -91,7 +112,9 @@ impl Window {
             .create_texture_streaming(PixelFormat::ARGB8888, width, height)
             .map_err(|e| EngineError::sdl(format!("SDL_CreateTexture: {e}")))?;
 
-        let events = sdl.event_pump().map_err(|e| EngineError::sdl(format!("SDL event pump: {e}")))?;
+        let events = sdl
+            .event_pump()
+            .map_err(|e| EngineError::sdl(format!("SDL event pump: {e}")))?;
 
         Ok(Self {
             _sdl: sdl,
@@ -164,9 +187,7 @@ impl Window {
                             height: h.max(0) as u32,
                         })
                     }
-                    WindowEvent::FocusGained => {
-                        out.push(RawInput::FocusChanged { focused: true })
-                    }
+                    WindowEvent::FocusGained => out.push(RawInput::FocusChanged { focused: true }),
                     WindowEvent::FocusLost => out.push(RawInput::FocusChanged { focused: false }),
                     WindowEvent::CloseRequested => out.push(RawInput::Quit),
                     _ => {}

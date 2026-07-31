@@ -152,7 +152,11 @@ fn the_border_ring_covers_the_corner_the_fill_reaches() {
     );
 
     // Straight edges were always right, and must stay right.
-    assert_eq!(what_is_at(&mut engine, 60, 4), "border", "top edge is border");
+    assert_eq!(
+        what_is_at(&mut engine, 60, 4),
+        "border",
+        "top edge is border"
+    );
     assert_eq!(
         what_is_at(&mut engine, 60, 40),
         "background",

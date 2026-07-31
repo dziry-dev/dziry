@@ -354,6 +354,24 @@ const tsPath = join(ROOT, "src", "protocol", "generated.ts");
 await Bun.write(rustPath, emitRust());
 await Bun.write(tsPath, emitTypeScript());
 
+/**
+ * Hand the Rust file to rustfmt rather than trying to emit its formatting.
+ *
+ * The crate denies clippy's default lints and `cargo fmt --check` covers every
+ * file in it, generated ones included — and a generator cannot reliably guess
+ * where rustfmt wants to break a 48-element array. So it emits readable Rust and
+ * rustfmt decides the rest.
+ *
+ * A missing rustfmt is a warning, not a failure: it is a rustup component, and
+ * `gen:protocol` must keep working for anyone who has not installed it. The
+ * output compiles either way; only `cargo fmt --check` would notice.
+ */
+const fmt = Bun.spawnSync(["rustfmt", "--edition", "2021", rustPath]);
+if (!fmt.success) {
+  const detail = new TextDecoder().decode(fmt.stderr).trim();
+  console.warn(`warning: rustfmt did not format protocol.rs${detail ? `: ${detail}` : ""}`);
+}
+
 const totalFields = TABLES.reduce((n, t) => n + t.fields.length, 0);
 console.log(
   `protocol v${PROTOCOL_VERSION}: ${TABLES.length} tables, ${totalFields} fields\n` +

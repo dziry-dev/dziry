@@ -19,9 +19,9 @@
 
 use std::collections::HashMap;
 
+use crate::error::EngineError;
 use skia_safe::font_style::{Slant, Weight, Width};
 use skia_safe::{Font, FontMgr, FontStyle, Typeface};
-use crate::error::EngineError;
 
 /// Tried in order. A missing font family is not a crash: the last resort is
 /// whatever the platform considers its default sans-serif.
@@ -184,8 +184,17 @@ impl Measurer {
     /// `available_width` is accepted and currently ignored, which is the honest
     /// shape of the single-line limitation: the signature is already the one
     /// SkParagraph needs, so A2 changes the body and not the callers.
-    pub fn measure(&mut self, text: &str, size: f32, weight: u16, _available_width: f32) -> (f32, f32) {
-        (self.advance(text, size, weight), self.line_height(size, weight))
+    pub fn measure(
+        &mut self,
+        text: &str,
+        size: f32,
+        weight: u16,
+        _available_width: f32,
+    ) -> (f32, f32) {
+        (
+            self.advance(text, size, weight),
+            self.line_height(size, weight),
+        )
     }
 
     /// Diagnostics: confirms the cache stays bounded under dynamic text.

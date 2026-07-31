@@ -14,8 +14,8 @@
 
 use dziri_engine::engine::{Engine, EngineConfig};
 use dziri_engine::protocol::{
-    self, align, display, event_kind, flags, flex_direction, justify, node_kind, nodes,
-    predicate, styles, variant_slots, variants, Table,
+    self, align, display, event_kind, flags, flex_direction, justify, node_kind, nodes, predicate,
+    styles, variant_slots, variants, Table,
 };
 use dziri_engine::tables::Tables;
 
@@ -196,9 +196,14 @@ fn main() {
         }
 
         let mut cursor = 0;
-        t.push_string(0, "Hello from the engine", &mut cursor).unwrap();
-        t.push_string(1, "Taffy laid this out. Skia painted it. SDL3 owns the window.", &mut cursor)
+        t.push_string(0, "Hello from the engine", &mut cursor)
             .unwrap();
+        t.push_string(
+            1,
+            "Taffy laid this out. Skia painted it. SDL3 owns the window.",
+            &mut cursor,
+        )
+        .unwrap();
         t.push_string(2, "Click me", &mut cursor).unwrap();
 
         node(t, 0, node_kind::BOX, ROOT, -1);
@@ -225,9 +230,17 @@ fn main() {
         // compacted down. Pressing while hovering now has its own entry rather
         // than losing one of the two.
         t.set_i32(VARIANTS, variants::NODE, 0, 4);
-        t.set_u32(VARIANTS, variants::MASK, 0, predicate::HOVER | predicate::ACTIVE);
+        t.set_u32(
+            VARIANTS,
+            variants::MASK,
+            0,
+            predicate::HOVER | predicate::ACTIVE,
+        );
         t.set_i32(VARIANTS, variants::RUN_START, 0, 0);
-        for (i, slot) in [BUTTON, BUTTON_HOVER, BUTTON_ACTIVE, BUTTON_ACTIVE].iter().enumerate() {
+        for (i, slot) in [BUTTON, BUTTON_HOVER, BUTTON_ACTIVE, BUTTON_ACTIVE]
+            .iter()
+            .enumerate()
+        {
             t.set_u16(VARIANT_SLOTS, variant_slots::STYLE, i, *slot as u16);
         }
     }

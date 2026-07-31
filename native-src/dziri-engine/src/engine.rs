@@ -163,8 +163,8 @@ impl Engine {
             string_bytes: config.string_bytes.max(1),
         };
 
-        let surface = surfaces::raster_n32_premul((width as i32, height as i32))
-            .ok_or_else(|| {
+        let surface =
+            surfaces::raster_n32_premul((width as i32, height as i32)).ok_or_else(|| {
                 EngineError::skia(format!(
                     "Skia could not allocate a {width}x{height} raster surface"
                 ))
@@ -289,8 +289,12 @@ impl Engine {
         self.resync(&diff)?;
 
         if self.fresh || diff.any {
-            self.tree
-                .compute(&self.tables, &mut self.measurer, self.width as f32, self.height as f32)?;
+            self.tree.compute(
+                &self.tables,
+                &mut self.measurer,
+                self.width as f32,
+                self.height as f32,
+            )?;
             let bounds = self.tree.bounds().to_vec();
             self.tables.write_bounds(&bounds);
             self.fresh = false;
@@ -570,8 +574,8 @@ impl Engine {
             return Ok(());
         }
 
-        self.surface = surfaces::raster_n32_premul((width as i32, height as i32))
-            .ok_or_else(|| {
+        self.surface =
+            surfaces::raster_n32_premul((width as i32, height as i32)).ok_or_else(|| {
                 EngineError::skia(format!(
                     "Skia could not allocate a {width}x{height} raster surface"
                 ))

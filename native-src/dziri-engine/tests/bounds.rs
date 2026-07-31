@@ -76,7 +76,12 @@ fn init_style(t: &mut Tables, slot: usize) {
 
 /// Links `children` under `parent` and gives every node its parent pointer.
 fn link(t: &mut Tables, parent: usize, children: &[usize]) {
-    t.set_i32(NODES, nodes::FIRST_CHILD, parent, children.first().map_or(-1, |c| *c as i32));
+    t.set_i32(
+        NODES,
+        nodes::FIRST_CHILD,
+        parent,
+        children.first().map_or(-1, |c| *c as i32),
+    );
     for (i, &child) in children.iter().enumerate() {
         t.set_i32(NODES, nodes::PARENT, child, parent as i32);
         let next = children.get(i + 1).map_or(-1, |c| *c as i32);
@@ -142,8 +147,16 @@ fn a_column_stacks_its_children_inside_the_padding() {
 
     engine.tick().expect("tick");
 
-    assert_eq!(bound(&engine, 0), [0.0, 0.0, 200.0, 100.0], "root fills the window");
-    assert_eq!(bound(&engine, 1), [10.0, 10.0, 50.0, 20.0], "first child at the padding");
+    assert_eq!(
+        bound(&engine, 0),
+        [0.0, 0.0, 200.0, 100.0],
+        "root fills the window"
+    );
+    assert_eq!(
+        bound(&engine, 1),
+        [10.0, 10.0, 50.0, 20.0],
+        "first child at the padding"
+    );
     assert_eq!(
         bound(&engine, 2),
         [10.0, 38.0, 50.0, 20.0],
@@ -212,7 +225,8 @@ fn text_is_measured_by_skia_not_guessed() {
         link(t, 0, &[1]);
 
         let mut cursor = 0;
-        t.push_string(0, "Hello", &mut cursor).expect("string arena");
+        t.push_string(0, "Hello", &mut cursor)
+            .expect("string arena");
         t.set_i32(NODES, nodes::TEXT, 1, 0);
         t.set_u8(NODES, nodes::KIND, 1, protocol::node_kind::TEXT);
         t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::MEASURABLE);
@@ -364,9 +378,7 @@ fn a_style_patch_relays_out_without_touching_the_tree() {
 
     // What a `.compact` toggle does: rewrite a field of the style table. Node
     // style indices are never touched.
-    engine
-        .tables_mut()
-        .set_f32(STYLES, styles::HEIGHT, 1, 32.0);
+    engine.tables_mut().set_f32(STYLES, styles::HEIGHT, 1, 32.0);
     engine.tick().expect("tick");
 
     assert_eq!(bound(&engine, 1)[3], 32.0, "the patch reached layout");
@@ -481,7 +493,11 @@ fn removing_a_row_relinks_the_parent_it_left() {
         link(t, 0, &[1, 2, 3]);
     }
     engine.tick().expect("tick");
-    assert_eq!(bound(&engine, 3)[1], 50.0, "third row starts below the first two");
+    assert_eq!(
+        bound(&engine, 3)[1],
+        50.0,
+        "third row starts below the first two"
+    );
 
     {
         // `firstChild[0]` is untouched: the chain still starts at node 1.
@@ -490,7 +506,11 @@ fn removing_a_row_relinks_the_parent_it_left() {
     }
     engine.tick().expect("tick");
 
-    assert_eq!(bound(&engine, 3)[1], 20.0, "the third row took the second's place");
+    assert_eq!(
+        bound(&engine, 3)[1],
+        20.0,
+        "the third row took the second's place"
+    );
 }
 
 #[test]
@@ -591,7 +611,11 @@ fn repointing_a_node_at_another_style_slot_relayouts() {
     }
     engine.tick().expect("tick");
 
-    assert_eq!(bound(&engine, 1), [0.0, 0.0, 70.0, 35.0], "it wears slot 2 now");
+    assert_eq!(
+        bound(&engine, 1),
+        [0.0, 0.0, 70.0, 35.0],
+        "it wears slot 2 now"
+    );
 }
 
 #[test]
@@ -613,7 +637,10 @@ fn a_cycle_in_the_child_chain_is_an_error_not_a_hang() {
     let result = engine.tick();
     assert!(result.is_err(), "a cycle must be reported, not spun on");
     let err = result.unwrap_err();
-    assert!(err.detail.contains("cycle"), "the message should name the problem");
+    assert!(
+        err.detail.contains("cycle"),
+        "the message should name the problem"
+    );
     // And the *category* travels: a malformed tree is not Skia failing.
     assert_eq!(err.status, protocol::status::LAYOUT);
 }
@@ -700,7 +727,11 @@ fn absurd_grid_inputs_are_clamped_rather_than_believed() {
         elapsed.as_millis() < 150,
         "a clamped grid should still be a normal frame, took {elapsed:?}"
     );
-    assert_eq!(bound(&engine, 0), [0.0, 0.0, 200.0, 100.0], "the root still lays out");
+    assert_eq!(
+        bound(&engine, 0),
+        [0.0, 0.0, 200.0, 100.0],
+        "the root still lays out"
+    );
 }
 
 #[test]
@@ -725,7 +756,11 @@ fn hit_testing_finds_the_deepest_interactive_node() {
     }
     engine.tick().expect("tick");
 
-    assert_eq!(engine.hit_test(10.0, 30.0), 2, "inside the interactive child");
+    assert_eq!(
+        engine.hit_test(10.0, 30.0),
+        2,
+        "inside the interactive child"
+    );
     assert_eq!(engine.hit_test(10.0, 5.0), -1, "the non-interactive one");
     assert_eq!(engine.hit_test(500.0, 500.0), -1, "outside everything");
 }
@@ -755,8 +790,16 @@ fn hit_testing_starts_at_the_configured_root() {
     }
     engine.tick().expect("tick");
 
-    assert_eq!(bound(&engine, 1), [0.0, 0.0, 200.0, 100.0], "the root fills the window");
-    assert_eq!(engine.hit_test(10.0, 10.0), 2, "the interactive node under root 1");
+    assert_eq!(
+        bound(&engine, 1),
+        [0.0, 0.0, 200.0, 100.0],
+        "the root fills the window"
+    );
+    assert_eq!(
+        engine.hit_test(10.0, 10.0),
+        2,
+        "the interactive node under root 1"
+    );
 }
 
 #[test]
@@ -788,8 +831,16 @@ fn overlapping_siblings_hit_test_to_the_one_on_top() {
     }
     engine.tick().expect("tick");
 
-    assert_eq!(bound(&engine, 1), bound(&engine, 2), "the two overlap exactly");
-    assert_eq!(engine.hit_test(20.0, 20.0), 2, "the later sibling is painted on top");
+    assert_eq!(
+        bound(&engine, 1),
+        bound(&engine, 2),
+        "the two overlap exactly"
+    );
+    assert_eq!(
+        engine.hit_test(20.0, 20.0),
+        2,
+        "the later sibling is painted on top"
+    );
 }
 
 #[test]
@@ -815,7 +866,8 @@ fn the_descriptor_matches_the_generated_schema() {
             assert_eq!(span.table, table as i32, "span {i} is the wrong table");
             assert_eq!(span.field, field as i32, "span {i} is the wrong field");
             assert_eq!(
-                span.elem_size as usize, size,
+                span.elem_size as usize,
+                size,
                 "{}.{} is {} bytes, schema says {size}",
                 protocol::TABLE_NAMES[table],
                 protocol::field_names(table)[field],

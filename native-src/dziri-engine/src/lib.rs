@@ -101,7 +101,8 @@ pub extern "C" fn dziri_schema_hash() -> u32 {
 /// `buf` must be writable for `len` bytes, or null to query the length.
 #[no_mangle]
 pub unsafe extern "C" fn dziri_last_error(buf: *mut u8, len: u32) -> u32 {
-    error::read_last_error(buf, len)
+    // SAFETY: forwarding the caller's own promise about `buf` and `len`.
+    unsafe { error::read_last_error(buf, len) }
 }
 
 /// Creates an engine. On success `*out` holds the handle.
@@ -119,9 +120,11 @@ pub unsafe extern "C" fn dziri_engine_create(
         if config.is_null() || out.is_null() {
             return fail(status::INVALID_ARGUMENT, "null config or out pointer");
         }
-        *out = std::ptr::null_mut();
+        // SAFETY: both pointers were just checked for null, and the caller
+        // promises they are writable and point at a valid config.
+        unsafe { *out = std::ptr::null_mut() };
 
-        let config = &*config;
+        let config = unsafe { &*config };
         if config.protocol_version != protocol::PROTOCOL_VERSION {
             return fail(
                 status::PROTOCOL_MISMATCH,
@@ -139,7 +142,8 @@ pub unsafe extern "C" fn dziri_engine_create(
                     magic: MAGIC,
                     engine,
                 });
-                *out = Box::into_raw(handle);
+                // SAFETY: as above — `out` is non-null and writable.
+                unsafe { *out = Box::into_raw(handle) };
                 status::OK
             }
             Err(e) => fail(e.status, e.detail),
@@ -158,13 +162,22 @@ pub unsafe extern "C" fn dziri_engine_destroy(handle: *mut Handle) -> i32 {
         if handle.is_null() {
             return status::OK;
         }
-        if (*handle).magic != MAGIC {
+        // SAFETY: non-null, and the magic number is the only evidence available
+        // that it came from `create`. Reading it is the unsound step this whole
+        // scheme is built on, and what the generation-indexed handle table in the
+        // review replaces; until then, the read is why a *wild* pointer is usually
+        // a refusal rather than a crash.
+        if unsafe { (*handle).magic } != MAGIC {
             return fail(status::INVALID_HANDLE, "not an engine handle");
         }
         // Cleared first, so a second `destroy` on the same pointer is refused
         // instead of freeing memory twice.
-        (*handle).magic = 0;
-        drop(Box::from_raw(handle));
+        // SAFETY: the magic number matched, so this is a live handle from `create`
+        // and the box it came from is ours to reclaim.
+        unsafe {
+            (*handle).magic = 0;
+            drop(Box::from_raw(handle));
+        }
         status::OK
     })
 }
@@ -183,7 +196,8 @@ pub unsafe extern "C" fn dziri_engine_span_count(handle: *mut Handle, out: *mut 
         if out.is_null() {
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
-        *out = engine.span_count() as u32;
+        // SAFETY: non-null, and writable by the caller's promise.
+        unsafe { *out = engine.span_count() as u32 };
         status::OK
     })
 }
@@ -208,7 +222,9 @@ pub unsafe extern "C" fn dziri_engine_describe(
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
         if (capacity as usize) < engine.span_count() {
-            *written = 0;
+            // SAFETY: non-null, writable. Zero first: a partial descriptor is
+            // worse than none, and this is the value the host keys on.
+            unsafe { *written = 0 };
             return fail(
                 status::CAPACITY,
                 format!(
@@ -218,8 +234,11 @@ pub unsafe extern "C" fn dziri_engine_describe(
             );
         }
 
-        let slice = std::slice::from_raw_parts_mut(out, capacity as usize);
-        *written = engine.describe(slice) as u32;
+        // SAFETY: the caller promises room for `capacity` records, and the check
+        // above proved `capacity` covers every span. The slice does not outlive
+        // this call, so nothing holds a Rust reference into host memory.
+        let slice = unsafe { std::slice::from_raw_parts_mut(out, capacity as usize) };
+        unsafe { *written = engine.describe(slice) as u32 };
         status::OK
     })
 }
@@ -236,7 +255,8 @@ pub unsafe extern "C" fn dziri_engine_generation(handle: *mut Handle, out: *mut 
         if out.is_null() {
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
-        *out = engine.generation();
+        // SAFETY: non-null, and writable by the caller's promise.
+        unsafe { *out = engine.generation() };
         status::OK
     })
 }
@@ -274,8 +294,11 @@ pub unsafe extern "C" fn dziri_engine_drain_events(
         if out.is_null() || written.is_null() {
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
-        let slice = std::slice::from_raw_parts_mut(out, capacity as usize);
-        *written = engine.drain_events(slice) as u32;
+        // SAFETY: the caller promises room for `capacity` events, and
+        // `drain_events` writes no more than the slice's length. Materialised
+        // inside the call only, like every other view over host memory here.
+        let slice = unsafe { std::slice::from_raw_parts_mut(out, capacity as usize) };
+        unsafe { *written = engine.drain_events(slice) as u32 };
         status::OK
     })
 }
@@ -297,7 +320,8 @@ pub unsafe extern "C" fn dziri_engine_grow(
         if caps.is_null() {
             return fail(status::INVALID_ARGUMENT, "null capacities pointer");
         }
-        engine.grow(*caps);
+        // SAFETY: non-null, and the caller promises a valid `Capacities`.
+        engine.grow(unsafe { *caps });
         status::OK
     })
 }
@@ -340,7 +364,8 @@ pub unsafe extern "C" fn dziri_engine_hit_test(
         if out.is_null() {
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
-        *out = engine.hit_test(x, y);
+        // SAFETY: non-null, and writable by the caller's promise.
+        unsafe { *out = engine.hit_test(x, y) };
         status::OK
     })
 }
@@ -353,18 +378,15 @@ pub unsafe extern "C" fn dziri_engine_hit_test(
 /// # Safety
 /// `out` must be writable for four `f32`.
 #[no_mangle]
-pub unsafe extern "C" fn dziri_engine_bounds(
-    handle: *mut Handle,
-    node: u32,
-    out: *mut f32,
-) -> i32 {
+pub unsafe extern "C" fn dziri_engine_bounds(handle: *mut Handle, node: u32, out: *mut f32) -> i32 {
     with(handle, |engine| {
         if out.is_null() {
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
         match engine.bounds_of(node as usize) {
             Some(rect) => {
-                std::ptr::copy_nonoverlapping(rect.as_ptr(), out, 4);
+                // SAFETY: non-null, and the caller promises room for four `f32`.
+                unsafe { std::ptr::copy_nonoverlapping(rect.as_ptr(), out, 4) };
                 status::OK
             }
             None => fail(status::INVALID_ARGUMENT, format!("no node {node}")),
@@ -384,10 +406,14 @@ pub unsafe extern "C" fn dziri_engine_surface_info(handle: *mut Handle, out: *mu
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
         let (width, height) = engine.size();
-        *out = width;
-        *out.add(1) = height;
-        *out.add(2) = width * 4;
-        *out.add(3) = engine.frame_count() as u32;
+        // SAFETY: non-null, and the caller promises room for four `u32` — so
+        // `add(3)` is the last element rather than one past it.
+        unsafe {
+            *out = width;
+            *out.add(1) = height;
+            *out.add(2) = width * 4;
+            *out.add(3) = engine.frame_count() as u32;
+        }
         status::OK
     })
 }
@@ -415,7 +441,9 @@ pub unsafe extern "C" fn dziri_engine_read_pixels(
                 format!("frame is {} bytes, was given {len}", pixels.len()),
             );
         }
-        std::ptr::copy_nonoverlapping(pixels.as_ptr(), out, pixels.len());
+        // SAFETY: non-null, and the length check above proved the caller's buffer
+        // is at least as long as the frame.
+        unsafe { std::ptr::copy_nonoverlapping(pixels.as_ptr(), out, pixels.len()) };
         status::OK
     })
 }
@@ -437,7 +465,8 @@ pub unsafe extern "C" fn dziri_engine_encode_png(handle: *mut Handle, out_len: *
         }
         match engine.encode_png() {
             Some(len) => {
-                *out_len = len as u32;
+                // SAFETY: non-null, and writable by the caller's promise.
+                unsafe { *out_len = len as u32 };
                 status::OK
             }
             None => fail(status::SKIA, "Skia could not encode the frame as PNG"),
@@ -455,11 +484,7 @@ pub unsafe extern "C" fn dziri_engine_encode_png(handle: *mut Handle, out_len: *
 /// # Safety
 /// `out` must be writable for `len` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn dziri_engine_take_png(
-    handle: *mut Handle,
-    out: *mut u8,
-    len: u32,
-) -> i32 {
+pub unsafe extern "C" fn dziri_engine_take_png(handle: *mut Handle, out: *mut u8, len: u32) -> i32 {
     with(handle, |engine| {
         if out.is_null() {
             return fail(status::INVALID_ARGUMENT, "null out pointer");
@@ -472,7 +497,9 @@ pub unsafe extern "C" fn dziri_engine_take_png(
             );
         }
         let png = engine.take_png();
-        std::ptr::copy_nonoverlapping(png.as_ptr(), out, png.len());
+        // SAFETY: non-null, and the capacity check above proved the buffer holds
+        // the whole PNG.
+        unsafe { std::ptr::copy_nonoverlapping(png.as_ptr(), out, png.len()) };
         status::OK
     })
 }
@@ -493,10 +520,12 @@ pub unsafe extern "C" fn dziri_engine_font_family(
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
         let bytes = engine.font_family().as_bytes();
-        *written = bytes.len() as u32;
+        // SAFETY: non-null, and writable by the caller's promise.
+        unsafe { *written = bytes.len() as u32 };
         if !buf.is_null() && len > 0 {
             let n = bytes.len().min(len as usize);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n);
+            // SAFETY: `n <= len`, and the caller promises `len` writable bytes.
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n) };
         }
         status::OK
     })
@@ -512,7 +541,8 @@ pub unsafe extern "C" fn dziri_engine_last_frame_ms(handle: *mut Handle, out: *m
         if out.is_null() {
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
-        *out = engine.last_frame_ms();
+        // SAFETY: non-null, and writable by the caller's promise.
+        unsafe { *out = engine.last_frame_ms() };
         status::OK
     })
 }
@@ -521,5 +551,7 @@ pub unsafe extern "C" fn dziri_engine_last_frame_ms(handle: *mut Handle, out: *m
 /// becomes a status code and a message instead of an aborted process.
 #[no_mangle]
 pub extern "C" fn dziri_engine_panic_for_testing(handle: *mut Handle) -> i32 {
-    with(handle, |_| panic!("deliberate panic from dziri_engine_panic_for_testing"))
+    with(handle, |_| {
+        panic!("deliberate panic from dziri_engine_panic_for_testing")
+    })
 }

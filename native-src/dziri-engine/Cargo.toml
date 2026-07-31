@@ -13,6 +13,21 @@ publish = false
 name = "dziri_engine"
 crate-type = ["cdylib", "rlib"]
 
+# An `unsafe fn` body is an implicit unsafe block in edition 2021, so the whole of
+# every `extern "C"` entry point — nineteen of them, each mostly ordinary logic —
+# reads as unsafe and nothing marks the two or three lines that genuinely are.
+# Denying this makes each raw-pointer read say so at the point it happens, which is
+# what the review asked for and what edition 2024 will require anyway.
+[lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+
+# Clippy's default groups, as errors rather than warnings: the crate is clean
+# against them today, so the cost of keeping it clean is zero and the cost of
+# discovering it later is not. `priority` lets a specific `expect` outrank the
+# group, which is how the two deliberate exceptions in layout.rs and paint.rs work.
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+
 [dependencies]
 # Pinned to what `native-src/skia-probe` verified: raster surface, platform font
 # manager, and SkParagraph via `textlayout`.

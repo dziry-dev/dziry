@@ -398,7 +398,11 @@ impl Tables {
     /// silently collapses.
     fn set_bytes(&mut self, table: usize, field: usize, index: usize, value: &[u8]) {
         let span = *self.plan_of(table, field);
-        debug_assert_eq!(span.elem_size as usize, value.len(), "wrong width for field");
+        debug_assert_eq!(
+            span.elem_size as usize,
+            value.len(),
+            "wrong width for field"
+        );
         if index >= span.capacity as usize {
             return;
         }
@@ -792,8 +796,7 @@ impl Tables {
             let (t, f) = (span.table as usize, span.field as usize);
             let len = span.byte_len();
             let dst_len = grown.plan_of(t, f).byte_len().min(len);
-            grown.staged_mut(t, f)[..dst_len]
-                .copy_from_slice(&self.staged_bytes(t, f)[..dst_len]);
+            grown.staged_mut(t, f)[..dst_len].copy_from_slice(&self.staged_bytes(t, f)[..dst_len]);
             let live = self.live_bytes(t, f)[..dst_len].to_vec();
             let dst = grown.plan_of(t, f);
             let range = dst.offset..dst.offset + dst_len;
@@ -801,7 +804,9 @@ impl Tables {
         }
 
         let string_bytes = self.string_bytes().to_vec();
-        let n = string_bytes.len().min(grown.staged_string_bytes_mut().len());
+        let n = string_bytes
+            .len()
+            .min(grown.staged_string_bytes_mut().len());
         grown.staged_string_bytes_mut()[..n].copy_from_slice(&string_bytes[..n]);
 
         let generation = self.generation + 1;
@@ -832,7 +837,13 @@ mod tests {
     fn spans_do_not_overlap_and_are_aligned() {
         let tables = Tables::new(caps());
         let mut descs = vec![
-            SpanDesc { table: 0, field: 0, ptr: 0, elem_size: 0, capacity: 0 };
+            SpanDesc {
+                table: 0,
+                field: 0,
+                ptr: 0,
+                elem_size: 0,
+                capacity: 0
+            };
             tables.span_count()
         ];
         assert_eq!(tables.describe(&mut descs), tables.span_count());
@@ -994,14 +1005,25 @@ mod tests {
         tables.commit();
 
         let before = tables.generation();
-        assert!(tables.grow(Capacities { nodes: 64, ..caps() }));
+        assert!(tables.grow(Capacities {
+            nodes: 64,
+            ..caps()
+        }));
         assert!(!tables.grow(caps()), "shrinking is not growth");
 
-        assert!(tables.generation() > before, "Bun must re-read the descriptor");
+        assert!(
+            tables.generation() > before,
+            "Bun must re-read the descriptor"
+        );
         assert_eq!(tables.capacities().nodes, 64);
-        assert_eq!(tables.u16s(Table::Nodes as usize, protocol::nodes::STYLE)[0], 7);
         assert_eq!(
-            tables.u32s(Table::Layout as usize, protocol::layout::X).len(),
+            tables.u16s(Table::Nodes as usize, protocol::nodes::STYLE)[0],
+            7
+        );
+        assert_eq!(
+            tables
+                .u32s(Table::Layout as usize, protocol::layout::X)
+                .len(),
             64,
             "layout tracks the node count"
         );

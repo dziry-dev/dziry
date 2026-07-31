@@ -1,0 +1,17 @@
+# rustfmt's defaults, pinned rather than assumed.
+#
+# `max_width` is already 100 and the edition is already in Cargo.toml, so neither
+# line changes today's output. They are here because both are read from *this*
+# file by a bare `rustfmt path/to/file.rs` — which is how `scripts/gen-protocol.ts`
+# formats the generated `protocol.rs` — and a bare invocation would otherwise
+# assume edition 2015 and parse the crate wrongly.
+#
+# Deliberately not set: `use_small_heuristics = "Max"`. It reads better for the
+# table-writing call sites in the tests and examples, but measured against this
+# crate it rewraps 69 places where the defaults rewrap 41, because it also *joins*
+# lines that were split on purpose. Defaults churn least.
+#
+# `wrap_comments` stays off. The doc comments here carry arguments rather than
+# descriptions, and their line breaks are where the author put them.
+edition = "2021"
+max_width = 100

@@ -22,7 +22,15 @@ pub const TABLE_COUNT: usize = 7;
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
 pub const MAX_FIELD_COUNT: usize = 48;
-pub const TABLE_NAMES: [&str; TABLE_COUNT] = ["nodes", "styles", "variants", "variantSlots", "lists", "layout", "strings"];
+pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
+    "nodes",
+    "styles",
+    "variants",
+    "variantSlots",
+    "lists",
+    "layout",
+    "strings",
+];
 
 #[repr(u32)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -42,11 +50,20 @@ impl Table {
     }
 }
 
-pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [nodes::FIELD_COUNT, styles::FIELD_COUNT, variants::FIELD_COUNT, variant_slots::FIELD_COUNT, lists::FIELD_COUNT, layout::FIELD_COUNT, strings::FIELD_COUNT];
+pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [
+    nodes::FIELD_COUNT,
+    styles::FIELD_COUNT,
+    variants::FIELD_COUNT,
+    variant_slots::FIELD_COUNT,
+    lists::FIELD_COUNT,
+    layout::FIELD_COUNT,
+    strings::FIELD_COUNT,
+];
 
 /// How each table is sized, so the engine can turn a capacity request into byte
 /// spans without a hand-written mapping that could drift from the schema.
-pub const SIZED_BY: [&str; TABLE_COUNT] = ["nodes", "styles", "own", "own", "own", "nodes", "strings"];
+pub const SIZED_BY: [&str; TABLE_COUNT] =
+    ["nodes", "styles", "own", "own", "own", "nodes", "strings"];
 
 /// Element size per field, indexed by table. Empty for an unknown table.
 pub fn elem_sizes(table: usize) -> &'static [usize] {
@@ -91,7 +108,17 @@ pub mod nodes {
 
     pub const FIELD_COUNT: usize = 9;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [1, 2, 4, 4, 4, 4, 2, 1, 1];
-    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags"];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
+        "kind",
+        "style",
+        "text",
+        "parent",
+        "firstChild",
+        "nextSibling",
+        "list",
+        "hidden",
+        "flags",
+    ];
 }
 
 /// Resolved style values. Patches write field values in place.
@@ -147,8 +174,60 @@ pub mod styles {
     pub const OVERFLOW: usize = 47;
 
     pub const FIELD_COUNT: usize = 48;
-    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1];
-    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["bg", "fg", "borderColor", "borderWidth", "radius", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflow"];
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2,
+        2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1,
+    ];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
+        "bg",
+        "fg",
+        "borderColor",
+        "borderWidth",
+        "radius",
+        "padTop",
+        "padRight",
+        "padBottom",
+        "padLeft",
+        "marginTop",
+        "marginRight",
+        "marginBottom",
+        "marginLeft",
+        "display",
+        "flexDirection",
+        "flexWrap",
+        "justifyContent",
+        "alignItems",
+        "alignSelf",
+        "justifyItems",
+        "justifySelf",
+        "flexGrow",
+        "flexShrink",
+        "flexBasis",
+        "gapRow",
+        "gapColumn",
+        "gridColumns",
+        "gridRows",
+        "gridColumnStart",
+        "gridColumnSpan",
+        "gridRowStart",
+        "gridRowSpan",
+        "width",
+        "height",
+        "minWidth",
+        "minHeight",
+        "maxWidth",
+        "maxHeight",
+        "aspectRatio",
+        "position",
+        "insetTop",
+        "insetRight",
+        "insetBottom",
+        "insetLeft",
+        "fontSize",
+        "fontWeight",
+        "lineClamp",
+        "overflow",
+    ];
 
     /// Whether a change to this field can move a box.
     ///
@@ -156,7 +235,12 @@ pub mod styles {
     /// touches only such fields needs no Taffy work at all — the repaint that
     /// every non-empty commit schedules is the entire response. A colour-only
     /// theme patch is the case this exists for.
-    pub const LAYOUT_AFFECTING: [bool; FIELD_COUNT] = [false, false, false, true, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
+    pub const LAYOUT_AFFECTING: [bool; FIELD_COUNT] = [
+        false, false, false, true, false, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true,
+    ];
 }
 
 /// Per-node predicate mask and where that node's style run begins.
@@ -194,7 +278,15 @@ pub mod lists {
 
     pub const FIELD_COUNT: usize = 7;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 4, 4, 4, 4, 4, 4];
-    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["container", "anchorPrev", "anchorNext", "arenaStart", "stride", "capacity", "active"];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
+        "container",
+        "anchorPrev",
+        "anchorNext",
+        "arenaStart",
+        "stride",
+        "capacity",
+        "active",
+    ];
 }
 
 /// Final bounds per node, written by the engine.

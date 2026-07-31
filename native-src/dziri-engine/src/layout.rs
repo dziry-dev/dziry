@@ -65,6 +65,12 @@ pub struct LayoutTree {
     root: usize,
 }
 
+impl Default for LayoutTree {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LayoutTree {
     pub fn new() -> Self {
         Self {
@@ -307,12 +313,9 @@ impl LayoutTree {
         if self.ids.is_empty() {
             return Ok(());
         }
-        let root = *self
-            .ids
-            .get(self.root)
-            .ok_or_else(|| {
-                EngineError::layout(format!("root node {} is outside the table", self.root))
-            })?;
+        let root = *self.ids.get(self.root).ok_or_else(|| {
+            EngineError::layout(format!("root node {} is outside the table", self.root))
+        })?;
 
         // Borrowed before the closure so it captures the tables, not `self`.
         let text = tables.i32s(NODES, protocol::nodes::TEXT);
@@ -603,7 +606,8 @@ fn style_of(tables: &Tables, node: usize) -> Style {
     let u8f = |field: usize| -> u8 { tables.u8s(STYLES, field).get(slot).copied().unwrap_or(0) };
     let u16f = |field: usize| -> u16 { tables.u16s(STYLES, field).get(slot).copied().unwrap_or(0) };
     let i16f = |field: usize| -> i16 { tables.i16s(STYLES, field).get(slot).copied().unwrap_or(0) };
-    let f32f = |field: usize| -> f32 { tables.f32s(STYLES, field).get(slot).copied().unwrap_or(0.0) };
+    let f32f =
+        |field: usize| -> f32 { tables.f32s(STYLES, field).get(slot).copied().unwrap_or(0.0) };
 
     s.display = match u8f(f::DISPLAY) {
         display_enum::GRID => Display::Grid,
@@ -636,9 +640,21 @@ fn style_of(tables: &Tables, node: usize) -> Style {
     };
 
     s.align_items = align_of(u8f(f::ALIGN_ITEMS));
-    s.align_self = align_of(u8f(f::ALIGN_SELF)).map(AlignSelf::from);
     s.justify_items = align_of(u8f(f::JUSTIFY_ITEMS));
-    s.justify_self = align_of(u8f(f::JUSTIFY_SELF)).map(AlignSelf::from);
+
+    // `taffy::AlignSelf` is a type *alias* for `AlignItems` today, so clippy is
+    // right that these convert nothing. They stay because the field being written
+    // is the self axis, and if taffy ever makes them distinct types this is
+    // already the correct code — at which point the lint stops firing and
+    // `expect` says so, which is the reminder to drop the attribute.
+    #[expect(
+        clippy::useless_conversion,
+        reason = "AlignSelf is an alias for AlignItems in taffy 0.9, not a distinct type"
+    )]
+    {
+        s.align_self = align_of(u8f(f::ALIGN_SELF)).map(AlignSelf::from);
+        s.justify_self = align_of(u8f(f::JUSTIFY_SELF)).map(AlignSelf::from);
+    }
 
     let grow = f32f(f::FLEX_GROW);
     s.flex_grow = if grow.is_finite() { grow } else { 0.0 };

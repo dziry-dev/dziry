@@ -102,13 +102,19 @@ fn a_destroyed_handle_is_refused_rather_than_dereferenced() {
 
     // The magic number is cleared before the free, so this is a refusal instead
     // of a double free — the mistake a scripting host makes most easily.
-    assert_eq!(unsafe { dziri_engine_destroy(handle) }, status::INVALID_HANDLE);
+    assert_eq!(
+        unsafe { dziri_engine_destroy(handle) },
+        status::INVALID_HANDLE
+    );
     assert_eq!(dziri_engine_tick(handle), status::INVALID_HANDLE);
 }
 
 #[test]
 fn a_null_handle_is_an_error_not_a_crash() {
-    assert_eq!(dziri_engine_tick(std::ptr::null_mut()), status::INVALID_HANDLE);
+    assert_eq!(
+        dziri_engine_tick(std::ptr::null_mut()),
+        status::INVALID_HANDLE
+    );
     assert_eq!(
         unsafe { dziri_engine_destroy(std::ptr::null_mut()) },
         status::OK,
@@ -162,8 +168,7 @@ fn the_descriptor_survives_a_round_trip_through_the_abi() {
         count as usize
     ];
     let mut written = 0u32;
-    let code =
-        unsafe { dziri_engine_describe(handle, spans.as_mut_ptr(), count, &mut written) };
+    let code = unsafe { dziri_engine_describe(handle, spans.as_mut_ptr(), count, &mut written) };
 
     assert_eq!(code, status::OK);
     assert_eq!(written, count);
