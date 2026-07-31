@@ -399,6 +399,9 @@ impl Painter {
     /// legitimately sticks out sideways gets cut off.
     fn clips(&self, tables: &Tables, node: usize, state: &InputState) -> (bool, bool) {
         let slot = self.style_for(tables, node, state);
+        // `CLIP` belongs here and not in `is_scrollable`: it clips like `hidden` and
+        // is deliberately *not* a scroll container, which is the whole reason CSS
+        // distinguishes the two.
         let contains = |field: usize| {
             matches!(
                 tables.u8s(STYLES, field).get(slot).copied(),
@@ -406,6 +409,7 @@ impl Painter {
                     protocol::overflow::HIDDEN
                         | protocol::overflow::ELLIPSIS
                         | protocol::overflow::SCROLL
+                        | protocol::overflow::CLIP
                 )
             )
         };

@@ -343,9 +343,12 @@ export const ENUMS: EnumDef[] = [
   },
   {
     name: "Overflow",
-    doc: "`styles.overflow`.",
+    doc:
+      "`styles.overflowX` / `styles.overflowY`. `CLIP` is distinct from `HIDDEN` for one " +
+      "measured reason: Chromium coerces a `visible` axis to `auto` when the other axis is a " +
+      "scroll container, and `clip` is not one — see BROWSER-FACTS.md.",
     ty: "u8",
-    values: { VISIBLE: 0, HIDDEN: 1, ELLIPSIS: 2, SCROLL: 3 },
+    values: { VISIBLE: 0, HIDDEN: 1, ELLIPSIS: 2, SCROLL: 3, CLIP: 4 },
   },
   {
     name: "Predicate",

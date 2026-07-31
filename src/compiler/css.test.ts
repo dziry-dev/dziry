@@ -8,6 +8,7 @@
  */
 import { expect, test } from "bun:test";
 
+import { compile, toCompiledUi } from "./compile.ts";
 import {
   CssError,
   expandDeclaration,
@@ -228,12 +229,13 @@ test("KNOWN WRONG: `border` neither resets nor honours `none`", () => {
   expect(expand("border", "none")).toEqual({ borderWidth: 0 });
 });
 
-test("overflow maps CSS's five keywords onto the three the engine has", () => {
+test("overflow maps CSS's keywords onto the four the engine has", () => {
   expect(expand("overflow", "visible")).toEqual({ overflowX: 0, overflowY: 0 });
-  // `clip` and `hidden` differ only in programmatic scrollability, which does not
-  // exist yet.
   expect(expand("overflow", "hidden")).toEqual({ overflowX: 1, overflowY: 1 });
-  expect(expand("overflow", "clip")).toEqual({ overflowX: 1, overflowY: 1 });
+  // `clip` was folded into `hidden` until a probe showed why it cannot be: `hidden`
+  // makes the box a scroll container and so coerces a `visible` axis to `auto`, and
+  // `clip` does not. See BROWSER-FACTS.md.
+  expect(expand("overflow", "clip")).toEqual({ overflowX: 4, overflowY: 4 });
   // `auto` is what the engine actually does — a scrollbar only when needed — so
   // `scroll` is the approximation rather than the other way round.
   expect(expand("overflow", "auto")).toEqual({ overflowX: 3, overflowY: 3 });
@@ -257,4 +259,50 @@ test("overflow is per axis, which is the case that matters", () => {
   expandDeclaration("overflow", "hidden", out as never);
   expandDeclaration("overflow-y", "auto", out as never);
   expect(out).toEqual({ overflowX: 1, overflowY: 3 });
+});
+
+/**
+ * The `visible`-to-`auto` coercion, against what Chromium 151 was measured doing.
+ *
+ * Every row here corresponds to a row of the table in BROWSER-FACTS.md
+ * (`probes/overflow-axis-coercion.html`). This is the test that keeps the compiler and
+ * the measurement from drifting: if someone re-runs the probe and the engine has
+ * changed, this fails and points at the recorded fact rather than at a guess.
+ */
+test("a visible axis becomes scrollable when the other axis scrolls", () => {
+  // `styleOf` is not usable here — the coercion happens when the cascade finishes, so
+  // it has to be observed through a compiled node rather than through `expand`.
+  const declared = (css: string): { x: number; y: number } => {
+    const ui = toCompiledUi(compile(`<body><div class="a"></div></body>`, `.a { ${css} }`));
+    const styles = ui.styles as unknown as Record<string, ArrayLike<number>>;
+    // node 1 is the div; node 0 is body.
+    const slot = ui.nodes.style[1]!;
+    return { x: styles.overflowX![slot]!, y: styles.overflowY![slot]! };
+  };
+
+  const VISIBLE = 0;
+  const HIDDEN = 1;
+  const SCROLL = 3;
+  const CLIP = 4;
+
+  // One axis scrolls, so the other cannot stay `visible`: content spilling out of it
+  // would have nowhere to go.
+  expect(declared("overflow-y: auto")).toEqual({ x: SCROLL, y: SCROLL });
+  expect(declared("overflow-y: scroll")).toEqual({ x: SCROLL, y: SCROLL });
+  expect(declared("overflow-y: hidden")).toEqual({ x: SCROLL, y: HIDDEN });
+  expect(declared("overflow-x: auto")).toEqual({ x: SCROLL, y: SCROLL });
+
+  // Even when the author writes `visible` explicitly. Measured, and surprising enough
+  // that it is worth its own case.
+  expect(declared("overflow-x: visible; overflow-y: auto")).toEqual({ x: SCROLL, y: SCROLL });
+  expect(declared("overflow-x: visible; overflow-y: hidden")).toEqual({ x: SCROLL, y: HIDDEN });
+
+  // `clip` is not a scroll container, so it coerces nothing — the one exception, and
+  // the reason `CLIP` exists separately from `HIDDEN`.
+  expect(declared("overflow-y: clip")).toEqual({ x: VISIBLE, y: CLIP });
+  expect(declared("overflow-x: visible; overflow-y: clip")).toEqual({ x: VISIBLE, y: CLIP });
+
+  // And nothing is coerced when nothing scrolls.
+  expect(declared("overflow: visible")).toEqual({ x: VISIBLE, y: VISIBLE });
+  expect(declared("width: 10px")).toEqual({ x: VISIBLE, y: VISIBLE });
 });

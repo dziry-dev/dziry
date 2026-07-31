@@ -575,6 +575,10 @@ fn overflow_of(v: u8) -> Overflow {
         // `hidden`, which is the closest true thing.
         protocol::overflow::HIDDEN | protocol::overflow::ELLIPSIS => Overflow::Hidden,
         protocol::overflow::SCROLL => Overflow::Scroll,
+        // `CLIP` differs from `HIDDEN` in exactly one way that matters here: it is not
+        // a scroll container. Taffy models that distinction natively, and the compiler
+        // relies on it — the `visible`-to-`auto` coercion must skip `clip`.
+        protocol::overflow::CLIP => Overflow::Clip,
         // `VISIBLE` and anything unrecognised: spill, which is CSS's default and the
         // only answer that cannot hide content.
         _ => Overflow::Visible,

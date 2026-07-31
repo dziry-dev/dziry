@@ -1,0 +1,107 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>overflow-axis-coercion</title>
+<style>
+  body { font: 12px ui-monospace, SFMono-Regular, monospace; padding: 16px; }
+  #out { white-space: pre; line-height: 1.5; }
+</style>
+<h3>overflow: does setting one axis change the other, and can the user reach sideways overflow?</h3>
+<script type="module">
+  import { log, mount, frame, report } from "./_harness.js";
+
+  // ---------------------------------------------------------------------------
+  // 1. The computed value of the axis nobody set.
+  //
+  // dziri carries overflowX and overflowY as independent fields and takes
+  // `visible` literally on the axis the author left alone. If Chromium coerces
+  // instead, `body { overflow-y: auto }` means something different there than
+  // here, and the difference is whether sideways overflow is reachable at all.
+  // ---------------------------------------------------------------------------
+  log("=== computed overflow-x / overflow-y for each declaration ===");
+
+  const cases = [
+    ["overflow-y:auto",                 "overflow-y:auto"],
+    ["overflow-y:scroll",               "overflow-y:scroll"],
+    ["overflow-y:hidden",               "overflow-y:hidden"],
+    ["overflow-y:clip",                 "overflow-y:clip"],
+    ["overflow-x:auto",                 "overflow-x:auto"],
+    ["x:visible + y:auto (explicit)",   "overflow-x:visible;overflow-y:auto"],
+    ["x:visible + y:hidden (explicit)", "overflow-x:visible;overflow-y:hidden"],
+    ["x:visible + y:clip (explicit)",   "overflow-x:visible;overflow-y:clip"],
+    ["both visible",                    "overflow-x:visible;overflow-y:visible"],
+    ["overflow:auto",                   "overflow:auto"],
+  ];
+
+  for (const [name, css] of cases) {
+    mount(`<div id="t" style="${css}">x</div>`);
+    const cs = getComputedStyle(document.getElementById("t"));
+    log("  " + name.padEnd(32) + " -> x=" + cs.overflowX.padEnd(8) + " y=" + cs.overflowY);
+  }
+
+  // ---------------------------------------------------------------------------
+  // 2. What that means for a real narrow layout: dziri's own sample shape.
+  //
+  // A two-track `1fr` grid whose items cannot shrink below their content, which
+  // is the case a too-narrow window hits. Measured with an UNBREAKABLE word:
+  // hyphens are soft break opportunities, so a hyphenated string wraps instead
+  // of forcing overflow and quietly answers a different question.
+  // ---------------------------------------------------------------------------
+  log("");
+  log("=== 300px viewport, two 1fr tracks, unbreakable content ===");
+
+  const layout = (viewportCss) => `
+    <div id="vp" style="width:300px;height:200px;padding:18px;box-sizing:border-box;${viewportCss}">
+      <div id="panels" style="display:grid;grid-template-columns:repeat(2,1fr);gap:14px">
+        <div id="cardA" style="border:1px solid #555;padding:14px">
+          <div id="row" style="display:flex;align-items:center;gap:10px">
+            <span>[x]</span>
+            <span id="label" style="flex:1">Compilethecascadeatbuildtimewithnobreaks</span>
+            <span id="del">x</span>
+          </div>
+        </div>
+        <div id="cardB" style="border:1px solid #555;padding:14px">chip</div>
+      </div>
+    </div>`;
+
+  const rect = (id) => {
+    const b = document.getElementById(id).getBoundingClientRect();
+    return { x: Math.round(b.left), right: Math.round(b.right), w: Math.round(b.width) };
+  };
+
+  async function measureLayout(name, viewportCss, extra = () => {}) {
+    mount(layout(viewportCss));
+    extra();
+    await frame();
+    const vp = document.getElementById("vp");
+    const cs = getComputedStyle(vp);
+    vp.scrollLeft = 9999;
+    const reachable = vp.scrollLeft;
+    vp.scrollLeft = 0;
+
+    log("  " + name);
+    log("    computed overflow x=" + cs.overflowX + " y=" + cs.overflowY);
+    for (const id of ["vp", "panels", "cardA", "row", "label", "cardB"]) {
+      const g = rect(id);
+      log("      " + id.padEnd(7) + " x=" + String(g.x).padStart(4) +
+          " right=" + String(g.right).padStart(5) + " w=" + String(g.w).padStart(5));
+    }
+    log("    client/scroll width = " + vp.clientWidth + "/" + vp.scrollWidth +
+        "   overflows sideways = " + (vp.scrollWidth > vp.clientWidth));
+    log("    max scrollLeft reached = " + reachable +
+        (reachable > 0 ? "  (the user can see the rest)" : "  (clipped, unreachable)"));
+    log("    cardA wider than its 1fr track? " +
+        (rect("cardA").w > Math.round((rect("panels").w - 14) / 2)));
+  }
+
+  await measureLayout("overflow-y:auto only (what app.css says)", "overflow-y:auto");
+  await measureLayout("both axes visible (no overflow declared)", "");
+  await measureLayout("overflow-x:hidden + overflow-y:auto", "overflow-x:hidden;overflow-y:auto");
+
+  // The classic recipe, measured rather than assumed: does min-width:0 on the
+  // flex text stop the card bursting its track?
+  await measureLayout("overflow-y:auto + min-width:0 on the flex text", "overflow-y:auto", () => {
+    document.getElementById("label").style.minWidth = "0";
+  });
+
+  report();
+</script>

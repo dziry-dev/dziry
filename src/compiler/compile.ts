@@ -13,6 +13,7 @@ import {
   Direction,
   Display,
   Justify,
+  Overflow,
   INITIAL_STYLE,
   INHERITED_FIELDS,
   NodeKind,
@@ -182,7 +183,42 @@ function applyDecls(base: ComputedStyle, decls: Map<string, string>, where: stri
     }
   }
 
-  return { ...base, ...patch };
+  return coerceOverflow({ ...base, ...patch });
+}
+
+/**
+ * `visible` on one axis becomes `auto` when the other axis scrolls.
+ *
+ * Measured, not assumed — Chromium 151, `probes/overflow-axis-coercion.html`, recorded
+ * in BROWSER-FACTS.md. Declaring `overflow-y: auto` and nothing else gives a computed
+ * `overflow-x: auto`, and it happens *even when the author writes `visible` explicitly*:
+ * a box cannot be a scroll container in one axis and let content spill out of the other,
+ * because the content that spills would have nowhere to go.
+ *
+ * This was a real divergence, not a nicety. `app.css` sets only `overflow-y: auto` on the
+ * body; dziri computed `overflow-x: visible`, so a window too narrow for its content
+ * clipped the right-hand column with **no way to reach it**. The layout matched Chromium
+ * exactly; only the reachability was wrong.
+ *
+ * `clip` is the exception and the reason the schema now has a `CLIP` value distinct from
+ * `HIDDEN`: `overflow-y: clip` leaves `overflow-x: visible` alone, because `clip` is not a
+ * scroll container and so has nothing for the other axis to co-operate with. Folding it
+ * into `HIDDEN` would have made this rule coerce a case that must not coerce.
+ *
+ * A *computed value* rule, so it belongs here where the cascade finishes rather than in
+ * the per-declaration expander: it depends on both axes' final values, and either
+ * longhand may arrive after the other.
+ */
+function coerceOverflow(style: ComputedStyle): ComputedStyle {
+  const scrolls = (v: number) =>
+    v === Overflow.SCROLL || v === Overflow.HIDDEN || v === Overflow.ELLIPSIS;
+
+  const x = style.overflowX;
+  const y = style.overflowY;
+
+  if (x === Overflow.VISIBLE && scrolls(y)) return { ...style, overflowX: Overflow.SCROLL };
+  if (y === Overflow.VISIBLE && scrolls(x)) return { ...style, overflowY: Overflow.SCROLL };
+  return style;
 }
 
 /** Style for a text node: inherited properties only, everything else initial. */

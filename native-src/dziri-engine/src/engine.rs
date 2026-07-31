@@ -398,10 +398,14 @@ impl Engine {
         let mut restyle = diff.changed_nodes.clone();
 
         if !diff.changed_styles.is_empty() {
-            // Only nodes wearing a changed slot need re-pushing. `nodes.style` is
-            // immutable by design, so this is a scan rather than a lookup — and a
+            // Only nodes wearing a changed slot need re-pushing. This scans the
+            // `style` column rather than keeping a slot -> nodes index, because a
             // scan over one `u16` column is cheaper than a map that has to be
-            // maintained.
+            // maintained — and it would have to be. `nodes.style` is *not*
+            // immutable: a node can be repointed at a different slot at runtime,
+            // which is why `changed_nodes` above is a union rather than an
+            // alternative. A reverse index would need invalidating on exactly the
+            // frames that already do the most work.
             let slots = self
                 .tables
                 .u16s(protocol::Table::Nodes as usize, protocol::nodes::STYLE);

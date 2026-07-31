@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 4;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x917d9cf3;
+export const SCHEMA_HASH = 0xcd08e76a;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -341,12 +341,13 @@ export const Position = {
 } as const;
 export type Position = (typeof Position)[keyof typeof Position];
 
-/** `styles.overflow`. */
+/** `styles.overflowX` / `styles.overflowY`. `CLIP` is distinct from `HIDDEN` for one measured reason: Chromium coerces a `visible` axis to `auto` when the other axis is a scroll container, and `clip` is not one — see BROWSER-FACTS.md. */
 export const Overflow = {
   VISIBLE: 0,
   HIDDEN: 1,
   ELLIPSIS: 2,
   SCROLL: 3,
+  CLIP: 4,
 } as const;
 export type Overflow = (typeof Overflow)[keyof typeof Overflow];
 

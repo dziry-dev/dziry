@@ -1,0 +1,74 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>focus-removal</title>
+<style>
+  body { font: 12px ui-monospace, SFMono-Regular, monospace; padding: 16px; }
+  #out { white-space: pre; line-height: 1.5; }
+</style>
+<h3>focus: what survives hiding vs removal?</h3>
+<script type="module">
+  import { log, active, tick, mount, measure, report } from "./_harness.js";
+
+  // anc > mid > btn, so an ancestor can be hidden without touching the target.
+  const setup = () => {
+    mount('<div id="anc"><div id="mid"><button id="btn">t</button></div></div>');
+    const btn = document.getElementById("btn");
+    btn.focus();
+    return btn;
+  };
+  const anc = () => document.getElementById("anc");
+  const ev = ["blur", "focusout"];
+
+  log("=== does focus survive? ===");
+  await measure("remove focused element",   { setup, events: ev, mutate: (b) => b.remove() });
+  await measure("remove ancestor subtree",  { setup, events: ev, mutate: () => anc().remove() });
+  await measure("detach + reinsert same node", { setup, events: ev, mutate: () => {
+    const a = anc(), p = a.parentNode, n = a.nextSibling;
+    a.remove(); p.insertBefore(a, n);
+  }});
+  await measure("disable focused element",  { setup, events: ev, mutate: (b) => (b.disabled = true) });
+  await measure("display:none element",     { setup, events: ev, mutate: (b) => (b.style.display = "none") });
+  await measure("display:none ancestor",    { setup, events: ev, mutate: () => (anc().style.display = "none") });
+  await measure("visibility:hidden ancestor", { setup, events: ev, mutate: () => (anc().style.visibility = "hidden") });
+  await measure("hidden attribute ancestor", { setup, events: ev, mutate: () => (anc().hidden = true) });
+  await measure("inert ancestor",           { setup, events: ev, mutate: () => (anc().inert = true) });
+
+  log("");
+  log("=== is a display:none element FUNCTIONALLY focused? ===");
+  {
+    const btn = setup();
+    let keyed = false;
+    btn.addEventListener("keydown", () => (keyed = true));
+    log("  after setup()            " + active());
+    anc().style.display = "none";
+    log("  right after display:none " + active());
+    await tick();
+    log("  after one tick           " + active());
+    document.activeElement.dispatchEvent(new KeyboardEvent("keydown", { key: "a", bubbles: true }));
+    await tick();
+    log("  after dispatching keydown" + active());
+    log("  keydown reaches it       " + keyed);
+    log("  tabbable (offsetParent)  " + (btn.offsetParent !== null));
+
+    const other = document.body.appendChild(document.createElement("button"));
+    other.id = "other";
+    other.focus();
+    await tick();
+    log("  after another el focuses " + active());
+    other.remove();
+  }
+
+  log("");
+  log("=== does re-showing restore it? ===");
+  {
+    setup();
+    anc().style.display = "none";
+    await tick();
+    const hidden = active();
+    anc().style.display = "";
+    await tick();
+    log("  while hidden " + hidden + "   after re-show " + active());
+  }
+
+  report();
+</script>

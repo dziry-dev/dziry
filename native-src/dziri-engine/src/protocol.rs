@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: u32 = 4;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x917d9cf3;
+pub const SCHEMA_HASH: u32 = 0xcd08e76a;
 
 pub const TABLE_COUNT: usize = 7;
 
@@ -378,12 +378,13 @@ pub mod position {
     pub const ABSOLUTE: u8 = 1;
 }
 
-/// `styles.overflow`.
+/// `styles.overflowX` / `styles.overflowY`. `CLIP` is distinct from `HIDDEN` for one measured reason: Chromium coerces a `visible` axis to `auto` when the other axis is a scroll container, and `clip` is not one — see BROWSER-FACTS.md.
 pub mod overflow {
     pub const VISIBLE: u8 = 0;
     pub const HIDDEN: u8 = 1;
     pub const ELLIPSIS: u8 = 2;
     pub const SCROLL: u8 = 3;
+    pub const CLIP: u8 = 4;
 }
 
 /// Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care.

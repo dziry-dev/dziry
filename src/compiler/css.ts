@@ -354,8 +354,12 @@ function overflowKeyword(keyword: string, whole: string): number {
     case "visible":
       return Overflow.VISIBLE;
     case "hidden":
-    case "clip":
       return Overflow.HIDDEN;
+    // Not folded into `hidden`, though it was until a probe showed why it cannot be:
+    // `hidden` makes the box a scroll container, which coerces a `visible` axis to
+    // `auto`, and `clip` does not. Measured on Chromium 151; see BROWSER-FACTS.md.
+    case "clip":
+      return Overflow.CLIP;
     case "auto":
     case "scroll":
       return Overflow.SCROLL;
