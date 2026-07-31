@@ -63,6 +63,13 @@ pub enum RawInput {
     },
 }
 
+/// How coarsely the upload texture is sized. See `Window::resize`.
+const TEXTURE_GRID: u32 = 256;
+
+fn round_up(n: u32, to: u32) -> u32 {
+    n.div_ceil(to) * to
+}
+
 /// Forwards a resize seen mid-pump to the engine that is pumping.
 ///
 /// Deliberately stateless. The engine cannot be captured here — the callback has to
@@ -142,8 +149,12 @@ impl Window {
 
         let canvas = window.into_canvas();
         let creator = canvas.texture_creator();
+        // On the same grid `resize` uses, so the first resize does not reallocate a
+        // texture that was already big enough.
+        let texture_width = round_up(width, TEXTURE_GRID);
+        let texture_height = round_up(height, TEXTURE_GRID);
         let texture = creator
-            .create_texture_streaming(PixelFormat::ARGB8888, width, height)
+            .create_texture_streaming(PixelFormat::ARGB8888, texture_width, texture_height)
             .map_err(|e| EngineError::sdl(format!("SDL_CreateTexture: {e}")))?;
 
         let events = sdl
@@ -177,8 +188,8 @@ impl Window {
             texture,
             width,
             height,
-            texture_width: width,
-            texture_height: height,
+            texture_width,
+            texture_height,
         })
     }
 
@@ -225,14 +236,23 @@ impl Window {
         self.width = width;
         self.height = height;
 
-        if width <= self.texture_width && height <= self.texture_height {
+        // Rounded to a coarse grid rather than to a power of two. A power of two
+        // sounds free and is not: a maximized 1920x1080 window rounds to 2048x2048,
+        // which is 16.8 MB of texture for 8.3 MB of pixels, and the height nearly
+        // doubles. A 256-pixel grid costs 2048x1280 — 10.5 MB — and a drag still
+        // crosses a boundary only every 256 pixels.
+        let texture_width = round_up(width, TEXTURE_GRID);
+        let texture_height = round_up(height, TEXTURE_GRID);
+
+        let too_small = width > self.texture_width || height > self.texture_height;
+        // Shrink as well as grow, or restoring a maximized window keeps its texture
+        // for the rest of the process. Only when it is *far* too big, so ordinary
+        // dragging never trips it.
+        let far_too_big =
+            self.texture_width >= texture_width * 2 || self.texture_height >= texture_height * 2;
+        if !too_small && !far_too_big {
             return Ok(());
         }
-
-        // Grow past what was asked for, so dragging an edge outward does not
-        // reallocate on every pixel.
-        let texture_width = width.max(self.texture_width).next_power_of_two();
-        let texture_height = height.max(self.texture_height).next_power_of_two();
 
         let texture = self
             .creator
