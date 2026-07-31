@@ -10,7 +10,7 @@
  * specificity, inheritance and expansion together rather than a seam.
  */
 import { expect, test } from "bun:test";
-import { compile, compileTree, emit, toCompiledUi } from "./compile.ts";
+import { compile, compileTree, dump, emit, toCompiledUi } from "./compile.ts";
 import { compileVariants, findToggles } from "./variant-compile.ts";
 import { parseHtml } from "./html.ts";
 import { compactBits, INITIAL_STYLE, Predicate, UNSET, type StyleField } from "../ir.ts";
@@ -276,4 +276,64 @@ test("a uniform style column is emitted as a fill, and a varying one is not", ()
   expect(source).toMatch(/basis: new Float32Array\(\d+\)\.fill\(NaN\),/);
   // Uniform is a property of the values, not of the field.
   expect(source).toMatch(/width: new Float32Array\(\[[^\]]*10[^\]]*20[^\]]*\]\)/);
+});
+
+// ---------------------------------------------------------------------------
+// Golden IR
+// ---------------------------------------------------------------------------
+
+/**
+ * One fixture, the whole IR, as text.
+ *
+ * `dump()` already existed for `bun run compile`, which makes it the cheapest
+ * broad assertion available: node kinds and tree shape, style interning and reuse,
+ * inheritance, the hover variant, and the string table, all in one comparison.
+ * The individual tests above pin *rules*; this pins the *output*, so a change
+ * anywhere in the pipeline has to be looked at and either explained or fixed.
+ *
+ * Written inline rather than as a snapshot file: a golden nobody reads is a golden
+ * that gets regenerated on autopilot. Notice what it records — style 2 is shared by
+ * `.row` and the nested `.row` span, `fg` is inherited into every slot including
+ * the text nodes, and the button's `hover` slot repeats every non-colour field
+ * because a variant is a whole resolved style rather than a delta.
+ */
+test("the IR for one small document is exactly this", () => {
+  const html =
+    `<body class="page"><h1 id="title">Hi</h1><div class="row">` +
+    `<button class="btn">Go</button><span class="row">x</span></div></body>`;
+  const css = `
+  .page { padding: 8px; display: flex; flex-direction: column; gap: 4px; color: #eeeeee }
+  #title { font-size: 20px; font-weight: 700 }
+  .row { display: flex; gap: 4px }
+  .btn { background: #123456; border: 1px solid #abcdef; border-radius: 6px; padding: 2px 6px }
+  .btn:hover { background: #2244aa }
+`;
+
+  expect(dump(compile(html, css))).toBe(
+    [
+      "tree",
+      "  #0 box  style=0",
+      "    #1 box  style=1",
+      '      #2 text "Hi"  style=1',
+      "    #3 box  style=2",
+      '      #4 button "Go"  style=3 hover=4',
+      "      #5 box  style=2",
+      '        #6 text "x"  style=5',
+      "",
+      "styles (6 unique)",
+      "    0  fg=#eeeeee padT=8 padR=8 padB=8 padL=8 gapRow=4 gapCol=4",
+      "    1  fg=#eeeeee fontSize=20 fontWeight=700",
+      "    2  fg=#eeeeee direction=row gapRow=4 gapCol=4",
+      "    3  bg=#123456 fg=#eeeeee borderColor=#abcdef borderWidth=1 radius=6 " +
+        "padT=2 padR=6 padB=2 padL=6",
+      "    4  bg=#2244aa fg=#eeeeee borderColor=#abcdef borderWidth=1 radius=6 " +
+        "padT=2 padR=6 padB=2 padL=6",
+      "    5  fg=#eeeeee",
+      "",
+      "strings (3)",
+      '    0  "Hi"',
+      '    1  "Go"',
+      '    2  "x"',
+    ].join("\n"),
+  );
 });
