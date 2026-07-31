@@ -41,8 +41,28 @@ const VARIANT_SLOTS: usize = protocol::Table::VariantSlots as usize;
 /// displacing it, so its cost is what it hides.
 const THUMB_THICKNESS: f32 = 8.0;
 
+/// How thick a thumb gets once the pointer is on it, or dragging it.
+///
+/// Overlay bars are deliberately unobtrusive, which makes them hard to *aim* at. The
+/// answer every overlay implementation reaches is the same: stay thin until the pointer
+/// is there, then become a control. The grab region is wider still — see
+/// [`Bar::hot`] — so this is about looking grabbable rather than being grabbable.
+const THUMB_THICKNESS_ACTIVE: f32 = 11.0;
+
 /// The gap between a thumb and the padding-box edge it runs along.
 const THUMB_INSET: f32 = 2.0;
+
+/// How wide a strip along the edge counts as "on the scrollbar" for input.
+///
+/// Wider than the thumb is drawn, and that asymmetry is the point: an 8 px target is
+/// a miss most of the time, and a bar that has to be hit exactly is worse than no bar.
+/// 16 is Chromium's classic gutter (15, measured) rounded up — the width a user who has
+/// ever used a scrollbar expects to be able to aim at.
+///
+/// The visual and the hot region are computed together in [`Painter::bars_of`] and
+/// never separately, because a bar you can see in one place and grab in another is the
+/// specific bug this shape exists to prevent.
+const BAR_HOT_WIDTH: f32 = 16.0;
 
 /// The shortest a thumb may get, so a very long document still leaves something
 /// grabbable and visible rather than a sub-pixel tick.
@@ -53,6 +73,12 @@ const THUMB_MIN: f32 = 24.0;
 /// Translucent for one reason: an overlay bar sits on top of content, so anything it
 /// covers has to stay legible through it.
 const THUMB_ALPHA: u8 = 90;
+
+/// The same, with the pointer on the bar. Still translucent — it is still over content.
+const THUMB_ALPHA_HOVER: u8 = 150;
+
+/// And while it is being dragged, where the user's attention already is.
+const THUMB_ALPHA_HELD: u8 = 200;
 
 /// Where a thumb sits along a `track`-long bar, as `(start, length)`.
 ///
@@ -81,6 +107,88 @@ fn thumb(track: f32, viewport: f32, extent: f32, offset: f32) -> Option<(f32, f3
         0.0
     };
     Some(((track - length) * progress, length))
+}
+
+/// One scrollbar: what is drawn, what can be grabbed, and what it maps onto.
+///
+/// Produced once by [`Painter::bars_of`] and used by both the paint walk and the input
+/// path, which is the whole reason it is a type. The alternative — paint computing a
+/// rect and input computing the same rect again — is a bar that drifts from its own hit
+/// region as soon as either side is edited.
+///
+/// Rects are in the container's own unscrolled layout space, the space the paint walk is
+/// in when it draws them. Input converts *the pointer* into that space rather than
+/// converting these, so there is one direction of travel and no rect exists in two
+/// forms.
+#[derive(Clone, Copy, Debug)]
+pub struct Bar {
+    pub node: usize,
+    pub vertical: bool,
+    /// The corridor the thumb travels in — the part of the bar that means anything.
+    pub track: Rect,
+    /// The thumb, as drawn.
+    pub thumb: Rect,
+    /// The track widened across its short axis to something a pointer can hit.
+    pub hot: Rect,
+    /// How far the content can scroll on this axis.
+    pub extent: f32,
+    /// How much of it is visible — one page, for a click in the track.
+    pub viewport: f32,
+}
+
+impl Bar {
+    /// The pointer coordinate that matters, along the axis this bar runs.
+    pub fn along(&self, px: f32, py: f32) -> f32 {
+        if self.vertical {
+            py
+        } else {
+            px
+        }
+    }
+
+    /// Where the track starts and how long it is, along that same axis.
+    pub fn span(&self) -> (f32, f32) {
+        if self.vertical {
+            (self.track.top, self.track.height())
+        } else {
+            (self.track.left, self.track.width())
+        }
+    }
+
+    /// Where the thumb starts and how long it is.
+    pub fn thumb_span(&self) -> (f32, f32) {
+        if self.vertical {
+            (self.thumb.top, self.thumb.height())
+        } else {
+            (self.thumb.left, self.thumb.width())
+        }
+    }
+
+    /// Whether the point is on the thumb rather than merely on the bar.
+    ///
+    /// Across the bar this asks about [`Bar::hot`], not the thumb's drawn width: a
+    /// press 6 px to the side of a thin thumb is aimed at the thumb, and treating it as
+    /// a track click would page the content away from where the user was pointing.
+    pub fn on_thumb(&self, px: f32, py: f32) -> bool {
+        let (start, len) = self.thumb_span();
+        let at = self.along(px, py);
+        at >= start && at < start + len
+    }
+
+    /// The scroll offset that puts the thumb's start at `at`, clamped to the extent.
+    ///
+    /// The inverse of [`thumb`], and it has to divide by the same travel: dividing by
+    /// the track's whole length instead is the classic scrollbar bug where the content
+    /// lags the cursor and can never quite reach the end.
+    pub fn offset_at(&self, at: f32) -> f32 {
+        let (start, track_len) = self.span();
+        let (_, thumb_len) = self.thumb_span();
+        let travel = track_len - thumb_len;
+        if travel <= 0.0 {
+            return 0.0;
+        }
+        (((at - start) / travel) * self.extent).clamp(0.0, self.extent)
+    }
 }
 
 /// Gathers the bits of `value` that are set in `mask` down to a dense index.
@@ -157,6 +265,20 @@ enum Step {
     Restore(usize),
 }
 
+/// Which scrollbar the pointer is on, and whether it is being held.
+///
+/// Not a node index, and deliberately outside predicate resolution: a scrollbar is
+/// painted furniture the compiler has never heard of, so it cannot be `:hover`ed in
+/// the sense the variant machinery means. It only changes how the bar itself is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BarHover {
+    pub node: usize,
+    /// Which of the container's two bars.
+    pub vertical: bool,
+    /// Held, rather than merely under the pointer.
+    pub held: bool,
+}
+
 /// Which node is under the cursor, pressed, and focused.
 ///
 /// The engine owns this now, rather than Bun: it owns the event loop, so it can
@@ -167,6 +289,8 @@ pub struct InputState {
     pub hovered: i32,
     pub pressed: i32,
     pub focused: i32,
+    /// The scrollbar under the pointer, if the pointer is on one at all.
+    pub bar: Option<BarHover>,
 }
 
 impl InputState {
@@ -175,6 +299,53 @@ impl InputState {
             hovered: -1,
             pressed: -1,
             focused: -1,
+            bar: None,
+        }
+    }
+
+    /// The hover state of `node`'s bar on one axis: held, hovered, or neither.
+    fn bar_state(&self, node: usize, vertical: bool) -> BarPhase {
+        match self.bar {
+            Some(bar) if bar.node == node && bar.vertical == vertical => {
+                if bar.held {
+                    BarPhase::Held
+                } else {
+                    BarPhase::Hovered
+                }
+            }
+            _ => BarPhase::Idle,
+        }
+    }
+}
+
+/// How prominent a bar is right now.
+///
+/// A bar under the pointer thickens and darkens, and one being dragged more so. Both
+/// are the same idea — the bar becomes a control while you are using it, and gets out
+/// of the way when you are not — so they are one axis with three stops rather than two
+/// independent flags.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarPhase {
+    Idle,
+    Hovered,
+    Held,
+}
+
+impl BarPhase {
+    fn thickness(self) -> f32 {
+        match self {
+            BarPhase::Idle => THUMB_THICKNESS,
+            // Both grown states are the same width: a thumb that changed size at the
+            // moment you pressed it would move under the cursor mid-grab.
+            BarPhase::Hovered | BarPhase::Held => THUMB_THICKNESS_ACTIVE,
+        }
+    }
+
+    fn alpha(self) -> u8 {
+        match self {
+            BarPhase::Idle => THUMB_ALPHA,
+            BarPhase::Hovered => THUMB_ALPHA_HOVER,
+            BarPhase::Held => THUMB_ALPHA_HELD,
         }
     }
 }
@@ -529,13 +700,53 @@ impl Painter {
         state: &InputState,
         node: usize,
     ) {
+        let (bar_x, bar_y) = self.bars_of(tables, geometry, state, node);
+        let slot = self.style_for(tables, node, state);
+        // The container's own text colour, at the phase's alpha instead of its own.
+        // Nothing in the schema describes a scrollbar, and the foreground is the one
+        // colour a box is already guaranteed to contrast against its own background —
+        // so this reads correctly in a dark theme without a second colour to keep in
+        // sync with it. Its alpha is *replaced* rather than scaled: a bar over
+        // transparent text still has to be visible.
+        let fg = tables
+            .u32s(STYLES, protocol::styles::FG)
+            .get(slot)
+            .copied()
+            .unwrap_or(0);
+
+        for bar in [bar_y, bar_x].into_iter().flatten() {
+            let alpha = state.bar_state(node, bar.vertical).alpha();
+            self.fill
+                .set_color(Color::from((fg & 0x00ff_ffff) | ((alpha as u32) << 24)));
+            // Fully round ends: the radius is half the short side, so the thumb is a
+            // capsule at every thickness rather than a rect with hinted corners.
+            let radius = bar.thumb.width().min(bar.thumb.height()) / 2.0;
+            canvas.draw_round_rect(bar.thumb, radius, radius, &self.fill);
+        }
+    }
+
+    /// The geometry of a container's two scrollbars: `(horizontal, vertical)`.
+    ///
+    /// The single source for both what is drawn and what can be clicked. Everything
+    /// that decides whether a bar exists lives here — scrollability, whether the
+    /// content actually overflows, whether the box is big enough to say so — so paint
+    /// and input cannot disagree about any of it.
+    pub fn bars_of(
+        &self,
+        tables: &Tables,
+        geometry: Geometry,
+        state: &InputState,
+        node: usize,
+    ) -> (Option<Bar>, Option<Bar>) {
+        const NONE: (Option<Bar>, Option<Bar>) = (None, None);
+
         // The *base* style, matching [`is_scrollable`]: this bar promises the wheel
         // will move this box, so it has to be drawn from the same fact the wheel
         // reads. A node whose scrollability changed on hover would otherwise show a
         // bar that does nothing.
         let (may_scroll_x, may_scroll_y) = scrollable_axes(tables, node);
         if !may_scroll_x && !may_scroll_y {
-            return;
+            return NONE;
         }
 
         // `auto`, not `scroll`: a bar exists only where the content actually
@@ -545,14 +756,14 @@ impl Painter {
         //
         // Half a pixel of overflow is rounding, not a scroll region.
         let extent = geometry.extent_of(node);
-        let bar_x = may_scroll_x && extent[0] > 0.5;
-        let bar_y = may_scroll_y && extent[1] > 0.5;
-        if !bar_x && !bar_y {
-            return;
+        let wants_x = may_scroll_x && extent[0] > 0.5;
+        let wants_y = may_scroll_y && extent[1] > 0.5;
+        if !wants_x && !wants_y {
+            return NONE;
         }
 
         let Some(&[x, y, w, h]) = geometry.bounds.get(node) else {
-            return;
+            return NONE;
         };
 
         // The padding box, because that is what the clip is: the bars sit inside the
@@ -564,64 +775,78 @@ impl Painter {
         // its own clause because NaN fails every comparison, so the size tests alone
         // would let a nonsense rect through — the trap `radius` fell into in `node`.
         if !vw.is_finite() || !vh.is_finite() || vw <= THUMB_THICKNESS || vh <= THUMB_THICKNESS {
-            return;
+            return NONE;
         }
 
         let offset = geometry.scroll_of(node);
-        let slot = self.style_for(tables, node, state);
-        // The container's own text colour, at `THUMB_ALPHA` instead of its own. Nothing
-        // in the schema describes a scrollbar, and the foreground is the one colour a
-        // box is already guaranteed to contrast against its own background — so this
-        // reads correctly in a dark theme without a second colour to keep in sync with
-        // it. Its alpha is *replaced* rather than scaled: a bar over transparent text
-        // still has to be visible.
-        let fg = tables
-            .u32s(STYLES, protocol::styles::FG)
-            .get(slot)
-            .copied()
-            .unwrap_or(0);
-        self.fill.set_color(Color::from(
-            (fg & 0x00ff_ffff) | ((THUMB_ALPHA as u32) << 24),
-        ));
+        // Each thickness comes from that bar's own phase, so hovering the vertical bar
+        // does not fatten the horizontal one.
+        let thick_x = state.bar_state(node, false).thickness();
+        let thick_y = state.bar_state(node, true).thickness();
 
-        let radius = THUMB_THICKNESS / 2.0;
-        // Where two bars meet, each track stops short of the other so the thumbs
-        // cannot cross in the corner.
-        let corner = THUMB_THICKNESS + THUMB_INSET * 2.0;
+        let mut out = NONE;
 
-        if bar_y {
-            let track = vh - THUMB_INSET * 2.0 - if bar_x { corner } else { 0.0 };
-            if let Some((start, len)) = thumb(track, vh, extent[1], offset[1]) {
-                canvas.draw_round_rect(
-                    Rect::from_xywh(
-                        vx + vw - THUMB_THICKNESS - THUMB_INSET,
-                        vy + THUMB_INSET + start,
-                        THUMB_THICKNESS,
-                        len,
+        if wants_y {
+            // Where two bars meet, each track stops short of the other so the thumbs
+            // cannot cross in the corner. It is the *other* bar's thickness that takes
+            // the room, which is why this is not one shared constant.
+            let corner = if wants_x {
+                thick_x + THUMB_INSET * 2.0
+            } else {
+                0.0
+            };
+            let track_len = vh - THUMB_INSET * 2.0 - corner;
+            if let Some((start, len)) = thumb(track_len, vh, extent[1], offset[1]) {
+                let left = vx + vw - thick_y - THUMB_INSET;
+                let top = vy + THUMB_INSET;
+                out.1 = Some(Bar {
+                    node,
+                    vertical: true,
+                    track: Rect::from_xywh(left, top, thick_y, track_len),
+                    thumb: Rect::from_xywh(left, top + start, thick_y, len),
+                    // Grown inwards from the edge the bar is pinned to, and never
+                    // wider than the box: a narrow container must not end up with its
+                    // whole width counted as scrollbar.
+                    hot: Rect::from_xywh(
+                        vx + vw - BAR_HOT_WIDTH.min(vw),
+                        top,
+                        BAR_HOT_WIDTH.min(vw),
+                        track_len,
                     ),
-                    radius,
-                    radius,
-                    &self.fill,
-                );
+                    extent: extent[1],
+                    viewport: vh,
+                });
             }
         }
 
-        if bar_x {
-            let track = vw - THUMB_INSET * 2.0 - if bar_y { corner } else { 0.0 };
-            if let Some((start, len)) = thumb(track, vw, extent[0], offset[0]) {
-                canvas.draw_round_rect(
-                    Rect::from_xywh(
-                        vx + THUMB_INSET + start,
-                        vy + vh - THUMB_THICKNESS - THUMB_INSET,
-                        len,
-                        THUMB_THICKNESS,
+        if wants_x {
+            let corner = if wants_y {
+                thick_y + THUMB_INSET * 2.0
+            } else {
+                0.0
+            };
+            let track_len = vw - THUMB_INSET * 2.0 - corner;
+            if let Some((start, len)) = thumb(track_len, vw, extent[0], offset[0]) {
+                let left = vx + THUMB_INSET;
+                let top = vy + vh - thick_x - THUMB_INSET;
+                out.0 = Some(Bar {
+                    node,
+                    vertical: false,
+                    track: Rect::from_xywh(left, top, track_len, thick_x),
+                    thumb: Rect::from_xywh(left + start, top, len, thick_x),
+                    hot: Rect::from_xywh(
+                        left,
+                        vy + vh - BAR_HOT_WIDTH.min(vh),
+                        track_len,
+                        BAR_HOT_WIDTH.min(vh),
                     ),
-                    radius,
-                    radius,
-                    &self.fill,
-                );
+                    extent: extent[0],
+                    viewport: vw,
+                });
             }
         }
+
+        out
     }
 
     fn node(
@@ -849,6 +1074,79 @@ pub fn scrollable_at(
     found
 }
 
+impl Painter {
+    /// The scrollbar under a window-coordinate point, innermost first.
+    ///
+    /// Consulted *before* [`hit_test`], because an overlay bar is on top of content and
+    /// a press that lands on it is aimed at it. Without that order a click near the
+    /// right edge of a scrolling list would both drag the bar and press the row under
+    /// it.
+    ///
+    /// Innermost wins, matching [`scrollable_at`]: the bar of the list you are pointing
+    /// at, not the page's.
+    pub fn bar_at(
+        &self,
+        tables: &Tables,
+        geometry: Geometry,
+        state: &InputState,
+        root: usize,
+        px: f32,
+        py: f32,
+    ) -> Option<Bar> {
+        let count = geometry.bounds.len();
+        let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
+        let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
+        let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
+
+        let mut found = None;
+        // Each entry carries the scroll its ancestors have applied, as every other walk
+        // in this file does.
+        let mut stack: Vec<(usize, f32, f32)> = vec![(root, 0.0, 0.0)];
+        let mut budget = count.saturating_mul(2) + 16;
+
+        while let Some((node, sx, sy)) = stack.pop() {
+            if budget == 0 {
+                break;
+            }
+            budget -= 1;
+
+            if node >= count || hidden.get(node).copied().unwrap_or(0) != 0 {
+                continue;
+            }
+
+            let [x, y, w, h] = geometry.bounds[node];
+            if px < x - sx || py < y - sy || px >= x + w - sx || py >= y + h - sy {
+                continue;
+            }
+
+            // The bars are in unscrolled layout space, so the *pointer* moves into it.
+            // One direction of travel: a rect that existed in both spaces is how a bar
+            // and its hit region drift apart.
+            let (at_x, at_y) = (px + sx, py + sy);
+            let (bar_x, bar_y) = self.bars_of(tables, geometry, state, node);
+            // Vertical first: where both bars' hot regions overlap, in the corner, the
+            // vertical one wins because it is the one almost every wheel-less scroll
+            // reaches for.
+            for bar in [bar_y, bar_x].into_iter().flatten() {
+                let hot = bar.hot;
+                if at_x >= hot.left && at_x < hot.right && at_y >= hot.top && at_y < hot.bottom {
+                    found = Some(bar);
+                    break;
+                }
+            }
+
+            let own = geometry.scroll_of(node);
+            let mut c = first.get(node).copied().unwrap_or(-1);
+            while c >= 0 && (c as usize) < count {
+                stack.push((c as usize, sx + own[0], sy + own[1]));
+                c = next[c as usize];
+            }
+        }
+
+        found
+    }
+}
+
 /// Topmost interactive node containing the point, or `-1`.
 ///
 /// Walks the live tree rather than a sorted `interactive` array: arena rows are
@@ -860,9 +1158,10 @@ pub fn scrollable_at(
 /// non-zero root would have hit-tested a tree that is not on screen, which is
 /// the kind of divergence that only shows up in someone else's app.
 ///
-/// The scrollbars are not in this walk. They are painted furniture, not nodes, so a
-/// click that lands on one reaches whatever is under it — see ROADMAP, "Dragging a
-/// scrollbar".
+/// The scrollbars are not in this walk, and must not be: they are painted furniture with
+/// no row in the tree. [`Painter::bar_at`] is their walk, and the input path asks it
+/// *first* — an overlay bar is on top of the content, so a press on one is aimed at it
+/// rather than at whatever it covers.
 pub fn hit_test(tables: &Tables, geometry: Geometry, root: usize, px: f32, py: f32) -> i32 {
     let count = geometry.bounds.len();
     let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);

@@ -235,8 +235,8 @@ FFI, text measurement, mouse and keyboard input, event-driven repaint, increment
 validated the architecture and are what the Rust engine now implements properly.
 
 **Landed in the engine since**: per-axis `overflow` with clipping, wheel scrolling with
-nested-scroll escape, hit-testing that follows the offset, and an overlay scrollbar that reports
-where in the content you are — see A4. Dragging that scrollbar is not done.
+nested-scroll escape, hit-testing that follows the offset, and an overlay scrollbar you can
+grab, drag, page and hover — see A4.
 
 **Not started**: text clipping and editing, images, SVG, animation, widgets, windowing,
 packaging, hot reload, CLI, diagnostics.
@@ -438,21 +438,26 @@ dziri and that gutter, and they have to land together or not at all:
 Buying both gets one case: content that fits inside a box declared `overflow: scroll`. Not worth
 two layout passes yet, so it is deferred rather than half-done.
 
-#### Dragging a scrollbar
+#### The scrollbar is a control, not an indicator
 
-The thumb signals and reports; it is not yet a control. Grabbing one needs three things the input
-path does not have:
+Grab it, drag it, click the track to page, and it thickens under the pointer. Three things had to
+exist for that, and they are worth naming because each has an obvious wrong version:
 
-- **A hit region that is not a node.** `hit_test` walks the tree, and a scrollbar is painted
-  furniture with no row in it. Today a click near the right edge of a scroll container reaches
-  whatever is under the bar — which is the cost of overlay, and the reason a classic gutter
-  eventually earns its keep.
-- **Pointer capture.** A drag has to keep tracking after the cursor leaves the bar, which means an
-  input mode the engine currently has no state for.
-- **Position-to-offset**, the inverse of `thumb()` — divide by the same track, not by the box.
+- **A hit region that is not a node.** `hit_test` walks the tree and a scrollbar has no row in it,
+  so `Painter::bar_at` is its own walk, consulted *before* the tree — an overlay bar is on top of
+  the content, so a press that lands on it is aimed at it, and the row underneath must not also be
+  clicked. The grab region is 16 px, wider than the 8 px the thumb is drawn at: an 8 px target is
+  a miss most of the time. Both come out of `bars_of` together, so what you can see and what you
+  can grab cannot drift apart.
+- **Pointer capture**, which is just the drag being state: while `Engine::drag` is set the pointer
+  means "where the thumb goes" and nothing else, whether or not it is still over the bar or even
+  in the window.
+- **The grab offset.** A drag keeps the point the thumb was picked up by. Centring the thumb on
+  the cursor instead is the classic wrong version — the content lurches the instant you touch the
+  bar.
 
-Until then the wheel is the only way to scroll, which is what the sample exercises. Click-in-track
-paging and hover thickening are the same work and can follow it.
+Still to do: **held-button auto-repeat** on a track click (one click, one page today), and a
+`scroll-behavior`-style animated jump for the page rather than a hard cut.
 
 ### A5 · Images, icons, and single-line text input
 - Image decode, async load, cache, eviction. Decode off the main thread.

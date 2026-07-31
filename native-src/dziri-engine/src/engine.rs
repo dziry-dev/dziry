@@ -28,7 +28,9 @@ use skia_safe::{
 
 use crate::error::EngineError;
 use crate::layout::LayoutTree;
-use crate::paint::{hit_test, is_scrollable, scrollable_at, Geometry, InputState, Painter};
+use crate::paint::{
+    hit_test, is_scrollable, scrollable_at, BarHover, Geometry, InputState, Painter,
+};
 use crate::protocol::{self, event_kind};
 use crate::tables::{Capacities, Diff, SpanDesc, Tables};
 use crate::text::Measurer;
@@ -105,6 +107,19 @@ pub struct EngineConfig {
     pub title_len: u32,
 }
 
+/// A scrollbar being dragged.
+///
+/// `grab` is what makes a drag feel right: the offset from the thumb's start to where it
+/// was actually picked up, held constant for the whole gesture. Without it the thumb
+/// centres itself on the cursor at the first move, which reads as the content lurching
+/// the instant you touch the bar.
+#[derive(Clone, Copy, Debug)]
+struct BarDrag {
+    node: usize,
+    vertical: bool,
+    grab: f32,
+}
+
 pub struct Engine {
     tables: Tables,
     tree: LayoutTree,
@@ -142,6 +157,13 @@ pub struct Engine {
     /// tables. Keyed by node id, which append-and-abandon list growth never
     /// invalidates.
     scroll: Vec<[f32; 2]>,
+    /// A scrollbar drag in progress.
+    ///
+    /// Engine state for the same reason a scroll offset is: nothing the host authored,
+    /// and it has to survive the frames in between. It also *is* the pointer capture —
+    /// while this is set the pointer's position means "where the thumb goes" and nothing
+    /// else, whether or not it is still over the bar.
+    drag: Option<BarDrag>,
     /// The most recently encoded PNG, waiting to be copied out.
     png: Vec<u8>,
 }
@@ -203,6 +225,7 @@ impl Engine {
             last_frame_ms: 0.0,
             last_live_repaint: std::time::Instant::now(),
             scroll: vec![[0.0; 2]; caps.nodes as usize],
+            drag: None,
             png: Vec::new(),
         })
     }
@@ -640,63 +663,9 @@ impl Engine {
                     self.scroll_at(x, y, dx * WHEEL_NOTCH_PX, dy * WHEEL_NOTCH_PX);
                 }
 
-                RawInput::MouseMotion { x, y } => {
-                    let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
-                    if hit != self.state.hovered {
-                        self.state.hovered = hit;
-                        // A hover is a repaint the host never hears about until
-                        // it drains, so the engine decides this itself.
-                        self.needs_paint = true;
-                        self.events.push(Event {
-                            kind: event_kind::MOUSE_MOVE,
-                            node: hit,
-                            x,
-                            y,
-                            ..Default::default()
-                        });
-                    }
-                }
-
-                RawInput::MouseDown { x, y } => {
-                    let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
-                    // Clicking is the only way to acquire focus for now;
-                    // keyboard traversal is A3.
-                    self.state.pressed = hit;
-                    self.state.focused = hit;
-                    self.needs_paint = true;
-                    self.events.push(Event {
-                        kind: event_kind::MOUSE_DOWN,
-                        node: hit,
-                        x,
-                        y,
-                        ..Default::default()
-                    });
-                }
-
-                RawInput::MouseUp { x, y } => {
-                    let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
-                    // A click is press and release on the *same* node, which is
-                    // what makes dragging off a button cancel it.
-                    if self.state.pressed != -1 && hit == self.state.pressed {
-                        self.events.push(Event {
-                            kind: event_kind::CLICK,
-                            node: hit,
-                            x,
-                            y,
-                            ..Default::default()
-                        });
-                    }
-                    self.state.pressed = -1;
-                    self.state.hovered = hit;
-                    self.needs_paint = true;
-                    self.events.push(Event {
-                        kind: event_kind::MOUSE_UP,
-                        node: hit,
-                        x,
-                        y,
-                        ..Default::default()
-                    });
-                }
+                RawInput::MouseMotion { x, y } => self.mouse_move(x, y),
+                RawInput::MouseDown { x, y } => self.mouse_down(x, y),
+                RawInput::MouseUp { x, y } => self.mouse_up(x, y),
 
                 RawInput::KeyDown { keycode, mods } => self.events.push(Event {
                     kind: event_kind::KEY_DOWN,
@@ -800,6 +769,11 @@ impl Engine {
             hovered,
             pressed,
             focused,
+            // A scrollbar hover has no node to name, so there is nothing for these
+            // three integers to say about it. Left alone rather than cleared: this
+            // override exists to stand in for a mouse, and a screenshot taken with
+            // `--hover` should not also decide that no bar is under the cursor.
+            bar: self.state.bar,
         };
         self.needs_paint = true;
     }
@@ -819,6 +793,248 @@ impl Engine {
             bounds: self.tree.bounds(),
             scroll: &self.scroll,
             extent: self.tree.overflow(),
+        }
+    }
+
+    /// The pointer moved to `(x, y)`, in window coordinates.
+    ///
+    /// A method rather than a match arm because these three are the whole pointer
+    /// state machine — drag, then bars, then the tree — and a test has no SDL to ask.
+    /// The order is the substance: an overlay bar is drawn on top of content, so
+    /// whatever is under it is not what the pointer is on.
+    pub fn mouse_move(&mut self, x: f32, y: f32) {
+        // A drag owns the pointer: while one is live the cursor means "where the thumb
+        // goes" and nothing else, which is what pointer capture buys and why the drag
+        // is checked before anything else.
+        if self.drag_to(x, y) {
+            return;
+        }
+
+        // Then the bars, before the tree. An overlay bar is drawn on top of content, so
+        // the content under it is not what the pointer is on.
+        let bar = self.bar_hover_at(x, y, false);
+        if bar != self.state.bar {
+            self.state.bar = bar;
+            self.needs_paint = true;
+        }
+        if bar.is_some() {
+            // Whatever the bar covers stops being hovered, or a row's hover style
+            // would stay lit while the pointer is demonstrably on something else.
+            if self.state.hovered != -1 {
+                self.state.hovered = -1;
+                self.needs_paint = true;
+            }
+            return;
+        }
+
+        let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
+        if hit != self.state.hovered {
+            self.state.hovered = hit;
+            // A hover is a repaint the host never hears about until it drains, so the
+            // engine decides this itself.
+            self.needs_paint = true;
+            self.events.push(Event {
+                kind: event_kind::MOUSE_MOVE,
+                node: hit,
+                x,
+                y,
+                ..Default::default()
+            });
+        }
+    }
+
+    /// A press at `(x, y)`.
+    pub fn mouse_down(&mut self, x: f32, y: f32) {
+        // A press on a bar is consumed entirely: no `pressed`, no focus change, and no
+        // event for the host. The row under an overlay bar must not be clicked by
+        // someone reaching for the thumb.
+        if self.press_bar(x, y) {
+            return;
+        }
+
+        let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
+        // Clicking is the only way to acquire focus for now; keyboard traversal is A3.
+        self.state.pressed = hit;
+        self.state.focused = hit;
+        self.needs_paint = true;
+        self.events.push(Event {
+            kind: event_kind::MOUSE_DOWN,
+            node: hit,
+            x,
+            y,
+            ..Default::default()
+        });
+    }
+
+    /// A release at `(x, y)`.
+    pub fn mouse_up(&mut self, x: f32, y: f32) {
+        if self.drag.take().is_some() {
+            // The bar keeps its hover if the pointer ended up back on it, and loses it
+            // if the drag finished somewhere else.
+            self.state.bar = self.bar_hover_at(x, y, false);
+            self.needs_paint = true;
+            return;
+        }
+
+        let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
+        // A click is press and release on the *same* node, which is what makes
+        // dragging off a button cancel it.
+        if self.state.pressed != -1 && hit == self.state.pressed {
+            self.events.push(Event {
+                kind: event_kind::CLICK,
+                node: hit,
+                x,
+                y,
+                ..Default::default()
+            });
+        }
+        self.state.pressed = -1;
+        self.state.hovered = hit;
+        self.needs_paint = true;
+        self.events.push(Event {
+            kind: event_kind::MOUSE_UP,
+            node: hit,
+            x,
+            y,
+            ..Default::default()
+        });
+    }
+
+    /// What scrollbar is under `(px, py)`, as hover state.
+    ///
+    /// `held` is the caller's to state rather than something this can know: the same
+    /// point means "hovered" after a move and "held" after a press.
+    fn bar_hover_at(&self, px: f32, py: f32, held: bool) -> Option<BarHover> {
+        self.painter
+            .bar_at(
+                &self.tables,
+                self.geometry(),
+                &self.state,
+                self.root,
+                px,
+                py,
+            )
+            .map(|bar| BarHover {
+                node: bar.node,
+                vertical: bar.vertical,
+                held,
+            })
+    }
+
+    /// How far `node`'s ancestors have scrolled it, summed.
+    ///
+    /// A bar's geometry is in its container's unscrolled layout space, so a pointer in
+    /// window coordinates has to be moved into that space before it can be compared
+    /// against one. The paint and hit-test walks accumulate this on the way down; a
+    /// drag has no walk, so it climbs instead.
+    ///
+    /// Summing every ancestor's offset is right because only a scroll *container* ever
+    /// has a non-zero one, and a container always clips — so the set of ancestors that
+    /// translate is exactly the set with an offset to add.
+    fn ancestor_scroll(&self, node: usize) -> [f32; 2] {
+        let mut total = [0.0, 0.0];
+        let mut up = self.tree.parent_of(node);
+        let mut budget = self.scroll.len() + 1;
+        while let Some(parent) = up {
+            if budget == 0 {
+                break;
+            }
+            budget -= 1;
+            let own = self.scroll_of(parent);
+            total[0] += own[0];
+            total[1] += own[1];
+            up = self.tree.parent_of(parent);
+        }
+        total
+    }
+
+    /// Starts a drag, or pages the track. Returns whether the press was a bar's.
+    ///
+    /// Two gestures on one target, told apart by where along the bar the press landed.
+    /// On the thumb it is a grab, and the grab point is remembered so the thumb does not
+    /// jump under the cursor — the single most noticeable way to get a scrollbar wrong.
+    /// Elsewhere on the track it is a page, which is the desktop convention and what
+    /// Chromium does on the platform this runs on.
+    fn press_bar(&mut self, px: f32, py: f32) -> bool {
+        let Some(bar) = self.painter.bar_at(
+            &self.tables,
+            self.geometry(),
+            &self.state,
+            self.root,
+            px,
+            py,
+        ) else {
+            return false;
+        };
+
+        let shift = self.ancestor_scroll(bar.node);
+        let (at_x, at_y) = (px + shift[0], py + shift[1]);
+        let axis = usize::from(bar.vertical);
+
+        if bar.on_thumb(at_x, at_y) {
+            let (thumb_start, _) = bar.thumb_span();
+            self.drag = Some(BarDrag {
+                node: bar.node,
+                vertical: bar.vertical,
+                grab: bar.along(at_x, at_y) - thumb_start,
+            });
+        } else {
+            // A page, towards the click. `viewport` rather than the thumb's length,
+            // because a page is what the user can see, not what the bar happens to
+            // show.
+            let (thumb_start, thumb_len) = bar.thumb_span();
+            let forward = bar.along(at_x, at_y) >= thumb_start + thumb_len;
+            let by = if forward { bar.viewport } else { -bar.viewport };
+            let mut wanted = self.scroll_of(bar.node);
+            wanted[axis] = (wanted[axis] + by).clamp(0.0, bar.extent);
+            self.set_scroll(bar.node, wanted);
+        }
+
+        self.state.bar = Some(BarHover {
+            node: bar.node,
+            vertical: bar.vertical,
+            held: true,
+        });
+        self.needs_paint = true;
+        true
+    }
+
+    /// Moves a live drag to follow the pointer. Returns whether there was one.
+    fn drag_to(&mut self, px: f32, py: f32) -> bool {
+        let Some(drag) = self.drag else {
+            return false;
+        };
+
+        // Re-derived from the current layout rather than remembered from the press: a
+        // list can grow under a drag, and a thumb that keeps a stale track walks away
+        // from the cursor.
+        let (bar_x, bar_y) =
+            self.painter
+                .bars_of(&self.tables, self.geometry(), &self.state, drag.node);
+        let Some(bar) = (if drag.vertical { bar_y } else { bar_x }) else {
+            // The bar stopped existing mid-drag — the content shrank to fit. Nothing
+            // left to drag, so let go rather than keep applying a dead mapping.
+            self.drag = None;
+            self.state.bar = None;
+            self.needs_paint = true;
+            return true;
+        };
+
+        let shift = self.ancestor_scroll(drag.node);
+        let at = bar.along(px + shift[0], py + shift[1]);
+        let mut wanted = self.scroll_of(drag.node);
+        wanted[usize::from(drag.vertical)] = bar.offset_at(at - drag.grab);
+        self.set_scroll(drag.node, wanted);
+        true
+    }
+
+    /// Writes a node's scroll offset, repainting if it moved.
+    fn set_scroll(&mut self, node: usize, to: [f32; 2]) {
+        if let Some(slot) = self.scroll.get_mut(node) {
+            if *slot != to {
+                *slot = to;
+                self.needs_paint = true;
+            }
         }
     }
 
