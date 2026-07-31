@@ -132,6 +132,8 @@ pub struct Engine {
     /// animating, a tick is an event-queue drain and no pixels at all.
     needs_paint: bool,
     last_frame_ms: f32,
+    /// When the event watcher last drew mid-pump, for coalescing a live resize.
+    last_live_repaint: std::time::Instant,
     /// The most recently encoded PNG, waiting to be copied out.
     png: Vec<u8>,
 }
@@ -191,6 +193,7 @@ impl Engine {
             fresh: true,
             needs_paint: true,
             last_frame_ms: 0.0,
+            last_live_repaint: std::time::Instant::now(),
             png: Vec::new(),
         })
     }
@@ -434,11 +437,43 @@ impl Engine {
         Ok(())
     }
 
+    /// The root's own background, or black when it has none.
+    ///
+    /// Used for both clears — Skia's and the renderer's — so that every surface the
+    /// user can see between two of our frames is the colour the app is *supposed* to
+    /// be. Black was visible as a flash during a resize, and would have been a much
+    /// worse flash on a light theme.
+    fn clear_color(&self) -> u32 {
+        let styles = protocol::Table::Styles as usize;
+        let slot = self
+            .tables
+            .u16s(protocol::Table::Nodes as usize, protocol::nodes::STYLE)
+            .get(self.root)
+            .copied()
+            .unwrap_or(0) as usize;
+
+        match self
+            .tables
+            .u32s(styles, protocol::styles::BG)
+            .get(slot)
+            .copied()
+        {
+            // A transparent root says nothing about what should be behind it.
+            Some(argb) if argb >> 24 != 0 => argb,
+            _ => 0xff00_0000,
+        }
+    }
+
     fn draw(&mut self) {
+        let clear = self.clear_color();
+        if let Some(window) = self.window.as_mut() {
+            window.set_clear_color(clear);
+        }
+
         let canvas = self.surface.canvas();
         // Clear first: the root only covers the window if its own background is
         // opaque, and an unpainted frame should not show the last one.
-        canvas.clear(Color::BLACK);
+        canvas.clear(Color::from(clear));
         self.painter.paint(
             canvas,
             &self.tables,
@@ -739,8 +774,27 @@ pub(crate) fn repaint_pumping_engine(width: u32, height: u32) {
     let Some(engine) = (unsafe { Pumping::engine() }) else {
         return;
     };
+
+    // Coalesced, because a drag delivers a size change every few milliseconds and
+    // each one costs a full relayout, a repaint and a texture upload. Drawing every
+    // one of them makes dragging *slower* the faster you drag, which is exactly what
+    // it looked like: the window falls behind and shows unpainted background.
+    //
+    // Skipping is safe rather than merely tolerable: SDL also delivers the same size
+    // change through `poll`, so `pump_input` resizes and the following `tick` paints
+    // the final size regardless. What is dropped here is intermediate frames, which
+    // is the correct thing to drop under load.
+    if engine.last_live_repaint.elapsed() < LIVE_REPAINT_INTERVAL {
+        return;
+    }
+    engine.last_live_repaint = std::time::Instant::now();
     let _ = engine.resize_and_repaint(width, height);
 }
+
+/// One frame at 60 Hz. A drag is a continuous gesture, so there is nothing to gain
+/// from painting faster than the display, and a great deal to lose: at 1040x560 a
+/// frame is ~4 ms, so an uncapped watcher can spend the whole drag repainting.
+const LIVE_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
 
 /// The CPU raster surface every frame is painted into.
 ///

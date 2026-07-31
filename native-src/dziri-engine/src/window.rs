@@ -19,7 +19,9 @@
 
 use sdl3::event::{Event as SdlEvent, EventWatch, EventWatchCallback, WindowEvent};
 use sdl3::mouse::MouseButton;
-use sdl3::pixels::PixelFormat;
+use sdl3::pixels::{Color as SdlColor, PixelFormat};
+use sdl3::rect::Rect;
+use sdl3::render::FRect;
 use sdl3::render::{Texture, TextureCreator, WindowCanvas};
 use sdl3::video::WindowContext;
 use sdl3::{EventPump, Sdl, VideoSubsystem};
@@ -96,8 +98,12 @@ pub struct Window {
     canvas: WindowCanvas,
     creator: TextureCreator<WindowContext>,
     texture: Texture,
+    /// The window, in pixels.
     width: u32,
     height: u32,
+    /// The texture, which is allowed to be larger than the window — see `resize`.
+    texture_width: u32,
+    texture_height: u32,
 }
 
 impl Window {
@@ -171,6 +177,8 @@ impl Window {
             texture,
             width,
             height,
+            texture_width: width,
+            texture_height: height,
         })
     }
 
@@ -186,13 +194,49 @@ impl Window {
     }
 
     /// Reallocates the upload texture. The caller owns resizing its own surface.
+    /// The colour the renderer clears to.
+    ///
+    /// Set from the root's own background, because this colour is what the user sees
+    /// in any frame that is not ours: the moment after a resize when the OS has
+    /// enlarged the window and we have not presented yet, and whatever DWM or the
+    /// compositor decides to fill with during a drag. It defaulted to black, which
+    /// is why a resize flashed black on a dark app and would have flashed black on a
+    /// light one.
+    pub fn set_clear_color(&mut self, argb: u32) {
+        self.canvas.set_draw_color(SdlColor::RGB(
+            ((argb >> 16) & 0xff) as u8,
+            ((argb >> 8) & 0xff) as u8,
+            (argb & 0xff) as u8,
+        ));
+    }
+
+    /// Grows the upload texture. The caller owns resizing its own surface.
+    ///
+    /// Grow-only, and deliberately: a live resize delivers a size change every few
+    /// milliseconds, and destroying plus recreating a texture that often is both an
+    /// allocation per frame and a window in which the renderer has no texture to
+    /// present — which is what the black flash during a drag actually was. The
+    /// texture is therefore allowed to be *larger* than the window, and `present`
+    /// uploads and copies only the used rectangle.
     pub fn resize(&mut self, width: u32, height: u32) -> Result<(), EngineError> {
-        if width == 0 || height == 0 || (width == self.width && height == self.height) {
+        if width == 0 || height == 0 {
             return Ok(());
         }
+        self.width = width;
+        self.height = height;
+
+        if width <= self.texture_width && height <= self.texture_height {
+            return Ok(());
+        }
+
+        // Grow past what was asked for, so dragging an edge outward does not
+        // reallocate on every pixel.
+        let texture_width = width.max(self.texture_width).next_power_of_two();
+        let texture_height = height.max(self.texture_height).next_power_of_two();
+
         let texture = self
             .creator
-            .create_texture_streaming(PixelFormat::ARGB8888, width, height)
+            .create_texture_streaming(PixelFormat::ARGB8888, texture_width, texture_height)
             .map_err(|e| EngineError::sdl(format!("SDL_CreateTexture on resize: {e}")))?;
 
         let old = std::mem::replace(&mut self.texture, texture);
@@ -201,19 +245,23 @@ impl Window {
         // same struct. The cost is this line.
         unsafe { old.destroy() };
 
-        self.width = width;
-        self.height = height;
+        self.texture_width = texture_width;
+        self.texture_height = texture_height;
         Ok(())
     }
 
     pub fn present(&mut self, pixels: &[u8], pitch: usize) -> Result<(), EngineError> {
+        // Only the window-sized rectangle, since the texture may be larger. The
+        // copy takes float rects and the upload takes integer ones, hence both.
+        let used = Rect::new(0, 0, self.width, self.height);
+        let used_f = FRect::new(0.0, 0.0, self.width as f32, self.height as f32);
         self.texture
-            .update(None, pixels, pitch)
+            .update(Some(used), pixels, pitch)
             .map_err(|e| EngineError::sdl(format!("SDL_UpdateTexture: {e}")))?;
 
         self.canvas.clear();
         self.canvas
-            .copy(&self.texture, None, None)
+            .copy(&self.texture, Some(used_f), None)
             .map_err(|e| EngineError::sdl(format!("SDL_RenderTexture: {e}")))?;
         self.canvas.present();
         Ok(())
