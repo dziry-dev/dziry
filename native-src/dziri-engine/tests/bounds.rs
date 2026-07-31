@@ -882,3 +882,58 @@ fn the_descriptor_matches_the_generated_schema() {
     assert_eq!(spans[i].table, dziri_engine::tables::REGION);
     assert_eq!(spans[i].field, dziri_engine::tables::REGION_STRING_BYTES);
 }
+
+/// A resize repaints from inside the pump, without a `tick`.
+///
+/// This is the engine half of the live-resize fix: while the user drags a window
+/// edge the host's frame loop gets no turn, so an SDL event watcher calls this
+/// directly. The SDL wiring cannot be tested headlessly — there is no window — but
+/// what it calls can be, and that is where the work is: a new surface, a relayout
+/// against the new viewport, a painted frame.
+#[test]
+fn a_resize_repaints_without_waiting_for_a_tick() {
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        // The child fills the root, so its bounds *are* the viewport.
+        t.set_u8(STYLES, styles::ALIGN_ITEMS, 0, align::STRETCH);
+        t.set_f32(STYLES, styles::FLEX_GROW, 1, 1.0);
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(
+        bound(&engine, 1),
+        [0.0, 0.0, 200.0, 100.0],
+        "the window size"
+    );
+    let frames = engine.frame_count();
+
+    engine
+        .resize_and_repaint(320, 240)
+        .expect("resize and repaint");
+
+    assert_eq!(
+        bound(&engine, 1),
+        [0.0, 0.0, 320.0, 240.0],
+        "layout followed the new viewport, without a tick in between"
+    );
+    assert_eq!(
+        engine.frame_count(),
+        frames + 1,
+        "and a frame was actually painted"
+    );
+    assert_eq!(engine.size(), (320, 240));
+
+    // The next tick must not repaint what was already presented.
+    engine.tick().expect("tick");
+    assert_eq!(
+        engine.frame_count(),
+        frames + 1,
+        "an idle tick after a mid-pump repaint draws nothing"
+    );
+}

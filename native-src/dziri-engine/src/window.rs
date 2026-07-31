@@ -17,7 +17,7 @@
 //! packed `ARGB8888`. So presenting is a straight upload with no swizzle — the
 //! same property the TypeScript runtime relied on.
 
-use sdl3::event::{Event as SdlEvent, WindowEvent};
+use sdl3::event::{Event as SdlEvent, EventWatch, EventWatchCallback, WindowEvent};
 use sdl3::mouse::MouseButton;
 use sdl3::pixels::PixelFormat;
 use sdl3::render::{Texture, TextureCreator, WindowCanvas};
@@ -61,9 +61,37 @@ pub enum RawInput {
     },
 }
 
+/// Forwards a resize seen mid-pump to the engine that is pumping.
+///
+/// Deliberately stateless. The engine cannot be captured here — the callback has to
+/// be `Send + 'static`, and the engine is neither — so it is fetched from the
+/// thread-local the pump parks it in. That also means the watcher is inert whenever
+/// nothing is pumping, which is what makes a stray SDL event harmless.
+struct ResizeWatch;
+
+impl EventWatchCallback for ResizeWatch {
+    fn callback(&mut self, event: SdlEvent) {
+        // `PixelSizeChanged` rather than `Resized`: on HiDPI the two differ, and the
+        // surface is measured in pixels. `Exposed` is *not* handled — it fires for
+        // occlusion too, and repainting on it would relayout on every window that
+        // passes over this one.
+        if let SdlEvent::Window {
+            win_event: WindowEvent::PixelSizeChanged(width, height),
+            ..
+        } = event
+        {
+            if width > 0 && height > 0 {
+                crate::engine::repaint_pumping_engine(width as u32, height as u32);
+            }
+        }
+    }
+}
+
 pub struct Window {
     _sdl: Sdl,
     _video: VideoSubsystem,
+    /// Removed from SDL when this is dropped, so it must outlive the window.
+    _resize_watch: EventWatch<ResizeWatch>,
     events: EventPump,
     canvas: WindowCanvas,
     creator: TextureCreator<WindowContext>,
@@ -116,9 +144,27 @@ impl Window {
             .event_pump()
             .map_err(|e| EngineError::sdl(format!("SDL event pump: {e}")))?;
 
+        // Draw *during* a live resize, not after it.
+        //
+        // While the user drags a window edge, macOS and Windows both run a nested
+        // modal event loop inside the pump: `poll` does not return, so the host's
+        // frame loop gets no turn and the window shows a stretched or stale frame
+        // until the mouse comes up. An event watcher is called from inside that
+        // nested loop, which makes it the only place a frame can come from.
+        //
+        // The watcher is kept alive by living in this struct — dropping the handle
+        // removes it from SDL — and it does nothing except forward the new size to
+        // the engine that is currently pumping. That indirection is what keeps this
+        // file free of engine internals.
+        let event_subsystem = sdl
+            .event()
+            .map_err(|e| EngineError::sdl(format!("SDL event subsystem: {e}")))?;
+        let resize_watch = event_subsystem.add_event_watch(ResizeWatch);
+
         Ok(Self {
             _sdl: sdl,
             _video: video,
+            _resize_watch: resize_watch,
             events,
             canvas,
             creator,

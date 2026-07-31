@@ -315,6 +315,46 @@ impl Engine {
         Ok(())
     }
 
+    /// A resize repainted immediately, from inside the OS's own event handling.
+    ///
+    /// This is what an event watcher calls, and it exists because of a platform
+    /// behaviour no threading model can dodge: while the user drags a window edge,
+    /// macOS and Windows both run a *nested* modal event loop inside the pump. The
+    /// host's `while (running) { tick() }` does not get another turn until the drag
+    /// ends, so the window shows a stretched or stale frame for as long as the user
+    /// holds the mouse down.
+    ///
+    /// The roadmap's answer was A0 step 3, an engine-owned render thread. That does
+    /// not work: the nested loop blocks whichever thread owns the window, so a
+    /// render thread would be stuck behind exactly the same modal loop, and on macOS
+    /// it cannot own the window at all. Being *called by* the pump is the only way to
+    /// draw during it.
+    ///
+    /// Layout is recomputed rather than the last frame being rescaled: a resize
+    /// changes what the layout *is*, and a stretched bitmap is the artefact this is
+    /// meant to remove.
+    pub fn resize_and_repaint(&mut self, width: u32, height: u32) -> Result<(), EngineError> {
+        self.resize(width, height)?;
+
+        // `resize` set `fresh`, so this is a full relayout — which is the honest
+        // cost of a resize, and the advance cache means it is not a re-shape.
+        self.tree.compute(
+            &self.tables,
+            &mut self.measurer,
+            self.width as f32,
+            self.height as f32,
+        )?;
+        let bounds = self.tree.bounds().to_vec();
+        self.tables.write_bounds(&bounds);
+        self.fresh = false;
+
+        self.draw();
+        self.present()?;
+        self.needs_paint = false;
+        self.frame += 1;
+        Ok(())
+    }
+
     /// Turns a commit's diff into the minimum work Taffy needs.
     ///
     /// The whole point of staging is here: a colour-only theme patch touches no
@@ -428,11 +468,37 @@ impl Engine {
 
     /// Drains the platform queue, resolves hits, and records what Bun needs.
     fn pump_input(&mut self) -> Result<(), EngineError> {
-        let Some(window) = self.window.as_mut() else {
+        if self.window.is_none() {
             return Ok(());
+        }
+
+        // The one re-entrant window in the engine, and it is deliberate.
+        //
+        // SDL calls event watchers from inside the pump, which is the only moment a
+        // frame can be drawn during a live resize (see `resize_and_repaint`). The
+        // watcher therefore has to reach this engine while this call is on the
+        // stack, so the pointer is parked in a thread-local for exactly the duration
+        // of `poll` and cleared after — `Pumping` is an RAII guard so an early
+        // return or a panic cannot leave a stale pointer behind.
+        //
+        // What makes it defensible rather than merely conventional: the parked
+        // pointer is only ever readable while this frame is suspended inside
+        // `SDL_PumpEvents`, and this frame touches nothing until `poll` returns.
+        // Nothing else in the process can reach it — the handle table marks the slot
+        // `InCall`, so a re-entrant *host* call is refused rather than aliasing.
+        //
+        // The rejected alternative is the sound-by-construction one: split `Engine`
+        // into `Engine { inner: RefCell<Inner> }`, release the borrow before pumping,
+        // and let the watcher take its own. That is the right shape and it is a
+        // refactor of every method here, so it is written down (ROADMAP, "Live resize")
+        // rather than half-done. Until then this is a raw pointer with a documented
+        // invariant, which is what the SDL C API expects of its callers anyway.
+        let raw = {
+            let _pumping = Pumping::park(self);
+            // SAFETY: checked non-none above, and `poll` does not move the window.
+            self.window.as_mut().expect("checked").poll()
         };
 
-        let raw = window.poll();
         if raw.is_empty() {
             return Ok(());
         }
@@ -618,6 +684,62 @@ impl Engine {
     pub fn hit_test(&self, x: f32, y: f32) -> i32 {
         hit_test(&self.tables, self.tree.bounds(), self.root, x, y)
     }
+}
+
+thread_local! {
+    /// The engine whose `poll` is running on this thread, or null.
+    ///
+    /// A thread-local rather than a global: SDL delivers watcher callbacks on the
+    /// pumping thread, so this is the narrowest scope that reaches them, and it
+    /// cannot be observed by any other thread even in principle.
+    static PUMPING: std::cell::Cell<*mut Engine> = const { std::cell::Cell::new(std::ptr::null_mut()) };
+}
+
+/// Parks an engine pointer for the duration of one `poll`, and clears it after.
+struct Pumping;
+
+impl Pumping {
+    fn park(engine: &mut Engine) -> Self {
+        PUMPING.set(engine as *mut Engine);
+        Self
+    }
+
+    /// The engine currently pumping on this thread, for an event watcher.
+    ///
+    /// # Safety
+    /// The caller must be inside a watcher invoked by `SDL_PumpEvents` on this
+    /// thread, which is the only context in which the parked pointer is live and the
+    /// parking frame is known to be suspended.
+    unsafe fn engine() -> Option<&'static mut Engine> {
+        let ptr = PUMPING.get();
+        if ptr.is_null() {
+            return None;
+        }
+        // SAFETY: the caller's promise, plus `park` only ever storing a pointer to a
+        // live engine and clearing it on drop.
+        Some(unsafe { &mut *ptr })
+    }
+}
+
+impl Drop for Pumping {
+    fn drop(&mut self) {
+        PUMPING.set(std::ptr::null_mut());
+    }
+}
+
+/// Repaints the engine currently pumping, if a watcher saw a resize.
+///
+/// Errors are swallowed on purpose: a frame that could not be drawn *during a drag*
+/// is a cosmetic loss, and the next `tick` reports the same failure through the
+/// normal path where the host can act on it. Returning a status into SDL's event
+/// filter would achieve nothing.
+pub(crate) fn repaint_pumping_engine(width: u32, height: u32) {
+    // SAFETY: called only from the event watcher installed in `Window::new`, which
+    // SDL invokes from inside the pump on the pumping thread.
+    let Some(engine) = (unsafe { Pumping::engine() }) else {
+        return;
+    };
+    let _ = engine.resize_and_repaint(width, height);
 }
 
 /// The CPU raster surface every frame is painted into.

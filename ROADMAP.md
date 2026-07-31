@@ -61,7 +61,7 @@ a frame headlessly with no window at all.
 | --- | --- |
 | 1 · crate skeleton, SDL3 window, Skia surface, Taffy tree, `catch_unwind`, structured errors | **done** |
 | 2 · descriptor + `tick()` | **done**, both sides. `toArrayBuffer` verified to attach **no deallocator** |
-| 3 · staging buffer | **half** — staged/live arenas and the commit diff exist; the engine does not yet own a render thread, so Bun still drives `tick()` |
+| 3 · staging buffer | **done as far as it should go** — staged/live arenas and the commit diff exist, and Bun keeps driving `tick()` on purpose. The render thread this step asked for is **withdrawn**; see "Live resize" below |
 | 4 · Bun side — replace the three runtime files | **done**. `bun run dev` runs the compiled app on the engine; `layout.ts`, `paint.ts`, `text.ts`, `png.ts`, `src/ffi/*`, the probe and the natives scripts are **deleted** |
 | 5 · IME proof | not started |
 | 6 · window chrome decision | plumbed (`decorated` is fixed at window creation), not decided |
@@ -803,10 +803,42 @@ deferred past v1: Tier 2 components · rich text editing · markup hot reload
                   multi-window · plugin API · animation · layering · positioning
 ```
 
-**Immediate next step: A0 step 3 — the engine's own render thread**, then the IME proof.
-Bun still calls `tick()`, so a long computation in app code stalls a resize. The
-staged/live split that makes the move safe is already in place; what is missing is a
-thread-safe handle and a published-snapshot swap.
+### Live resize, and why the render thread is withdrawn
+
+A0 step 3 asked for an engine-owned render thread so "a resize or a caret blink
+repaints while Bun is busy". **That does not deliver it, and it is not being built.**
+While the user drags a window edge, macOS and Windows both run a *nested modal event
+loop inside the pump* — so whichever thread owns the window is stuck there, render
+thread or not. On macOS an engine-spawned thread cannot own the window at all, since
+AppKit requires the process's first thread.
+
+What does work, and is now in: an **SDL event watcher**. SDL calls watchers from
+inside the pump, including from inside that nested loop, so the frame comes from
+`Engine::resize_and_repaint` while the drag is still happening. One struct in
+`window.rs`, one thread-local in `engine.rs`, no protocol or host change, and it
+behaves identically on all three platforms.
+
+Two things are deliberately left for later, in this order:
+
+1. **The sound version of the re-entrancy.** The watcher reaches the engine through a
+   pointer parked in a thread-local for the duration of `poll`, with the invariant
+   written out at `pump_input`. The by-construction alternative is
+   `Engine { inner: RefCell<Inner> }` with the borrow released before pumping and
+   retaken by the watcher — right, and a refactor of every method on `Engine`. Do it
+   if the current shape ever produces a bug that is not obviously something else.
+2. **Blocking loop on Bun's main thread, app code in a Worker.** This is the real
+   version of "the engine owns the frame loop", and it is what Electrobun does: the
+   Bun main thread blocks in the native event loop, the app's TypeScript runs in a
+   Worker in the same process, so the zero-copy tables survive — the Worker wraps the
+   same engine memory through `toArrayBuffer`. What needs designing is the split:
+   the Worker writes tables freely, while calls that take the engine handle (`grow`,
+   event drain) have to be marshalled to the main thread, which the handle table's
+   owner-thread check already enforces. **Only worth doing if the event watcher turns
+   out to be insufficient** — a caret blink during a long JS computation is the
+   scenario it would not cover. No launcher process is needed either way:
+   `bun build --compile` already produces a binary whose main thread runs the app.
+
+**Immediate next step: the IME proof** (A0 step 5).
 
 **The compiler grew into the schema** rather than the schema shrinking. `src/ir.ts` went
 from 25 style fields to 46: grid tracks and placement, `flex-wrap`, `flex-grow`/`shrink`/
