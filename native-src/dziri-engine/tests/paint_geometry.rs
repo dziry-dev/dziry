@@ -665,6 +665,109 @@ fn a_box_with_nothing_to_scroll_draws_no_thumb() {
     );
 }
 
+/// A resize followed by an ordinary idle tick still paints the tree.
+///
+/// This is the "sometimes it hides all elements" bug itself, and it had nothing to do
+/// with scrolling. `resize` sets `fresh`, meaning "this tree has no layout". `resync`
+/// consumed that flag to decide whether to rebuild — and `rebuild` zeroes every
+/// bound — then cleared it. `tick` read it as false, found an empty diff, and skipped
+/// `compute`. What it painted was a tree in which every node was a 0x0 box at the
+/// origin: nothing to fill, nothing to measure, every node rejected by the viewport
+/// test, and only the clear colour left on screen.
+///
+/// It needed an idle frame to show, which is what made it intermittent: any table
+/// change in the same tick set `diff.any` and laid out anyway.
+#[test]
+fn a_resize_then_an_idle_tick_is_not_a_blank_window() {
+    let mut engine = scrolling_rows(protocol::overflow::VISIBLE, 1);
+    assert_eq!(
+        what_is_at(&mut engine, 60, 50),
+        "background",
+        "the row is painted before the resize"
+    );
+
+    engine.resize(200, 200).expect("resize");
+    // No table writes at all: the host had nothing to say this frame, which is the
+    // common case and was the broken one.
+    engine.tick().expect("tick");
+
+    let row = engine.bounds_of(1).expect("row bounds");
+    assert!(
+        row[2] > 0.0 && row[3] > 0.0,
+        "the row must still have a size after a resize, got {row:?}"
+    );
+    assert_eq!(
+        what_is_at(&mut engine, 60, 50),
+        "background",
+        "a resize followed by an idle tick must not paint an empty frame"
+    );
+}
+
+/// A window that grows takes back the scroll it no longer has room for.
+///
+/// Reported from the real window as "sometimes it hides all elements". A scroll offset
+/// is engine state, deliberately outlived by relayout so a box the user scrolled stays
+/// where they put it — but nothing re-clamped it, so an offset earned at one window
+/// size survived into a layout that had less to scroll, or nothing at all. The content
+/// was then translated up by an offset the box could no longer justify and left the
+/// screen, and no scrollbar was drawn either, because by then the extent was 0.
+#[test]
+fn growing_the_window_gives_back_a_scroll_it_can_no_longer_hold() {
+    // 300 of content in 120: 180 of scroll, all of which we take.
+    let mut engine = scrolling_rows(protocol::overflow::SCROLL, 3);
+    assert!(engine.scroll_at(60.0, 60.0, 0.0, 10_000.0), "scrolled");
+    engine.tick().expect("tick");
+    assert_eq!(
+        engine.scroll_of(0),
+        [0.0, 180.0],
+        "scrolled to the very end"
+    );
+
+    // Now 300 of content in 400: nothing overflows, so there is nothing to scroll
+    // and the content belongs at the top of the box.
+    engine.resize(120, 400).expect("resize");
+    engine.tick().expect("tick");
+
+    assert_eq!(
+        engine.scroll_of(0),
+        [0.0, 0.0],
+        "a box with nothing left to scroll cannot still be scrolled"
+    );
+    assert_eq!(
+        what_is_at(&mut engine, 60, 10),
+        "background",
+        "the first row is back at the top of the box, not 180px above it"
+    );
+    assert_eq!(
+        what_is_at(&mut engine, 60, 250),
+        "background",
+        "and the content reaches where it should rather than ending 180px early"
+    );
+}
+
+/// The same clamp, when there is *some* scroll left rather than none.
+///
+/// The half of the fix that a "reset it to zero" answer would get wrong: growing a
+/// window that still overflows must keep the user's position, only shortened to what
+/// now fits. Losing it entirely would be its own bug.
+#[test]
+fn a_scroll_that_still_fits_is_kept_not_reset() {
+    let mut engine = scrolling_rows(protocol::overflow::SCROLL, 3);
+    assert!(engine.scroll_at(60.0, 60.0, 0.0, 10_000.0));
+    engine.tick().expect("tick");
+    assert_eq!(engine.scroll_of(0), [0.0, 180.0]);
+
+    // 300 of content in 200: 100 of scroll, so the offset shortens to 100 rather
+    // than to 0.
+    engine.resize(120, 200).expect("resize");
+    engine.tick().expect("tick");
+    assert_eq!(
+        engine.scroll_of(0),
+        [0.0, 100.0],
+        "the scroll is clamped to what the new layout can give, not discarded"
+    );
+}
+
 /// `overflow: hidden` overflows without scrolling, and so draws no thumb.
 ///
 /// Clipping and scrolling are separate properties — that is the whole difference

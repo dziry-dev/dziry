@@ -298,15 +298,7 @@ impl Engine {
         self.resync(&diff)?;
 
         if self.fresh || diff.any {
-            self.tree.compute(
-                &self.tables,
-                &mut self.measurer,
-                self.width as f32,
-                self.height as f32,
-            )?;
-            let bounds = self.tree.bounds().to_vec();
-            self.tables.write_bounds(&bounds);
-            self.fresh = false;
+            self.relayout()?;
             self.needs_paint = true;
         }
 
@@ -325,6 +317,58 @@ impl Engine {
         self.frame += 1;
         self.last_frame_ms = started.elapsed().as_secs_f32() * 1000.0;
         Ok(())
+    }
+
+    /// Lays out, publishes the bounds, and reconciles the state layout invalidates.
+    ///
+    /// One function because there are two callers — a tick and a live resize — and the
+    /// second forgetting a step is not a hypothetical: the scroll clamp below was
+    /// missing from both, and it took the window blank.
+    fn relayout(&mut self) -> Result<(), EngineError> {
+        self.tree.compute(
+            &self.tables,
+            &mut self.measurer,
+            self.width as f32,
+            self.height as f32,
+        )?;
+        let bounds = self.tree.bounds().to_vec();
+        self.tables.write_bounds(&bounds);
+        self.fresh = false;
+        self.clamp_scrolls();
+        Ok(())
+    }
+
+    /// Shortens every scroll offset to what the new layout can actually give.
+    ///
+    /// A scroll offset deliberately outlives relayout — a box the user scrolled must
+    /// stay where they put it across a list edit or a resize, which is what makes it
+    /// engine state rather than table state. But *surviving* is not the same as
+    /// surviving unchanged: an offset earned when there were 350 px to scroll is not
+    /// meaningful in a layout with 100, and translating the content by it anyway walks
+    /// the whole subtree off the screen. That was reported as "sometimes it hides all
+    /// elements", and it is worst exactly where it is hardest to diagnose: once the
+    /// extent reaches 0 no scrollbar is drawn either, so nothing on screen says the
+    /// content is merely somewhere else.
+    ///
+    /// Clamped rather than reset, because reaching for zero would throw away the
+    /// position in the common case where the box still scrolls, just less far.
+    fn clamp_scrolls(&mut self) {
+        for (node, offset) in self.scroll.iter_mut().enumerate() {
+            if *offset == [0.0, 0.0] {
+                continue;
+            }
+            let extent = self.tree.overflow_of(node);
+            let clamped = [
+                offset[0].clamp(0.0, extent[0]),
+                offset[1].clamp(0.0, extent[1]),
+            ];
+            if clamped != *offset {
+                *offset = clamped;
+                // The content is about to move without anyone having scrolled it, so
+                // the frame on screen is stale even if nothing else changed.
+                self.needs_paint = true;
+            }
+        }
     }
 
     /// A resize repainted immediately, from inside the OS's own event handling.
@@ -350,15 +394,7 @@ impl Engine {
 
         // `resize` set `fresh`, so this is a full relayout — which is the honest
         // cost of a resize, and the advance cache means it is not a re-shape.
-        self.tree.compute(
-            &self.tables,
-            &mut self.measurer,
-            self.width as f32,
-            self.height as f32,
-        )?;
-        let bounds = self.tree.bounds().to_vec();
-        self.tables.write_bounds(&bounds);
-        self.fresh = false;
+        self.relayout()?;
 
         self.draw();
         self.present()?;
@@ -382,7 +418,13 @@ impl Engine {
         if self.fresh || self.tree.node_count() != self.tables.capacities().nodes as usize {
             self.tree.rebuild(&self.tables, self.root)?;
             self.tree.apply_all_styles(&self.tables)?;
-            self.fresh = false;
+            // `fresh` stays set: it says "this tree has no layout", and `rebuild` is
+            // what made that true — it zeroes every bound. Clearing it here is what
+            // blanked the window. `tick` then read `fresh` as false, found an empty
+            // diff, skipped `compute` entirely, and painted a tree in which every node
+            // was a 0x0 box at the origin: no fill, no text, everything rejected by the
+            // viewport test, nothing left but the clear colour. Only `relayout` may
+            // clear this, because only `relayout` makes it untrue.
             return Ok(());
         }
 
