@@ -81,6 +81,7 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
   ["insetLeft", "insetL"],
   ["fontSize", "fontSize"],
   ["fontWeight", "fontWeight"],
+  ["overflow", "overflow"],
 ];
 
 /** How much room to leave beyond what the IR needs right now. */
@@ -258,9 +259,9 @@ export class Uploader {
       for (let i = count; i < capacity; i++) out[i] = initial;
     }
 
-    // `lineClamp` and `overflow` are in the schema but not in the IR, because the
-    // engine does not implement clipping or paragraph clamping yet. Zero is the
-    // honest value for both: no clamp, `overflow: visible`.
+    // `lineClamp` is in the schema but not in the IR: the engine does not clamp
+    // paragraphs yet, and zero is the honest value for "no clamp". `overflow` used
+    // to be in the same sentence and is now a real field.
   }
 
   uploadVariants(): void {

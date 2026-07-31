@@ -49,6 +49,16 @@ fn compact(value: u32, mask: u32) -> u32 {
     out
 }
 
+/// One entry on the paint walk's stack.
+///
+/// A plain node index was enough until clipping: a clip has to be *undone* when the
+/// subtree that opened it finishes, and an explicit stack has no natural "after the
+/// children" moment. This is that moment, made a value.
+enum Step {
+    Node(usize),
+    Restore,
+}
+
 /// Which node is under the cursor, pressed, and focused.
 ///
 /// The engine owns this now, rather than Bun: it owns the event loop, so it can
@@ -201,15 +211,26 @@ impl Painter {
 
         // Pre-order, iterative: children paint over their parents, and a hostile
         // tree must not be able to overflow the render thread's stack.
-        let mut stack = vec![root];
+        let mut stack = vec![Step::Node(root)];
         let mut siblings: Vec<usize> = Vec::with_capacity(16);
         let mut budget = count.saturating_mul(2) + 16;
 
-        while let Some(node) = stack.pop() {
+        while let Some(step) = stack.pop() {
             if budget == 0 {
                 break;
             }
             budget -= 1;
+
+            // A clip ends when the subtree that opened it does. Pushed *before* the
+            // children, so it pops after all of them — which is what makes an
+            // explicit stack able to express save/restore at all.
+            let node = match step {
+                Step::Node(node) => node,
+                Step::Restore => {
+                    canvas.restore();
+                    continue;
+                }
+            };
 
             if node >= count || hidden.get(node).copied().unwrap_or(0) != 0 {
                 continue;
@@ -243,8 +264,64 @@ impl Painter {
                 siblings.push(c as usize);
                 c = next[c as usize];
             }
+
+            // A node that contains its overflow clips its descendants to its own
+            // padding box. Ordered so `Restore` pops last: push it, then the
+            // children in reverse.
+            //
+            // The clip is the *padding* box rather than the border box, which is
+            // what CSS says and what makes a bordered scroll container look right:
+            // content scrolls under its own border rather than over it.
+            if !siblings.is_empty() && self.clips(tables, node, state) {
+                let [x, y, w, h] = bounds[node];
+                let inset = self.border_of(tables, node, state);
+                canvas.save();
+                canvas.clip_rect(
+                    Rect::from_xywh(
+                        x + inset,
+                        y + inset,
+                        (w - inset * 2.0).max(0.0),
+                        (h - inset * 2.0).max(0.0),
+                    ),
+                    None,
+                    // Antialiased, or a clipped edge crossing a rounded corner shows
+                    // a stair-step against the border it is supposed to sit inside.
+                    true,
+                );
+                stack.push(Step::Restore);
+            }
+
             // Reversed, because the stack pops last-in first.
-            stack.extend(siblings.iter().rev().copied());
+            stack.extend(siblings.iter().rev().map(|&c| Step::Node(c)));
+        }
+    }
+
+    /// Whether this node contains its overflow, and so clips its descendants.
+    fn clips(&self, tables: &Tables, node: usize, state: &InputState) -> bool {
+        let slot = self.style_for(tables, node, state);
+        matches!(
+            tables
+                .u8s(STYLES, protocol::styles::OVERFLOW)
+                .get(slot)
+                .copied(),
+            Some(
+                protocol::overflow::HIDDEN
+                    | protocol::overflow::ELLIPSIS
+                    | protocol::overflow::SCROLL
+            )
+        )
+    }
+
+    /// The border width, which the clip has to sit inside.
+    fn border_of(&self, tables: &Tables, node: usize, state: &InputState) -> f32 {
+        let slot = self.style_for(tables, node, state);
+        match tables
+            .f32s(STYLES, protocol::styles::BORDER_WIDTH)
+            .get(slot)
+            .copied()
+        {
+            Some(width) if width.is_finite() && width > 0.0 => width,
+            _ => 0.0,
         }
     }
 

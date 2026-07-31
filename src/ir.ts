@@ -14,6 +14,7 @@ import {
   FlexWrap as SchemaFlexWrap,
   Justify as SchemaJustify,
   NodeKind as SchemaNodeKind,
+  Overflow as SchemaOverflow,
   Position as SchemaPosition,
   Predicate as SchemaPredicate,
 } from "./protocol/generated.ts";
@@ -53,6 +54,7 @@ export const Predicate = SchemaPredicate;
 export const Display = SchemaDisplay;
 export const FlexWrap = SchemaFlexWrap;
 export const Position = SchemaPosition;
+export const Overflow = SchemaOverflow;
 
 /**
  * "The author said nothing" for an enum field.
@@ -171,6 +173,10 @@ export const STYLE_FIELDS = [
   // text — both change measured advance width
   ["fontSize", "Float32Array", true, true],
   ["fontWeight", "Uint16Array", true, true],
+  // Layout, not paint, even though its most visible effect is clipping: a scroll
+  // container's automatic minimum size is 0 rather than its content, so whether a
+  // node scrolls changes where its *siblings* end up.
+  ["overflow", "Uint8Array", false, true],
 ] as const;
 
 export type StyleField = (typeof STYLE_FIELDS)[number][0];
@@ -242,6 +248,7 @@ export const INITIAL_STYLE: ComputedStyle = {
   insetL: AUTO,
   fontSize: 16,
   fontWeight: 400,
+  overflow: Overflow.VISIBLE,
 };
 
 /** Shape of the generated module, so the runtime can type its import. */

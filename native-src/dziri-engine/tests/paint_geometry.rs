@@ -333,3 +333,78 @@ fn glyph_edges_are_subpixel_antialiased() {
         "no glyph edge carried colour, so this is greyscale AA: {lit} lit pixels, {coloured} coloured"
     );
 }
+
+/// `overflow: hidden` clips its descendants, and only its descendants.
+///
+/// Two children of a clipping container: one inside its box, one placed well outside
+/// it. Before this, both were drawn — the engine had an `overflow` field in the
+/// schema that nothing read, so content spilled over whatever came after it.
+///
+/// The sibling *after* the container proves the clip is undone: an explicit paint
+/// stack has no natural "after the children" moment, so the restore is pushed as its
+/// own step, and getting that ordering wrong would clip the rest of the frame.
+#[test]
+fn overflow_hidden_clips_the_subtree_and_nothing_after_it() {
+    let mut engine = Engine::new(&config_of(4)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..4 {
+            init_style(t, slot);
+        }
+
+        // 0: the root, a column.
+        // 1: a 40x40 clipping container at the top left, red.
+        t.set_u32(STYLES, styles::BG, 1, BG);
+        t.set_u8(STYLES, styles::OVERFLOW, 1, protocol::overflow::HIDDEN);
+        t.set_f32(STYLES, styles::WIDTH, 1, 40.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 40.0);
+
+        // 2: its child, absolutely placed so most of it hangs outside the container.
+        t.set_u32(STYLES, styles::BG, 2, BORDER);
+        t.set_u8(STYLES, styles::POSITION, 2, protocol::position::ABSOLUTE);
+        t.set_f32(STYLES, styles::INSET_TOP, 2, 20.0);
+        t.set_f32(STYLES, styles::INSET_LEFT, 2, 20.0);
+        t.set_f32(STYLES, styles::WIDTH, 2, 60.0);
+        t.set_f32(STYLES, styles::HEIGHT, 2, 60.0);
+
+        // 3: a sibling of the container, below it, blue.
+        t.set_u32(STYLES, styles::BG, 3, BORDER);
+        t.set_f32(STYLES, styles::WIDTH, 3, 40.0);
+        t.set_f32(STYLES, styles::HEIGHT, 3, 40.0);
+
+        for node in 0..4 {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        t.set_i32(NODES, nodes::PARENT, 1, 0);
+        t.set_i32(NODES, nodes::NEXT_SIBLING, 1, 3);
+        t.set_i32(NODES, nodes::PARENT, 3, 0);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 1, 2);
+        t.set_i32(NODES, nodes::PARENT, 2, 1);
+    }
+    engine.tick().expect("tick");
+
+    // Inside the container, where the child overlaps it: the child wins.
+    assert_eq!(what_is_at(&mut engine, 30, 30), "border", "the child draws");
+    // Outside the container, where the child would have reached: clipped away, and
+    // the root has no background, so this is bare surface.
+    assert_eq!(
+        what_is_at(&mut engine, 60, 60),
+        "surface",
+        "the part of the child outside the container must be clipped"
+    );
+    // The sibling below is unaffected: the clip was undone.
+    let sibling = engine.bounds_of(3).expect("sibling bounds");
+    assert!(sibling[1] >= 40.0, "the sibling is below the container");
+    assert_eq!(
+        what_is_at(&mut engine, 20, (sibling[1] + 20.0) as usize),
+        "border",
+        "a sibling after the clipping container is not clipped by it"
+    );
+}

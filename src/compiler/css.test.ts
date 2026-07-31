@@ -227,3 +227,22 @@ test("KNOWN WRONG: `border` neither resets nor honours `none`", () => {
   // `border: none` alone is handled, which is what makes the above surprising.
   expect(expand("border", "none")).toEqual({ borderWidth: 0 });
 });
+
+test("overflow maps CSS's five keywords onto the three the engine has", () => {
+  expect(expand("overflow", "visible")).toEqual({ overflow: 0 });
+  // `clip` and `hidden` differ only in programmatic scrollability, which does not
+  // exist yet.
+  expect(expand("overflow", "hidden")).toEqual({ overflow: 1 });
+  expect(expand("overflow", "clip")).toEqual({ overflow: 1 });
+  // `auto` is what the engine actually does — a scrollbar only when needed — so
+  // `scroll` is the approximation rather than the other way round.
+  expect(expand("overflow", "auto")).toEqual({ overflow: 3 });
+  expect(expand("overflow", "scroll")).toEqual({ overflow: 3 });
+
+  // Per-axis overflow needs two fields in the schema, and guessing which axis was
+  // meant would be wrong for the mixed case that motivates the property at all.
+  for (const bad of ["overflow-x", "overflow-y"]) {
+    expect(() => expand(bad, "auto"), bad).not.toThrow(); // warn-and-ignore, for now
+  }
+  expect(() => expand("overflow", "overlay")).toThrow(CssError);
+});

@@ -41,15 +41,18 @@ test("the engine and the compiler agree on which fields move a box", () => {
   expect(disagreements).toEqual([]);
 });
 
-test("the only unmapped schema fields are the two the IR has not caught up with", () => {
-  // `lineClamp` and `overflow` exist in the schema and not in the IR, because
-  // the engine implements neither paragraph clamping nor clipping — writing them
-  // would be claiming a feature. This pins that list so a *third* one cannot
-  // appear unnoticed and go un-uploaded, which is the failure mode of a
-  // hand-written mapping table.
+test("the only unmapped schema field is the one the IR has not caught up with", () => {
+  // `lineClamp` exists in the schema and not in the IR, because the engine does not
+  // clamp paragraphs — writing it would be claiming a feature. This pins the list so
+  // a *second* one cannot appear unnoticed and go un-uploaded, which is the failure
+  // mode of a hand-written mapping table.
+  //
+  // `overflow` was here until it became real. That is the intended direction of
+  // travel for this list, and shortening it is a deliberate edit rather than
+  // maintenance.
   const mapped = new Set(NUMBER_FIELDS.map(([schemaName]) => schemaName as string));
   const unmapped = FIELD_NAMES.styles.filter((name) => !mapped.has(name));
-  expect(unmapped).toEqual(["lineClamp", "overflow"]);
+  expect(unmapped).toEqual(["lineClamp"]);
 });
 
 test("every IR style field reaches the schema", () => {

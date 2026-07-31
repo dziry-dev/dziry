@@ -16,9 +16,9 @@
 use taffy::prelude::*;
 use taffy::style::{
     AlignContent, AlignItems, AlignSelf, Dimension, Display, FlexDirection, FlexWrap,
-    GridPlacement, LengthPercentage, LengthPercentageAuto, Position, Style,
+    GridPlacement, LengthPercentage, LengthPercentageAuto, Overflow, Position, Style,
 };
-use taffy::{Rect, Size, TaffyTree};
+use taffy::{Point, Rect, Size, TaffyTree};
 
 use crate::error::EngineError;
 use crate::protocol::{self, align, display as display_enum, flex_direction, flex_wrap, justify};
@@ -702,6 +702,25 @@ fn style_of(tables: &Tables, node: usize) -> Style {
         right: lpa(f32f(f::MARGIN_RIGHT)),
         bottom: lpa(f32f(f::MARGIN_BOTTOM)),
         left: lpa(f32f(f::MARGIN_LEFT)),
+    };
+
+    // One field for both axes until the schema has two; `css.ts` refuses
+    // `overflow-x`/`overflow-y` rather than guessing which axis was meant.
+    //
+    // `scrollbar_width` stays 0, which makes Taffy treat `Scroll` exactly like
+    // `Hidden` for sizing. That is deliberate: reserving a gutter is only honest
+    // once a scrollbar is drawn into it, and this commit clips without scrolling.
+    let overflow = match u8f(f::OVERFLOW) {
+        protocol::overflow::VISIBLE => Overflow::Visible,
+        // `ELLIPSIS` is `text-overflow` wearing the wrong field's name — a schema
+        // wart. For layout it contains its content, like `hidden`.
+        protocol::overflow::HIDDEN | protocol::overflow::ELLIPSIS => Overflow::Hidden,
+        protocol::overflow::SCROLL => Overflow::Scroll,
+        _ => Overflow::Visible,
+    };
+    s.overflow = Point {
+        x: overflow,
+        y: overflow,
     };
 
     s.position = if u8f(f::POSITION) == protocol::position::ABSOLUTE {

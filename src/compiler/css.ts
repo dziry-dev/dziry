@@ -17,6 +17,7 @@ import {
   Display,
   FlexWrap,
   Justify,
+  Overflow,
   Position,
   UNSET,
   type StyleField,
@@ -766,6 +767,32 @@ export function expandDeclaration(
         if (!Number.isFinite(n)) throw new CssError(`bad font-weight "${value}"`);
         out.fontWeight = n;
       }
+      return;
+    }
+
+    // One field for both axes. `overflow-x`/`overflow-y` are *not* handled here:
+    // applying either to both axes would be wrong for the mixed case that motivates
+    // the properties at all (`overflow-x: hidden; overflow-y: auto`), and the schema
+    // has one `overflow` field to write. So they fall through to the same
+    // warn-and-ignore as any other unsupported property, and per-axis overflow needs
+    // a second schema field before it can mean anything.
+    case "overflow": {
+      const v = value.trim().toLowerCase();
+      const known: Record<string, number> = {
+        visible: Overflow.VISIBLE,
+        // `clip` differs from `hidden` only in whether the box is *scrollable* by
+        // script; nothing here scrolls programmatically yet, so they are the same.
+        clip: Overflow.HIDDEN,
+        hidden: Overflow.HIDDEN,
+        // `auto` shows a scrollbar only when it is needed and `scroll` always does.
+        // The engine draws one only when the content overflows, which is `auto`'s
+        // behaviour — so `scroll` is the approximation, and it is the harmless one.
+        auto: Overflow.SCROLL,
+        scroll: Overflow.SCROLL,
+      };
+      const resolved = known[v];
+      if (resolved === undefined) throw new CssError(`unsupported overflow "${value}"`);
+      out.overflow = resolved;
       return;
     }
 
