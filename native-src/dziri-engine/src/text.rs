@@ -5,24 +5,41 @@
 //! ~1.1 µs each. Here the measure function is an ordinary Rust call into Skia, so
 //! that cost is gone rather than reduced.
 //!
-//! # What this is not, yet
+//! # Measurement is paragraph layout
 //!
-//! Measurement is **single-line**: `Font::measure_str` for the advance, font
-//! metrics for the height. That is exactly what `src/runtime/text.ts` does today
-//! (`measure_str("Hello")` = 36.85 px on both paths), so the migration is
-//! like-for-like and the existing behaviour is preserved.
+//! Measurement used to be single-line: `Font::measure_str` for the advance, font
+//! metrics for the height, and `available_width` accepted and ignored. A string
+//! longer than its box overflowed at any width, which is what made a narrow
+//! window look broken.
 //!
-//! SkParagraph — wrapping, line breaking, ellipsis, bidi, font fallback — is
-//! verified working in `native-src/skia-probe` and is A2's job. [`Measurer`] is
-//! the seam it slots into: `measure` already receives the available width and the
-//! style's `lineClamp`, which are the two inputs a paragraph needs.
+//! It is now **SkParagraph**, which brings line breaking, and with it bidi and
+//! font fallback, from the same call. The seam did not move: [`Measurer::measure`]
+//! already received the available width, so this changed the body and not the
+//! callers.
+//!
+//! # What a paragraph costs, and what is cached
+//!
+//! The cache holds *measurements*, not paragraphs — `Paragraph` owns shaped
+//! glyphs and is not cheap to keep, and paint needs a live one to draw anyway. So
+//! layout hits the cache and paint builds. The key gained the width, because that
+//! is now an input to the answer: the same string at 200 px and at 600 px are
+//! different measurements, and a key that omitted the width would return the
+//! first one forever.
+//!
+//! `lineClamp` is one field away from working — it exists in the wire schema
+//! (`0 = unlimited; drives SkParagraph maxLines`) and is what
+//! `ParagraphStyle::set_max_lines` takes. What it still lacks is an entry in the
+//! IR's `STYLE_FIELDS`, which is why `schema.test.ts` still pins it as unmapped.
 
 use std::collections::HashMap;
 
 use crate::error::EngineError;
 use skia_safe::font::Edging;
 use skia_safe::font_style::{Slant, Weight, Width};
-use skia_safe::{Font, FontMgr, FontStyle, Typeface};
+use skia_safe::textlayout::{
+    FontCollection, Paragraph, ParagraphBuilder, ParagraphStyle, TextAlign, TextStyle,
+};
+use skia_safe::{Canvas, FontMgr, FontStyle, Paint, Point};
 
 /// Tried in order. A missing font family is not a crash: the last resort is
 /// whatever the platform considers its default sans-serif.
@@ -33,35 +50,35 @@ const FAMILIES: &[&str] = &["SF Pro Text", "Helvetica Neue", "Helvetica", "Arial
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 const FAMILIES: &[&str] = &["DejaVu Sans", "Liberation Sans", "Noto Sans", "Arial"];
 
-/// A resolved font at one size and weight, with the metrics paint needs.
-pub struct Face {
-    pub font: Font,
-    /// Negative, as in Skia: the distance from the baseline up to the top.
-    pub ascent: f32,
-    pub descent: f32,
-}
+/// Stands in for "no constraint" when Taffy asks for a max-content width.
+///
+/// `Paragraph::layout` takes a finite scalar. Passing `f32::INFINITY` is not
+/// specified to do anything useful, and the intrinsic widths are the supported way
+/// to ask the question: lay out unconstrained, then read `max_intrinsic_width`.
+/// A million pixels is past any surface this will ever run on.
+const MAX_LAYOUT_WIDTH: f32 = 1.0e6;
 
-impl Face {
-    pub fn line_height(&self) -> f32 {
-        self.descent - self.ascent
-    }
-}
+/// Measurements are cached because dynamic text makes the key space unbounded —
+/// a counter alone mints a new string on every increment. The TypeScript runtime
+/// bounded the same cache at 4096 entries.
+const MEASURE_LIMIT: usize = 4096;
 
-/// Advance widths are cached because dynamic text makes the key space unbounded
-/// — a counter alone mints a new string on every increment. The TypeScript
-/// runtime bounds the same cache at 4096 entries.
-const ADVANCE_LIMIT: usize = 4096;
+/// `(font size bits, weight, text hash, available width bits)`.
+///
+/// Sizes and widths are keyed on their bit pattern so `16.0` and `16.000001` stay
+/// distinct rather than silently merging, and so infinity is an ordinary key.
+type MeasureKey = (u32, u16, u64, u32);
 
 pub struct Measurer {
-    font_mgr: FontMgr,
     family: String,
-    typefaces: HashMap<u16, Typeface>,
-    faces: HashMap<(u32, u16), Face>,
-    advances: HashMap<(u32, u16, u64), f32>,
-    /// Insertion order for the advance cache, so eviction is FIFO-by-first-use.
+    /// Owns font fallback. One collection, reused: building one per paragraph
+    /// would re-resolve the platform font manager on every measure.
+    fonts: FontCollection,
+    measured: HashMap<MeasureKey, (f32, f32)>,
+    /// Insertion order for the measurement cache, so eviction is FIFO-by-first-use.
     /// Cheaper than true LRU and, for text that changes every frame, identical in
     /// effect: the churn is in recently minted strings either way.
-    advance_order: std::collections::VecDeque<(u32, u16, u64)>,
+    order: std::collections::VecDeque<MeasureKey>,
 }
 
 impl Measurer {
@@ -94,13 +111,14 @@ impl Measurer {
             family = font_mgr.family_name(0);
         }
 
+        let mut fonts = FontCollection::new();
+        fonts.set_default_font_manager(FontMgr::new(), None);
+
         Ok(Self {
-            font_mgr,
             family,
-            typefaces: HashMap::new(),
-            faces: HashMap::new(),
-            advances: HashMap::new(),
-            advance_order: std::collections::VecDeque::new(),
+            fonts,
+            measured: HashMap::new(),
+            order: std::collections::VecDeque::new(),
         })
     }
 
@@ -108,120 +126,190 @@ impl Measurer {
         &self.family
     }
 
-    /// The typeface for a weight, or `None` when the platform cannot supply one
-    /// — which is survivable, because Skia has a default font of its own.
-    fn typeface(&mut self, weight: u16) -> Option<Typeface> {
-        if let Some(tf) = self.typefaces.get(&weight) {
-            return Some(tf.clone());
-        }
+    /// The paragraph style for one run of text.
+    ///
+    /// `apply_rounding_hack(false)` turns off Skia's habit of rounding line widths
+    /// up to whole pixels. It is on by default and browsers do not do it, so
+    /// leaving it on costs up to a pixel of disagreement per line for nothing —
+    /// checked against Chrome with `bun run layout-diff` rather than assumed.
+    fn style(&self, size: f32, weight: u16, align: TextAlign) -> ParagraphStyle {
+        let mut text_style = TextStyle::new();
+        text_style.set_font_size(size);
+        text_style.set_font_families(&[self.family.as_str()]);
+        text_style.set_font_style(FontStyle::new(
+            Weight::from(weight as i32),
+            Width::NORMAL,
+            Slant::Upright,
+        ));
 
-        let style = FontStyle::new(Weight::from(weight as i32), Width::NORMAL, Slant::Upright);
-        let tf = self
-            .font_mgr
-            .match_family_style(&self.family, style)
-            .or_else(|| self.font_mgr.legacy_make_typeface(None, style))?;
-
-        self.typefaces.insert(weight, tf.clone());
-        Some(tf)
+        let mut para = ParagraphStyle::new();
+        para.set_text_style(&text_style);
+        para.set_text_align(align);
+        para.set_apply_rounding_hack(false);
+        para
     }
 
-    /// A font plus its vertical metrics. Keyed on the size's bit pattern so
-    /// `16.0` and `16.000001` stay distinct rather than silently merging.
-    pub fn face(&mut self, size: f32, weight: u16) -> &Face {
-        let key = (size.to_bits(), weight);
-        if !self.faces.contains_key(&key) {
-            let mut font = match self.typeface(weight) {
-                Some(tf) => Font::from_typeface(tf, size),
-                None => {
-                    // Skia's built-in default, resized. Ugly text beats no text
-                    // and beats a panic on the render thread.
-                    let mut font = Font::default();
-                    font.set_size(size);
-                    font
-                }
-            };
-
-            // SkFont defaults to greyscale AA and integer glyph positions, which is
-            // why text read thin and unevenly spaced next to every other window on
-            // the same desktop — ClearType is subpixel AA with fractional advances.
-            // `Paint::set_anti_alias` does not cover this: it governs geometry, not
-            // glyph rasterisation.
-            //
-            // Subpixel AA is only *valid* over known pixels, and it is valid here
-            // because the surface is opaque: `raster_n32_premul` cleared to opaque
-            // black every frame. A translucent or layered window would have to fall
-            // back to `Edging::AntiAlias`, so that precondition belongs next to the
-            // call rather than in a commit message.
-            //
-            // Hinting stays at Skia's default. DirectWrite's slight hinting was the
-            // review's suggestion, but on this corpus it moved stems around without
-            // making anything measurably better, and it is a separate decision from
-            // the two that fix the AA.
-            font.set_edging(Edging::SubpixelAntiAlias);
-            font.set_subpixel(true);
-
-            let (_, metrics) = font.metrics();
-            self.faces.insert(
-                key,
-                Face {
-                    font,
-                    ascent: metrics.ascent,
-                    descent: metrics.descent,
-                },
-            );
-        }
-        &self.faces[&key]
+    fn build(&mut self, text: &str, style: &ParagraphStyle) -> Paragraph {
+        let mut builder = ParagraphBuilder::new(style, self.fonts.clone());
+        builder.add_text(text);
+        builder.build()
     }
 
-    pub fn advance(&mut self, text: &str, size: f32, weight: u16) -> f32 {
-        if text.is_empty() {
-            return 0.0;
-        }
-
-        let key = (size.to_bits(), weight, hash_str(text));
-        if let Some(&w) = self.advances.get(&key) {
-            return w;
-        }
-
-        let width = self.face(size, weight).font.measure_str(text, None).0;
-
-        self.advances.insert(key, width);
-        self.advance_order.push_back(key);
-        if self.advance_order.len() > ADVANCE_LIMIT {
-            if let Some(old) = self.advance_order.pop_front() {
-                self.advances.remove(&old);
-            }
-        }
-
-        width
-    }
-
-    pub fn line_height(&mut self, size: f32, weight: u16) -> f32 {
-        self.face(size, weight).line_height()
+    /// A laid-out paragraph, for paint to draw.
+    ///
+    /// Not cached, and deliberately: a `Paragraph` owns its shaped glyphs, and the
+    /// measurement cache exists so that *layout* — which runs over every node,
+    /// including ones paint will skip — never builds one.
+    pub fn paragraph(
+        &mut self,
+        text: &str,
+        size: f32,
+        weight: u16,
+        width: f32,
+        align: TextAlign,
+    ) -> Paragraph {
+        let para_style = self.style(size, weight, align);
+        let mut paragraph = self.build(text, &para_style);
+        // A non-finite or negative width would be a caller bug rather than a
+        // constraint, and Skia has no defined answer for it.
+        paragraph.layout(if width.is_finite() && width > 0.0 {
+            width
+        } else {
+            MAX_LAYOUT_WIDTH
+        });
+        paragraph
     }
 
     /// The size a text node wants, given whatever space Taffy is offering.
     ///
-    /// `available_width` is accepted and currently ignored, which is the honest
-    /// shape of the single-line limitation: the signature is already the one
-    /// SkParagraph needs, so A2 changes the body and not the callers.
+    /// `available_width` is now honoured, which is the whole of this milestone:
+    /// infinity asks for max-content, zero or less asks for min-content, and a
+    /// definite width asks what the text does when wrapped to it.
     pub fn measure(
         &mut self,
         text: &str,
         size: f32,
         weight: u16,
-        _available_width: f32,
+        available_width: f32,
     ) -> (f32, f32) {
-        (
-            self.advance(text, size, weight),
-            self.line_height(size, weight),
-        )
+        if text.is_empty() {
+            return (0.0, 0.0);
+        }
+
+        let key = (
+            size.to_bits(),
+            weight,
+            hash_str(text),
+            available_width.to_bits(),
+        );
+        if let Some(&wh) = self.measured.get(&key) {
+            return wh;
+        }
+
+        let style = self.style(size, weight, TextAlign::Left);
+        let mut paragraph = self.build(text, &style);
+
+        let raw = if available_width.is_finite() && available_width > 0.0 {
+            paragraph.layout(available_width);
+            (paragraph.longest_line(), paragraph.height())
+        } else if available_width.is_finite() {
+            // Min-content: the narrowest the text can be without overflowing, which
+            // is its longest unbreakable run. Laid out *at* that width rather than
+            // at 0, so the height reported is the height it would really take —
+            // `min_intrinsic_width` alone says nothing about how tall the result is.
+            paragraph.layout(MAX_LAYOUT_WIDTH);
+            let min = paragraph.min_intrinsic_width();
+            paragraph.layout(min);
+            (paragraph.longest_line(), paragraph.height())
+        } else {
+            // Max-content: unwrapped, however wide that is.
+            paragraph.layout(MAX_LAYOUT_WIDTH);
+            (paragraph.max_intrinsic_width(), paragraph.height())
+        };
+
+        // Rounded up, and this is load-bearing rather than tidiness.
+        //
+        // Taffy rounds laid-out boxes to whole pixels as `round(x + w) - round(x)`,
+        // which for a fractional `w` yields either `floor(w)` or `ceil(w)` depending
+        // on where the box happens to sit. Landing on `floor` makes the box one pixel
+        // narrower than the text measured, and paint then lays the same string out
+        // into it and breaks the last glyph onto a second line — in a box whose
+        // height was computed for one. That is precisely what "Clear" rendering as
+        // "Clea/r" was, and every short label in the demo did it.
+        //
+        // An integral `w` is immune: adding an integer does not change a fractional
+        // part, so `round(x + w) - round(x) == w` exactly, for every `x`. Ceiling the
+        // measurement therefore makes the rounding pass a no-op on text boxes
+        // instead of a coin flip.
+        //
+        // The cost is up to a pixel of width against Chrome, which does not round
+        // its layout at all. That is the right side to err on: a pixel wide is
+        // invisible, a pixel narrow is a broken word. The residue is a box whose
+        // *padding* is fractional, where the content width can still land low —
+        // rare, since padding is nearly always integral, and it would need Taffy's
+        // rounding disabled outright to fix properly.
+        let wh = (raw.0.ceil(), raw.1.ceil());
+
+        self.measured.insert(key, wh);
+        self.order.push_back(key);
+        if self.order.len() > MEASURE_LIMIT {
+            if let Some(old) = self.order.pop_front() {
+                self.measured.remove(&old);
+            }
+        }
+
+        wh
     }
 
     /// Diagnostics: confirms the cache stays bounded under dynamic text.
-    pub fn advance_cache_len(&self) -> usize {
-        self.advances.len()
+    pub fn measure_cache_len(&self) -> usize {
+        self.measured.len()
     }
+}
+
+/// Draws a laid-out paragraph, with this engine's glyph rasterisation rather than
+/// Skia's default.
+///
+/// `Paragraph::paint` would be one line, and it draws **greyscale**-antialiased
+/// text: SkParagraph builds its own `SkFont` per run and exposes no edging control
+/// anywhere in `ParagraphStyle` or `TextStyle`, so the `SubpixelAntiAlias` this
+/// engine sets is silently dropped. That is not cosmetic — it is the shipped fix
+/// for text reading thin and unevenly spaced next to every other window on the
+/// same desktop, and `tests/paint_geometry.rs` pins it by counting coloured glyph
+/// edges. Switching to `paragraph.paint` took that count from nonzero to exactly 0.
+///
+/// So the paragraph decides *where* each glyph goes and this decides *how* it is
+/// rasterised: `visit` hands back every run's font, glyph ids and positions, and
+/// they are redrawn through a font configured the way the rest of the engine wants.
+///
+/// The subpixel-AA precondition still holds here and still belongs next to the
+/// call: it is only valid over known pixels, and the surface is opaque because
+/// `raster_n32_premul` clears to opaque black every frame. A translucent or layered
+/// window would have to fall back to `Edging::AntiAlias`.
+pub fn paint_paragraph(paragraph: &mut Paragraph, canvas: &Canvas, at: Point, paint: &Paint) {
+    paragraph.visit(|_line, info| {
+        // `None` marks the end of a line rather than an error.
+        let Some(info) = info else { return };
+        if info.count() == 0 {
+            return;
+        }
+
+        let mut font = info.font().clone();
+        font.set_edging(Edging::SubpixelAntiAlias);
+        font.set_subpixel(true);
+
+        // `positions` are relative to the run's `origin`, which is itself relative
+        // to the paragraph — so the block's own position is added on top. Verified
+        // by rendering: treating them as absolute doubles the offset and the text
+        // walks down and to the right of its box.
+        canvas.draw_glyphs_at(
+            info.glyphs(),
+            info.positions(),
+            at + info.origin(),
+            &font,
+            paint,
+        );
+    });
 }
 
 /// FNV-1a. Short strings, no allocation, and no dependency for something this
@@ -239,34 +327,112 @@ fn hash_str(s: &str) -> u64 {
 mod tests {
     use super::*;
 
+    /// The figure the single-line path produced, which max-content has to agree
+    /// with: an unwrapped short string is the same measurement by another route.
     #[test]
-    fn measures_the_same_string_the_typescript_runtime_did() {
+    fn max_content_agrees_with_what_measure_str_reported() {
         let mut m = Measurer::new().expect("font manager");
-        let width = m.advance("Hello", 16.0, 400);
+        let (width, height) = m.measure("Hello", 16.0, 400, f32::INFINITY);
 
-        // 36.85 px through libSkiaSharp and through skia-safe's probe. The
-        // tolerance is for a different default font on a non-Windows machine.
         assert!(width > 0.0, "measured nothing");
+        assert!(height > 0.0, "no line height");
         if m.family() == "Segoe UI" {
+            // 36.85 px through libSkiaSharp, skia-safe's probe, and `measure_str`.
+            // The tolerance is wider than the old test's 0.1 because a paragraph
+            // reports the shaped advance rather than the sum of glyph advances.
             assert!(
-                (width - 36.85).abs() < 0.1,
+                (width - 36.85).abs() < 1.0,
                 "expected the libSkiaSharp figure, got {width}"
             );
         }
     }
 
+    /// The bug this milestone closes, as one assertion.
     #[test]
-    fn the_advance_cache_stays_bounded() {
+    fn a_long_string_wraps_and_gets_taller() {
         let mut m = Measurer::new().expect("font manager");
-        for i in 0..(ADVANCE_LIMIT + 500) {
-            m.advance(&format!("row {i}"), 16.0, 400);
+        let text = "The quick brown fox jumps over the lazy dog near the river bank";
+
+        let (wide_w, wide_h) = m.measure(text, 16.0, 400, f32::INFINITY);
+        let (narrow_w, narrow_h) = m.measure(text, 16.0, 400, 200.0);
+
+        assert!(
+            narrow_w <= 200.0,
+            "wrapped text should fit its width, got {narrow_w}"
+        );
+        assert!(
+            narrow_w < wide_w,
+            "wrapping should narrow the box: {narrow_w} vs {wide_w}"
+        );
+        assert!(
+            narrow_h > wide_h * 2.0,
+            "200px of a {wide_w}px string is at least three lines, got {narrow_h} vs {wide_h}"
+        );
+    }
+
+    /// Regression for the cache key. With the width left out, the second call
+    /// returns the first call's answer and wrapping silently stops working.
+    #[test]
+    fn the_same_string_measures_differently_at_different_widths() {
+        let mut m = Measurer::new().expect("font manager");
+        let text = "The quick brown fox jumps over the lazy dog near the river bank";
+
+        let narrow = m.measure(text, 16.0, 400, 200.0);
+        let wider = m.measure(text, 16.0, 400, 400.0);
+        let narrow_again = m.measure(text, 16.0, 400, 200.0);
+
+        assert_ne!(narrow, wider, "width is not part of the key");
+        assert_eq!(narrow, narrow_again, "the cache changed its mind");
+    }
+
+    /// A token with no break opportunity is **broken by cluster**, not overflowed.
+    ///
+    /// Measured, and it is not what CSS says: `overflow-wrap: normal` leaves such a
+    /// token on one line and lets it stick out of its box, which is what Chrome
+    /// does. Skia's line breaker falls back to breaking anywhere once a word cannot
+    /// fit — Flutter's behaviour, since this is Flutter's text stack.
+    ///
+    /// Pinned rather than fixed because it is not adjustable from `ParagraphStyle`:
+    /// changing it means `overflow-wrap`/`word-break` as real properties. Recorded
+    /// in BROWSER-FACTS.md so it is a known divergence and not a surprise.
+    #[test]
+    fn an_unbreakable_token_is_broken_by_cluster_not_overflowed() {
+        let mut m = Measurer::new().expect("font manager");
+        let (w, h) = m.measure("Unbreakablesupercalifragilistic", 16.0, 400, 40.0);
+        let (_, one_line) = m.measure("x", 16.0, 400, f32::INFINITY);
+
+        assert!(w <= 40.0, "Skia breaks the token to fit, got {w}");
+        assert!(
+            h > one_line * 2.0,
+            "so it takes several lines: {h} vs a single {one_line}"
+        );
+    }
+
+    #[test]
+    fn min_content_is_the_longest_word() {
+        let mut m = Measurer::new().expect("font manager");
+        let (min_w, min_h) = m.measure("aaa bbbbbbbbbbbb cc", 16.0, 400, 0.0);
+        let (word_w, _) = m.measure("bbbbbbbbbbbb", 16.0, 400, f32::INFINITY);
+
+        assert!(
+            (min_w - word_w).abs() < 1.0,
+            "min-content should be the longest word: {min_w} vs {word_w}"
+        );
+        assert!(min_h > 0.0, "min-content still has a height");
+    }
+
+    #[test]
+    fn the_measure_cache_stays_bounded() {
+        let mut m = Measurer::new().expect("font manager");
+        for i in 0..(MEASURE_LIMIT + 500) {
+            m.measure(&format!("row {i}"), 16.0, 400, f32::INFINITY);
         }
-        assert_eq!(m.advance_cache_len(), ADVANCE_LIMIT);
+        assert_eq!(m.measure_cache_len(), MEASURE_LIMIT);
     }
 
     #[test]
     fn an_empty_string_is_free() {
         let mut m = Measurer::new().expect("font manager");
-        assert_eq!(m.advance("", 16.0, 400), 0.0);
+        assert_eq!(m.measure("", 16.0, 400, f32::INFINITY), (0.0, 0.0));
     }
 }

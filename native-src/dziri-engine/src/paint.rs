@@ -12,6 +12,7 @@
 //! decided what a hovered or pressed node looks like, so there is nothing to
 //! resolve here beyond picking an index.
 
+use skia_safe::textlayout::TextAlign;
 use skia_safe::{Canvas, Color, Paint, PaintStyle, RRect, Rect};
 
 use crate::protocol::{self, node_kind, predicate};
@@ -1027,33 +1028,34 @@ impl Painter {
             .copied()
             .unwrap_or(node_kind::BOX);
 
+        // SkParagraph positions from the top of the text block, so none of the
+        // ascent arithmetic this used to do survives. `Paragraph::paint` takes the
+        // block's origin, not a baseline.
         if kind == node_kind::BUTTON {
             // Centre the label in the content box, so asymmetric padding is
             // honoured rather than averaged away. The border counts: Taffy reports
             // the border box, and since `style_of` now reserves the border the
             // content box is inset by it on every side.
             //
-            // The *measure* width stays the border box deliberately. It only
-            // decides where the label wraps, and it must never wrap earlier than
-            // the layout pass did — that pass measured against Taffy's available
-            // space, and a paint-side wrap the layout did not predict would double
-            // `line_height` and push the label off centre. Erring wide is
-            // harmless; erring narrow is visible.
-            let (advance, line_height) = measurer.measure(text, size, weight, w);
-            let ascent = measurer.face(size, weight).ascent;
+            // Horizontal centring is the paragraph's own `TextAlign::Center` rather
+            // than arithmetic on an advance. That is what makes a label that *does*
+            // wrap centre line by line, which is what the previous version could
+            // only anticipate.
             let borders = border_width * 2.0;
             let box_w = w - borders - g(f::PAD_LEFT) - g(f::PAD_RIGHT);
             let box_h = h - borders - g(f::PAD_TOP) - g(f::PAD_BOTTOM);
 
-            let tx = x + border_width + g(f::PAD_LEFT) + (box_w - advance) / 2.0;
-            let ty = y + border_width + g(f::PAD_TOP) + (box_h - line_height) / 2.0 - ascent;
-            let font = &measurer.face(size, weight).font;
-            canvas.draw_str(text, (tx, ty), font, &self.fill);
+            let mut paragraph = measurer.paragraph(text, size, weight, box_w, TextAlign::Center);
+            let tx = x + border_width + g(f::PAD_LEFT);
+            let ty = y + border_width + g(f::PAD_TOP) + (box_h - paragraph.height()) / 2.0;
+            crate::text::paint_paragraph(&mut paragraph, canvas, (tx, ty).into(), &self.fill);
         } else {
-            // Ascent is negative, so subtracting it moves down to the baseline.
-            let ascent = measurer.face(size, weight).ascent;
-            let font = &measurer.face(size, weight).font;
-            canvas.draw_str(text, (x, y - ascent), font, &self.fill);
+            // A text run is its own node, so its bounds *are* the text block and
+            // the wrap width is the box width. Laying out to anything else here
+            // would wrap at a width the layout pass did not predict, and the box
+            // would be the wrong height for what is drawn in it.
+            let mut paragraph = measurer.paragraph(text, size, weight, w, TextAlign::Left);
+            crate::text::paint_paragraph(&mut paragraph, canvas, (x, y).into(), &self.fill);
         }
     }
 }

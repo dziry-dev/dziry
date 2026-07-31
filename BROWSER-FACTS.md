@@ -248,3 +248,37 @@ does not. `thin` and `none` are honoured against dziri's own overlay thickness r
 Chromium's gutter widths, because the gutter is not reserved here at all (see above) — `none` means
 no bar drawn *and* nothing to grab, while the wheel keeps working, which is exactly what the
 property means.
+
+---
+
+## A word too long for its line: Chrome overflows, Skia breaks it
+
+Measured 2026-08-01 with `bun run layout-diff` (Chrome/Edge over CDP, `wrap-unbreakable`) against
+dziri's own SkParagraph path, both laying out `Unbreakablesupercalifragilistic` at 16px in a 120px
+box:
+
+| Engine | lines | box height |
+|---|---|---|
+| Chrome | **1** | 21 |
+| dziri (SkParagraph) | **2** | 42 |
+
+CSS's initial `overflow-wrap: normal` / `word-break: normal` says a token with no break
+opportunity **stays on one line and overflows its box**. Chrome does that. Skia's line breaker
+falls back to breaking anywhere once a word cannot fit the width, so the token is cut mid-word and
+the box grows a line — Flutter's behaviour, which is unsurprising given whose text stack this is.
+
+Confirmed from both sides: `text.rs`'s `an_unbreakable_token_is_broken_by_cluster_not_overflowed`
+pins dziri at ≤ the requested width over several lines, and `layout-diff` reports Chrome at one
+line for the same input.
+
+**Bearing on dziri.** Not adjustable from `ParagraphStyle` or `TextStyle` — there is no
+word-break or overflow-wrap setting exposed anywhere in skia-safe 0.87's paragraph module. Closing
+it means implementing `overflow-wrap`/`word-break` as real properties and doing the fallback
+by hand, which is A2 work that has not been priced. Until then it is a known divergence and the
+one scenario `layout-diff` is expected to report red. **A red `wrap-unbreakable` is the status
+quo, not a regression** — if any *other* scenario goes red, that is new.
+
+An adjacent finding from the same work, recorded because it is the opposite mistake: **Skia's
+`ParagraphStyle::apply_rounding_hack` is on by default** and rounds line widths up to whole
+pixels, which browsers do not do. dziri turns it off. What dziri *does* round is the measurement
+it hands Taffy, and for an unrelated reason — see the comment on `Measurer::measure`.
