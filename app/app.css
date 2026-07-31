@@ -22,8 +22,15 @@ body {
        to miss because the two properties are always described together. Declared here
        to exercise the authored path: with neither property the engine picks its own
        overlay colours from `color` above, which is the interesting default but not
-       proof that an author can override it. */
-    scrollbar-color: #52525b #27272a;
+       proof that an author can override it.
+
+       The track is `transparent` on purpose. These bars are *overlay* — they reserve no
+       layout room and are drawn on top of the content — so a filled track paints a
+       full-height band over text that is still there underneath, which reads as a gutter
+       that does not exist. A coloured track only tells the truth once the gutter is
+       reserved, which needs a second layout pass; see ROADMAP under A4. Until then the
+       honest bar is a thumb alone. */
+    scrollbar-color: #52525b transparent;
 }
 
 .app {

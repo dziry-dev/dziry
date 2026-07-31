@@ -693,9 +693,13 @@ impl Engine {
                 // sits, which is not something the host authored and not something it
                 // needs to hear about. No event is queued, so app code cannot be the
                 // thing that makes scrolling feel slow.
-                RawInput::Wheel { x, y, dx, dy } => {
-                    self.scroll_at(x, y, dx * WHEEL_NOTCH_PX, dy * WHEEL_NOTCH_PX);
-                }
+                RawInput::Wheel {
+                    x,
+                    y,
+                    dx,
+                    dy,
+                    shift,
+                } => self.wheel(x, y, dx, dy, shift),
 
                 RawInput::MouseMotion { x, y } => self.mouse_move(x, y),
                 RawInput::MouseDown { x, y } => self.mouse_down(x, y),
@@ -887,6 +891,27 @@ impl Engine {
                 ..Default::default()
             });
         }
+    }
+
+    /// A wheel or trackpad scroll of `(dx, dy)` notches at `(x, y)`.
+    ///
+    /// Notches to pixels happens here rather than in `window.rs`, which reports what the
+    /// platform said and nothing more.
+    ///
+    /// Shift turns a vertical wheel sideways. Every desktop platform does this, and with
+    /// a plain mouse it is the *only* way to reach a horizontal scroll region — SDL does
+    /// not do it for you, and its wheel event does not even carry the modifier.
+    ///
+    /// Only when the device sent nothing horizontal of its own, which is the part worth
+    /// getting right: a trackpad reports both axes, and swapping there would discard a
+    /// real `dx` and turn a diagonal gesture into a wrong one.
+    pub fn wheel(&mut self, x: f32, y: f32, dx: f32, dy: f32, shift: bool) {
+        let (dx, dy) = if shift && dx == 0.0 {
+            (dy, 0.0)
+        } else {
+            (dx, dy)
+        };
+        self.scroll_at(x, y, dx * WHEEL_NOTCH_PX, dy * WHEEL_NOTCH_PX);
     }
 
     /// A press at `(x, y)`.

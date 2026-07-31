@@ -124,6 +124,52 @@ fn rows(count_rows: usize, interactive: bool) -> Engine {
     engine
 }
 
+/// A 120x120 box scrolling *horizontally* over `count` cells of 100.
+///
+/// The mirror of [`rows`], for the axis a plain mouse can only reach with shift held.
+fn columns(count_cells: usize) -> Engine {
+    let count = count_cells + 1;
+    let mut engine = Engine::new(&config_of(count as u32)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..count {
+            init_style(t, slot);
+        }
+        t.set_u8(STYLES, styles::OVERFLOW_X, 0, protocol::overflow::SCROLL);
+        t.set_u8(STYLES, styles::FLEX_DIRECTION, 0, flex_direction::ROW);
+        for node in 1..count {
+            t.set_f32(STYLES, styles::WIDTH, node, 100.0);
+            t.set_f32(STYLES, styles::FLEX_SHRINK, node, 0.0);
+        }
+
+        for node in 0..count {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        for node in 1..count {
+            t.set_i32(NODES, nodes::PARENT, node, 0);
+            t.set_i32(
+                NODES,
+                nodes::NEXT_SIBLING,
+                node,
+                if node + 1 < count {
+                    node as i32 + 1
+                } else {
+                    -1
+                },
+            );
+        }
+    }
+    engine.tick().expect("tick");
+    engine
+}
+
 /// Dragging the thumb scrolls the content, in proportion and both ways.
 #[test]
 fn dragging_the_thumb_scrolls_the_content() {
@@ -246,6 +292,45 @@ fn clicking_the_track_pages() {
         engine.scroll_target_of(0)[1],
         0.0,
         "and above it, back a page — clamped at the top"
+    );
+}
+
+/// Shift turns a vertical wheel sideways.
+///
+/// The only way to reach a horizontal scroll region with a plain mouse, and neither the
+/// platform nor SDL does it — SDL's wheel event does not even carry the modifier, which is
+/// why `window.rs` queries `SDL_GetModState` separately.
+#[test]
+fn shift_scrolls_a_vertical_wheel_sideways() {
+    // A row of three 100-wide cells in a 120 box: 180 of horizontal scroll and none
+    // vertical, so a plain wheel has nothing to move and a shifted one has.
+    let mut engine = columns(3);
+
+    engine.wheel(60.0, 60.0, 0.0, 1.0, false);
+    assert_eq!(
+        engine.scroll_target_of(0),
+        [0.0, 0.0],
+        "an unshifted wheel finds nothing to scroll vertically"
+    );
+
+    engine.wheel(60.0, 60.0, 0.0, 1.0, true);
+    assert_eq!(
+        engine.scroll_target_of(0),
+        [48.0, 0.0],
+        "shift sends the same notch along x"
+    );
+
+    // Back the other way, and clamped at zero rather than going negative.
+    engine.wheel(60.0, 60.0, 0.0, -10.0, true);
+    assert_eq!(engine.scroll_target_of(0), [0.0, 0.0], "and back");
+
+    // A device that reports its own horizontal delta keeps it: swapping there would
+    // discard the real `dx` and turn a diagonal trackpad gesture into a wrong one.
+    engine.wheel(60.0, 60.0, 1.0, 2.0, true);
+    assert_eq!(
+        engine.scroll_target_of(0)[0],
+        48.0,
+        "a real dx survives shift rather than being replaced by dy"
     );
 }
 

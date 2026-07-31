@@ -18,6 +18,7 @@
 //! same property the TypeScript runtime relied on.
 
 use sdl3::event::{Event as SdlEvent, EventWatch, EventWatchCallback, WindowEvent};
+use sdl3::keyboard::Mod;
 use sdl3::mouse::MouseButton;
 use sdl3::pixels::{Color as SdlColor, PixelFormat};
 use sdl3::rect::Rect;
@@ -49,6 +50,13 @@ pub enum RawInput {
         y: f32,
         dx: f32,
         dy: f32,
+        /// Whether shift was held, which every platform reads as "scroll sideways".
+        ///
+        /// Reported rather than applied here: SDL's wheel event carries no modifier
+        /// state at all, so this comes from a separate `SDL_GetModState` query, and what
+        /// to *do* about it is the engine's policy — the same division that keeps
+        /// notches-to-pixels out of this file.
+        shift: bool,
     },
     MouseDown {
         x: f32,
@@ -75,6 +83,18 @@ pub enum RawInput {
 
 /// How coarsely the upload texture is sized. See `Window::resize`.
 const TEXTURE_GRID: u32 = 256;
+
+/// The narrowest the OS will let the user drag the window.
+///
+/// 564 is Chrome's own floor on Windows, which is a better source than a round number:
+/// it is the width a browser team settled on for "a page still works here", and dziri's
+/// layouts are the same shape as pages. Below it a card grid becomes a column of clipped
+/// words, and the resulting bug reports are about the layout rather than the size.
+const MIN_WINDOW_WIDTH: u32 = 564;
+
+/// And a floor on height, which no browser publishes. This one is chosen: two rows of
+/// cards plus chrome, i.e. enough that a vertical scrollbar has somewhere to be.
+const MIN_WINDOW_HEIGHT: u32 = 320;
 
 fn round_up(n: u32, to: u32) -> u32 {
     n.div_ceil(to) * to
@@ -107,7 +127,8 @@ impl EventWatchCallback for ResizeWatch {
 }
 
 pub struct Window {
-    _sdl: Sdl,
+    /// Kept for `SDL_GetModState`, which a wheel needs and its event does not carry.
+    sdl: Sdl,
     _video: VideoSubsystem,
     /// Removed from SDL when this is dropped, so it must outlive the window.
     _resize_watch: EventWatch<ResizeWatch>,
@@ -139,9 +160,19 @@ impl Window {
             builder.borderless();
         }
 
-        let window = builder
+        let mut window = builder
             .build()
             .map_err(|e| EngineError::sdl(format!("SDL_CreateWindow: {e}")))?;
+
+        // A floor on the window, not on the layout. Below this every app is a column of
+        // clipped words, and letting the user drag there produces bug reports about the
+        // layout rather than about the size — a narrow window is a real case worth
+        // supporting, an 80 px one is not.
+        //
+        // The OS enforces it, so no code here has to defend against a smaller surface.
+        window
+            .set_minimum_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
+            .map_err(|e| EngineError::sdl(format!("SDL_SetWindowMinimumSize: {e}")))?;
 
         // Without this SDL delivers **no** `TextInput` events at all — not for
         // IME composition and not for plain Latin keys either. The event arm in
@@ -189,7 +220,7 @@ impl Window {
         let resize_watch = event_subsystem.add_event_watch(ResizeWatch);
 
         Ok(Self {
-            _sdl: sdl,
+            sdl,
             _video: video,
             _resize_watch: resize_watch,
             events,
@@ -337,6 +368,15 @@ impl Window {
                     y: mouse_y,
                     dx: -x,
                     dy: -y,
+                    // Queried now rather than tracked from key events: SDL's wheel event
+                    // has no modifier field, and a shift press that arrived while the
+                    // window was not focused would never have been seen. `SDL_GetModState`
+                    // is the platform's own answer and cannot drift out of sync.
+                    shift: self
+                        .sdl
+                        .keyboard()
+                        .mod_state()
+                        .intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD),
                 }),
 
                 SdlEvent::MouseButtonDown {
