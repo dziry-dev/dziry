@@ -15,7 +15,7 @@
 
 use taffy::prelude::*;
 use taffy::style::{
-    AlignContent, AlignItems, AlignSelf, Dimension, Display, FlexDirection, FlexWrap,
+    AlignContent, AlignItems, AlignSelf, BoxSizing, Dimension, Display, FlexDirection, FlexWrap,
     GridPlacement, LengthPercentage, LengthPercentageAuto, Overflow, Position, Style,
 };
 use taffy::{Point, Rect, Size, TaffyTree};
@@ -360,20 +360,33 @@ impl LayoutTree {
         // the way an author expects — the same decision the compiler documents
         // when it makes `body` the root node rather than a child of one.
         //
+        // And it receives it as a **border** box, which is why the root alone keeps
+        // Taffy's default while `style_of` gives every other node CSS's `content-box`.
+        // The window is the outer edge of the root's box: a root with padding has to
+        // take that padding out of the window, not add it and overflow the surface. A
+        // browser treats the initial containing block the same way.
+        //
         // Only written when it differs, because `set_style` marks the node dirty
-        // and would otherwise force a full relayout every single frame.
+        // and would otherwise force a full relayout every single frame. The
+        // comparison covers `box_sizing` as well as `size` — `rebuild` re-derives the
+        // root's style from `style_of`, so checking the size alone would let a
+        // rebuild-without-resize leave the root on `content-box` permanently.
         let want = Size {
             width: Dimension::length(width),
             height: Dimension::length(height),
         };
-        let current = self.tree.style(root).map(|s| s.size).ok();
-        if current != Some(want) {
+        let stale = match self.tree.style(root) {
+            Ok(s) => s.size != want || s.box_sizing != BoxSizing::BorderBox,
+            Err(_) => true,
+        };
+        if stale {
             let mut style = self
                 .tree
                 .style(root)
                 .map_err(taffy("taffy style on root"))?
                 .clone();
             style.size = want;
+            style.box_sizing = BoxSizing::BorderBox;
             self.tree
                 .set_style(root, style)
                 .map_err(taffy("taffy set_style on root"))?;
@@ -647,7 +660,31 @@ fn placement(start: i16, span: i16) -> Line<GridPlacement> {
 fn style_of(tables: &Tables, node: usize) -> Style {
     use protocol::styles as f;
 
-    let mut s = Style::default();
+    // Taffy's `Style::default()` is `BoxSizing::BorderBox`; CSS's initial value for
+    // `box-sizing` is `content-box`. Taken from Taffy's default, `width: 400px` with
+    // `padding: 12px` produced a 400 px box where a browser gives 424 — measured by
+    // `layout-diff`'s no-text control scenario, which differed by exactly the padding
+    // and nothing else.
+    //
+    // **The root is deliberately excluded**, in `compute`: the window rect is the
+    // outer edge of the root's box, so a padded root has to take that padding out of
+    // the window rather than growing past it. Three `tests/bounds.rs` cases pin that
+    // invariant, and they were right to fail when this was applied to every node.
+    //
+    // dziri has no `box-sizing` *field* yet, so this sets the initial value rather
+    // than implementing the property. That is the whole of the gap for hand-written
+    // CSS and it is not the whole of the gap for Tailwind, whose preflight sets
+    // `box-sizing: border-box` on every element — meaning Tailwind's own layouts now
+    // need the property that A1 has to add, where before they accidentally worked.
+    //
+    // Spelled as a struct update rather than `let mut` + assignment: clippy's
+    // `field_reassign_with_default` rejects the assignment when it sits next to the
+    // `default()` call it corrects, and moving it away from that call would separate
+    // it from the reason it exists.
+    let mut s = Style {
+        box_sizing: BoxSizing::ContentBox,
+        ..Style::default()
+    };
 
     let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
     if hidden.get(node).copied().unwrap_or(0) != 0 {
