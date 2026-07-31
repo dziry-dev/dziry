@@ -416,8 +416,16 @@ export const ENUMS: EnumDef[] = [
 /**
  * Bumped on any change to the tables above. The engine refuses to start on a
  * mismatch rather than rendering garbage.
+ *
+ * Also bumped when the *C ABI* changes shape, even though the tables did not —
+ * v4 is where the engine handle stopped being a pointer and became a `u32` token
+ * into a handle table. `SCHEMA_HASH` cannot cover that: it hashes the tables, and
+ * a stale binary would pass both checks and then be handed a 4-byte out-parameter
+ * where it expects 8. `dziri_protocol_version` takes no arguments, so it is the one
+ * call that is safe to make against a binary of unknown vintage — which is why the
+ * ABI's own version lives here.
  */
-export const PROTOCOL_VERSION = 3;
+export const PROTOCOL_VERSION = 4;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

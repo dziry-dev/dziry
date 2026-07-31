@@ -40,11 +40,11 @@ fn last_error() -> String {
     }
 }
 
-fn create() -> *mut Handle {
-    let mut handle = std::ptr::null_mut();
+fn create() -> Handle {
+    let mut handle: Handle = 0;
     let code = unsafe { dziri_engine_create(&config(), &mut handle) };
     assert_eq!(code, status::OK, "create failed: {}", last_error());
-    assert!(!handle.is_null());
+    assert_ne!(handle, 0, "0 is never a valid handle");
     handle
 }
 
@@ -58,11 +58,11 @@ fn a_protocol_mismatch_refuses_to_start() {
     let mut config = config();
     config.protocol_version = protocol::PROTOCOL_VERSION + 99;
 
-    let mut handle = std::ptr::null_mut();
+    let mut handle: Handle = 0;
     let code = unsafe { dziri_engine_create(&config, &mut handle) };
 
     assert_eq!(code, status::PROTOCOL_MISMATCH);
-    assert!(handle.is_null(), "nothing is allocated on refusal");
+    assert_eq!(handle, 0, "nothing is allocated on refusal");
     assert!(
         last_error().contains("protocol mismatch"),
         "the message should say what happened: {}",
@@ -92,34 +92,89 @@ fn a_panic_becomes_a_status_code_and_poisons_the_engine() {
     // than painting from half-updated state.
     assert_eq!(dziri_engine_tick(handle), status::POISONED);
 
-    unsafe { dziri_engine_destroy(handle) };
+    dziri_engine_destroy(handle);
 }
 
 #[test]
 fn a_destroyed_handle_is_refused_rather_than_dereferenced() {
     let handle = create();
-    assert_eq!(unsafe { dziri_engine_destroy(handle) }, status::OK);
+    assert_eq!(dziri_engine_destroy(handle), status::OK);
 
-    // The magic number is cleared before the free, so this is a refusal instead
-    // of a double free — the mistake a scripting host makes most easily.
-    assert_eq!(
-        unsafe { dziri_engine_destroy(handle) },
-        status::INVALID_HANDLE
+    // A lookup miss, not a read of freed memory: the slot is empty and its
+    // generation has moved past this handle. Double-destroy is the mistake a
+    // scripting host makes most easily, and it used to be caught by dereferencing
+    // the pointer to find a cleared magic number — reading the very allocation it
+    // was checking had been freed.
+    assert_eq!(dziri_engine_destroy(handle), status::INVALID_HANDLE);
+    assert!(
+        last_error().contains("already destroyed"),
+        "the message should say which mistake this was: {}",
+        last_error()
     );
     assert_eq!(dziri_engine_tick(handle), status::INVALID_HANDLE);
 }
 
+/// The case a magic number could not catch: the slot is live, the handle is not.
+///
+/// A stale pointer under the old scheme could land on a reallocated block whose
+/// first eight bytes happen to be a valid magic number, and the call would then run
+/// against a *different* engine. Only a generation distinguishes those.
+///
+/// Constructed rather than provoked: the handle is `(generation << 8) | slot`, so
+/// the neighbouring generations on a live slot are arithmetic. Waiting for a
+/// destroy/create pair to reuse a slot would depend on what the other tests in this
+/// binary are doing on their own threads, which is not a thing to assert on.
 #[test]
-fn a_null_handle_is_an_error_not_a_crash() {
+fn a_wrong_generation_on_a_live_slot_is_refused() {
+    let live = create();
+    let slot = live & 0xff;
+
+    for (handle, what) in [
+        (live + (1 << 8), "a generation this slot has not reached"),
+        (live - (1 << 8), "the generation before this one"),
+        (slot, "generation 0, which is never issued"),
+    ] {
+        assert_eq!(
+            dziri_engine_tick(handle),
+            status::INVALID_HANDLE,
+            "{what} should be refused"
+        );
+    }
+
+    // And none of that disturbed the engine that does exist.
+    assert_eq!(dziri_engine_tick(live), status::OK, "{}", last_error());
+    assert_eq!(dziri_engine_destroy(live), status::OK);
+}
+
+#[test]
+fn a_zero_handle_is_an_error_not_a_crash() {
+    assert_eq!(dziri_engine_tick(0), status::INVALID_HANDLE);
     assert_eq!(
-        dziri_engine_tick(std::ptr::null_mut()),
-        status::INVALID_HANDLE
-    );
-    assert_eq!(
-        unsafe { dziri_engine_destroy(std::ptr::null_mut()) },
+        dziri_engine_destroy(0),
         status::OK,
         "destroying nothing succeeds, so teardown paths stay simple"
     );
+    // A number the host invented rather than received. There is no pointer to
+    // dereference, so this is a bounds check.
+    assert_eq!(dziri_engine_tick(0xdead_beef), status::INVALID_HANDLE);
+}
+
+/// SDL pins its window and event pump to the thread that initialised video, and
+/// Skia's surface is not shared either — so a handle reaching a foreign thread has
+/// to be refused rather than accommodated. The registry records the creating thread
+/// precisely so this can be a message instead of a crash inside Cocoa or a driver.
+#[test]
+fn a_handle_used_from_another_thread_is_refused() {
+    let handle = create();
+
+    let code = std::thread::spawn(move || dziri_engine_tick(handle))
+        .join()
+        .expect("the foreign thread should return a status, not panic");
+    assert_eq!(code, status::INVALID_HANDLE);
+
+    // And the engine is untouched: the owning thread still has it.
+    assert_eq!(dziri_engine_tick(handle), status::OK, "{}", last_error());
+    assert_eq!(dziri_engine_destroy(handle), status::OK);
 }
 
 #[test]
@@ -147,7 +202,7 @@ fn a_short_descriptor_buffer_is_refused_before_it_is_written() {
     assert_eq!(written, 0, "a partial descriptor is worse than none");
     assert!(last_error().contains("needs"), "{}", last_error());
 
-    unsafe { dziri_engine_destroy(handle) };
+    dziri_engine_destroy(handle);
 }
 
 #[test]
@@ -182,7 +237,7 @@ fn the_descriptor_survives_a_round_trip_through_the_abi() {
     unsafe { dziri_engine_generation(handle, &mut generation) };
     assert!(generation > 0);
 
-    unsafe { dziri_engine_destroy(handle) };
+    dziri_engine_destroy(handle);
 }
 
 #[test]
@@ -205,7 +260,7 @@ fn a_skia_failure_reports_skia_and_not_the_entry_point_s_guess() {
         last_error()
     );
 
-    unsafe { dziri_engine_destroy(handle) };
+    dziri_engine_destroy(handle);
 }
 
 /// A refused copy must not consume the frame.
@@ -253,7 +308,7 @@ fn a_short_png_buffer_leaves_the_frame_to_retry() {
         "and it should be the frame, not zeros"
     );
 
-    unsafe { dziri_engine_destroy(handle) };
+    dziri_engine_destroy(handle);
 }
 
 /// `written` means written, not wanted.
@@ -286,7 +341,7 @@ fn a_short_font_family_buffer_reports_what_it_wrote() {
         "whatever it wrote is a whole number of characters"
     );
 
-    unsafe { dziri_engine_destroy(handle) };
+    dziri_engine_destroy(handle);
 }
 
 #[test]
@@ -315,5 +370,5 @@ fn a_headless_engine_paints_pixels() {
         "the frame should be opaque"
     );
 
-    unsafe { dziri_engine_destroy(handle) };
+    dziri_engine_destroy(handle);
 }

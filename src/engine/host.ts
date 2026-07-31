@@ -40,29 +40,38 @@ export const EVENT_SIZE = 56;
 const REGION = -1;
 const REGION_STRING_BYTES = 0;
 
+/**
+ * The engine handle is a `u32`, not a pointer.
+ *
+ * It is an index plus a generation into a table the engine owns, so a handle used
+ * after `close()` is a lookup miss rather than a dereference of freed memory —
+ * which is what the old pointer-plus-magic-number scheme had to do to discover
+ * that it had been freed. Nothing on this side may do arithmetic on it or attempt
+ * to read through it; it is a token.
+ */
 const SYMBOLS = {
   dziri_protocol_version: { args: [], returns: u32 },
   dziri_schema_hash: { args: [], returns: u32 },
   dziri_last_error: { args: [PTR, u32], returns: u32 },
   dziri_engine_create: { args: [PTR, PTR], returns: i32 },
-  dziri_engine_destroy: { args: [PTR], returns: i32 },
-  dziri_engine_span_count: { args: [PTR, PTR], returns: i32 },
-  dziri_engine_describe: { args: [PTR, PTR, u32, PTR], returns: i32 },
-  dziri_engine_generation: { args: [PTR, PTR], returns: i32 },
-  dziri_engine_tick: { args: [PTR], returns: i32 },
-  dziri_engine_drain_events: { args: [PTR, PTR, u32, PTR], returns: i32 },
-  dziri_engine_grow: { args: [PTR, PTR], returns: i32 },
-  dziri_engine_resize: { args: [PTR, u32, u32], returns: i32 },
-  dziri_engine_set_input_state: { args: [PTR, i32, i32, i32], returns: i32 },
-  dziri_engine_hit_test: { args: [PTR, f32, f32, PTR], returns: i32 },
-  dziri_engine_bounds: { args: [PTR, u32, PTR], returns: i32 },
-  dziri_engine_surface_info: { args: [PTR, PTR], returns: i32 },
-  dziri_engine_read_pixels: { args: [PTR, PTR, u32], returns: i32 },
-  dziri_engine_encode_png: { args: [PTR, PTR], returns: i32 },
-  dziri_engine_take_png: { args: [PTR, PTR, u32], returns: i32 },
-  dziri_engine_font_family: { args: [PTR, PTR, u32, PTR], returns: i32 },
-  dziri_engine_last_frame_ms: { args: [PTR, PTR], returns: i32 },
-  dziri_engine_panic_for_testing: { args: [PTR], returns: i32 },
+  dziri_engine_destroy: { args: [u32], returns: i32 },
+  dziri_engine_span_count: { args: [u32, PTR], returns: i32 },
+  dziri_engine_describe: { args: [u32, PTR, u32, PTR], returns: i32 },
+  dziri_engine_generation: { args: [u32, PTR], returns: i32 },
+  dziri_engine_tick: { args: [u32], returns: i32 },
+  dziri_engine_drain_events: { args: [u32, PTR, u32, PTR], returns: i32 },
+  dziri_engine_grow: { args: [u32, PTR], returns: i32 },
+  dziri_engine_resize: { args: [u32, u32, u32], returns: i32 },
+  dziri_engine_set_input_state: { args: [u32, i32, i32, i32], returns: i32 },
+  dziri_engine_hit_test: { args: [u32, f32, f32, PTR], returns: i32 },
+  dziri_engine_bounds: { args: [u32, u32, PTR], returns: i32 },
+  dziri_engine_surface_info: { args: [u32, PTR], returns: i32 },
+  dziri_engine_read_pixels: { args: [u32, PTR, u32], returns: i32 },
+  dziri_engine_encode_png: { args: [u32, PTR], returns: i32 },
+  dziri_engine_take_png: { args: [u32, PTR, u32], returns: i32 },
+  dziri_engine_font_family: { args: [u32, PTR, u32, PTR], returns: i32 },
+  dziri_engine_last_frame_ms: { args: [u32, PTR], returns: i32 },
+  dziri_engine_panic_for_testing: { args: [u32], returns: i32 },
 } as const;
 
 function libraryPath(): string {
@@ -161,14 +170,15 @@ export type EngineEvent = {
 };
 
 export class Engine {
-  #handle: Pointer;
+  /** An opaque token from the engine's handle table. Never a pointer. */
+  #handle: number;
   #generation = 0n;
   #tables!: SharedTables;
   #stringBytes!: Uint8Array;
   /** Keeps the wrapped buffers reachable for as long as the engine is alive. */
   #buffers: ArrayBuffer[] = [];
 
-  private constructor(handle: Pointer) {
+  private constructor(handle: number) {
     this.#handle = handle;
     this.#bindTables();
   }
@@ -220,14 +230,17 @@ export class Engine {
     u64v[6] = BigInt(ptr(title));
     u32v[14] = title.length;
 
-    const out = new BigUint64Array(1);
+    // One `u32`, not a pointer-sized slot: the handle is a table token.
+    const out = new Uint32Array(1);
     check(
       engine.dziri_engine_create(ptr(config) as Pointer, ptr(out) as Pointer),
       "dziri_engine_create",
     );
 
-    const handle = Number(out[0]!) as Pointer;
-    if (!handle) throw new Error("engine_create reported success but returned null");
+    const handle = out[0]!;
+    // 0 is never issued, so this catches an engine that returned OK without
+    // writing — which is the failure the status code alone cannot express.
+    if (handle === 0) throw new Error("engine_create reported success but issued no handle");
     return new Engine(handle);
   }
 
@@ -540,9 +553,11 @@ export class Engine {
   }
 
   close(): void {
-    if (!this.#handle) return;
+    if (this.#handle === 0) return;
     check(engine.dziri_engine_destroy(this.#handle), "dziri_engine_destroy");
-    this.#handle = 0 as Pointer;
+    // 0 is never a valid handle, so a call after `close` is refused by the engine's
+    // handle table even if this object is still reachable.
+    this.#handle = 0;
     /* Dropped together: every view points into memory the engine just freed. */
     this.#buffers = [];
   }
