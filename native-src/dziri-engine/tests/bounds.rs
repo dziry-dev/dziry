@@ -940,10 +940,15 @@ fn a_resize_repaints_without_waiting_for_a_tick() {
 
 /// A wheel over a scroll container moves its content, clamped to what overflows.
 ///
-/// The offset is engine state rather than table state, so this asserts through
-/// `scroll_of`: `bounds` deliberately keep meaning "where layout put this", and paint
-/// translates instead. A test that expected bounds to move would be pinning the wrong
-/// design.
+/// The offset is engine state rather than table state, so this asserts through the
+/// scroll accessors: `bounds` deliberately keep meaning "where layout put this", and
+/// paint translates instead. A test that expected bounds to move would be pinning the
+/// wrong design.
+///
+/// Asserted on `scroll_target_of` rather than `scroll_of` because a wheel now aims the
+/// content and the glide catches up over the next few frames — what this test is about is
+/// the wheel's arithmetic and its clamping, both of which happen to the target. The glide
+/// itself is `a_wheel_glides_rather_than_jumping`.
 #[test]
 fn a_wheel_scrolls_the_box_under_the_cursor_and_stops_at_the_end() {
     // Root is 200x100. A 200x100 scroll container holding 300px of content, so 200px
@@ -964,19 +969,23 @@ fn a_wheel_scrolls_the_box_under_the_cursor_and_stops_at_the_end() {
     }
     engine.tick().expect("tick");
 
-    assert_eq!(engine.scroll_of(0), [0.0, 0.0], "nothing has scrolled yet");
+    assert_eq!(
+        engine.scroll_target_of(0),
+        [0.0, 0.0],
+        "nothing has scrolled yet"
+    );
 
     // Down a little: the content moves by the wheel delta.
     assert!(
         engine.scroll_at(100.0, 50.0, 0.0, 50.0),
         "the wheel scrolled"
     );
-    assert_eq!(engine.scroll_of(0), [0.0, 50.0]);
+    assert_eq!(engine.scroll_target_of(0), [0.0, 50.0]);
 
     // Down a lot: clamped at 300 - 100 = 200, never past the end of the content.
     assert!(engine.scroll_at(100.0, 50.0, 0.0, 10_000.0));
     assert_eq!(
-        engine.scroll_of(0),
+        engine.scroll_target_of(0),
         [0.0, 200.0],
         "clamped to what overflows"
     );
@@ -987,7 +996,7 @@ fn a_wheel_scrolls_the_box_under_the_cursor_and_stops_at_the_end() {
 
     // Back up, clamped at zero rather than going negative.
     assert!(engine.scroll_at(100.0, 50.0, 0.0, -10_000.0));
-    assert_eq!(engine.scroll_of(0), [0.0, 0.0]);
+    assert_eq!(engine.scroll_target_of(0), [0.0, 0.0]);
 
     // The other axis never moves: `overflow-x` is visible, so there is no scroll
     // region horizontally no matter how much content there is.
@@ -1029,6 +1038,9 @@ fn a_scrolled_child_is_hit_where_it_now_appears() {
     assert_eq!(engine.hit_test(10.0, 90.0), 2, "before scrolling");
     // Scroll 60px: node 2 now appears at 20..100, so y=90 is still it, and y=10 is too.
     assert!(engine.scroll_at(10.0, 50.0, 0.0, 60.0));
+    // Hit-testing reads where the content *is*, so the glide has to land first. A dt of
+    // one second is "arrive now" at this time constant.
+    engine.advance_scrolls(1.0);
     assert_eq!(engine.hit_test(10.0, 30.0), 2, "moved up under the cursor");
     // Its layout rect never moved, which is what the host still reads.
     assert_eq!(bound(&engine, 2)[1], 80.0);
@@ -1085,6 +1097,7 @@ fn a_document_taller_than_the_window_scrolls_the_page() {
         engine.scroll_at(100.0, 50.0, 0.0, 10_000.0),
         "the page scrolls"
     );
+    engine.advance_scrolls(1.0);
     let scrolled = engine.scroll_of(0)[1];
     assert!(
         (scrolled - 160.0).abs() < 1.0,

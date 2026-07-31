@@ -157,6 +157,23 @@ pub struct Engine {
     /// tables. Keyed by node id, which append-and-abandon list growth never
     /// invalidates.
     scroll: Vec<[f32; 2]>,
+    /// Where each of those offsets is heading.
+    ///
+    /// The gate's question 1 answered "no": a scroll position depends on the wheel and
+    /// the clock, and neither exists at build time. Nothing else about it is dynamic —
+    /// the curve and its time constant are compile-time constants, the host is never
+    /// told, and the runtime trace is this one `[f32; 2]` per node plus one
+    /// interpolation in `tick`.
+    ///
+    /// Separate from `scroll` rather than replacing it, because paint needs where the
+    /// content *is* and input needs where it is *going*: a second wheel notch during a
+    /// glide has to add to the destination, not to the current position, or a fast
+    /// scroll ends up slower than a slow one.
+    scroll_target: Vec<[f32; 2]>,
+    /// Whether any offset is still catching up, so an idle frame stays free.
+    scroll_animating: bool,
+    /// When `scroll` was last advanced, for a frame-rate-independent step.
+    last_advance: std::time::Instant,
     /// A scrollbar drag in progress.
     ///
     /// Engine state for the same reason a scroll offset is: nothing the host authored,
@@ -225,6 +242,9 @@ impl Engine {
             last_frame_ms: 0.0,
             last_live_repaint: std::time::Instant::now(),
             scroll: vec![[0.0; 2]; caps.nodes as usize],
+            scroll_target: vec![[0.0; 2]; caps.nodes as usize],
+            scroll_animating: false,
+            last_advance: std::time::Instant::now(),
             drag: None,
             png: Vec::new(),
         })
@@ -325,6 +345,12 @@ impl Engine {
             self.needs_paint = true;
         }
 
+        // The one place wall-clock time enters the scroll glide, and after the relayout
+        // because the clamp above can move a target this then has to chase.
+        let dt = self.last_advance.elapsed().as_secs_f32();
+        self.last_advance = std::time::Instant::now();
+        self.advance_scrolls(dt);
+
         // An idle tick is an event drain and nothing else. The window keeps the
         // last frame it was given, so not presenting is not the same as
         // presenting nothing.
@@ -376,17 +402,25 @@ impl Engine {
     /// Clamped rather than reset, because reaching for zero would throw away the
     /// position in the common case where the box still scrolls, just less far.
     fn clamp_scrolls(&mut self) {
-        for (node, offset) in self.scroll.iter_mut().enumerate() {
-            if *offset == [0.0, 0.0] {
+        for node in 0..self.scroll.len() {
+            let offset = self.scroll[node];
+            let target = self.scroll_target_of(node);
+            if offset == [0.0, 0.0] && target == [0.0, 0.0] {
                 continue;
             }
             let extent = self.tree.overflow_of(node);
-            let clamped = [
-                offset[0].clamp(0.0, extent[0]),
-                offset[1].clamp(0.0, extent[1]),
-            ];
-            if clamped != *offset {
-                *offset = clamped;
+            let clamp = |v: [f32; 2]| [v[0].clamp(0.0, extent[0]), v[1].clamp(0.0, extent[1])];
+
+            // The target as well as the position, or a glide would immediately pull the
+            // content back out to an offset the new layout cannot justify — the same bug,
+            // one frame later and much harder to see.
+            let clamped_target = clamp(target);
+            if clamped_target != target {
+                self.scroll_target[node] = clamped_target;
+            }
+            let clamped = clamp(offset);
+            if clamped != offset {
+                self.scroll[node] = clamped;
                 // The content is about to move without anyone having scrolled it, so
                 // the frame on screen is stale even if nothing else changed.
                 self.needs_paint = true;
@@ -718,6 +752,7 @@ impl Engine {
         // append-and-abandon list arenas buy — so a box the user had scrolled must
         // still be scrolled to the same place afterwards.
         self.scroll.resize(caps.nodes as usize, [0.0, 0.0]);
+        self.scroll_target.resize(caps.nodes as usize, [0.0, 0.0]);
         self.fresh = true;
         true
     }
@@ -783,8 +818,19 @@ impl Engine {
     }
 
     /// Where a node's content currently sits, `[x, y]`, both >= 0.
+    ///
+    /// Where it *is*, which is what paint and hit-testing need. Mid-glide this is not
+    /// where the last gesture asked it to go — see [`Engine::scroll_target_of`].
     pub fn scroll_of(&self, node: usize) -> [f32; 2] {
         self.scroll.get(node).copied().unwrap_or([0.0, 0.0])
+    }
+
+    /// Where a node's content is heading.
+    ///
+    /// What a gesture reads and writes: a wheel notch adds to the destination, not to the
+    /// position, so a burst of notches goes as far as the sum of its parts.
+    pub fn scroll_target_of(&self, node: usize) -> [f32; 2] {
+        self.scroll_target.get(node).copied().unwrap_or([0.0, 0.0])
     }
 
     /// Layout rects plus scroll offsets, which every walk needs together.
@@ -996,9 +1042,13 @@ impl Engine {
             let (thumb_start, thumb_len) = bar.thumb_span();
             let forward = bar.along(at_x, at_y) >= thumb_start + thumb_len;
             let by = if forward { bar.viewport } else { -bar.viewport };
-            let mut wanted = self.scroll_of(bar.node);
+            // From the *target*, so holding a click through several pages accumulates
+            // rather than each one restarting from wherever the glide happens to be.
+            let mut wanted = self.scroll_target_of(bar.node);
             wanted[axis] = (wanted[axis] + by).clamp(0.0, bar.extent);
-            self.set_scroll(bar.node, wanted);
+            // Glided, unlike a drag: a whole viewport arriving in one frame gives no
+            // sense of which direction the content went.
+            self.aim_scroll(bar.node, wanted);
         }
 
         self.state.bar = Some(BarHover {
@@ -1039,14 +1089,98 @@ impl Engine {
         true
     }
 
-    /// Writes a node's scroll offset, repainting if it moved.
+    /// Puts a node's content at `to` immediately, with no glide.
+    ///
+    /// For a drag, and only for a drag. Direct manipulation must track the cursor
+    /// exactly: easing a thumb the user is holding adds lag between the mouse and the
+    /// thing it is visibly attached to, which reads as the bar being broken rather than
+    /// as smoothness. The target moves too, or the glide would fight the hand.
     fn set_scroll(&mut self, node: usize, to: [f32; 2]) {
+        if let Some(slot) = self.scroll_target.get_mut(node) {
+            *slot = to;
+        }
         if let Some(slot) = self.scroll.get_mut(node) {
             if *slot != to {
                 *slot = to;
                 self.needs_paint = true;
             }
         }
+    }
+
+    /// Aims a node's content at `to`, to be glided towards over the next few frames.
+    fn aim_scroll(&mut self, node: usize, to: [f32; 2]) {
+        if let Some(slot) = self.scroll_target.get_mut(node) {
+            if *slot != to {
+                *slot = to;
+                self.scroll_animating = true;
+                self.needs_paint = true;
+            }
+        }
+    }
+
+    /// Moves every offset `dt` seconds closer to its target. Returns whether any moved.
+    ///
+    /// Exponential approach rather than a fixed-duration tween, for two reasons that both
+    /// come from the wheel. A tween has to be restarted on every notch, and notches
+    /// arrive in bursts — so a tween either stutters as each one resets the clock, or
+    /// needs a queue. And a tween has a *start*, which means a second notch mid-glide
+    /// either snaps the origin forward or slows the whole thing down. An exponential
+    /// approach has neither: the state is one number, the target can change at any moment,
+    /// and the motion stays continuous through it.
+    ///
+    /// `dt` is a parameter rather than read from the clock here so the motion is
+    /// deterministic and testable; `tick` is the one place wall-clock time enters.
+    /// Frame-rate independent by construction — `exp(-dt/τ)` composes over any split of
+    /// `dt`, which a naive `delta * 0.2` per frame does not.
+    pub fn advance_scrolls(&mut self, dt: f32) -> bool {
+        if !self.scroll_animating {
+            return false;
+        }
+
+        // A pathological `dt` — a debugger pause, a first frame — must not overshoot or
+        // produce a NaN. `1.0` is already "arrive now" at this time constant.
+        let dt = if dt.is_finite() {
+            dt.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let step = 1.0 - (-dt / SCROLL_GLIDE_TAU).exp();
+
+        // Two answers, not one: `moving` decides whether to keep animating, `changed`
+        // decides whether to repaint. They differ on exactly one frame — the last, which
+        // moves the content and then stops — and conflating them either drops that frame
+        // or animates forever.
+        let mut moving = false;
+        let mut changed = false;
+
+        for (current, target) in self.scroll.iter_mut().zip(&self.scroll_target) {
+            for axis in 0..2 {
+                let delta = target[axis] - current[axis];
+                if delta == 0.0 {
+                    continue;
+                }
+                let next = current[axis] + delta * step;
+                // Snapped rather than approached forever: an exponential never arrives,
+                // and a scroll offset 0.03 px from its target is a repaint every frame for
+                // nothing. Tested on where the step *lands* rather than where it started,
+                // so the frame that gets within half a pixel is also the frame that
+                // finishes — otherwise every glide costs one more frame to travel a
+                // distance nothing can display.
+                if (target[axis] - next).abs() <= SCROLL_SNAP_PX {
+                    current[axis] = target[axis];
+                } else {
+                    current[axis] = next;
+                    moving = true;
+                }
+                changed = true;
+            }
+        }
+
+        self.scroll_animating = moving;
+        if changed {
+            self.needs_paint = true;
+        }
+        changed
     }
 
     /// Scrolls the innermost scrollable box under `(px, py)` by `(dx, dy)` pixels.
@@ -1064,18 +1198,26 @@ impl Engine {
 
         while let Some(index) = node {
             let extent = self.tree.overflow_of(index);
-            let current = self.scroll_of(index);
+            // Against the *target*, not the current offset. Notches arrive in bursts, and
+            // a second notch has to add to where the content is heading — measuring from
+            // where it happens to be mid-glide makes a fast scroll travel less far than a
+            // slow one, which is the opposite of what the gesture means.
+            //
+            // It is also what decides the escape: a box whose target is already pinned at
+            // its extent has nothing left to give, however far its content still has to
+            // glide, so the gesture belongs to an ancestor.
+            let current = self.scroll_target_of(index);
             let wanted = [
                 (current[0] + dx).clamp(0.0, extent[0]),
                 (current[1] + dy).clamp(0.0, extent[1]),
             ];
 
-            if wanted != current {
-                if let Some(slot) = self.scroll.get_mut(index) {
-                    *slot = wanted;
-                    self.needs_paint = true;
-                    return true;
-                }
+            // The bounds check is part of the condition rather than nested inside it: a
+            // node past the end of the arrays has nothing to aim, and must fall through
+            // to the ancestor walk rather than swallowing the gesture.
+            if wanted != current && index < self.scroll_target.len() {
+                self.aim_scroll(index, wanted);
+                return true;
             }
 
             // Nothing left in this box: hand the gesture to whatever contains it.
@@ -1171,6 +1313,20 @@ pub(crate) fn repaint_pumping_engine(width: u32, height: u32) {
 /// browser does that a trackpad feels ordinary. A trackpad sends fractional notches,
 /// so this multiplies rather than steps.
 const WHEEL_NOTCH_PX: f32 = 48.0;
+
+/// The glide's time constant, in seconds: how long to cover 63% of the remaining gap.
+///
+/// 70 ms is short enough that a single notch feels like a response rather than an
+/// animation, and long enough that a burst of notches reads as one continuous movement.
+/// Chromium's own wheel smoothing is in the same range. Raising it makes scrolling feel
+/// heavy and laggy well before it looks smoother.
+const SCROLL_GLIDE_TAU: f32 = 0.07;
+
+/// How close counts as arrived.
+///
+/// Half a pixel is below what anything can show, and an exponential approach never
+/// arrives on its own — without this, every scrolled box repaints forever.
+const SCROLL_SNAP_PX: f32 = 0.5;
 
 /// One frame at 60 Hz. A drag is a continuous gesture, so there is nothing to gain
 /// from painting faster than the display, and a great deal to lose: at 1040x560 a

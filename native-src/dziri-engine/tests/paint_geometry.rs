@@ -529,6 +529,10 @@ fn a_row_scrolled_into_view_is_actually_drawn() {
 
     // Scroll 100: row 2 should now be at the top of the box.
     assert!(engine.scroll_at(60.0, 60.0, 0.0, 100.0), "scrolled");
+    // A wheel aims the content and the glide catches up. These are claims about where the
+    // content ends up, so land it first — the gliding itself is asserted in
+    // `a_wheel_glides_rather_than_jumping`.
+    engine.advance_scrolls(1.0);
     engine.tick().expect("tick");
     assert_eq!(
         what_is_at(&mut engine, 60, 50),
@@ -539,6 +543,7 @@ fn a_row_scrolled_into_view_is_actually_drawn() {
     // Scroll to the very end: row 3 fills the box. Under the bug every row was
     // rejected here and the frame was bare surface.
     assert!(engine.scroll_at(60.0, 60.0, 0.0, 10_000.0));
+    engine.advance_scrolls(1.0);
     engine.tick().expect("tick");
     assert_eq!(
         what_is_at(&mut engine, 60, 60),
@@ -689,6 +694,7 @@ fn a_scrolling_box_draws_a_thumb_that_tracks_the_offset() {
     // To the end: the thumb has to reach the far end exactly when the scroll does,
     // which is the property that makes a bar worth looking at.
     assert!(engine.scroll_at(60.0, 60.0, 0.0, 10_000.0), "scrolled");
+    engine.advance_scrolls(1.0);
     engine.tick().expect("tick");
     assert!(
         red_at(&mut engine, THUMB_X, 110) + 20 < content,
@@ -770,6 +776,7 @@ fn growing_the_window_gives_back_a_scroll_it_can_no_longer_hold() {
     // 300 of content in 120: 180 of scroll, all of which we take.
     let mut engine = scrolling_rows(protocol::overflow::SCROLL, 3);
     assert!(engine.scroll_at(60.0, 60.0, 0.0, 10_000.0), "scrolled");
+    engine.advance_scrolls(1.0);
     engine.tick().expect("tick");
     assert_eq!(
         engine.scroll_of(0),
@@ -808,6 +815,7 @@ fn growing_the_window_gives_back_a_scroll_it_can_no_longer_hold() {
 fn a_scroll_that_still_fits_is_kept_not_reset() {
     let mut engine = scrolling_rows(protocol::overflow::SCROLL, 3);
     assert!(engine.scroll_at(60.0, 60.0, 0.0, 10_000.0));
+    engine.advance_scrolls(1.0);
     engine.tick().expect("tick");
     assert_eq!(engine.scroll_of(0), [0.0, 180.0]);
 

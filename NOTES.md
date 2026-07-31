@@ -591,6 +591,7 @@ Everything not listed here is a compiler bug if it happens at run time.
 | Hit-testing | Needs final layout bounds |
 | Window size | An OS input |
 | One dirty bit | Drives event-driven repaint |
+| Scroll offset, and the target it is gliding to | Where the user left a box, plus the clock. Question 1 of the gate: neither the wheel nor the time exists at build time. Two `[f32; 2]` per node and one `exp` in `tick`; the curve and its time constant are compile-time constants and the host is never told a scroll happened |
 
 Known open problems: a dynamic class on a *container* restyles its descendants (measured: one
 root boolean changed 11 of 12 nodes on the sample app), so conditional classes are not a

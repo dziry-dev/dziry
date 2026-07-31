@@ -420,7 +420,15 @@ winit-versus-SDL3 choice reversible.
   Order matters: this needs the scroll container to exist first, so it lands *with* A4 rather than
   before it. Wiring `dataOffset` while nothing can scroll would be a field with no consumer, which
   is what it is today.
-- Inertia and rubber-banding are OS expectations; budget polish time.
+- Inertia and rubber-banding are OS expectations; budget polish time. **A wheel glides**, which
+  is the first half of that: notches aim a per-node target and the offset approaches it
+  exponentially with a 70 ms time constant. A drag deliberately does *not* glide — direct
+  manipulation must track the cursor exactly, and easing a thumb the user is holding reads as a
+  broken scrollbar rather than a smooth one. Still missing: velocity carried past the last notch,
+  which is what "inertia" actually means, and a rubber-band overshoot at the ends.
+- `scroll-behavior: smooth` is parsed by nobody yet. Note it is *not* what makes the wheel smooth
+  — per spec it governs programmatic and anchor scrolls only, and browsers smooth the wheel
+  regardless. It becomes relevant with `scrollIntoView`.
 
 #### Scrollbars are overlay, and that is measured rather than provisional
 

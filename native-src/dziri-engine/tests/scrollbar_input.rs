@@ -221,6 +221,10 @@ fn a_drag_survives_the_pointer_leaving_the_bar() {
 }
 
 /// Clicking the track pages towards the click, and does not start a drag.
+///
+/// A page is glided rather than cut to, so the destination is the target and the position
+/// catches up — a whole viewport arriving in one frame gives no sense of which way the
+/// content went. `advance_scrolls(1.0)` is "arrive now" at this time constant.
 #[test]
 fn clicking_the_track_pages() {
     let mut engine = rows(3, false);
@@ -228,18 +232,78 @@ fn clicking_the_track_pages() {
     // Below the thumb, which ends at y=48: one viewport forward, so 120 of 180.
     engine.mouse_down(ON_BAR_X, 100.0);
     assert_eq!(
-        engine.scroll_of(0)[1],
+        engine.scroll_target_of(0)[1],
         120.0,
         "a click below the thumb pages forward by one viewport"
     );
+    engine.advance_scrolls(1.0);
+    assert_eq!(engine.scroll_of(0)[1], 120.0, "and the glide gets there");
 
     // A release, then a click above the thumb: back a page, to 0.
     engine.mouse_up(ON_BAR_X, 100.0);
     engine.mouse_down(ON_BAR_X, 4.0);
     assert_eq!(
-        engine.scroll_of(0)[1],
+        engine.scroll_target_of(0)[1],
         0.0,
         "and above it, back a page — clamped at the top"
+    );
+}
+
+/// A wheel glides; a drag does not.
+///
+/// The distinction is the whole design. A wheel is an *indirect* gesture — a notch is a
+/// request to move, and easing it reads as smoothness. A drag is *direct*: the thumb is
+/// visibly attached to the cursor, and easing that puts lag between the hand and the thing
+/// it is holding, which reads as a broken scrollbar rather than a smooth one.
+#[test]
+fn a_wheel_glides_rather_than_jumping() {
+    let mut engine = rows(3, false);
+
+    assert!(engine.scroll_at(60.0, 60.0, 0.0, 100.0), "the wheel aimed");
+    assert_eq!(
+        engine.scroll_target_of(0)[1],
+        100.0,
+        "the destination is immediate"
+    );
+    assert_eq!(
+        engine.scroll_of(0)[1],
+        0.0,
+        "the content has not moved yet — that is what a glide is"
+    );
+
+    // One frame at 60 Hz covers part of the gap, and not all of it.
+    engine.advance_scrolls(1.0 / 60.0);
+    let after_a_frame = engine.scroll_of(0)[1];
+    assert!(
+        after_a_frame > 0.0 && after_a_frame < 100.0,
+        "a frame moves part of the way, got {after_a_frame}"
+    );
+
+    // A second notch mid-glide adds to the destination rather than restarting from
+    // wherever the content currently is. Measuring from the position instead is what
+    // makes a fast scroll travel less far than a slow one.
+    assert!(engine.scroll_at(60.0, 60.0, 0.0, 50.0));
+    assert_eq!(
+        engine.scroll_target_of(0)[1],
+        150.0,
+        "notches accumulate on the destination"
+    );
+
+    // And it settles exactly, rather than approaching forever.
+    engine.advance_scrolls(1.0);
+    assert_eq!(engine.scroll_of(0)[1], 150.0, "the glide arrives exactly");
+    assert!(
+        !engine.advance_scrolls(1.0),
+        "and stops animating, so an idle frame stays free"
+    );
+
+    // A drag is not glided: the content is where the cursor put it, this instant.
+    engine.mouse_down(ON_BAR_X, 60.0);
+    engine.mouse_move(ON_BAR_X, 70.0);
+    assert_eq!(
+        engine.scroll_of(0),
+        engine.scroll_target_of(0),
+        "a dragged thumb never lags the cursor"
     );
 }
 
