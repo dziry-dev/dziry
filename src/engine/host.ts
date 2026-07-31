@@ -112,10 +112,17 @@ const scratchF32 = new Float32Array(scratch.buffer);
 const errorBuf = new Uint8Array(1024);
 const decoder = new TextDecoder();
 
-/** The detail behind a failure status. */
+/**
+ * The detail behind a failure status.
+ *
+ * The engine returns how many bytes it *wrote*, which is the longest whole-
+ * codepoint prefix that fits — so a message longer than `errorBuf` arrives cut
+ * short rather than ending in a half-decoded character. The clamp stays as a
+ * bound on a number that crossed the ABI, not because the engine needs it.
+ */
 export function lastError(): string {
-  const len = engine.dziri_last_error(ptr(errorBuf) as Pointer, errorBuf.length);
-  return decoder.decode(errorBuf.subarray(0, Math.min(len, errorBuf.length)));
+  const written = engine.dziri_last_error(ptr(errorBuf) as Pointer, errorBuf.length);
+  return decoder.decode(errorBuf.subarray(0, Math.min(written, errorBuf.length)));
 }
 
 function check(code: number, what: string): void {

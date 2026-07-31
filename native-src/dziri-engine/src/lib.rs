@@ -447,6 +447,11 @@ pub unsafe extern "C" fn dziri_engine_encode_png(handle: *mut Handle, out_len: *
 
 /// Copies out the bytes from the last [`dziri_engine_encode_png`] and clears them.
 ///
+/// A refusal leaves the frame where it was, so the host can allocate properly and
+/// call again. The check has to come before the take for that to be true: taking
+/// first and checking after answers `CAPACITY` once and then `OK` with zero bytes
+/// forever, which reads as a successful screenshot of nothing.
+///
 /// # Safety
 /// `out` must be writable for `len` bytes.
 #[no_mangle]
@@ -459,13 +464,14 @@ pub unsafe extern "C" fn dziri_engine_take_png(
         if out.is_null() {
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
-        let png = engine.take_png();
-        if (len as usize) < png.len() {
+        let needed = engine.png_len();
+        if (len as usize) < needed {
             return fail(
                 status::CAPACITY,
-                format!("PNG is {} bytes, was given {len}", png.len()),
+                format!("PNG is {needed} bytes, was given {len}"),
             );
         }
+        let png = engine.take_png();
         std::ptr::copy_nonoverlapping(png.as_ptr(), out, png.len());
         status::OK
     })

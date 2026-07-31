@@ -203,6 +203,54 @@ fn a_skia_failure_reports_skia_and_not_the_entry_point_s_guess() {
     unsafe { dziri_engine_destroy(handle) };
 }
 
+/// A refused copy must not consume the frame.
+///
+/// The failure this pins is quiet: `take_png` used to empty the engine's buffer
+/// and *then* compare capacity, so a host that guessed the size low got
+/// `CAPACITY` once and `OK` with zero bytes on every retry — a screenshot that
+/// succeeded and wrote an empty file.
+#[test]
+fn a_short_png_buffer_leaves_the_frame_to_retry() {
+    let handle = create();
+    assert_eq!(dziri_engine_tick(handle), status::OK, "{}", last_error());
+
+    let mut size = 0u32;
+    assert_eq!(
+        unsafe { dziri_engine_encode_png(handle, &mut size) },
+        status::OK,
+        "{}",
+        last_error()
+    );
+    assert!(size > 8, "a PNG is at least a signature");
+
+    let mut short = vec![0u8; (size - 1) as usize];
+    assert_eq!(
+        unsafe { dziri_engine_take_png(handle, short.as_mut_ptr(), short.len() as u32) },
+        status::CAPACITY,
+    );
+    assert!(
+        last_error().contains(&size.to_string()),
+        "the refusal should say how much room it needs: {}",
+        last_error()
+    );
+
+    // The retry the host would actually make.
+    let mut png = vec![0u8; size as usize];
+    assert_eq!(
+        unsafe { dziri_engine_take_png(handle, png.as_mut_ptr(), png.len() as u32) },
+        status::OK,
+        "{}",
+        last_error()
+    );
+    assert_eq!(
+        &png[..8],
+        b"\x89PNG\r\n\x1a\n",
+        "and it should be the frame, not zeros"
+    );
+
+    unsafe { dziri_engine_destroy(handle) };
+}
+
 #[test]
 fn a_headless_engine_paints_pixels() {
     let handle = create();

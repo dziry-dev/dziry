@@ -256,6 +256,14 @@ impl Engine {
         Some(self.png.len())
     }
 
+    /// How many bytes the last [`Self::encode_png`] produced, without consuming
+    /// them. A caller with a fixed buffer must ask this *before* taking: the take
+    /// is destructive, so checking capacity afterwards throws away the only copy
+    /// of the frame and leaves the retry nothing to return.
+    pub fn png_len(&self) -> usize {
+        self.png.len()
+    }
+
     /// Takes the encoded bytes, leaving the buffer empty.
     pub fn take_png(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.png)

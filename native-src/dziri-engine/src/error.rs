@@ -138,9 +138,21 @@ pub fn fail(code: i32, message: impl Into<String>) -> i32 {
     code
 }
 
-/// Copies the last error into a caller-owned buffer as UTF-8, and returns the
-/// number of bytes it *would* need — so a caller can size a buffer by asking
-/// once with a small one.
+/// Copies the last error into a caller-owned buffer as UTF-8.
+///
+/// The return value answers whichever question was asked. With `buf` null it is
+/// the byte length the message needs, so a caller can size a buffer by asking
+/// first. With a buffer it is the number of bytes *written*, which is the longest
+/// whole-codepoint prefix that fits.
+///
+/// Both halves of that matter. Truncating at `len` split multi-byte codepoints:
+/// error details carry CSS text, font names and paths, so a message that runs past
+/// the host's buffer can end mid-character, and the host's `TextDecoder` turns the
+/// fragment into U+FFFD — or throws, if it is ever constructed with `fatal`, which
+/// would replace the real error with a decoding error while reporting it. And
+/// returning the *needed* length while writing fewer bytes left the caller no way
+/// to know where the message stopped, so it decoded whatever the previous, longer
+/// error had left in a reused buffer.
 ///
 /// # Safety
 /// `buf` must be writable for `len` bytes, or null when only the size is wanted.
@@ -148,11 +160,21 @@ pub unsafe fn read_last_error(buf: *mut u8, len: u32) -> u32 {
     LAST_ERROR.with(|slot| {
         let text = slot.borrow();
         let bytes = text.as_bytes();
-        if !buf.is_null() && len > 0 {
-            let n = bytes.len().min(len as usize);
-            std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n);
+
+        if buf.is_null() || len == 0 {
+            return bytes.len() as u32;
         }
-        bytes.len() as u32
+
+        // Back off any trailing continuation bytes. `is_char_boundary` is true at
+        // `bytes.len()`, so an untruncated message never enters the loop, and 0 is
+        // a boundary, so it always terminates.
+        let mut n = bytes.len().min(len as usize);
+        while !text.is_char_boundary(n) {
+            n -= 1;
+        }
+
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n);
+        n as u32
     })
 }
 
@@ -172,5 +194,72 @@ pub fn guard<F: FnOnce() -> i32>(body: F) -> i32 {
             set_error(detail);
             status::PANIC
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Reads through the same pointer-and-length door the ABI uses.
+    fn read(cap: usize) -> (Vec<u8>, u32) {
+        let mut buf = vec![0u8; cap];
+        let written = unsafe { read_last_error(buf.as_mut_ptr(), cap as u32) };
+        buf.truncate(written as usize);
+        (buf, written)
+    }
+
+    #[test]
+    fn a_truncated_error_is_still_valid_utf8() {
+        // "détail" is 7 bytes: 'd', then "é" across bytes 1-2, then "tail". So a
+        // 2-byte buffer stops between the two bytes of "é" — the case that used to
+        // hand the host a lone 0xC3.
+        set_error("détail");
+        assert_eq!(unsafe { read_last_error(std::ptr::null_mut(), 0) }, 7);
+
+        let (buf, written) = read(2);
+        assert_eq!(written, 1, "the split codepoint is dropped whole");
+        assert_eq!(
+            std::str::from_utf8(&buf).expect("valid UTF-8"),
+            "d",
+            "not a fragment the host would decode as U+FFFD"
+        );
+
+        // A cut that already lands on a boundary keeps every byte it was given.
+        let (buf, written) = read(6);
+        assert_eq!(written, 6);
+        assert_eq!(std::str::from_utf8(&buf).expect("valid UTF-8"), "détai");
+    }
+
+    #[test]
+    fn a_message_that_fits_is_copied_whole() {
+        set_error("détail");
+        let (buf, written) = read(64);
+        assert_eq!(written, 7, "bytes, not characters");
+        assert_eq!(std::str::from_utf8(&buf).expect("valid UTF-8"), "détail");
+    }
+
+    /// The caller can size a buffer without owning one yet.
+    #[test]
+    fn a_null_buffer_asks_for_the_length() {
+        set_error("a longer detail than the buffer");
+        assert_eq!(
+            unsafe { read_last_error(std::ptr::null_mut(), 0) },
+            "a longer detail than the buffer".len() as u32
+        );
+    }
+
+    /// Buffers get reused, so what is written has to be self-delimiting: the
+    /// written count must not stray past the shorter message into the older one.
+    #[test]
+    fn a_shorter_error_does_not_report_the_previous_one() {
+        set_error("a very long first error, hundreds of bytes in the real thing");
+        let (_, first) = read(64);
+        assert_eq!(first, 60);
+
+        set_error("short");
+        let (buf, written) = read(64);
+        assert_eq!(written, 5);
+        assert_eq!(std::str::from_utf8(&buf).expect("valid UTF-8"), "short");
     }
 }
