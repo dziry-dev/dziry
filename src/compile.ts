@@ -12,6 +12,7 @@ import { join, relative, extname, resolve, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { compile, compileTree, emit, dump } from "./compiler/compile.ts";
+import { CssError, formatCssError } from "./compiler/css.ts";
 import { buildRefIndex, resolveRefs, type RefSource } from "./compiler/resolve-refs.ts";
 import {
   compileVariants,
@@ -46,6 +47,26 @@ const rel = (p: string) => relative(ROOT, p).replace(/\\/g, "/");
 const css = await Bun.file(cssPath).text();
 const isJsx = [".tsx", ".jsx"].includes(extname(inputPath).toLowerCase());
 
+/**
+ * Turns a stylesheet error into the author's problem rather than ours.
+ *
+ * Uncaught, a `CssError` printed a Bun stack trace whose frames are all inside
+ * `src/compiler/css.ts` — file and line, of the compiler. The one place the
+ * source text and the file name are both in hand is here, so this is where the
+ * offset becomes a position someone can act on.
+ */
+function reportCssErrors<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (e) {
+    if (e instanceof CssError) {
+      console.error(formatCssError(e, css, rel(cssPath)));
+      process.exit(1);
+    }
+    throw e;
+  }
+}
+
 const started = performance.now();
 
 let result;
@@ -72,7 +93,7 @@ if (isJsx) {
     throw new Error(`${rel(inputPath)} has no default export`);
   }
   const doc: Element = toDocument(mod.default);
-  result = compileTree(doc, css);
+  result = reportCssErrors(() => compileTree(doc, css));
 
   // Conditional classes: compile one extra variant per toggle and diff, so each
   // becomes a list of style-table writes rather than a class the runtime resolves.
@@ -116,7 +137,8 @@ if (isJsx) {
 
   ({ imports } = resolveRefs(result, buildRefIndex(sources), variants));
 } else {
-  result = compile(await Bun.file(inputPath).text(), css);
+  const html = await Bun.file(inputPath).text();
+  result = reportCssErrors(() => compile(html, css));
 }
 
 const elapsed = performance.now() - started;

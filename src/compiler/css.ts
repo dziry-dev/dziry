@@ -44,14 +44,61 @@ export type Rule = {
   order: number;
 };
 
-export class CssError extends Error {}
+/**
+ * A stylesheet error, carrying where it happened.
+ *
+ * Without the offset the author got a raw Bun stack trace pointing into this
+ * file — which names the compiler's internals and not one character of their
+ * stylesheet. `offset` is an index into the *source* text, which is only
+ * meaningful because [`stripComments`] preserves length.
+ */
+export class CssError extends Error {
+  /** Index into the source stylesheet, or `-1` when the site is unknown. */
+  readonly offset: number;
+
+  constructor(message: string, offset = -1) {
+    super(message);
+    this.name = "CssError";
+    this.offset = offset;
+  }
+}
+
+/**
+ * Renders a `CssError` against its source: `file:line:col`, the offending line,
+ * and a caret. Falls back to the bare message when there is no offset.
+ */
+export function formatCssError(err: CssError, src: string, file: string): string {
+  if (err.offset < 0 || err.offset > src.length) return `${file}: ${err.message}`;
+
+  const before = src.slice(0, err.offset);
+  const line = before.split("\n").length;
+  const column = err.offset - (before.lastIndexOf("\n") + 1);
+  const text = src.split("\n")[line - 1] ?? "";
+  const gutter = String(line);
+
+  return (
+    `${file}:${line}:${column + 1}  ${err.message}\n` +
+    `  ${gutter} | ${text}\n` +
+    `  ${" ".repeat(gutter.length)} | ${" ".repeat(column)}^`
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Tokenizing
 // ---------------------------------------------------------------------------
 
+/**
+ * Blanks comments **in place** rather than removing them.
+ *
+ * Every offset the parser records is reported to the author, so the stripped
+ * text and the source have to agree on where things are. Deleting the bytes
+ * would shift every later position by the length of the comments before it —
+ * and a stylesheet with a comment at the top would point at the wrong line for
+ * the whole file, which is worse than no position at all. Newlines survive so
+ * line numbers do too.
+ */
 function stripComments(src: string): string {
-  return src.replace(/\/\*[\s\S]*?\*\//g, "");
+  return src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));
 }
 
 export function parseCss(src: string): Rule[] {
@@ -64,9 +111,13 @@ export function parseCss(src: string): Rule[] {
     const open = text.indexOf("{", i);
     if (open === -1) break;
 
-    const prelude = text.slice(i, open).trim();
+    const raw = text.slice(i, open);
+    const prelude = raw.trim();
+    const preludeAt = i + raw.length - raw.trimStart().length;
     const close = text.indexOf("}", open);
-    if (close === -1) throw new CssError(`unclosed rule for selector "${prelude}"`);
+    if (close === -1) {
+      throw new CssError(`unclosed rule for selector "${prelude}"`, open);
+    }
 
     const body = text.slice(open + 1, close);
     i = close + 1;
@@ -78,33 +129,44 @@ export function parseCss(src: string): Rule[] {
     }
     if (prelude === "") continue;
 
-    rules.push({
-      selectors: prelude.split(",").map((s) => parseSelector(s.trim())),
-      decls: parseDeclarations(body),
-      order: order++,
-    });
+    // Selectors are split on commas rather than parsed as a list, so the offset
+    // of each one is the running length of everything before it.
+    const selectors: Selector[] = [];
+    let at = preludeAt;
+    for (const part of prelude.split(",")) {
+      const lead = part.length - part.trimStart().length;
+      selectors.push(parseSelector(part.trim(), at + lead));
+      at += part.length + 1; // the comma
+    }
+
+    rules.push({ selectors, decls: parseDeclarations(body, open + 1), order: order++ });
   }
 
   return rules;
 }
 
-function parseDeclarations(body: string): Map<string, string> {
+function parseDeclarations(body: string, at: number): Map<string, string> {
   const decls = new Map<string, string>();
+  let cursor = at;
   for (const part of body.split(";")) {
     const chunk = part.trim();
+    const start = cursor + (part.length - part.trimStart().length);
+    cursor += part.length + 1; // the semicolon
     if (!chunk) continue;
     const colon = chunk.indexOf(":");
-    if (colon === -1) throw new CssError(`declaration without a colon: "${chunk}"`);
+    if (colon === -1) {
+      throw new CssError(`declaration without a colon: "${chunk}"`, start);
+    }
     // Later duplicates win, matching CSS.
     decls.set(chunk.slice(0, colon).trim().toLowerCase(), chunk.slice(colon + 1).trim());
   }
   return decls;
 }
 
-export function parseSelector(src: string): Selector {
-  if (!src) throw new CssError("empty selector");
+export function parseSelector(src: string, at = -1): Selector {
+  if (!src) throw new CssError("empty selector", at);
   if (/[>+~]/.test(src)) {
-    throw new CssError(`only the descendant combinator is supported, got "${src}"`);
+    throw new CssError(`only the descendant combinator is supported, got "${src}"`, at);
   }
 
   const compounds: Compound[] = [];
@@ -114,11 +176,14 @@ export function parseSelector(src: string): Selector {
   const parts = src.split(/\s+/).filter(Boolean);
   for (let p = 0; p < parts.length; p++) {
     const part = parts[p]!;
+    // Where this compound starts in the source, so the caret lands on the
+    // offending compound rather than on the whole selector.
+    const partAt = at < 0 ? -1 : at + src.indexOf(part);
     const compound: Compound = { tag: null, id: null, classes: [] };
 
     // Split on the punctuation while keeping it: "div.a#b:hover" -> tokens.
     const tokens = part.match(/[#.:]?[A-Za-z0-9_-]+/g);
-    if (!tokens) throw new CssError(`could not parse compound selector "${part}"`);
+    if (!tokens) throw new CssError(`could not parse compound selector "${part}"`, partAt);
 
     // The tokens must *cover* the input, not merely be found in it.
     //
@@ -139,6 +204,7 @@ export function parseSelector(src: string): Selector {
           `:hover/:active/:focus on the subject.\n` +
           `  Not yet supported: attribute selectors, child (>) and sibling (+ ~) ` +
           `combinators, and *.`,
+        partAt,
       );
     }
 
@@ -154,10 +220,13 @@ export function parseSelector(src: string): Selector {
         if (!SUPPORTED_PSEUDO.has(name)) {
           // `:focus-within` is deliberately absent: it propagates to ancestors,
           // which is the descendant-selector problem again.
-          throw new CssError(`unsupported pseudo-class ":${name}"`);
+          throw new CssError(`unsupported pseudo-class ":${name}"`, partAt);
         }
         if (p !== parts.length - 1) {
-          throw new CssError(`":${name}" is only supported on the subject of a selector`);
+          throw new CssError(
+            `":${name}" is only supported on the subject of a selector`,
+            partAt,
+          );
         }
         pseudo = name as Pseudo;
         spec[1]++;
