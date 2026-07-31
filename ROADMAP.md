@@ -238,7 +238,10 @@ validated the architecture and are what the Rust engine now implements properly.
 nested-scroll escape, hit-testing that follows the offset, and an overlay scrollbar you can
 grab, drag, page and hover — see A4.
 
-**Not started**: text clipping and editing, images, SVG, animation, widgets, windowing,
+**The next thing that matters**: text wrapping. There is none — see A2. It is what makes a narrow
+window look broken, and a 564 px window minimum only keeps the user away from the worst of it.
+
+**Not started**: text wrapping and editing, images, SVG, animation, widgets, windowing,
 packaging, hot reload, CLI, diagnostics.
 
 ---
@@ -373,6 +376,30 @@ the shared-memory protocol and the layout/paint pipeline, both of which are inte
 
 ### A2 · Text — much smaller than it was
 Choosing `skia-safe` collapses most of this milestone, because **SkParagraph** ships in it.
+
+> **Wrapping is the next thing that matters, and it is why a narrow window looks broken.**
+> Reported 2026-07-31 from the real window as "text is not wrapping up with container, that's the
+> first obvious bug", and confirmed: `Measurer::measure` in `native-src/dziri-engine/src/text.rs`
+> takes an `available_width` and **ignores it**. There is no line breaking anywhere in the engine,
+> so a string longer than its box overflows at any width — nothing to do with the scroll or
+> scrollbar work. The 564 px window minimum added the same day keeps the user out of the sizes
+> where that dominates the screen; it does not fix it.
+>
+> What it touches, so the next session can price it:
+> - `text.rs`: `font.measure_str` becomes `ParagraphBuilder` + `layout(width)`. The advance cache
+>   re-keys on width as well as `(size, weight, text)`, since the answer now depends on it.
+> - `paint.rs`: `draw_str` becomes `paragraph.paint` for both text nodes and button labels, and the
+>   ascent/baseline arithmetic goes away — SkParagraph positions from the top. The button-label
+>   centring already anticipates multi-line and says so.
+> - It unlocks `styles.lineClamp`, which exists in the schema, is deliberately unmapped in the IR,
+>   and is exactly SkParagraph's `maxLines`. `schema.test.ts` pins that list, so shortening it is
+>   the visible sign this landed.
+> - It probably needs `white-space: nowrap` in `css.ts` at the same time, or things that must stay
+>   on one line will start breaking.
+> - Every text pixel moves: the demo's md5, all four golden scenarios and the characterize goldens
+>   change together. That is expected and should be blessed in one deliberate commit.
+>
+> `skia-safe`'s `textlayout` feature is already on, so nothing new gets pulled in.
 
 - Wrapping, line breaking, ellipsis, bidi and font fallback come from SkParagraph rather than
   being hand-rolled. This was the single largest risk in the previous plan; text layout is a
