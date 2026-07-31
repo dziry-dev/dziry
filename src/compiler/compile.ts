@@ -969,7 +969,35 @@ function num(v: number): string {
   return String(v);
 }
 
+/**
+ * A typed array as JS source, collapsing a uniform column to `new Ctor(n).fill(v)`.
+ *
+ * Most style fields are the same in every slot — margins, `flexShrink`, the grid
+ * fields, the `min`/`max` sizes — and spelling out 49 identical values is source
+ * JSC has to tokenize on every start for no information. `emit` already knew this
+ * trick two hundred lines down (`new Int16Array(n).fill(-1)` for the node list
+ * column); this just applies it where the values decide rather than where the
+ * author remembered.
+ *
+ * Zero needs no `fill` at all, since every typed array is zero-filled already —
+ * but `NaN` does, and it has to be tested with `Number.isNaN` because `NaN !== NaN`
+ * would otherwise make every all-`auto` column look non-uniform.
+ */
 function typedArray(ctor: string, values: number[]): string {
+  const first = values[0];
+  const uniform =
+    values.length > 1 &&
+    first !== undefined &&
+    (Number.isNaN(first)
+      ? values.every(Number.isNaN)
+      : values.every((v) => v === first));
+
+  if (uniform) {
+    return first === 0
+      ? `new ${ctor}(${values.length})`
+      : `new ${ctor}(${values.length}).fill(${num(first)})`;
+  }
+
   return `new ${ctor}([${values.map(num).join(",")}])`;
 }
 

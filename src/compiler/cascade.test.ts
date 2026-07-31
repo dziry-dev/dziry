@@ -10,7 +10,7 @@
  * specificity, inheritance and expansion together rather than a seam.
  */
 import { expect, test } from "bun:test";
-import { compile, compileTree, toCompiledUi } from "./compile.ts";
+import { compile, compileTree, emit, toCompiledUi } from "./compile.ts";
 import { compileVariants, findToggles } from "./variant-compile.ts";
 import { parseHtml } from "./html.ts";
 import { compactBits, INITIAL_STYLE, Predicate, UNSET, type StyleField } from "../ir.ts";
@@ -247,4 +247,33 @@ test("inherited properties pass down, non-inherited do not", () => {
   expect(styleOf(html, css, "fg")).toBe(0xffff0000);
   // `width` is not inherited: the child is `auto`, which is NaN.
   expect(Number.isNaN(styleOf(html, css, "width"))).toBe(true);
+});
+
+// ---------------------------------------------------------------------------
+// The emitted artifact
+// ---------------------------------------------------------------------------
+
+/**
+ * A style column that is the same in every slot is emitted as one value.
+ *
+ * `emit` already knew this trick for the node tables (`new Int16Array(n).fill(-1)`)
+ * and did not use it for the style columns, so most of a style table was identical
+ * values spelled out — 2279 bytes of the sample's 19335, which JSC tokenizes on
+ * every start. This asserts the shape of the output, not the size: a uniform column
+ * collapses, and a column that actually varies keeps every element.
+ */
+test("a uniform style column is emitted as a fill, and a varying one is not", () => {
+  const html = `<body><div class="a"></div><div class="b"></div></body>`;
+  // Nothing here sets a margin, so `marT` is uniform; `width` differs per slot.
+  const css = `.a { width: 10px } .b { width: 20px }`;
+  const source = emit(compile(html, css), { html, css, typesFrom: "../src" });
+
+  // Zero needs no `fill`: a typed array is already zero-filled.
+  expect(source).toMatch(/marT: new Float32Array\(\d+\),/);
+  // `NaN` and `Infinity` do, and `Number.isNaN` is why the all-`auto` columns
+  // collapse at all — `NaN !== NaN` would call every one of them non-uniform.
+  expect(source).toMatch(/maxW: new Float32Array\(\d+\)\.fill\(Infinity\),/);
+  expect(source).toMatch(/basis: new Float32Array\(\d+\)\.fill\(NaN\),/);
+  // Uniform is a property of the values, not of the field.
+  expect(source).toMatch(/width: new Float32Array\(\[[^\]]*10[^\]]*20[^\]]*\]\)/);
 });
