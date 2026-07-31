@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>scrollbar-gutter</title>
+<style>body{font:12px ui-monospace,monospace;padding:16px}#out{white-space:pre;line-height:1.5}</style>
+<h3>How much layout room does a scrollbar take, and on which overflow values?</h3>
+<script type="module">
+  import { log, frame, mount, report } from "./_harness.js";
+
+  // A fixed box, so any difference between offset and client size is the gutter
+  // and nothing else. Content either overflows one axis or fits.
+  const CASES = [
+    ["overflow-y:auto",            "overflow-y:auto",              "tall"],
+    ["overflow-y:auto (fits)",     "overflow-y:auto",              "fits"],
+    ["overflow-y:scroll",          "overflow-y:scroll",            "tall"],
+    ["overflow-y:scroll (fits)",   "overflow-y:scroll",            "fits"],
+    ["overflow-y:hidden",          "overflow-y:hidden",            "tall"],
+    ["overflow-y:clip",            "overflow-y:clip",              "tall"],
+    ["overflow-y:visible",         "overflow-y:visible",           "tall"],
+    ["overflow-x:auto",            "overflow-x:auto;overflow-y:hidden", "wide"],
+    ["overflow:auto (both)",       "overflow:auto",                "both"],
+    ["scrollbar-width:thin",       "overflow-y:auto;scrollbar-width:thin", "tall"],
+    ["scrollbar-width:none",       "overflow-y:auto;scrollbar-width:none", "tall"],
+    ["scrollbar-gutter:stable",    "overflow-y:auto;scrollbar-gutter:stable", "fits"],
+  ];
+
+  const CONTENT = {
+    tall: '<div style="width:20px;height:400px"></div>',
+    wide: '<div style="width:400px;height:20px"></div>',
+    both: '<div style="width:400px;height:400px"></div>',
+    fits: '<div style="width:20px;height:20px"></div>',
+  };
+
+  log("=== gutter = offsetSize - clientSize on a 100x100 box ===");
+  log("name".padEnd(28) + " vert  horz  clientW clientH scrollable");
+  for (const [name, css, content] of CASES) {
+    mount(`<div id="b" style="width:100px;height:100px;${css}">${CONTENT[content]}</div>`);
+    const b = document.getElementById("b");
+    await frame();
+    const vert = b.offsetWidth - b.clientWidth;
+    const horz = b.offsetHeight - b.clientHeight;
+    // Whether the box actually has somewhere to scroll, which is the thing the
+    // gutter is supposed to correspond to.
+    const canScroll = b.scrollHeight > b.clientHeight || b.scrollWidth > b.clientWidth;
+    log(
+      name.padEnd(28) +
+        " " + String(vert).padEnd(5) +
+        " " + String(horz).padEnd(5) +
+        " " + String(b.clientWidth).padEnd(7) +
+        " " + String(b.clientHeight).padEnd(7) +
+        " " + canScroll,
+    );
+  }
+
+  // The document's own scrollbar, which is the case `body { overflow-y: auto }`
+  // in app.css exercises.
+  log("");
+  log("=== the root scroller ===");
+  document.documentElement.style.height = "300vh";
+  await frame();
+  log("innerWidth - documentElement.clientWidth = " +
+      (innerWidth - document.documentElement.clientWidth));
+  document.documentElement.style.height = "";
+
+  // Whether the gutter is a CSS-px constant or a device-pixel one. Compared
+  // across `--dpr` runs, a constant CSS number means it scales with the display.
+  log("");
+  log("=== scale ===");
+  log("devicePixelRatio = " + devicePixelRatio);
+
+  report();
+</script>

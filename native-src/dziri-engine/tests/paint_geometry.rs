@@ -546,3 +546,141 @@ fn a_row_scrolled_into_view_is_actually_drawn() {
         "the last row is on screen at the end of the scroll, not blank"
     );
 }
+
+/// The red channel at a point.
+///
+/// The thumb is translucent black over red content, so "is there a thumb here" is
+/// "is this red darker than the content's red" — a comparison rather than a named
+/// colour, because a blend of the two is neither of them and `nearest` would round it
+/// back to the content it is drawn over.
+fn red_at(engine: &mut Engine, x: usize, y: usize) -> i32 {
+    ((pixel(engine, x, y) >> 16) & 0xff) as i32
+}
+
+/// The thumb's column: `THUMB_INSET` from the right edge of a 120-wide box, and
+/// `THUMB_THICKNESS` wide, so its centre is 6 px in.
+const THUMB_X: usize = 114;
+
+/// A 120x120 box holding `rows` red rows of 100, with `overflow_y` on the root.
+///
+/// Three rows is 300 of content in 120 of box: 180 of scroll. One row fits, so the
+/// same builder covers both "there is somewhere to scroll" and "there is not".
+fn scrolling_rows(overflow_y: u8, rows: usize) -> Engine {
+    let count = rows + 1;
+    let mut engine = Engine::new(&config_of(count as u32)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..count {
+            init_style(t, slot);
+        }
+        t.set_u8(STYLES, styles::OVERFLOW_Y, 0, overflow_y);
+        for node in 1..count {
+            t.set_u32(STYLES, styles::BG, node, BG);
+            t.set_f32(STYLES, styles::HEIGHT, node, 100.0);
+            t.set_f32(STYLES, styles::FLEX_SHRINK, node, 0.0);
+        }
+
+        for node in 0..count {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        for node in 1..count {
+            t.set_i32(NODES, nodes::PARENT, node, 0);
+            t.set_i32(
+                NODES,
+                nodes::NEXT_SIBLING,
+                node,
+                if node + 1 < count {
+                    node as i32 + 1
+                } else {
+                    -1
+                },
+            );
+        }
+    }
+    engine.tick().expect("tick");
+    engine
+}
+
+/// A box that scrolls says so, and says where in the content it is.
+///
+/// Nothing signalled scrollability before this: a list that scrolled and a list that
+/// did not looked identical, which is the one thing a scrollbar exists to fix.
+///
+/// The thumb is drawn *over* the content rather than in a reserved gutter, so these
+/// assertions are about the content's own pixels being darkened — see `THUMB_THICKNESS`
+/// for why the gutter is not reserved.
+#[test]
+fn a_scrolling_box_draws_a_thumb_that_tracks_the_offset() {
+    let mut engine = scrolling_rows(protocol::overflow::SCROLL, 3);
+
+    // 116 of track for 120 visible out of 300: a 46 px thumb, at the top.
+    let content = red_at(&mut engine, 60, 20);
+    assert!(
+        red_at(&mut engine, THUMB_X, 20) + 20 < content,
+        "a thumb must be drawn at the top of the bar when the box is at the top"
+    );
+    assert_eq!(
+        red_at(&mut engine, THUMB_X, 90),
+        content,
+        "and nowhere near the bottom of the bar, which is where the rest of the content is"
+    );
+
+    // To the end: the thumb has to reach the far end exactly when the scroll does,
+    // which is the property that makes a bar worth looking at.
+    assert!(engine.scroll_at(60.0, 60.0, 0.0, 10_000.0), "scrolled");
+    engine.tick().expect("tick");
+    assert!(
+        red_at(&mut engine, THUMB_X, 110) + 20 < content,
+        "scrolled to the end, the thumb must be at the end of the bar"
+    );
+    assert_eq!(
+        red_at(&mut engine, THUMB_X, 20),
+        content,
+        "and must have left the top"
+    );
+}
+
+/// Content that fits gets no thumb.
+///
+/// `auto` semantics, and the reason a gutter is not reserved: the compiler collapses
+/// `auto` and `scroll` into one wire value, and Chromium 151 reserves room for
+/// `scroll` even when the content fits — measured in BROWSER-FACTS.md. Paint is where
+/// that approximation is made good, so a box with nothing to scroll must look
+/// untouched.
+#[test]
+fn a_box_with_nothing_to_scroll_draws_no_thumb() {
+    let mut engine = scrolling_rows(protocol::overflow::SCROLL, 1);
+
+    assert_eq!(
+        red_at(&mut engine, THUMB_X, 20),
+        red_at(&mut engine, 60, 20),
+        "one 100px row in a 120px box has nowhere to scroll, so no thumb"
+    );
+}
+
+/// `overflow: hidden` overflows without scrolling, and so draws no thumb.
+///
+/// Clipping and scrolling are separate properties — that is the whole difference
+/// between `hidden` and `scroll` — and the wheel refuses a `hidden` box, so a bar
+/// there would promise something nothing delivers.
+#[test]
+fn a_clipping_box_that_cannot_scroll_draws_no_thumb() {
+    let mut engine = scrolling_rows(protocol::overflow::HIDDEN, 3);
+
+    assert_eq!(
+        red_at(&mut engine, THUMB_X, 20),
+        red_at(&mut engine, 60, 20),
+        "hidden clips its overflow but the user cannot move it, so no thumb"
+    );
+    assert!(
+        !engine.scroll_at(60.0, 60.0, 0.0, 100.0),
+        "and the wheel agrees, which is what the missing thumb has to match"
+    );
+}

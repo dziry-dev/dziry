@@ -4,6 +4,7 @@
  *   bun run app
  *   bun run app --stats                 # frame timings
  *   bun run app --screenshot out.png    # render one frame headlessly and exit
+ *   bun run app --size 600x400          # a window of that size, headless or not
  *
  * Note what is absent, and what has become absent. There is still no HTML
  * parser, no CSS parser, no selector matching and no cascade — the IR arrives as
@@ -59,6 +60,19 @@ const numberFlag = (name: string): number => {
   return i !== -1 && argv[i + 1] ? Number(argv[i + 1]) : -1;
 };
 
+/// The window size, as `WxH`. Defaults to the size the demo was laid out against.
+///
+/// A flag rather than a constant because the interesting cases are the small ones:
+/// whether the page scrolls, whether a scrollbar appears, whether a narrow window
+/// reflows — none of which can be seen at a size chosen to make everything fit.
+const [windowWidth, windowHeight] = (() => {
+  const i = argv.indexOf("--size");
+  const raw = i !== -1 ? argv[i + 1] : null;
+  const match = raw?.match(/^(\d+)x(\d+)$/);
+  if (raw && !match) throw new Error(`--size takes WxH, got "${raw}"`);
+  return match ? [Number(match[1]), Number(match[2])] : [1040, 560];
+})();
+
 // The generated module *is* the IR — no parsing, no deserialization.
 //
 // And no assertion either. This used to end in `as unknown as CompiledUi`, which
@@ -96,8 +110,8 @@ applyStylePatches(ui, stylePatches);
 // --- the engine ---------------------------------------------------------------
 const engine = Engine.open({
   ...capacitiesFor(ui),
-  width: 1040,
-  height: 560,
+  width: windowWidth,
+  height: windowHeight,
   title: "dziri — compiled UI",
   root: ui.root,
   windowed: screenshotPath === null,

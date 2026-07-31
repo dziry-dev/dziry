@@ -510,6 +510,7 @@ impl Engine {
             Geometry {
                 bounds: tree.bounds(),
                 scroll,
+                extent: tree.overflow(),
             },
             state,
             measurer,
@@ -775,6 +776,7 @@ impl Engine {
         Geometry {
             bounds: self.tree.bounds(),
             scroll: &self.scroll,
+            extent: self.tree.overflow(),
         }
     }
 

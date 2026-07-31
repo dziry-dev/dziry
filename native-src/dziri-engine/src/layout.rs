@@ -104,6 +104,11 @@ impl LayoutTree {
         self.overflow.get(node).copied().unwrap_or([0.0, 0.0])
     }
 
+    /// The same, for every node at once — what a walk needs alongside `bounds`.
+    pub fn overflow(&self) -> &[[f32; 2]] {
+        &self.overflow
+    }
+
     /// Who this tree linked `node` under, or `None` at the root.
     ///
     /// The tree's own record, not `nodes.parent`: host memory does not get to decide

@@ -234,7 +234,11 @@ assignment that survives reorders, per-row handlers. A working todo app driving 
 FFI, text measurement, mouse and keyboard input, event-driven repaint, incremental measure. These
 validated the architecture and are what the Rust engine now implements properly.
 
-**Not started**: text clipping and editing, scrolling, images, SVG, animation, widgets, windowing,
+**Landed in the engine since**: per-axis `overflow` with clipping, wheel scrolling with
+nested-scroll escape, hit-testing that follows the offset, and an overlay scrollbar that reports
+where in the content you are — see A4. Dragging that scrollbar is not done.
+
+**Not started**: text clipping and editing, images, SVG, animation, widgets, windowing,
 packaging, hot reload, CLI, diagnostics.
 
 ---
@@ -417,6 +421,38 @@ winit-versus-SDL3 choice reversible.
   before it. Wiring `dataOffset` while nothing can scroll would be a field with no consumer, which
   is what it is today.
 - Inertia and rubber-banding are OS expectations; budget polish time.
+
+#### Scrollbars are overlay, and that is measured rather than provisional
+
+A thumb is drawn over the content, reserving no layout room, which is why `style_of` leaves
+Taffy's `scrollbar_width` at 0. Chromium 151 reserves a 15 px gutter instead — but *conditionally*:
+only when the content overflows if the keyword was `auto`, and unconditionally if it was `scroll`
+(measured, BROWSER-FACTS.md, "What a scrollbar costs in layout room"). Two things stand between
+dziri and that gutter, and they have to land together or not at all:
+
+1. `auto` and `scroll` collapse into one `SCROLL` wire value in `overflowKeyword`, so the engine
+   cannot tell which of the two behaviours was asked for.
+2. `scrollbar_width` is a *static* Taffy input. Reserving room only when the content overflows means
+   laying out, asking whether it did, and laying out again — which is how Chromium does it.
+
+Buying both gets one case: content that fits inside a box declared `overflow: scroll`. Not worth
+two layout passes yet, so it is deferred rather than half-done.
+
+#### Dragging a scrollbar
+
+The thumb signals and reports; it is not yet a control. Grabbing one needs three things the input
+path does not have:
+
+- **A hit region that is not a node.** `hit_test` walks the tree, and a scrollbar is painted
+  furniture with no row in it. Today a click near the right edge of a scroll container reaches
+  whatever is under the bar — which is the cost of overlay, and the reason a classic gutter
+  eventually earns its keep.
+- **Pointer capture.** A drag has to keep tracking after the cursor leaves the bar, which means an
+  input mode the engine currently has no state for.
+- **Position-to-offset**, the inverse of `thumb()` — divide by the same track, not by the box.
+
+Until then the wheel is the only way to scroll, which is what the sample exercises. Click-in-track
+paging and hover thickening are the same work and can follow it.
 
 ### A5 · Images, icons, and single-line text input
 - Image decode, async load, cache, eviction. Decode off the main thread.
