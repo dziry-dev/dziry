@@ -40,12 +40,12 @@ function load(): {
     handlers: generated.handlers,
     lists: generated.lists,
     root: generated.root,
-  } as unknown as CompiledUi;
+  };
 
-  const patches = generated.stylePatches as unknown as StylePatchRef[];
+  const patches: StylePatchRef[] = generated.stylePatches;
 
   applyTextBindings(ui, []);
-  updateLists(ui, generated.listBindings as unknown as ListBindingRef[]);
+  updateLists(ui, generated.listBindings satisfies ListBindingRef[]);
   applyStylePatches(ui, patches);
 
   const engine = Engine.open({
@@ -65,7 +65,7 @@ function load(): {
 
 /** Nodes whose style satisfies a predicate, in document order. */
 function nodesWhere(ui: CompiledUi, pred: (get: (f: StyleField) => number) => boolean): number[] {
-  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const styles: Record<StyleField, ArrayLike<number>> = ui.styles;
   const out: number[] = [];
   for (let i = 0; i < ui.nodes.count; i++) {
     const slot = ui.nodes.style[i]!;
@@ -132,9 +132,12 @@ test("flex-grow gives a row's leftover width to one child", () => {
   const [check, label, del] = kids.map((k) => engine.bounds(k));
 
   // The label grew, so the delete button sits at the far end rather than
-  // butting against the checkbox. This is the bug the demo caught: without the
-  // LIST node passing its container's `align-items` through, the row
-  // shrink-wrapped and the label collapsed to zero width.
+  // butting against the checkbox. This is what the demo caught when rows still
+  // hung off a wrapper node: the container's `align-items` applied to the
+  // wrapper instead of the rows, so the row shrink-wrapped and the label
+  // collapsed to zero width. Rows are the container's own children now, so the
+  // property holds by construction rather than by copying fields onto a
+  // stand-in.
   expect(label![2]).toBeGreaterThan(100);
   expect(del![0] + del![2]).toBeCloseTo(rowBox[0] + rowBox[2] - 10, 0);
   expect(label![0]).toBeGreaterThanOrEqual(check![0] + check![2]);
@@ -204,7 +207,7 @@ test("aspect-ratio squares a box from its width alone", () => {
 
 test("absolute children are placed against their parent, out of flow", () => {
   const { engine, ui } = load();
-  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const styles: Record<StyleField, ArrayLike<number>> = ui.styles;
 
   const absolutes = nodesWhere(ui, (g) => g("position") === Position.ABSOLUTE);
   expect(absolutes.length).toBeGreaterThan(0);
@@ -237,7 +240,7 @@ test("absolute children are placed against their parent, out of flow", () => {
 
 test("inline styles beat every selector", () => {
   const { engine, ui } = load();
-  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const styles: Record<StyleField, ArrayLike<number>> = ui.styles;
 
   // `.btn` paints #27272e. The two inline-styled buttons override it — one from
   // a string, one from an object — which is the precedence a browser gives an

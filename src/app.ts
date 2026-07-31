@@ -60,6 +60,13 @@ const numberFlag = (name: string): number => {
 };
 
 // The generated module *is* the IR — no parsing, no deserialization.
+//
+// And no assertion either. This used to end in `as unknown as CompiledUi`, which
+// is the one place a project built on generated identity stopped checking: the
+// compiler emits the artifact, the runtime consumes it, and the cast told `tsc`
+// to take both on trust. The module now declares `satisfies` against these same
+// types, so a field the compiler renames is a compile error in the artifact
+// rather than a `TypeError` in whichever test happens to touch it first.
 const ui: CompiledUi = {
   strings: generated.strings,
   styles: generated.styles,
@@ -70,11 +77,11 @@ const ui: CompiledUi = {
   handlers: generated.handlers,
   lists: generated.lists,
   root: generated.root,
-} as unknown as CompiledUi;
+};
 
-const stylePatches = generated.stylePatches as unknown as StylePatchRef[];
-const listBindings = generated.listBindings as unknown as ListBindingRef[];
-const editables = generated.editables as unknown as EditableRef[];
+const stylePatches: StylePatchRef[] = generated.stylePatches;
+const listBindings: ListBindingRef[] = generated.listBindings;
+const editables: EditableRef[] = generated.editables;
 
 // --- state, before the engine exists -----------------------------------------
 //

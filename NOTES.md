@@ -732,6 +732,18 @@ export const textBindings = [
 export const handlers = [{ node: 7, fn: increment }, …];
 ```
 
+**And it declares what it satisfies.** Being a module rather than data means `tsc` can check
+it, so every export ends `satisfies StyleTable` / `NodeTable` / `ListTable` / `StylePatchRef[]`
+and the consumer takes it without a cast. That was the one interface in a project built on
+generated identity that nothing checked: `as unknown as CompiledUi` told the compiler to trust
+both ends, and renaming an IR field surfaced as a `TypeError` in whichever test touched it
+first. It now fails in `ui.gen.ts` itself, naming the field.
+
+One thing the change turned up, which is the argument for doing it at all: the cast was
+covering exactly one real mismatch — `field: "bg"` in a style patch widened to `string`
+instead of the `StyleField` union — and nine casts' worth of collateral that had never been
+needed at all.
+
 **Consequences of that design, worth knowing:**
 
 - Signals and handlers **must be module-level exports**. Unresolvable references are a compile

@@ -975,7 +975,21 @@ function typedArray(ctor: string, values: number[]): string {
 
 export function emit(
   result: CompileResult,
-  source: { html: string; css: string },
+  source: {
+    html: string;
+    css: string;
+    /**
+     * Specifier of the `src` directory relative to the output file, so the
+     * generated module can import the types it claims to satisfy.
+     *
+     * The alternative was for the consumer to assert the shape — which is what
+     * `as unknown as CompiledUi` did, and an `as unknown as` is a promise that
+     * the compiler stops checking. This is the one interface in the project
+     * `tsc` could not see, in a project whose entire safety story is generated
+     * identity.
+     */
+    typesFrom: string;
+  },
   /** Import specifier -> names, from the reference-resolution pass. */
   imports: Map<string, Set<string>> = new Map(),
   /**
@@ -1118,14 +1132,20 @@ export function emit(
 // ${variantTable.node.length} conditional nodes (${variantTable.slots.length} variant slots), ${interactive.length} interactive,
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
+// Types, so this artifact is checked rather than asserted at the far end.
+import type { HandlerBinding, ListTable, NodeTable, StyleTable, TextBinding, VariantTable } from "${source.typesFrom}/ir.ts";
+import type { EditableRef } from "${source.typesFrom}/runtime/bindings.ts";
+import type { ListBindingRef } from "${source.typesFrom}/runtime/list-runtime.ts";
+import type { StylePatchRef } from "${source.typesFrom}/runtime/patches.ts";
+
 /** Mutable past the static entries: text bindings overwrite their own slots. */
-export const strings = ${JSON.stringify(strings)};
+export const strings: string[] = ${JSON.stringify(strings)};
 
 /** Mutable: style patches write field values in place. Node pointers never change. */
 export const styles = {
   count: ${styleCount},
 ${styleArrays}
-};
+} satisfies StyleTable;
 
 export const nodes = {
   count: ${nodes.length},
@@ -1137,7 +1157,7 @@ export const nodes = {
   nextSibling: ${typedArray("Int32Array", nextSibling)},
   list: new Int16Array(${nodes.length}).fill(-1),
   hidden: new Uint8Array(${nodes.length}),
-};
+} satisfies NodeTable;
 
 /**
  * Conditional styling, sparse and sorted by node.
@@ -1152,7 +1172,7 @@ export const variants = {
   mask: ${typedArray("Uint32Array", variantTable.mask)},
   runStart: ${typedArray("Int32Array", variantTable.runStart)},
   slots: ${typedArray("Uint16Array", variantTable.slots)},
-};
+} satisfies VariantTable;
 
 /** Nodes that can receive input, sorted. Emitted, never inferred. */
 export const interactive = ${typedArray("Int32Array", interactive)};
@@ -1160,17 +1180,17 @@ export const interactive = ${typedArray("Int32Array", interactive)};
 /** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [
 ${textBindingSource}
-];
+] satisfies TextBinding[];
 
 /** Click handlers, as direct references to the app's exported functions. */
 export const handlers = [
 ${handlerSource}
-];
+] satisfies HandlerBinding[];
 
 /** Nodes that route keystrokes into a string signal while focused. */
 export const editables = [
 ${result.editables.map((e) => `  { node: ${e.node}, signal: ${e.name} },`).join("\n")}
-];
+] satisfies EditableRef[];
 
 /**
  * Conditional classes, compiled to style-table writes.
@@ -1181,7 +1201,7 @@ ${result.editables.map((e) => `  { node: ${e.node}, signal: ${e.name} },`).join(
  */
 export const stylePatches = [
 ${patchSource}
-];
+] satisfies StylePatchRef[];
 
 /**
  * Dynamic lists. Each owns a contiguous arena of identical item subtrees; the
@@ -1197,14 +1217,14 @@ export const lists = {
   capacity: ${typedArray("Int32Array", result.lists.map((l) => l.capacity))},
   active: new Int32Array(${result.lists.length}),
   dataOffset: new Int32Array(${result.lists.length}),
-};
+} satisfies ListTable;
 
 /** Per-list: the array signal, key path, and where each item's bound slots live. */
 export const listBindings = [
 ${listBindingSource}
-];
+] satisfies ListBindingRef[];
 
-export const root = ${root};
+export const root: number = ${root};
 `;
 }
 
