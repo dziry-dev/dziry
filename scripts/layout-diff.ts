@@ -83,16 +83,35 @@ const TOLERANCE = Number(flag("--tolerance") ?? 0.5);
  * comparing a viewport-sized box with a content-sized one would report a
  * difference on node 0 of every scenario forever.
  *
- * `box-sizing: content-box` is Chrome's default and is stated only to be explicit.
- * It is **not** dziri's behaviour — Taffy sizes the border box — and that
- * divergence is a real finding this tool reports rather than normalises.
+ * `box-sizing: content-box` agrees with both sides as of `d56611d`, which made
+ * dziri size the content box. It used to be a stated divergence — Taffy's default
+ * is `BorderBox` — and this tool reported it as `w 424 vs 400` on the control until
+ * that landed. It is still spelled out rather than dropped, because Chrome's
+ * default is only a default.
+ *
+ * **Two kinds of line live in the reset, and they are not the same kind.** Some
+ * state a difference dziri means to close — those are bug reports waiting to be
+ * filed, and this block should shrink as they are fixed, exactly as box-sizing
+ * did. The rest normalise a difference dziri will never close: it has no block
+ * layout, no `font-family` property, and no UA stylesheet at all. Every line of
+ * the second kind is a blind spot, because a difference normalised away is never
+ * reported.
+ *
+ * **Which is why inherited properties go on `body` and not on `body, body *`.** A
+ * selector that matches the child beats the value the child would have inherited,
+ * so `body * { font-size: 16px }` flattens inheritance on Chrome's side: measured,
+ * a child of `.parent { font-size: 24px }` computes 16px rather than 24px. A dziri
+ * inheritance bug would then read as *agreement*, because Chrome had been told not
+ * to inherit either — two engines wrong in the same direction is a green run. The
+ * non-inherited half has to stay on `body *`: it does not inherit, and Chrome's UA
+ * stylesheet sets it per element.
  */
 const RESET = `
   html, body { height: 100%; margin: 0 }
+  body { font-family: "Segoe UI"; font-size: 16px; font-weight: 400 }
   body, body * {
     margin: 0; padding: 0; border: 0 solid; box-sizing: content-box;
     display: flex; flex-direction: column; flex-wrap: nowrap;
-    font-family: "Segoe UI"; font-size: 16px; font-weight: 400;
   }
 `;
 
@@ -170,6 +189,42 @@ const CORPUS: Scenario[] = [
     height: 400,
     html: `<body><div class="outer"><div class="box">${SENTENCE}</div></div></body>`,
     css: `.outer { width: 260px; padding: 10px }`,
+  },
+
+  // Reported from the real window at ~400px: "even button are out of container".
+  // This is `app.css`'s `.newrow` — a `flex: 1` field and two content-sized
+  // buttons — in a container too narrow to hold their combined minimum. The
+  // question is not whether it overflows; it is whether dziri overflows *by the
+  // same amount Chrome does*, because a flex item's `min-width: auto` floor is
+  // exactly the rule that decides it.
+  {
+    name: "row-too-narrow",
+    asks: "a flex row past its minimum overflows by the amount CSS says, not more",
+    width: 300,
+    height: 200,
+    html:
+      `<body><div class="row">` +
+      `<div class="field"></div><div class="btn">Add</div><div class="btn">Clear</div>` +
+      `</div></body>`,
+    css: `.row { flex-direction: row; width: 150px; gap: 8px }
+.field { flex-grow: 1; flex-basis: 0; border: 1px solid #333; padding: 9px 12px }
+.btn { border: 1px solid #333; padding: 8px 14px }`,
+  },
+
+  // The same row with room to spare, as the control: if this disagrees then the
+  // disagreement above is about flex distribution generally, not about the floor.
+  {
+    name: "row-with-room",
+    asks: "the same row, given enough width, distributes the same way",
+    width: 600,
+    height: 200,
+    html:
+      `<body><div class="row">` +
+      `<div class="field"></div><div class="btn">Add</div><div class="btn">Clear</div>` +
+      `</div></body>`,
+    css: `.row { flex-direction: row; width: 420px; gap: 8px }
+.field { flex-grow: 1; flex-basis: 0; border: 1px solid #333; padding: 9px 12px }
+.btn { border: 1px solid #333; padding: 8px 14px }`,
   },
 ];
 

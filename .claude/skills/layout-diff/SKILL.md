@@ -70,12 +70,28 @@ and if they disagree about what `normal` means, that is a finding, not noise to 
 It is first and it has no text. If the control disagrees, the harness or the reset is wrong and
 every other row in the run is untrustworthy — read it before reading anything else.
 
-## Current state (2026-07-31)
+## Current state (2026-08-01)
 
-`3/7 agree, 4 differ`. All four differ on `h` only, and all four are **one** bug: there is no text
-wrapping (commit `bfb67df`). Chrome puts the sentence on 2–3 lines, dziri keeps it on one, so every
-text row and every ancestor is short by the missing lines. When wrapping lands, all four should go
-green together — if only some do, the rest are separate bugs.
+`6/7 agree, 1 differs`.
+
+The four wrapping scenarios went green together when wrapping landed in `724bdc0`, which is what
+the previous state of this file predicted would happen — the corpus was built so that one bug
+showed up as four rows, and fixing that one bug cleared all four at once. That is the property to
+preserve when adding scenarios: a row should fail for exactly one reason.
+
+The remaining failure is new, and it arrived *with* the wrapping fix:
+
+```
+DIFFER wrap-unbreakable
+       asks: a token with no break opportunity overflows rather than being cut
+       node 1 div   chrome vs dziri: h 21 vs 42
+       node 2 #text chrome vs dziri: h 21 vs 42  [chrome 1 line]
+```
+
+dziri puts `Unbreakablesupercalifragilistic` on two lines in a 120px box; Chrome keeps it on one and
+lets it overflow. CSS only breaks inside a word when asked (`overflow-wrap: break-word`,
+`word-break: break-all`), so Chrome is right and the wrapper is breaking words it should not. Note
+the direction: dziri is *taller* than Chrome here, the opposite of the pre-`724bdc0` failures.
 
 ## Traps found while building and running it
 
