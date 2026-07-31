@@ -387,8 +387,23 @@ winit-versus-SDL3 choice reversible.
 - Scroll model, wheel and trackpad, scrollbars, `overflow` semantics, clipping to the container.
 - **Nested scroll containers** — a scrollable list inside a scrollable panel is where layout
   engines break.
-- Wire existing `dataOffset` virtualization to real scrolling so long lists cost O(visible).
-  Worth marketing: most desktop frameworks still struggle at 100k rows.
+- **Virtualization is a property of a scroll container, and `dataOffset` is how it is spelled.**
+  Decided, closing the review's "wire it or delete it": wire it. A scrollable container caps its
+  list's materialized capacity at the visible window plus overscan, and scrolling becomes an
+  integer write, because slots are recomputed from `items[dataOffset + i]` regardless. Long lists
+  then cost O(visible) — worth marketing, since most desktop frameworks still struggle at 100k
+  rows.
+
+  This is what the arena has been reaching for all along. Today it materializes `capacity` item
+  subtrees whether or not they are on screen, which makes it "render everything, reuse nothing";
+  capping it at the window makes it view recycling, which is the proven form of the pattern —
+  `RecyclerView`, `UITableView`, and VS Code's editor, which renders only the visible line range
+  plus a small overscan. Nothing about the arena changes: the same slot-assignment path, the same
+  never-invalidated ids, one more integer.
+
+  Order matters: this needs the scroll container to exist first, so it lands *with* A4 rather than
+  before it. Wiring `dataOffset` while nothing can scroll would be a field with no consumer, which
+  is what it is today.
 - Inertia and rubber-banding are OS expectations; budget polish time.
 
 ### A5 · Images, icons, and single-line text input
