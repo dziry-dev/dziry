@@ -7,6 +7,16 @@ body {
     color: #e4e4e7;
     font-size: 14px;
     padding: 18px;
+    /* The page scrolls, which is what a browser does with a document taller than
+       its viewport: the body keeps its children at their natural size and the
+       *viewport* moves. The alternative — a fixed shell with one scrolling pane —
+       needs `min-height: 0` down the whole ancestor chain to let the middle
+       collapse, which is real CSS and a different layout, not a smaller version of
+       this one.
+
+       Only `overflow-y`: a window too narrow still overflows sideways, and that
+       needs a horizontal scrollbar rather than a silently clipped right edge. */
+    overflow-y: auto;
 }
 
 .app {
@@ -248,12 +258,6 @@ body {
 
 .list {
     gap: 4px;
-    /* The rows scroll, the page does not: `overflow-y` alone, so a row's focus ring
-       or a future dropdown can still stick out sideways. `flex-grow` gives the box
-       the leftover height to be short *of* — without it the container is exactly its
-       content and there is nothing to scroll. */
-    flex-grow: 1;
-    overflow-y: auto;
 }
 
 .todo {

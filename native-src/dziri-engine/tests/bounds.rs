@@ -1033,3 +1033,64 @@ fn a_scrolled_child_is_hit_where_it_now_appears() {
     // Its layout rect never moved, which is what the host still reads.
     assert_eq!(bound(&engine, 2)[1], 80.0);
 }
+
+/// The page scrolls when the document is taller than the window.
+///
+/// The shape `app.css` uses, and what a browser does: the root keeps its children at
+/// their natural size — `min-height: auto` is what allows that — and the *viewport*
+/// moves. Asserted separately from the inner-container case because the root is the
+/// one box whose size the engine forces to the window, so "content is taller than the
+/// box" is reached differently.
+///
+/// The alternative shape, a fixed shell with one scrolling pane, needs `min-height: 0`
+/// down the whole ancestor chain so the middle may collapse. Both are real CSS; this
+/// pins the one the sample uses.
+#[test]
+fn a_document_taller_than_the_window_scrolls_the_page() {
+    // Root is 200x100 with 10px padding, holding 240px of content.
+    let mut engine = Engine::new(&config(4, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        t.set_u8(STYLES, styles::OVERFLOW_Y, 0, protocol::overflow::SCROLL);
+        for field in [
+            styles::PAD_TOP,
+            styles::PAD_RIGHT,
+            styles::PAD_BOTTOM,
+            styles::PAD_LEFT,
+        ] {
+            t.set_f32(STYLES, field, 0, 10.0);
+        }
+        // Three 80px blocks that refuse to shrink, as content-sized children do
+        // once `min-height` is `auto`.
+        t.set_f32(STYLES, styles::HEIGHT, 1, 80.0);
+        t.set_f32(STYLES, styles::FLEX_SHRINK, 1, 0.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 1);
+        leaf(t, 3, 1);
+        link(t, 0, &[1, 2, 3]);
+    }
+    engine.tick().expect("tick");
+
+    // Content is 240 tall inside a 100 box with 20 of padding: the third block starts
+    // below the window and stays its full height rather than being squeezed.
+    assert_eq!(bound(&engine, 3), [10.0, 170.0, 180.0, 80.0]);
+
+    // So the page scrolls, by content + padding - box.
+    assert!(
+        engine.scroll_at(100.0, 50.0, 0.0, 10_000.0),
+        "the page scrolls"
+    );
+    let scrolled = engine.scroll_of(0)[1];
+    assert!(
+        (scrolled - 160.0).abs() < 1.0,
+        "expected ~160px of scroll (240 content + 20 padding - 100 box), got {scrolled}"
+    );
+
+    // And the layout is untouched by scrolling: only paint and hit-testing move.
+    assert_eq!(bound(&engine, 3), [10.0, 170.0, 180.0, 80.0]);
+}
