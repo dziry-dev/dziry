@@ -8,6 +8,20 @@
     "check": "tsc --noEmit",
     "lint": "cd native-src/dziri-engine && cargo fmt --check && cargo clippy --release --all-targets",
     "gen:protocol": "bun run scripts/gen-protocol.ts",
+    "probe": "bun run scripts/probe.ts",
+    "doc-lint": "bun run scripts/doc-lint.ts",
+    "protocol-guard": "bun run scripts/protocol-guard.ts",
+    "characterize": "bun run scripts/characterize.ts",
+    "golden": "bun run scripts/golden.ts",
+    "conformance": "bun run scripts/conformance.ts",
+    "spec-audit": "bun run scripts/spec-audit.ts",
+    "css-coverage": "bun run scripts/css-coverage.ts",
+    "html-coverage": "bun run scripts/html-coverage.ts",
+    "tailwind-coverage": "bun run scripts/tailwind-coverage.ts",
+    "mdn:sync": "bun run scripts/mdn-sync.ts",
+    "boundary-diff": "bun run scripts/boundary-diff.ts",
+    "layout-diff": "bun run scripts/layout-diff.ts",
+    "probe:serve": "bun run scripts/probe-server.ts",
     "engine": "cd native-src/dziri-engine && cargo build --release",
     "engine:test": "cd native-src/dziri-engine && cargo test --release",
     "engine:smoke": "bun test src/engine/smoke.test.ts",
@@ -20,7 +34,15 @@
     "shot": "bun run src/compile.ts && bun run src/app.ts --screenshot engine-demo.png"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
     "@types/bun": "latest",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "mdn-data": "^2.29.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5"
-  }
+  },
+  "packageManager": "pnpm@10.29.3+sha512.498e1fb4cca5aa06c1dcf2611e6fafc50972ffe7189998c409e90de74566444298ffe43e6cd2acdc775ba1aa7cc5e092a8b7054c811ba8c5770f84693d33d2dc"
 }

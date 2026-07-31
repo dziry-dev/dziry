@@ -1,0 +1,164 @@
+# The denominator for `bun run css-coverage`.
+#
+# ROADMAP A1 says Tailwind defines dziri's CSS subset. This is that subset
+# expressed as CSS *properties* — the properties Tailwind's utilities generate —
+# because a percentage needs a property list, not a utility list. `p-4`, `p-6`
+# and `p-8` are three utilities and one property.
+#
+# Curated, not derived: Tailwind is not a dependency here. Every name below is
+# validated against mdn-data by the script, so a typo or an invented property is
+# a hard error rather than a silently depressed score.
+#
+# Committed non-goals are absent by construction: no floats, tables, writing
+# modes, fragmentation, multi-column or print. Edit freely — this file is the
+# scope decision, and it is meant to be argued with.
+
+# ── layout ───────────────────────────────────────────────────────────────────
+display
+position
+top
+right
+bottom
+left
+z-index
+overflow-x
+overflow-y
+visibility
+isolation
+box-sizing
+aspect-ratio
+object-fit
+object-position
+
+# ── flexbox ──────────────────────────────────────────────────────────────────
+flex-direction
+flex-wrap
+flex-grow
+flex-shrink
+flex-basis
+order
+
+# ── grid ─────────────────────────────────────────────────────────────────────
+grid-template-columns
+grid-template-rows
+grid-column-start
+grid-column-end
+grid-row-start
+grid-row-end
+grid-auto-flow
+grid-auto-columns
+grid-auto-rows
+
+# ── alignment (shared by flex and grid) ──────────────────────────────────────
+justify-content
+justify-items
+justify-self
+align-content
+align-items
+align-self
+gap
+row-gap
+column-gap
+
+# ── spacing ──────────────────────────────────────────────────────────────────
+padding-top
+padding-right
+padding-bottom
+padding-left
+margin-top
+margin-right
+margin-bottom
+margin-left
+
+# ── sizing ───────────────────────────────────────────────────────────────────
+width
+min-width
+max-width
+height
+min-height
+max-height
+
+# ── typography ───────────────────────────────────────────────────────────────
+color
+font-family
+font-size
+font-style
+font-weight
+font-variant-numeric
+letter-spacing
+line-height
+text-align
+text-decoration-line
+text-decoration-color
+text-decoration-style
+text-decoration-thickness
+text-underline-offset
+text-transform
+text-overflow
+text-indent
+white-space
+word-break
+overflow-wrap
+vertical-align
+list-style-type
+list-style-position
+
+# ── backgrounds ──────────────────────────────────────────────────────────────
+background-color
+background-image
+background-position
+background-repeat
+background-size
+background-clip
+background-origin
+background-attachment
+
+# ── borders ──────────────────────────────────────────────────────────────────
+border-top-width
+border-right-width
+border-bottom-width
+border-left-width
+border-top-color
+border-right-color
+border-bottom-color
+border-left-color
+border-top-style
+border-right-style
+border-bottom-style
+border-left-style
+border-top-left-radius
+border-top-right-radius
+border-bottom-right-radius
+border-bottom-left-radius
+outline-width
+outline-style
+outline-color
+outline-offset
+
+# ── effects ──────────────────────────────────────────────────────────────────
+opacity
+box-shadow
+mix-blend-mode
+
+# ── transforms and motion ────────────────────────────────────────────────────
+transform
+transform-origin
+translate
+rotate
+scale
+transition-property
+transition-duration
+transition-timing-function
+transition-delay
+
+# ── interactivity ────────────────────────────────────────────────────────────
+cursor
+pointer-events
+user-select
+appearance
+resize
+scroll-behavior
+caret-color
+accent-color
+scrollbar-width
+scrollbar-color

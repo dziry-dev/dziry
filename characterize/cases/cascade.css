@@ -1,0 +1,8 @@
+body { background: #101014; color: #e4e4e7; font-size: 14px; padding: 12px; }
+.page { display: flex; flex-direction: column; gap: 8px; }
+.card { background: #1c1c22; border-radius: 6px; padding: 8px 12px; display: flex; gap: 6px; }
+/* (0,2,0) both — source order must decide, not "later wins by specificity" */
+.card .label { color: #a1a1aa; }
+.card.primary { color: #f4f4f5; }
+.label { font-weight: 600; }
+.wide { padding: 4px 16px; }

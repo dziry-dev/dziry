@@ -1,0 +1,74 @@
+---
+name: html-coverage
+description: Compare how each HTML element renders in dziri versus Chrome, producing the difference table that specifies the default stylesheet. Use when writing or extending dziri's default/UA stylesheet, when adding an HTML element, when deciding which CSS properties STYLE_FIELDS still needs, and to check progress on HTML-ELEMENT-COVERAGE-RESEARCH.md's tiers. Runs `bun run html-coverage`. Requires `bun run mdn:sync` first.
+---
+
+# html-coverage
+
+```bash
+bun run html-coverage                  # the difference table
+bun run html-coverage --only h1,ul,em  # a few elements
+bun run html-coverage --same           # also list elements that already match
+```
+
+Unlike `css-coverage`, this cannot be static analysis. dziri has no per-element table — it treats
+elements as generic boxes — so "supported" is not a lookup, it is a **behaviour**: is `<h1>` bold
+and larger, does `<ul>` indent, is `<strong>` distinguishable from `<span>`.
+
+## The output is the default stylesheet's specification
+
+Output is a difference table, not pass/fail, and that is deliberate: dziri ships no default
+stylesheet, so a pass/fail run would be uniformly red and tell you nothing.
+
+```
+  <h1>
+      display: chrome block · dziri FLEX
+      font-weight: chrome 700 · dziri 400
+      font-size: chrome 32px · dziri 16
+      margin-block-start: chrome 21.44px · dziri 0
+```
+
+That is four CSS declarations, dictated. Write the rule, re-run, watch the row disappear.
+
+At the time of writing: **59 differ · 22 already match · 29 out of scope · 22 not rendered.**
+
+## `no field` means the property does not exist yet
+
+A `no field · font-style=italic` line means dziri has no way to express the property at all — it
+is not in `STYLE_FIELDS`, so no rule can set it. Those are the ~10 missing properties
+`HTML-ELEMENT-COVERAGE-RESEARCH.md` lists, surfaced per element instead of as a flat list, so you
+can see which elements each one unblocks.
+
+Four properties are tracked this way: `font-style`, `font-family`, `list-style-type`,
+`text-decoration-line`.
+
+## Why some things are filtered out
+
+Each filter exists because without it the table drowned in true-but-useless rows.
+
+- **`inline` is counted once, not per element.** dziri has no inline layout — a committed
+  non-goal — so `inline` vs `FLEX` would appear on ~40 elements as if it were 40 tasks. It is one
+  architectural divergence, reported at the bottom. `block`, `list-item` and `none` stay
+  per-element, because a stylesheet genuinely has to set those.
+- **A `no field` property is only reported when Chrome's value differs from the CSS *initial*
+  value.** `list-style-type` is `disc` on *every* element by initial value, but only renders a
+  marker where `display: list-item` — so it is reported only there. Same idea for
+  `font-style: normal` and `text-decoration-line: none`.
+
+## Probe markup has real subtleties
+
+- **Void elements** (`br`, `hr`, `img`, `input`) get no closing tag. `<br>x</br>` fails to parse.
+- **Some elements need attributes.** `<a>` gets `href="#"` because Chrome's underline comes from
+  `a:-webkit-any-link` — a bare `<a>` is not a link and reports no underline, which read as
+  "already matches" until it was fixed.
+- **`h1`–`h6` come from a `GROUPED` map** because MDN documents them in one `heading_elements`
+  directory. Without it, headings were missing from the enumeration entirely — the single most
+  important thing a default stylesheet sets.
+
+If an element reports "already match" and you doubt it, check the markup first.
+
+## Related
+
+Enumeration comes from `vendor/mdn` (`mdn:sync`). Measurement shares `cdp.ts` with `conformance`
+and `browser-oracle` — installed Chrome or Edge, headless. `conformance` asks whether a *property*
+is right; this asks whether an *element* looks right.

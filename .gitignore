@@ -30,3 +30,7 @@ app/ui.gen.ts
 
 .DS_Store
 Thumbs.db
+
+# MDN prose, vendored for offline grep by `bun run mdn:sync`.
+# CC-BY-SA, so it is a local tool rather than part of this repo.
+vendor/mdn/
