@@ -314,3 +314,58 @@ test("a layout-affecting style patch reaches the engine", () => {
   (compact!.signal as unknown as { value: boolean }).value = false;
   engine.close();
 });
+
+test("typing does not resize the arena on every keystroke", () => {
+  // Growth is not free: `grow` reallocates all three arenas, invalidates every
+  // view, forces a full re-upload and marks the engine `fresh`, which rebuilds
+  // the whole Taffy tree. An exact capacity request moves by 12 bytes per
+  // character, so holding a key down did all of that once per character — and
+  // since `grow` never shrinks, deleting the text did not give it back.
+  const ui: CompiledUi = {
+    strings: [...generated.strings],
+    styles: generated.styles,
+    nodes: generated.nodes,
+    variants: generated.variants,
+    interactive: generated.interactive,
+    textBindings: generated.textBindings,
+    handlers: generated.handlers,
+    lists: generated.lists,
+    root: generated.root,
+  };
+
+  const slot = ui.strings.findIndex((s) => s === "");
+  expect(slot).toBeGreaterThanOrEqual(0);
+
+  let last = capacitiesFor(ui).stringBytes;
+  let growths = 0;
+  for (let i = 1; i <= 2000; i++) {
+    ui.strings[slot] = "x".repeat(i);
+    const want = capacitiesFor(ui).stringBytes;
+    if (want > last) {
+      growths++;
+      last = want;
+    }
+  }
+
+  // Doubling, so the count is logarithmic in the text length rather than equal
+  // to it. The exact figure depends on where the sample starts; what must hold
+  // is that it is a handful and not two thousand.
+  expect(growths).toBeLessThan(6);
+});
+
+test("a capacity request is a power of two", () => {
+  const ui: CompiledUi = {
+    strings: ["x".repeat(5000)],
+    styles: generated.styles,
+    nodes: generated.nodes,
+    variants: generated.variants,
+    interactive: generated.interactive,
+    textBindings: [],
+    handlers: [],
+    lists: generated.lists,
+    root: 0,
+  };
+  const bytes = capacitiesFor(ui).stringBytes;
+  expect(Number.isInteger(Math.log2(bytes))).toBe(true);
+  expect(bytes).toBeGreaterThanOrEqual(5000 * 3);
+});

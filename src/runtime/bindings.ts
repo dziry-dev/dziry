@@ -10,6 +10,17 @@
 import type { CompiledUi } from "../ir.ts";
 import { batch, type Signal } from "./signal.ts";
 
+/**
+ * The longest string a single slot may hold, in characters.
+ *
+ * Every sink that writes typed text into a slot stops here. It lives in the
+ * runtime rather than beside the arena it protects, because this is the only
+ * layer that can refuse: by the time the uploader sees the string, the slot is
+ * already sized for it. Generous for a text field, and finite, which is the
+ * property that matters — the engine's arenas only ever grow.
+ */
+export const MAX_SLOT_CHARS = 64 * 1024;
+
 export const Dirty = { NONE: 0, PAINT: 1, LAYOUT: 2 } as const;
 export type Dirty = (typeof Dirty)[keyof typeof Dirty];
 
@@ -93,6 +104,12 @@ export function typeInto(
   }
 
   if (input.text) {
+    // Refuse rather than grow. The engine's arenas are monotonic — `grow` never
+    // shrinks — so an input path with no ceiling is a one-way memory ratchet
+    // driven by whoever is holding a key down. Dropping the keystroke at a
+    // documented limit is the only place that can be decided, because by the
+    // time the signal has the text the slot is already sized for it.
+    if (target.signal.value.length + input.text.length > MAX_SLOT_CHARS) return false;
     batch(() => {
       target.signal.value += input.text;
     });

@@ -98,6 +98,24 @@ export type Capacities = {
   stringBytes: number;
 };
 
+/**
+ * The string arena's size, rounded up to a power of two.
+ *
+ * The rounding is what makes typing cheap. An *exact* request changes with every
+ * character — the sample's 48 strings ask for 5076 bytes, so one more character
+ * asks for 5088 — and satisfying it reallocates all three arenas, re-uploads
+ * everything and rebuilds the whole Taffy tree, because `grow` marks the engine
+ * `fresh`. Holding a key down did that once per character, and since `grow`
+ * never shrinks, deleting the text did not give the memory back.
+ *
+ * Rounding turns that into O(log n) growth events: the request is stable across
+ * thousands of keystrokes and only moves when the arena genuinely doubles.
+ */
+function arenaBytes(bytes: number): number {
+  const want = Math.max(bytes * ARENA_HEADROOM, 4096);
+  return 2 ** Math.ceil(Math.log2(want));
+}
+
 /** Capacities that hold `ui` with room for a list arena to grow into. */
 export function capacitiesFor(ui: CompiledUi): Capacities {
   let bytes = 0;
@@ -112,7 +130,7 @@ export function capacitiesFor(ui: CompiledUi): Capacities {
     variantSlots: Math.max(ui.variants.slots.length, 1),
     lists: Math.max(ui.lists.count, 1),
     strings: Math.ceil(ui.strings.length * STRING_HEADROOM) + 16,
-    stringBytes: Math.max(bytes * ARENA_HEADROOM, 4096),
+    stringBytes: arenaBytes(bytes),
   };
 }
 
