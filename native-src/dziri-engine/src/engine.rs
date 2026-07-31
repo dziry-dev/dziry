@@ -22,7 +22,9 @@
 //! surface it can hand back as pixels. That is what the Rust tests use, and what
 //! `--screenshot` becomes.
 
-use skia_safe::{surfaces, Color, Surface};
+use skia_safe::{
+    surfaces, Color, ImageInfo, PixelGeometry, Surface, SurfaceProps, SurfacePropsFlags,
+};
 
 use crate::error::EngineError;
 use crate::layout::LayoutTree;
@@ -163,12 +165,7 @@ impl Engine {
             string_bytes: config.string_bytes.max(1),
         };
 
-        let surface =
-            surfaces::raster_n32_premul((width as i32, height as i32)).ok_or_else(|| {
-                EngineError::skia(format!(
-                    "Skia could not allocate a {width}x{height} raster surface"
-                ))
-            })?;
+        let surface = raster_surface(width, height)?;
 
         let window = if config.windowed != 0 {
             let title = read_title(config);
@@ -574,12 +571,7 @@ impl Engine {
             return Ok(());
         }
 
-        self.surface =
-            surfaces::raster_n32_premul((width as i32, height as i32)).ok_or_else(|| {
-                EngineError::skia(format!(
-                    "Skia could not allocate a {width}x{height} raster surface"
-                ))
-            })?;
+        self.surface = raster_surface(width, height)?;
         if let Some(window) = self.window.as_mut() {
             window.resize(width, height)?;
         }
@@ -626,6 +618,31 @@ impl Engine {
     pub fn hit_test(&self, x: f32, y: f32) -> i32 {
         hit_test(&self.tables, self.tree.bounds(), self.root, x, y)
     }
+}
+
+/// The CPU raster surface every frame is painted into.
+///
+/// Not `surfaces::raster_n32_premul`, which is the same thing with default surface
+/// properties — and the default pixel geometry is `Unknown`, which silently turns
+/// subpixel text off. `Font::set_edging(SubpixelAntiAlias)` is a *request*: the
+/// device decides, and a device that does not know its subpixel layout correctly
+/// refuses to guess and falls back to greyscale. So the two-line font change on its
+/// own changed nothing, which a test caught by looking for coloured glyph edges and
+/// finding 485 lit pixels and none.
+///
+/// `RGBH` is the near-universal desktop LCD layout and what Windows assumes by
+/// default. It is a claim about the *display*, so it is wrong on a BGR or vertical
+/// panel — the same bet ClearType makes, and the reason a future translucent or
+/// rotated-display path has to fall back to `Edging::AntiAlias` rather than change
+/// this.
+fn raster_surface(width: u32, height: u32) -> Result<Surface, EngineError> {
+    let info = ImageInfo::new_n32_premul((width as i32, height as i32), None);
+    let props = SurfaceProps::new(SurfacePropsFlags::default(), PixelGeometry::RGBH);
+    surfaces::raster(&info, None, Some(&props)).ok_or_else(|| {
+        EngineError::skia(format!(
+            "Skia could not allocate a {width}x{height} raster surface"
+        ))
+    })
 }
 
 fn read_title(config: &EngineConfig) -> String {

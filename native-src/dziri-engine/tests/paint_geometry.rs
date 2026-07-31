@@ -262,3 +262,74 @@ fn an_offscreen_parent_does_not_hide_an_onscreen_child() {
         "an on-screen child of an off-screen parent must still be drawn"
     );
 }
+
+/// Text is rasterised with subpixel AA, which is what ClearType is.
+///
+/// SkFont's defaults are greyscale AA and integer glyph positions, so white text on
+/// black produced pixels with `r == g == b` — grey, thin, and visibly unlike every
+/// other window on the same desktop. Subpixel AA weights the three channels
+/// separately, so the tell is a coloured edge pixel, and that is what this looks
+/// for rather than for "crisper", which is not an assertion.
+///
+/// It is also the precondition check: subpixel AA is only valid over known pixels,
+/// and it is valid here because the surface is opaque.
+#[test]
+fn glyph_edges_are_subpixel_antialiased() {
+    let mut engine = Engine::new(&config_of(2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        // White text, and the engine clears to black, so any colour in a glyph
+        // edge came from the rasteriser rather than from the design.
+        t.set_u32(STYLES, styles::FG, 1, 0xffff_ffff);
+        t.set_f32(STYLES, styles::FONT_SIZE, 1, 40.0);
+
+        let mut cursor = 0;
+        t.push_string(0, "iiii", &mut cursor).expect("string arena");
+
+        for node in 0..2 {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_u8(NODES, nodes::KIND, 1, protocol::node_kind::TEXT);
+        t.set_i32(NODES, nodes::TEXT, 1, 0);
+        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::MEASURABLE);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        t.set_i32(NODES, nodes::PARENT, 1, 0);
+    }
+    engine.tick().expect("tick");
+
+    let (bytes, row_bytes) = engine.pixels().expect("surface pixels");
+    let mut coloured = 0;
+    let mut lit = 0;
+    for y in 0..120usize {
+        for x in 0..120usize {
+            let i = y * row_bytes + x * 4;
+            let (b, g, r) = (
+                i32::from(bytes[i]),
+                i32::from(bytes[i + 1]),
+                i32::from(bytes[i + 2]),
+            );
+            if r.max(g).max(b) > 16 {
+                lit += 1;
+                // Greyscale AA can only produce r == g == b here. A spread this
+                // wide is the three channels being weighted separately.
+                if r.max(g).max(b) - r.min(g).min(b) > 24 {
+                    coloured += 1;
+                }
+            }
+        }
+    }
+
+    assert!(lit > 0, "the glyphs were drawn at all");
+    assert!(
+        coloured > 0,
+        "no glyph edge carried colour, so this is greyscale AA: {lit} lit pixels, {coloured} coloured"
+    );
+}

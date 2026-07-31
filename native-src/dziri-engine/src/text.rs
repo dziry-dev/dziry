@@ -20,6 +20,7 @@
 use std::collections::HashMap;
 
 use crate::error::EngineError;
+use skia_safe::font::Edging;
 use skia_safe::font_style::{Slant, Weight, Width};
 use skia_safe::{Font, FontMgr, FontStyle, Typeface};
 
@@ -129,7 +130,7 @@ impl Measurer {
     pub fn face(&mut self, size: f32, weight: u16) -> &Face {
         let key = (size.to_bits(), weight);
         if !self.faces.contains_key(&key) {
-            let font = match self.typeface(weight) {
+            let mut font = match self.typeface(weight) {
                 Some(tf) => Font::from_typeface(tf, size),
                 None => {
                     // Skia's built-in default, resized. Ugly text beats no text
@@ -139,6 +140,26 @@ impl Measurer {
                     font
                 }
             };
+
+            // SkFont defaults to greyscale AA and integer glyph positions, which is
+            // why text read thin and unevenly spaced next to every other window on
+            // the same desktop — ClearType is subpixel AA with fractional advances.
+            // `Paint::set_anti_alias` does not cover this: it governs geometry, not
+            // glyph rasterisation.
+            //
+            // Subpixel AA is only *valid* over known pixels, and it is valid here
+            // because the surface is opaque: `raster_n32_premul` cleared to opaque
+            // black every frame. A translucent or layered window would have to fall
+            // back to `Edging::AntiAlias`, so that precondition belongs next to the
+            // call rather than in a commit message.
+            //
+            // Hinting stays at Skia's default. DirectWrite's slight hinting was the
+            // review's suggestion, but on this corpus it moved stems around without
+            // making anything measurably better, and it is a separate decision from
+            // the two that fix the AA.
+            font.set_edging(Edging::SubpixelAntiAlias);
+            font.set_subpixel(true);
+
             let (_, metrics) = font.metrics();
             self.faces.insert(
                 key,
