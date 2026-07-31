@@ -51,10 +51,45 @@ function schemaHash(): number {
   feed(`v${PROTOCOL_VERSION}`);
   for (const table of TABLES) {
     feed(`|${table.name}:${table.sizedBy}`);
-    for (const field of table.fields) feed(`,${field.name}:${field.type}`);
+    // `affects` carries no bytes, so it could have been left out of the
+    // fingerprint. It is in, because the two sides disagreeing about it means
+    // the engine skips a relayout the compiler expected — a stale frame with no
+    // write to blame, which is the same class of failure the hash exists for.
+    for (const field of table.fields) {
+      feed(`,${field.name}:${field.type}${field.affects ? `:${field.affects}` : ""}`);
+    }
   }
   return h >>> 0;
 }
+
+/**
+ * Which tables classify their fields as layout- or paint-affecting.
+ *
+ * A partially tagged table is refused rather than defaulted. Either default is
+ * wrong for somebody: assume `layout` and a paint field silently costs a
+ * relayout forever, assume `paint` and a layout field silently stops causing
+ * one. A field added without a tag should stop the build, which is the only
+ * moment anyone is thinking about that field.
+ */
+function classifiedTables(): Table[] {
+  const out: Table[] = [];
+  for (const table of TABLES) {
+    const tagged = table.fields.filter((f) => f.affects !== undefined);
+    if (tagged.length === 0) continue;
+    if (tagged.length !== table.fields.length) {
+      const missing = table.fields.filter((f) => f.affects === undefined).map((f) => f.name);
+      throw new Error(
+        `table "${table.name}" tags some fields with \`affects\` and not others.\n` +
+          `  untagged: ${missing.join(", ")}\n` +
+          `  Tag every field or none — see the \`Affects\` doc comment in schema.ts.`,
+      );
+    }
+    out.push(table);
+  }
+  return out;
+}
+
+const CLASSIFIED = classifiedTables();
 
 const SCHEMA_HASH = schemaHash();
 
@@ -87,6 +122,20 @@ function rustTable(table: Table): string {
   const sizes = table.fields.map((f) => `${ELEM_SIZE[f.type]}`).join(", ");
   const names = table.fields.map((f) => `"${f.name}"`).join(", ");
 
+  const classification = table.fields.some((f) => f.affects)
+    ? `
+
+    /// Whether a change to this field can move a box.
+    ///
+    /// \`false\` means paint reads it and layout does not, so a commit that
+    /// touches only such fields needs no Taffy work at all — the repaint that
+    /// every non-empty commit schedules is the entire response. A colour-only
+    /// theme patch is the case this exists for.
+    pub const LAYOUT_AFFECTING: [bool; FIELD_COUNT] = [${table.fields
+      .map((f) => (f.affects === "paint" ? "false" : "true"))
+      .join(", ")}];`
+    : "";
+
   return `/// ${table.doc}
 pub mod ${snake(table.name)} {
     /// Field indices, in descriptor order.
@@ -94,7 +143,7 @@ ${consts}
 
     pub const FIELD_COUNT: usize = ${table.fields.length};
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [${sizes}];
-    pub const FIELD_NAMES: [&str; FIELD_COUNT] = [${names}];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = [${names}];${classification}
 }`;
 }
 
@@ -243,6 +292,19 @@ ${TABLES.map((t) => `  ${t.name}: [${t.fields.map((f) => ELEM_SIZE[f.type]).join
 /** Field names per table, in descriptor order — used to name a mismatch. */
 export const FIELD_NAMES: Record<TableName, string[]> = {
 ${TABLES.map((t) => `  ${t.name}: [${t.fields.map((f) => `"${f.name}"`).join(", ")}],`).join("\n")}
+};
+
+/**
+ * Whether a change to a field can move a box, for the tables that classify.
+ *
+ * The engine is the consumer — it uses this to skip Taffy entirely for a
+ * paint-only patch. It is emitted here so the compiler's own \`LAYOUT_FIELDS\`
+ * can be checked against it rather than trusted to agree.
+ */
+export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
+${CLASSIFIED.map(
+  (t) => `  ${t.name}: [${t.fields.map((f) => (f.affects === "paint" ? "false" : "true")).join(", ")}],`,
+).join("\n")}
 };
 
 export const TABLE_NAMES = [${TABLES.map((t) => `"${t.name}"`).join(", ")}] as const;

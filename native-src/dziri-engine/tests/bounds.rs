@@ -332,6 +332,52 @@ fn relinking_children_reorders_without_moving_nodes() {
 }
 
 #[test]
+fn a_colour_patch_repaints_without_relaying_out() {
+    // The theme toggle. The compiler classifies `.light` as paint-only and says
+    // so on every build; the engine used to relayout the document anyway.
+    //
+    // Both halves matter and they pull opposite ways: skipping Taffy is the
+    // point, and a frame that skips Taffy *and* forgets to repaint is a worse
+    // bug than the one being fixed. So this asserts the pixels moved and the
+    // geometry did not.
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 50.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+        t.set_u32(STYLES, styles::BG, 1, 0xff00_00ff);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+    }
+    engine.tick().expect("tick");
+
+    let before = bound(&engine, 1);
+    let (pixels, _) = engine.pixels().expect("pixels");
+    let sample = |px: &[u8]| {
+        // Row 10, column 10 — inside the child's 50x20 box.
+        let i = (10 * 200 + 10) * 4;
+        [px[i], px[i + 1], px[i + 2], px[i + 3]]
+    };
+    let blue = sample(&pixels);
+
+    {
+        let t = engine.tables_mut();
+        t.set_u32(STYLES, styles::BG, 1, 0xff00_ff00);
+    }
+    engine.tick().expect("tick");
+
+    let (pixels, _) = engine.pixels().expect("pixels");
+    assert_ne!(sample(&pixels), blue, "the recolour reached the frame");
+    assert_eq!(bound(&engine, 1), before, "and moved nothing");
+}
+
+#[test]
 fn removing_a_row_relinks_the_parent_it_left() {
     // The case an incremental relink gets wrong if it only relinks the nodes
     // whose own bytes moved. Dropping the middle row rewrites exactly one

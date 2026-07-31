@@ -560,7 +560,18 @@ impl Tables {
         }
 
         if span.table as usize == styles {
-            self.collect_changed_slots(span, &mut diff.changed_styles);
+            // A paint-only field needs no entry at all. Paint reads this table
+            // out of live memory every frame, so recolouring is finished the
+            // moment `commit` copies the bytes — and `any` has already asked for
+            // the repaint. Taffy never hears about it.
+            //
+            // This is what `resync`'s doc comment has always claimed and what the
+            // code did not do: the compiler classifies `.light` as paint-only and
+            // says so on every build, and the engine relaid out the document
+            // anyway, because `classify` discarded `span.field`.
+            if protocol::styles::LAYOUT_AFFECTING[span.field as usize] {
+                self.collect_changed_slots(span, &mut diff.changed_styles);
+            }
             return;
         }
 
@@ -845,12 +856,15 @@ mod tests {
         // `fresh`, not from the diff, so an all-zero table still lays out once.
         assert!(!tables.commit().any, "an unchanged stage commits nothing");
 
-        // A colour-only theme patch: one field of one style slot.
+        // A colour-only theme patch: one field of one style slot. It reaches the
+        // live table and schedules a repaint, and it schedules no Taffy work at
+        // all, because paint reads `bg` straight out of live memory.
         let bg = tables.staged_mut(Table::Styles as usize, protocol::styles::BG);
         bg[4..8].copy_from_slice(&0xff112233u32.to_le_bytes());
 
         let diff = tables.commit();
-        assert_eq!(diff.changed_styles, vec![1], "only slot 1 moved");
+        assert!(diff.any, "the frame still repaints");
+        assert!(diff.changed_styles.is_empty(), "a colour cannot move a box");
         assert!(
             diff.changed_links.is_empty(),
             "a style value is not a structural change"
@@ -859,6 +873,33 @@ mod tests {
             tables.u32s(Table::Styles as usize, protocol::styles::BG)[1],
             0xff112233
         );
+
+        // The same patch shape, on a field layout *does* read, names the slot.
+        let width = tables.staged_mut(Table::Styles as usize, protocol::styles::WIDTH);
+        width[4..8].copy_from_slice(&64.0f32.to_le_bytes());
+
+        let diff = tables.commit();
+        assert_eq!(diff.changed_styles, vec![1], "only slot 1 moved");
+    }
+
+    #[test]
+    fn every_styles_field_is_classified() {
+        // The generator refuses a partially tagged table, so this cannot fail by
+        // omission — it exists to catch the array being emitted at the wrong
+        // length, which would read a neighbouring field's answer.
+        assert_eq!(
+            protocol::styles::LAYOUT_AFFECTING.len(),
+            protocol::styles::FIELD_COUNT
+        );
+        // Spot-check both ends of the classification against what the engine
+        // actually reads: `style_of` never looks at `radius`, and cannot lay out
+        // without `width`.
+        assert!(!protocol::styles::LAYOUT_AFFECTING[protocol::styles::RADIUS]);
+        assert!(!protocol::styles::LAYOUT_AFFECTING[protocol::styles::BORDER_WIDTH]);
+        assert!(protocol::styles::LAYOUT_AFFECTING[protocol::styles::WIDTH]);
+        // Not because Taffy reads it — it does not — but because the measure
+        // callback does.
+        assert!(protocol::styles::LAYOUT_AFFECTING[protocol::styles::FONT_SIZE]);
     }
 
     #[test]

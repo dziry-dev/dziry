@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 2;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xeecbb418;
+export const SCHEMA_HASH = 0x6a590fb4;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -41,6 +41,17 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
   lists: ["node", "arenaStart", "stride", "capacity", "active"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
+};
+
+/**
+ * Whether a change to a field can move a box, for the tables that classify.
+ *
+ * The engine is the consumer — it uses this to skip Taffy entirely for a
+ * paint-only patch. It is emitted here so the compiler's own `LAYOUT_FIELDS`
+ * can be checked against it rather than trusted to agree.
+ */
+export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
+  styles: [false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
 };
 
 export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "lists", "layout", "strings"] as const;

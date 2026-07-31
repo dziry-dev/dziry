@@ -34,7 +34,7 @@ import type { Engine } from "./host.ts";
  * translation beyond the rename. That was not luck — the schema's enums were
  * written from the IR's.
  */
-const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
+export const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
   ["bg", "bg"],
   ["fg", "fg"],
   ["borderColor", "borderColor"],

@@ -215,6 +215,18 @@ impl LayoutTree {
     }
 
     /// Pushes a node's resolved style into Taffy.
+    ///
+    /// **Do not guard this with `Style: PartialEq`.** It is the obvious saving
+    /// and it is wrong: `set_style` is also what marks the node dirty, and two
+    /// of the things that change a node's laid-out size do not appear in `Style`
+    /// at all. `fontSize` and `fontWeight` are read by the measure callback, and
+    /// the `MEASURABLE` flag decides whether that callback runs — so all three
+    /// produce a byte-identical `Style` and a different result on screen. A
+    /// no-op guard would skip them, and the symptom is text laid out at the old
+    /// size with nothing in the diff to blame.
+    ///
+    /// The saving that *is* safe is upstream, in `classify`: a field that layout
+    /// never reads produces no entry, so this is not called at all.
     pub fn apply_style(&mut self, tables: &Tables, node: usize) -> Result<(), String> {
         let style = style_of(tables, node);
         self.tree

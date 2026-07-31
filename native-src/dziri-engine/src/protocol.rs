@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: u32 = 2;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0xeecbb418;
+pub const SCHEMA_HASH: u32 = 0x6a590fb4;
 
 pub const TABLE_COUNT: usize = 7;
 
@@ -149,6 +149,14 @@ pub mod styles {
     pub const FIELD_COUNT: usize = 48;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["bg", "fg", "borderColor", "borderWidth", "radius", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflow"];
+
+    /// Whether a change to this field can move a box.
+    ///
+    /// `false` means paint reads it and layout does not, so a commit that
+    /// touches only such fields needs no Taffy work at all — the repaint that
+    /// every non-empty commit schedules is the entire response. A colour-only
+    /// theme patch is the case this exists for.
+    pub const LAYOUT_AFFECTING: [bool; FIELD_COUNT] = [false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true];
 }
 
 /// Per-node predicate mask and where that node's style run begins.

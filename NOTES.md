@@ -49,13 +49,33 @@ src/lib.rs        the C ABI
 staged over live, and returns a **diff** — and that diff is what earns the memory.
 Without the split there would be nothing to compare against.
 
-**The diff carries index sets, not verbs.** A colour-only theme patch names the two style
-*slots* that moved, and only nodes wearing them are restyled; a list relink names the
-*nodes* whose chain description moved, and only they and the parents the engine last
-linked them under are re-linked. The parents come from the engine's own record rather
-than from `nodes.parent`, which nothing here reads: letting host memory choose which node
-to relink would turn one wrong integer into a Taffy tree silently disagreeing with the
-chains.
+**The diff carries index sets, not verbs.** A style patch names the *slots* that moved,
+and only nodes wearing them are restyled; a list relink names the *nodes* whose chain
+description moved, and only they and the parents the engine last linked them under are
+re-linked. The parents come from the engine's own record rather than from `nodes.parent`,
+which nothing here reads: letting host memory choose which node to relink would turn one
+wrong integer into a Taffy tree silently disagreeing with the chains.
+
+**And it knows which fields can move a box.** A colour-only theme patch schedules *no
+Taffy work at all* — paint reads the styles table out of live memory, so recolouring is
+finished the moment `commit` copies the bytes. Every styles field is tagged `paint` or
+`layout` in `schema.ts` and the classification is generated to both sides; `classify`
+skips a paint-only span entirely. Measured on 2,000 nodes, a recolour went from 1.22 ms —
+exactly what a geometry patch cost, which was the bug — to 0.43 ms, all of it the repaint
+the frame genuinely needs.
+
+`layout` is the safe default and `paint` is the claim that has to be earned: over-tagging
+costs time, under-tagging is a stale frame with no write to blame. The generator refuses a
+table where only some fields carry a tag, so a new field stops the build rather than
+inheriting a guess.
+
+**The obvious follow-on is a trap, and it is worth not rediscovering.** Guarding
+`apply_style` with `Style: PartialEq` looks free and is wrong: `set_style` is also what
+marks a node dirty, and three things that change a node's laid-out size never appear in
+Taffy's `Style` — `fontSize`, `fontWeight` and the `MEASURABLE` flag all reach layout
+through the measure callback instead. A no-op guard would skip exactly those and lay text
+out at the old size. The saving that is safe lives upstream in `classify`, where the call
+never happens at all.
 
 This started as three booleans, and a boolean leaves only one answer — redo everything,
 over table *capacity*. A full rebuild is now reserved for the first tick and for a

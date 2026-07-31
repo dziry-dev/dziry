@@ -40,7 +40,23 @@ export const ELEM_VIEW: Record<ElemType, string> = {
   f64: "Float64Array",
 };
 
-export type Field = { name: string; type: ElemType; doc?: string };
+/**
+ * Whether the engine has to tell Taffy when this field changes.
+ *
+ * `paint` is a claim that has to be earned: the engine reads the styles table
+ * out of live memory when it draws, so a paint-only field needs no bookkeeping
+ * at all — the repaint every non-empty commit already schedules is the whole
+ * response. Getting it wrong in that direction is a stale frame with no write to
+ * blame, so anything not *demonstrably* invisible to layout is `layout`, and
+ * over-invalidating costs time rather than correctness.
+ *
+ * Tag every field of a table or none: the generator refuses a partial set,
+ * because a field added without a tag would silently inherit whichever default
+ * the generator happened to pick.
+ */
+export type Affects = "paint" | "layout";
+
+export type Field = { name: string; type: ElemType; doc?: string; affects?: Affects };
 
 export type Table = {
   name: string;
@@ -84,58 +100,65 @@ const STYLES: Table = {
   sizedBy: "styles",
   fields: [
     // paint
-    { name: "bg", type: "u32" },
-    { name: "fg", type: "u32" },
-    { name: "borderColor", type: "u32" },
-    { name: "borderWidth", type: "f32" },
-    { name: "radius", type: "f32" },
+    { name: "bg", type: "u32", affects: "paint" },
+    { name: "fg", type: "u32", affects: "paint" },
+    { name: "borderColor", type: "u32", affects: "paint" },
+    { name: "borderWidth", type: "f32", affects: "paint" },
+    { name: "radius", type: "f32", affects: "paint" },
     // box
-    { name: "padTop", type: "f32" },
-    { name: "padRight", type: "f32" },
-    { name: "padBottom", type: "f32" },
-    { name: "padLeft", type: "f32" },
-    { name: "marginTop", type: "f32" },
-    { name: "marginRight", type: "f32" },
-    { name: "marginBottom", type: "f32" },
-    { name: "marginLeft", type: "f32" },
+    { name: "padTop", type: "f32", affects: "layout" },
+    { name: "padRight", type: "f32", affects: "layout" },
+    { name: "padBottom", type: "f32", affects: "layout" },
+    { name: "padLeft", type: "f32", affects: "layout" },
+    { name: "marginTop", type: "f32", affects: "layout" },
+    { name: "marginRight", type: "f32", affects: "layout" },
+    { name: "marginBottom", type: "f32", affects: "layout" },
+    { name: "marginLeft", type: "f32", affects: "layout" },
     // flex + grid
-    { name: "display", type: "u8", doc: "0 flex, 1 grid, 2 block, 3 none" },
-    { name: "flexDirection", type: "u8" },
-    { name: "flexWrap", type: "u8" },
-    { name: "justifyContent", type: "u8" },
-    { name: "alignItems", type: "u8" },
-    { name: "alignSelf", type: "u8" },
-    { name: "justifyItems", type: "u8", doc: "Grid only" },
-    { name: "justifySelf", type: "u8", doc: "Grid only" },
-    { name: "flexGrow", type: "f32" },
-    { name: "flexShrink", type: "f32" },
-    { name: "flexBasis", type: "f32" },
-    { name: "gapRow", type: "f32" },
-    { name: "gapColumn", type: "f32" },
-    { name: "gridColumns", type: "u16", doc: "repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N" },
-    { name: "gridRows", type: "u16" },
-    { name: "gridColumnStart", type: "i16" },
-    { name: "gridColumnSpan", type: "i16" },
-    { name: "gridRowStart", type: "i16" },
-    { name: "gridRowSpan", type: "i16" },
+    { name: "display", type: "u8", affects: "layout", doc: "0 flex, 1 grid, 2 block, 3 none" },
+    { name: "flexDirection", type: "u8", affects: "layout" },
+    { name: "flexWrap", type: "u8", affects: "layout" },
+    { name: "justifyContent", type: "u8", affects: "layout" },
+    { name: "alignItems", type: "u8", affects: "layout" },
+    { name: "alignSelf", type: "u8", affects: "layout" },
+    { name: "justifyItems", type: "u8", affects: "layout", doc: "Grid only" },
+    { name: "justifySelf", type: "u8", affects: "layout", doc: "Grid only" },
+    { name: "flexGrow", type: "f32", affects: "layout" },
+    { name: "flexShrink", type: "f32", affects: "layout" },
+    { name: "flexBasis", type: "f32", affects: "layout" },
+    { name: "gapRow", type: "f32", affects: "layout" },
+    { name: "gapColumn", type: "f32", affects: "layout" },
+    { name: "gridColumns", type: "u16", affects: "layout", doc: "repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N" },
+    { name: "gridRows", type: "u16", affects: "layout" },
+    { name: "gridColumnStart", type: "i16", affects: "layout" },
+    { name: "gridColumnSpan", type: "i16", affects: "layout" },
+    { name: "gridRowStart", type: "i16", affects: "layout" },
+    { name: "gridRowSpan", type: "i16", affects: "layout" },
     // sizing — NaN means auto
-    { name: "width", type: "f32" },
-    { name: "height", type: "f32" },
-    { name: "minWidth", type: "f32" },
-    { name: "minHeight", type: "f32" },
-    { name: "maxWidth", type: "f32" },
-    { name: "maxHeight", type: "f32" },
-    { name: "aspectRatio", type: "f32" },
-    { name: "position", type: "u8", doc: "0 relative, 1 absolute" },
-    { name: "insetTop", type: "f32" },
-    { name: "insetRight", type: "f32" },
-    { name: "insetBottom", type: "f32" },
-    { name: "insetLeft", type: "f32" },
+    { name: "width", type: "f32", affects: "layout" },
+    { name: "height", type: "f32", affects: "layout" },
+    { name: "minWidth", type: "f32", affects: "layout" },
+    { name: "minHeight", type: "f32", affects: "layout" },
+    { name: "maxWidth", type: "f32", affects: "layout" },
+    { name: "maxHeight", type: "f32", affects: "layout" },
+    { name: "aspectRatio", type: "f32", affects: "layout" },
+    { name: "position", type: "u8", affects: "layout", doc: "0 relative, 1 absolute" },
+    { name: "insetTop", type: "f32", affects: "layout" },
+    { name: "insetRight", type: "f32", affects: "layout" },
+    { name: "insetBottom", type: "f32", affects: "layout" },
+    { name: "insetLeft", type: "f32", affects: "layout" },
     // text
-    { name: "fontSize", type: "f32" },
-    { name: "fontWeight", type: "u16" },
-    { name: "lineClamp", type: "u16", doc: "0 = unlimited; drives SkParagraph maxLines" },
-    { name: "overflow", type: "u8", doc: "0 visible, 1 hidden, 2 ellipsis, 3 scroll" },
+    //
+    // `layout`, and not for the obvious reason: neither appears in Taffy's
+    // `Style` at all. They reach layout through the *measure callback*, which
+    // reads them out of this table to shape the string. So they are the two
+    // fields where "the resolved Taffy style is unchanged" and "the laid-out
+    // size is unchanged" come apart — which is why `apply_style` must not be
+    // guarded by comparing styles for equality. See `LayoutTree::apply_style`.
+    { name: "fontSize", type: "f32", affects: "layout" },
+    { name: "fontWeight", type: "u16", affects: "layout" },
+    { name: "lineClamp", type: "u16", affects: "layout", doc: "0 = unlimited; drives SkParagraph maxLines" },
+    { name: "overflow", type: "u8", affects: "layout", doc: "0 visible, 1 hidden, 2 ellipsis, 3 scroll" },
   ],
 };
 
