@@ -100,7 +100,10 @@ export type Props = {
    * Inside a list item it receives that row's item and index, since one compiled
    * handler serves every row.
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  // `any`, not `unknown`: one compiled handler serves every row, so this position
+  // cannot know the item type, and `unknown` would make every author cast before
+  // reading a field. The `eslint-disable` that used to sit here suppressed a rule
+  // from a linter this repo has never configured.
   onClick?: ((item: any, index: number) => void) | (() => void) | string;
   /**
    * Accepted and ignored. There are no form widgets yet, so `<input>` compiles to
