@@ -27,7 +27,7 @@ use sdl3::render::{Texture, TextureCreator, WindowCanvas};
 use sdl3::video::WindowContext;
 use sdl3::{EventPump, Sdl, VideoSubsystem};
 
-use crate::error::EngineError;
+use crate::error::{status, EngineError};
 
 /// Input as the platform reports it, before the engine decides what it means.
 #[derive(Debug, Clone)]
@@ -95,6 +95,52 @@ const MIN_WINDOW_WIDTH: u32 = 564;
 /// And a floor on height, which no browser publishes. This one is chosen: two rows of
 /// cards plus chrome, i.e. enough that a vertical scrollbar has somewhere to be.
 const MIN_WINDOW_HEIGHT: u32 = 320;
+
+/// Moves or removes the floor, for measuring rather than for shipping.
+///
+/// `DZIRI_MIN_WINDOW=none` removes it; `DZIRI_MIN_WINDOW=200x150` moves it.
+///
+/// It exists because of the floor's own justification: it keeps the user out of the
+/// widths where a missing feature dominates the screen, and the only way to *fix* such
+/// a feature is to go and look at those widths. Text wrapping is the live example —
+/// there is none, the floor hides most of it, and hiding it is not fixing it.
+///
+/// An environment variable rather than a config field on purpose: this is a
+/// developer's hatch, and a wire field would make it part of the protocol that every
+/// host has to know about forever.
+const MIN_WINDOW_ENV: &str = "DZIRI_MIN_WINDOW";
+
+/// `None` means "ask the OS for no minimum at all".
+///
+/// Split from the environment read so it is testable: a test that sets a process-wide
+/// variable races every other test in the binary.
+fn parse_min_window(raw: Option<&str>) -> Result<Option<(u32, u32)>, EngineError> {
+    let Some(raw) = raw.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(Some((MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)));
+    };
+
+    let lower = raw.to_ascii_lowercase();
+    if lower == "none" || lower == "0" {
+        return Ok(None);
+    }
+
+    // A malformed value is a hard error, not a silent fall back to the default. This
+    // is only ever set by someone who is measuring, and quietly ignoring the request
+    // would let them draw a conclusion at a window size they did not choose.
+    let bad = || {
+        EngineError::new(
+            status::INVALID_ARGUMENT,
+            format!("{MIN_WINDOW_ENV}=\"{raw}\": expected WxH, or \"none\""),
+        )
+    };
+    let (w, h) = lower.split_once('x').ok_or_else(bad)?;
+    let w: u32 = w.parse().map_err(|_| bad())?;
+    let h: u32 = h.parse().map_err(|_| bad())?;
+    if w == 0 || h == 0 {
+        return Err(bad());
+    }
+    Ok(Some((w, h)))
+}
 
 fn round_up(n: u32, to: u32) -> u32 {
     n.div_ceil(to) * to
@@ -169,10 +215,16 @@ impl Window {
         // layout rather than about the size — a narrow window is a real case worth
         // supporting, an 80 px one is not.
         //
-        // The OS enforces it, so no code here has to defend against a smaller surface.
-        window
-            .set_minimum_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-            .map_err(|e| EngineError::sdl(format!("SDL_SetWindowMinimumSize: {e}")))?;
+        // The OS enforces it, so no code here has to defend against a smaller surface
+        // — *unless* `DZIRI_MIN_WINDOW` removed it, which is why that is a measurement
+        // hatch and not a supported configuration.
+        if let Some((min_w, min_h)) =
+            parse_min_window(std::env::var(MIN_WINDOW_ENV).ok().as_deref())?
+        {
+            window
+                .set_minimum_size(min_w, min_h)
+                .map_err(|e| EngineError::sdl(format!("SDL_SetWindowMinimumSize: {e}")))?;
+        }
 
         // Without this SDL delivers **no** `TextInput` events at all — not for
         // IME composition and not for plain Latin keys either. The event arm in
@@ -418,3 +470,49 @@ impl Window {
 // renderer, and `destroy` is documented as undefined behaviour once the parent
 // canvas is gone. Dropping the canvas is the correct teardown, and `resize` is
 // the one place a texture is orphaned early enough to destroy by hand.
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unset_means_the_shipped_floor() {
+        assert_eq!(
+            parse_min_window(None).unwrap(),
+            Some((MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT))
+        );
+        // An empty or whitespace value is how a shell spells "unset" by accident.
+        assert_eq!(
+            parse_min_window(Some("  ")).unwrap(),
+            Some((MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT))
+        );
+    }
+
+    #[test]
+    fn none_removes_the_floor_entirely() {
+        assert_eq!(parse_min_window(Some("none")).unwrap(), None);
+        assert_eq!(parse_min_window(Some("NONE")).unwrap(), None);
+        assert_eq!(parse_min_window(Some("0")).unwrap(), None);
+    }
+
+    #[test]
+    fn a_size_moves_the_floor() {
+        assert_eq!(parse_min_window(Some("200x150")).unwrap(), Some((200, 150)));
+        assert_eq!(parse_min_window(Some("200X150")).unwrap(), Some((200, 150)));
+        assert_eq!(
+            parse_min_window(Some(" 320x200 ")).unwrap(),
+            Some((320, 200))
+        );
+    }
+
+    /// The whole point of the hatch is measuring at a chosen size, so a value that
+    /// does not name one has to stop the run rather than pick 564 behind your back.
+    #[test]
+    fn a_malformed_value_refuses_rather_than_defaulting() {
+        for raw in ["wide", "200", "200x", "x150", "200x0", "0x150", "-5x10"] {
+            let err = parse_min_window(Some(raw)).expect_err(raw);
+            assert_eq!(err.status, status::INVALID_ARGUMENT, "{raw}");
+            assert!(err.detail.contains(raw), "{raw}: {}", err.detail);
+        }
+    }
+}

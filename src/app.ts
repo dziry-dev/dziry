@@ -5,6 +5,7 @@
  *   bun run app --stats                 # frame timings
  *   bun run app --screenshot out.png    # render one frame headlessly and exit
  *   bun run app --size 600x400          # a window of that size, headless or not
+ *   bun run app --size 400x600 --min-size none   # ...and let it be dragged narrower
  *
  * Note what is absent, and what has become absent. There is still no HTML
  * parser, no CSS parser, no selector matching and no cascade — the IR arrives as
@@ -72,6 +73,23 @@ const [windowWidth, windowHeight] = (() => {
   if (raw && !match) throw new Error(`--size takes WxH, got "${raw}"`);
   return match ? [Number(match[1]), Number(match[2])] : [1040, 560];
 })();
+
+/// `--min-size none` (or `WxH`) lifts the engine's 564x320 floor for this run.
+///
+/// It has to be set here rather than passed, because it is an environment variable the
+/// engine reads at window creation rather than a field on the config — see
+/// `MIN_WINDOW_ENV` in `window.rs` for why it is not on the wire. Setting it before the
+/// engine is created is the whole requirement; `dlopen` has already happened by now and
+/// does not matter, since the read is in `Window::new`.
+///
+/// Without this, `--size 400x600` silently gives you a 564-wide window: SDL clamps up
+/// to the minimum, so the flag that exists to *reach* small sizes cannot reach them.
+{
+  const i = argv.indexOf("--min-size");
+  const raw = i !== -1 ? argv[i + 1] : null;
+  if (i !== -1 && !raw) throw new Error(`--min-size takes WxH or "none"`);
+  if (raw) process.env.DZIRI_MIN_WINDOW = raw;
+}
 
 // The generated module *is* the IR — no parsing, no deserialization.
 //
