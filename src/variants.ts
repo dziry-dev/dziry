@@ -1,8 +1,8 @@
 /**
  * Compares dynamic-styling strategies on a real page.
  *
- *   bun run variants                    # app/todo.tsx + app/todo.css
- *   bun run variants app/app.tsx app/app.css
+ *   bun run variants                    # app/app.tsx + app/app.css
+ *   bun run variants some/other.tsx some/other.css
  *
  * Reports IR size for each strategy, which toggles can skip relayout, where
  * toggles collide, and the measured cost of applying a change either way.
@@ -17,12 +17,17 @@ import {
   strategyBytes,
   type ToggleSpec,
 } from "./compiler/variants.ts";
+import { compileTree } from "./compiler/compile.ts";
+import { findToggles, verifyCompose } from "./compiler/variant-compile.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 
-const inputPath = argv[0] ?? join(ROOT, "app", "todo.tsx");
-const cssPath = argv[1] ?? join(ROOT, "app", "todo.css");
+// `app/todo.tsx` was the default and has not existed for some time, so the tool
+// could not be run at all without arguments — it failed on the CSS read, one line
+// later, which read like a missing stylesheet rather than a missing default.
+const inputPath = argv[0] ?? join(ROOT, "app", "app.tsx");
+const cssPath = argv[1] ?? join(ROOT, "app", "app.css");
 const rel = (p: string) => relative(ROOT, p).replace(/\\/g, "/");
 
 const css = await Bun.file(cssPath).text();
@@ -42,15 +47,48 @@ if ([".tsx", ".jsx"].includes(extname(inputPath).toLowerCase())) {
   toggles = [];
 }
 
-if (toggles.length === 0) {
-  console.error(`${rel(inputPath)} exports no TOGGLES; nothing to compare.`);
-  process.exit(1);
-}
-
 const kb = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
 
 console.log(`\nvariant analysis — ${rel(inputPath)} + ${rel(cssPath)}`);
-console.log(`${toggles.length} toggles: ${toggles.map((t) => t.name).join(", ")}\n`);
+
+// --- correctness, against the shipped compiler -------------------------------
+//
+// First, unconditionally, and on production's own terms: `findToggles` discovers
+// conditional classes from `classWhen`, which is how the compiler finds them. The
+// size comparison below needs an explicit `TOGGLES` export because it injects
+// classes by selector — an older model than `classWhen`, kept because it is what
+// lets the report compile the same page three ways.
+const productionToggles = findToggles(doc);
+console.log("correctness: patches vs the compiler's own output");
+if (productionToggles.length === 0) {
+  console.log("  no conditional classes in this document");
+} else {
+  const mismatches = verifyCompose(doc, css, compileTree(doc, css), productionToggles);
+  const names = productionToggles.map((t) => "." + t.className).join(", ");
+  if (mismatches.length === 0) {
+    console.log(`  all ${1 << productionToggles.length} combinations of ${names} reproduced exactly`);
+  } else {
+    const combinations = new Set(mismatches.map((m) => m.combination));
+    console.log(`  ${combinations.size} combination(s) WRONG, ${mismatches.length} field(s):`);
+    for (const m of mismatches.slice(0, 8)) {
+      console.log(
+        `    [${m.classNames.join(" + ")}] node ${m.node} ${m.field}: ` +
+          `patched ${m.patched}, compiled ${m.compiled}`,
+      );
+    }
+    process.exitCode = 1;
+  }
+}
+
+if (toggles.length === 0) {
+  console.log(
+    `\n${rel(inputPath)} exports no TOGGLES, so the size comparison is skipped.\n` +
+      `Pass a document that exports one to compare the three IR strategies.`,
+  );
+  process.exit(process.exitCode ?? 0);
+}
+
+console.log(`\n${toggles.length} toggles: ${toggles.map((t) => t.name).join(", ")}\n`);
 
 const a = analyzeVariants(doc, css, toggles);
 
@@ -185,15 +223,8 @@ if (p.fieldCollisions.length === 0) {
   }
 }
 
-console.log("\n  correctness: patches vs the compiler's own output");
-if (p.composeFailures.length === 0) {
-  console.log(`    all ${a.combos.length} combinations reproduced exactly`);
-} else {
-  console.log(`    ${p.composeFailures.length}/${a.combos.length} combinations WRONG:`);
-  for (const f of p.composeFailures.slice(0, 8)) {
-    console.log(`      [${f.toggles.join(" + ") || "none"}] ${f.mismatches} mismatched fields`);
-  }
-}
+// Correctness is reported at the top, against the shipped compiler, rather than
+// here against this file's measurement model.
 
 console.log("\nIR size, all three strategies");
 console.log(`  combinations                     ${kb(bytes.combinations)}`);

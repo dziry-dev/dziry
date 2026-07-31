@@ -321,11 +321,6 @@ export type PatchAnalysis = {
   patches: TogglePatch[];
   /** Toggles writing the same field of the same style — genuine conflicts. */
   fieldCollisions: { toggles: string[]; conflicts: number }[];
-  /**
-   * Combinations where sequencing the patches did not reproduce the compiler's
-   * own output. Any entry here is a correctness failure, not an inefficiency.
-   */
-  composeFailures: { mask: number; toggles: string[]; mismatches: number }[];
   bytes: number;
 };
 
@@ -451,49 +446,19 @@ export function analyzePatches(a: VariantAnalysis, toggles: ToggleSpec[]): Patch
     }
   }
 
-  // The real test: does sequencing patches reproduce the compiler's own output
-  // for every combination?
-  const composeFailures: { mask: number; toggles: string[]; mismatches: number }[] = [];
-  const table = new Map<StyleField, Float64Array>();
-
-  for (const [field] of STYLE_FIELDS) table.set(field, new Float64Array(variantStyles));
-
-  for (let mask = 0; mask < comboCount; mask++) {
-    // Reset to the baseline table.
-    for (const [field] of STYLE_FIELDS) {
-      const col = table.get(field)!;
-      for (let v = 0; v < variantStyles; v++) col[v] = styleAt(v, 0)[field];
-    }
-
-    // Apply each active toggle's patch in declaration order.
-    for (let i = 0; i < patches.length; i++) {
-      if (!(mask & (1 << i))) continue;
-      for (const e of patches[i]!.entries) {
-        const col = table.get(e.field)!;
-        for (let k = 0; k < e.styles.length; k++) col[e.styles[k]!] = e.on[k]!;
-      }
-    }
-
-    // Compare against what the compiler produced for this combination.
-    let mismatches = 0;
-    for (let v = 0; v < variantStyles; v++) {
-      const truth = styleAt(v, mask);
-      for (const [field] of STYLE_FIELDS) {
-        const got = table.get(field)![v]!;
-        const want = truth[field];
-        if (Number.isNaN(got) && Number.isNaN(want)) continue;
-        if (got !== want) mismatches++;
-      }
-    }
-
-    if (mismatches > 0) {
-      composeFailures.push({
-        mask,
-        toggles: toggles.filter((_, i) => mask & (1 << i)).map((t) => t.name),
-        mismatches,
-      });
-    }
-  }
+  // What used to be here: an exhaustive proof that sequencing these patches
+  // reproduces the compiler's own output for all 2^k combinations. It has moved to
+  // `verifyCompose` in `variant-compile.ts`, and this is why.
+  //
+  // The proof was the strongest test in the project and it validated *this* file's
+  // reimplementation rather than `compileVariants`, which is what ships — so a
+  // regression in the shipped path passed silently, while a divergence between the
+  // two copies looked like a failure of the one nobody runs. It also only ever
+  // printed its verdict; nothing exited non-zero.
+  //
+  // This file stays what it always honestly was: a measurement report comparing
+  // three IR strategies by size. Correctness belongs to the compiler it is
+  // measuring, asserted in `variant-compile.test.ts`.
 
   // Style table + immutable node ids (base/hover/active) + patch lists.
   let bytes = variantStyles * STYLE_FIELDS.length * 4 + a.nodeCount * (2 + 2 + 2);
@@ -505,7 +470,6 @@ export function analyzePatches(a: VariantAnalysis, toggles: ToggleSpec[]): Patch
     materializedStates,
     patches,
     fieldCollisions,
-    composeFailures,
     bytes,
   };
 }

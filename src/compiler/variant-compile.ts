@@ -326,3 +326,138 @@ export function compileVariants(
 export function hasState(v: VariantCompiled, node: number): boolean {
   return v.masks[node]! !== 0;
 }
+
+// ---------------------------------------------------------------------------
+// The oracle
+// ---------------------------------------------------------------------------
+
+/** One node whose style, under one toggle combination, is not what the compiler says. */
+export type ComposeMismatch = {
+  /** Bit i is set when `toggles[i]` is on. */
+  combination: number;
+  classNames: string[];
+  node: number;
+  /** Live predicate bits (hover/active/focus) under which the styles differ. */
+  predicates: number;
+  field: StyleField;
+  /** What sequencing the patches produced. */
+  patched: number;
+  /** What compiling the same document with those classes applied produces. */
+  compiled: number;
+};
+
+/**
+ * Does sequencing per-toggle patches reproduce the compiler's own output for
+ * *every* combination of toggles?
+ *
+ * This is the load-bearing claim of the whole variant design. `compileVariants`
+ * compiles k+1 times, not 2^k, and ships one patch per toggle on the assumption
+ * that applying two patches in order lands where a real cascade with both classes
+ * would. Where two toggles write the same `(field, slot)` that assumption can be
+ * false, which is why `compileVariants` warns about the overlap — and warning is
+ * not verifying.
+ *
+ * The check existed already, in `src/compiler/variants.ts`, and pointed at a
+ * *second copy* of the algorithm while only printing its result. So the strongest
+ * test in the project guarded code nothing shipped. This is the same proof aimed
+ * at `compileVariants`, returning mismatches so a test can assert on them.
+ *
+ * Truth is a fresh `compileTree` of the document with the combination's classes
+ * applied — the real cascade, no patches involved. Comparison happens per node and
+ * per live predicate combination rather than per slot, because the slot is an
+ * implementation detail while "what style does this node wear" is the promise.
+ * Masks differ between variants (a toggle can introduce `:hover` where the
+ * baseline had none), so both sides are indexed by live predicate *bits* and
+ * compacted through their own mask, which is the one space they share.
+ *
+ * Cost is 2^k compiles, so this belongs in a test rather than in a build.
+ */
+export function verifyCompose(
+  doc: Element,
+  css: string,
+  baseline: CompileResult,
+  toggles: Toggle[],
+): ComposeMismatch[] {
+  const compiled = compileVariants(doc, css, baseline, toggles);
+  const mismatches: ComposeMismatch[] = [];
+
+  if (toggles.length === 0 || toggles.length > 12) {
+    // 2^12 compiles is already minutes; past that the caller wants a subset.
+    return mismatches;
+  }
+
+  const nodeCount = baseline.nodes.length;
+
+  for (let combination = 1; combination < 1 << toggles.length; combination++) {
+    // The patched table: baseline values, then every active toggle's writes in
+    // declaration order — exactly what the runtime does.
+    const table: Record<string, number[]> = {};
+    for (const [field] of STYLE_FIELDS) table[field] = [...compiled.table[field]];
+
+    for (let i = 0; i < toggles.length; i++) {
+      if ((combination & (1 << i)) === 0) continue;
+      for (const entry of compiled.patches[i]!.entries) {
+        const column = table[entry.field]!;
+        for (let s = 0; s < entry.slots.length; s++) {
+          column[entry.slots[s]!] = entry.on[s]!;
+        }
+      }
+    }
+
+    // Truth: compile the document with those classes really applied.
+    const tree = cloneTree(doc) as Element;
+    const classNames: string[] = [];
+    for (let i = 0; i < toggles.length; i++) {
+      if ((combination & (1 << i)) === 0) continue;
+      applyToggle(tree, toggles[i]!);
+      classNames.push(toggles[i]!.className);
+    }
+    const truth = compileTree(tree, css);
+
+    for (let node = 0; node < nodeCount; node++) {
+      const truthNode = truth.nodes[node];
+      if (truthNode === undefined) continue;
+
+      const mask = compiled.masks[node]! | truthNode.mask;
+      for (const predicates of subsetsOf(mask)) {
+        const mine = compiled.runs[node]![
+          compactBits(predicates & compiled.masks[node]!, compiled.masks[node]!)
+        ]!;
+        const theirs =
+          truthNode.run[compactBits(predicates & truthNode.mask, truthNode.mask)] ??
+          truthNode.style;
+        const want = truth.styles[theirs]!;
+
+        for (const [field] of STYLE_FIELDS) {
+          const patched = table[field]![mine]!;
+          const expected = want[field];
+          if (Number.isNaN(patched) && Number.isNaN(expected)) continue;
+          if (patched === expected) continue;
+          mismatches.push({
+            combination,
+            classNames,
+            node,
+            predicates,
+            field,
+            patched,
+            compiled: expected,
+          });
+        }
+      }
+    }
+  }
+
+  return mismatches;
+}
+
+/** Every combination of the set bits in `mask`, including none of them. */
+function subsetsOf(mask: number): number[] {
+  const bits = maskBits(mask);
+  const out: number[] = [];
+  for (let i = 0; i < 1 << bits.length; i++) {
+    let live = 0;
+    for (let b = 0; b < bits.length; b++) if (i & (1 << b)) live |= bits[b]!;
+    out.push(live);
+  }
+  return out;
+}
