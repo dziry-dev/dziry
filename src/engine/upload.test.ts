@@ -13,9 +13,9 @@
  */
 import { expect, test } from "bun:test";
 import { Align, Display, FlexWrap, Position } from "../protocol/generated.ts";
-import type { CompiledUi, StyleField } from "../ir.ts";
+import { INITIAL_STYLE, type CompiledUi, type StyleField } from "../ir.ts";
 import { Engine } from "./host.ts";
-import { Uploader, capacitiesFor } from "./upload.ts";
+import { NUMBER_FIELDS, Uploader, capacitiesFor } from "./upload.ts";
 import { applyTextBindings } from "../runtime/bindings.ts";
 import { updateLists, type ListBindingRef } from "../runtime/list-runtime.ts";
 import { applyStylePatches, type StylePatchRef } from "../runtime/patches.ts";
@@ -360,6 +360,49 @@ test("typing does not resize the arena on every keystroke", () => {
   // to it. The exact figure depends on where the sample starts; what must hold
   // is that it is a handful and not two thousand.
   expect(growths).toBeLessThan(6);
+});
+
+/**
+ * Zero is a real value in a style table, so a slot nobody wrote must still say
+ * `auto` rather than `0`.
+ *
+ * Asserted through the mapping table rather than on a chosen field, because the
+ * bug this replaces was a hand-written list: it covered `width`, `height` and
+ * `alignSelf` and left `maxWidth: 0`, `flexBasis: 0`, `flexShrink: 0` and
+ * `fontSize: 0` in every spare slot. A per-field list in the test would have had
+ * exactly the same blind spot as the one in the code.
+ */
+test("spare style slots hold the initial style, every field of it", () => {
+  const { ui } = load();
+  const count = ui.styles.count;
+
+  // `capacitiesFor` sizes the style table exactly — styles are interned at build
+  // time, so there is nothing to grow into — which is why this asks for headroom
+  // rather than using the shared harness. A grown table is where spare slots
+  // actually appear.
+  const engine = Engine.open({
+    ...capacitiesFor(ui),
+    styles: count + 4,
+    width: WIDTH,
+    height: HEIGHT,
+    root: ui.root,
+    windowed: false,
+  });
+  new Uploader(engine, ui).uploadAll();
+
+  const styles = engine.tables.styles as unknown as Record<string, ArrayLike<number>>;
+  expect(engine.tables.styles.bg.length).toBeGreaterThan(count);
+
+  const wrong: string[] = [];
+  for (const [schemaField, irField] of NUMBER_FIELDS) {
+    const initial = INITIAL_STYLE[irField];
+    const got = styles[schemaField]![count]!;
+    const same = Number.isNaN(initial) ? Number.isNaN(got) : got === initial;
+    if (!same) wrong.push(`${schemaField}: got ${got}, want ${initial}`);
+  }
+
+  expect(wrong).toEqual([]);
+  engine.close();
 });
 
 test("a capacity request is a power of two", () => {

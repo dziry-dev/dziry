@@ -22,8 +22,8 @@
  * of memcpy). **Strings are uploaded incrementally**, because re-encoding every
  * row of a 2000-item list on every keystroke would not be.
  */
-import { findRow, type CompiledUi, type StyleField } from "../ir.ts";
-import { Align, F, NodeFlags, type SharedTables } from "../protocol/generated.ts";
+import { findRow, INITIAL_STYLE, type CompiledUi, type StyleField } from "../ir.ts";
+import { F, NodeFlags, type SharedTables } from "../protocol/generated.ts";
 import type { Engine } from "./host.ts";
 
 /**
@@ -241,11 +241,21 @@ export class Uploader {
       for (let i = 0; i < count; i++) out[i] = column[i]!;
     }
 
-    // Spare slots past the IR's count must not read as `width: 0`.
-    for (let i = count; i < this.#tables.styles.bg.length; i++) {
-      this.#tables.styles.width[i] = NaN;
-      this.#tables.styles.height[i] = NaN;
-      this.#tables.styles.alignSelf[i] = Align.UNSET;
+    // Spare slots past the IR's count get the *initial* style, field by field
+    // through the same mapping table.
+    //
+    // This used to name three fields by hand — `width`, `height`, `alignSelf` —
+    // which left the other 43 reading as zero: `maxWidth: 0` (nothing may exceed
+    // nothing), `flexBasis: 0` (a collapsed flex item), `flexShrink: 0`,
+    // `fontSize: 0`. The same argument that justified those three covers all of
+    // them, and `INITIAL_STYLE` already states every answer, so deriving beats
+    // listing — a new field is unset here the moment it is added to the IR,
+    // rather than the day somebody notices.
+    const capacity = this.#tables.styles.bg.length;
+    for (const [schemaField, irField] of NUMBER_FIELDS) {
+      const initial = INITIAL_STYLE[irField];
+      const out = dst[schemaField]!;
+      for (let i = count; i < capacity; i++) out[i] = initial;
     }
 
     // `lineClamp` and `overflow` are in the schema but not in the IR, because the

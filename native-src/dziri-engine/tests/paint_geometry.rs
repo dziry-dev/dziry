@@ -19,16 +19,25 @@ const STYLES: usize = Table::Styles as usize;
 
 const BG: u32 = 0xffff_0000; // opaque red — the fill that used to leak
 const BORDER: u32 = 0xff00_00ff; // opaque blue — the ring
-const SURFACE: u32 = 0xffff_ffff; // the engine clears to white
+
+// "Nothing was drawn here", which is opaque black rather than white because that
+// is what `Engine::paint` clears to. Naming it wrongly made an unpainted pixel
+// report as the red background: black is equidistant from red and blue, and the
+// first candidate wins the tie.
+const SURFACE: u32 = 0xff00_0000;
 
 /// A 120x120 window, so the corner arithmetic below has room to be unambiguous.
 fn config() -> EngineConfig {
+    config_of(1)
+}
+
+fn config_of(nodes: u32) -> EngineConfig {
     EngineConfig {
         protocol_version: protocol::PROTOCOL_VERSION,
         width: 120,
         height: 120,
-        node_capacity: 1,
-        style_capacity: 1,
+        node_capacity: nodes,
+        style_capacity: nodes.max(1),
         variant_capacity: 1,
         variant_slot_capacity: 1,
         list_capacity: 1,
@@ -189,4 +198,67 @@ fn a_border_wider_than_the_box_fills_it() {
 
     assert_eq!(what_is_at(&mut engine, 60, 60), "border", "all border");
     assert_eq!(what_is_at(&mut engine, 2, 2), "border", "corner too");
+}
+
+/// An off-screen node is skipped, but its subtree still gets walked.
+///
+/// The viewport reject in `Painter::paint` is per node for exactly this case: an
+/// absolutely-positioned child can be placed outside its parent's box, so an
+/// off-screen parent says nothing about its children. Skipping the subtree is the
+/// tempting version of the optimisation and it silently loses content — hence a
+/// test whose only job is to fail if someone writes `continue` there.
+#[test]
+fn an_offscreen_parent_does_not_hide_an_onscreen_child() {
+    let mut engine = Engine::new(&config_of(3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+
+        // Slot 1: a 50x50 red box pushed a long way below the 120px window.
+        t.set_u32(STYLES, styles::BG, 1, BG);
+        t.set_u8(STYLES, styles::POSITION, 1, protocol::position::ABSOLUTE);
+        t.set_f32(STYLES, styles::INSET_TOP, 1, 200.0);
+        t.set_f32(STYLES, styles::INSET_LEFT, 1, 0.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 50.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 50.0);
+
+        // Slot 2: a 20x20 blue box, absolute inside the red one, pulled back up so
+        // it lands at y = 200 - 190 = 10 — on screen, under an off-screen parent.
+        t.set_u32(STYLES, styles::BG, 2, BORDER);
+        t.set_u8(STYLES, styles::POSITION, 2, protocol::position::ABSOLUTE);
+        t.set_f32(STYLES, styles::INSET_TOP, 2, -190.0);
+        t.set_f32(STYLES, styles::INSET_LEFT, 2, 5.0);
+        t.set_f32(STYLES, styles::WIDTH, 2, 20.0);
+        t.set_f32(STYLES, styles::HEIGHT, 2, 20.0);
+
+        for node in 0..3 {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        t.set_i32(NODES, nodes::PARENT, 1, 0);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 1, 2);
+        t.set_i32(NODES, nodes::PARENT, 2, 1);
+    }
+    engine.tick().expect("tick");
+
+    // The parent is at y = 200 in a 120px window, so nothing of it is visible.
+    assert_eq!(
+        engine.bounds_of(1).expect("parent bounds")[1],
+        200.0,
+        "the parent really is off screen"
+    );
+    // The child is not.
+    assert_eq!(
+        what_is_at(&mut engine, 10, 15),
+        "border",
+        "an on-screen child of an off-screen parent must still be drawn"
+    );
 }

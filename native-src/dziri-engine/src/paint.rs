@@ -189,6 +189,16 @@ impl Painter {
         let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
         let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
 
+        // What is actually visible, asked once per frame rather than per node:
+        // `local_clip_bounds` inverts the canvas matrix, and this loop runs over
+        // every node in the tree.
+        //
+        // Skia would reject an off-screen rect itself, but only after the draw op
+        // exists — and for text the expensive part happens on this side of that
+        // call: `measure` before `draw_str`. An off-screen list therefore paid full
+        // price. `None` means the clip is empty, so nothing is visible at all.
+        let viewport = canvas.local_clip_bounds();
+
         // Pre-order, iterative: children paint over their parents, and a hostile
         // tree must not be able to overflow the render thread's stack.
         let mut stack = vec![root];
@@ -205,7 +215,27 @@ impl Painter {
                 continue;
             }
 
-            self.node(canvas, tables, bounds, state, measurer, node);
+            // Rejected per node, never per subtree: an absolutely-positioned child
+            // can sit outside its parent's box, so an off-screen parent does not
+            // imply off-screen children. Hence the skip is around the *draw*, and
+            // the traversal below runs either way.
+            //
+            // NaN compares false everywhere, so a nonsense rect fails open and is
+            // drawn — Skia's own clip is still behind this.
+            let visible = match viewport {
+                Some(vp) => {
+                    let [x, y, w, h] = bounds[node];
+                    !(x + w <= vp.left || x >= vp.right || y + h <= vp.top || y >= vp.bottom)
+                }
+                // An empty clip: nothing is visible, but the walk still has to
+                // reach the children, which is what makes this a `false` rather
+                // than an early return.
+                None => false,
+            };
+
+            if visible {
+                self.node(canvas, tables, bounds, state, measurer, node);
+            }
 
             siblings.clear();
             let mut c = first.get(node).copied().unwrap_or(-1);
