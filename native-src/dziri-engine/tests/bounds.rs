@@ -937,3 +937,99 @@ fn a_resize_repaints_without_waiting_for_a_tick() {
         "an idle tick after a mid-pump repaint draws nothing"
     );
 }
+
+/// A wheel over a scroll container moves its content, clamped to what overflows.
+///
+/// The offset is engine state rather than table state, so this asserts through
+/// `scroll_of`: `bounds` deliberately keep meaning "where layout put this", and paint
+/// translates instead. A test that expected bounds to move would be pinning the wrong
+/// design.
+#[test]
+fn a_wheel_scrolls_the_box_under_the_cursor_and_stops_at_the_end() {
+    // Root is 200x100. A 200x100 scroll container holding 300px of content, so 200px
+    // can scroll.
+    let mut engine = Engine::new(&config(3, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        t.set_u8(STYLES, styles::OVERFLOW_Y, 0, protocol::overflow::SCROLL);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 300.0);
+        t.set_f32(STYLES, styles::FLEX_SHRINK, 1, 0.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(engine.scroll_of(0), [0.0, 0.0], "nothing has scrolled yet");
+
+    // Down a little: the content moves by the wheel delta.
+    assert!(
+        engine.scroll_at(100.0, 50.0, 0.0, 50.0),
+        "the wheel scrolled"
+    );
+    assert_eq!(engine.scroll_of(0), [0.0, 50.0]);
+
+    // Down a lot: clamped at 300 - 100 = 200, never past the end of the content.
+    assert!(engine.scroll_at(100.0, 50.0, 0.0, 10_000.0));
+    assert_eq!(
+        engine.scroll_of(0),
+        [0.0, 200.0],
+        "clamped to what overflows"
+    );
+    assert!(
+        !engine.scroll_at(100.0, 50.0, 0.0, 10_000.0),
+        "already at the end, so nothing moved and nothing repaints"
+    );
+
+    // Back up, clamped at zero rather than going negative.
+    assert!(engine.scroll_at(100.0, 50.0, 0.0, -10_000.0));
+    assert_eq!(engine.scroll_of(0), [0.0, 0.0]);
+
+    // The other axis never moves: `overflow-x` is visible, so there is no scroll
+    // region horizontally no matter how much content there is.
+    assert!(
+        !engine.scroll_at(100.0, 50.0, 40.0, 0.0),
+        "x does not scroll"
+    );
+
+    // And a wheel outside the container does nothing at all.
+    assert!(!engine.scroll_at(1000.0, 1000.0, 0.0, 50.0));
+}
+
+/// Hit-testing follows the scroll, or clicking a row hits whatever used to be there.
+#[test]
+fn a_scrolled_child_is_hit_where_it_now_appears() {
+    let mut engine = Engine::new(&config(3, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        t.set_u8(STYLES, styles::OVERFLOW_Y, 0, protocol::overflow::SCROLL);
+
+        // Two 80px rows in a 100px viewport: the second starts at y=80, off screen
+        // until the container scrolls.
+        for node in [1usize, 2] {
+            t.set_f32(STYLES, styles::HEIGHT, node, 80.0);
+            t.set_f32(STYLES, styles::FLEX_SHRINK, node, 0.0);
+        }
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 2);
+        t.set_u8(NODES, nodes::FLAGS, 2, protocol::flags::INTERACTIVE);
+        link(t, 0, &[1, 2]);
+    }
+    engine.tick().expect("tick");
+
+    // Node 2 is laid out at y = 80..160, so y=90 is inside it and on screen.
+    assert_eq!(engine.hit_test(10.0, 90.0), 2, "before scrolling");
+    // Scroll 60px: node 2 now appears at 20..100, so y=90 is still it, and y=10 is too.
+    assert!(engine.scroll_at(10.0, 50.0, 0.0, 60.0));
+    assert_eq!(engine.hit_test(10.0, 30.0), 2, "moved up under the cursor");
+    // Its layout rect never moved, which is what the host still reads.
+    assert_eq!(bound(&engine, 2)[1], 80.0);
+}

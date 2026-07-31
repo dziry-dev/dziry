@@ -54,6 +54,13 @@ pub struct LayoutTree {
     ids: Vec<NodeId>,
     /// Absolute bounds, row-major, published to the layout table after compute.
     bounds: Vec<[f32; 4]>,
+    /// Per node, how far its content reaches past its own box: `[x, y]`, never
+    /// negative.
+    ///
+    /// This is what bounds a scroll — the offset can go from 0 to exactly this — and
+    /// it comes from Taffy's `content_size` rather than from walking children,
+    /// because Taffy already knows and a walk would disagree about margins.
+    overflow: Vec<[f32; 2]>,
     /// Who this tree last linked each node under, or `-1`.
     ///
     /// Deliberately **not** `nodes.parent`. Nothing in the engine reads that
@@ -77,6 +84,7 @@ impl LayoutTree {
             tree: TaffyTree::new(),
             ids: Vec::new(),
             bounds: Vec::new(),
+            overflow: Vec::new(),
             parents: Vec::new(),
             root: 0,
         }
@@ -88,6 +96,23 @@ impl LayoutTree {
 
     pub fn bounds_of(&self, node: usize) -> Option<[f32; 4]> {
         self.bounds.get(node).copied()
+    }
+
+    /// How far this node's content reaches past its box, per axis. `[0, 0]` when it
+    /// fits, which is also the answer for a node that does not exist.
+    pub fn overflow_of(&self, node: usize) -> [f32; 2] {
+        self.overflow.get(node).copied().unwrap_or([0.0, 0.0])
+    }
+
+    /// Who this tree linked `node` under, or `None` at the root.
+    ///
+    /// The tree's own record, not `nodes.parent`: host memory does not get to decide
+    /// which box a scroll gesture escapes into.
+    pub fn parent_of(&self, node: usize) -> Option<usize> {
+        match self.parents.get(node).copied() {
+            Some(parent) if parent >= 0 => Some(parent as usize),
+            _ => None,
+        }
     }
 
     /// Rebuilds the tree's shape from `nodes.firstChild` / `nextSibling`.
@@ -105,6 +130,7 @@ impl LayoutTree {
         self.tree = TaffyTree::with_capacity(count);
         self.ids = Vec::with_capacity(count);
         self.bounds = vec![[0.0; 4]; count];
+        self.overflow = vec![[0.0; 2]; count];
         self.parents = vec![-1; count];
 
         for i in 0..count {
@@ -398,8 +424,10 @@ impl LayoutTree {
         let count = self.ids.len();
         if self.bounds.len() != count {
             self.bounds = vec![[0.0; 4]; count];
+            self.overflow = vec![[0.0; 2]; count];
         } else {
             self.bounds.fill([0.0; 4]);
+            self.overflow.fill([0.0; 2]);
         }
 
         let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
@@ -427,6 +455,14 @@ impl LayoutTree {
             let x = ox + l.location.x;
             let y = oy + l.location.y;
             self.bounds[node] = [x, y, l.size.width, l.size.height];
+
+            // How far a scroll may go, straight from Taffy. `scroll_width`/
+            // `scroll_height` are `content_size - (size - border - scrollbar)`
+            // clamped at zero, which is exactly the definition of scrollable extent
+            // — and it is zero for a node whose overflow is `Visible`, because
+            // content only *contributes* to a scroll region on a container that
+            // contains it.
+            self.overflow[node] = [l.scroll_width(), l.scroll_height()];
 
             let mut c = first.get(node).copied().unwrap_or(-1);
             while c >= 0 {

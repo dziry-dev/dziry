@@ -28,7 +28,7 @@ use skia_safe::{
 
 use crate::error::EngineError;
 use crate::layout::LayoutTree;
-use crate::paint::{hit_test, InputState, Painter};
+use crate::paint::{hit_test, is_scrollable, scrollable_at, Geometry, InputState, Painter};
 use crate::protocol::{self, event_kind};
 use crate::tables::{Capacities, Diff, SpanDesc, Tables};
 use crate::text::Measurer;
@@ -134,6 +134,14 @@ pub struct Engine {
     last_frame_ms: f32,
     /// When the event watcher last drew mid-pump, for coalescing a live resize.
     last_live_repaint: std::time::Instant,
+    /// Per node, how far its content is scrolled: `[x, y]`, both >= 0.
+    ///
+    /// Engine state, not table state, and that is the point. A scroll position is
+    /// not something the host authored — it is where the user left this box — so it
+    /// must survive a patch, a relink and a list reorder, all of which rewrite the
+    /// tables. Keyed by node id, which append-and-abandon list growth never
+    /// invalidates.
+    scroll: Vec<[f32; 2]>,
     /// The most recently encoded PNG, waiting to be copied out.
     png: Vec<u8>,
 }
@@ -194,6 +202,7 @@ impl Engine {
             needs_paint: true,
             last_frame_ms: 0.0,
             last_live_repaint: std::time::Instant::now(),
+            scroll: vec![[0.0; 2]; caps.nodes as usize],
             png: Vec::new(),
         })
     }
@@ -470,17 +479,37 @@ impl Engine {
             window.set_clear_color(clear);
         }
 
-        let canvas = self.surface.canvas();
+        // Destructured because the borrows genuinely are disjoint and the compiler
+        // cannot see that through `self`: the canvas comes from `&mut surface`, the
+        // painter and measurer are `&mut`, and the tables, tree and scroll offsets are
+        // shared. Spelling the fields out is the honest way to say so — the
+        // alternative is cloning the bounds every frame to dodge a borrow.
+        let Self {
+            surface,
+            painter,
+            measurer,
+            tables,
+            tree,
+            scroll,
+            state,
+            root,
+            ..
+        } = self;
+
+        let canvas = surface.canvas();
         // Clear first: the root only covers the window if its own background is
         // opaque, and an unpainted frame should not show the last one.
         canvas.clear(Color::from(clear));
-        self.painter.paint(
+        painter.paint(
             canvas,
-            &self.tables,
-            self.tree.bounds(),
-            &self.state,
-            &mut self.measurer,
-            self.root,
+            tables,
+            Geometry {
+                bounds: tree.bounds(),
+                scroll,
+            },
+            state,
+            measurer,
+            *root,
         );
     }
 
@@ -556,8 +585,16 @@ impl Engine {
             match input {
                 RawInput::Quit => self.events.push(Event::of(event_kind::QUIT)),
 
+                // A wheel is handled entirely by the engine: it changes where content
+                // sits, which is not something the host authored and not something it
+                // needs to hear about. No event is queued, so app code cannot be the
+                // thing that makes scrolling feel slow.
+                RawInput::Wheel { x, y, dx, dy } => {
+                    self.scroll_at(x, y, dx * WHEEL_NOTCH_PX, dy * WHEEL_NOTCH_PX);
+                }
+
                 RawInput::MouseMotion { x, y } => {
-                    let hit = hit_test(&self.tables, self.tree.bounds(), self.root, x, y);
+                    let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
                     if hit != self.state.hovered {
                         self.state.hovered = hit;
                         // A hover is a repaint the host never hears about until
@@ -574,7 +611,7 @@ impl Engine {
                 }
 
                 RawInput::MouseDown { x, y } => {
-                    let hit = hit_test(&self.tables, self.tree.bounds(), self.root, x, y);
+                    let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
                     // Clicking is the only way to acquire focus for now;
                     // keyboard traversal is A3.
                     self.state.pressed = hit;
@@ -590,7 +627,7 @@ impl Engine {
                 }
 
                 RawInput::MouseUp { x, y } => {
-                    let hit = hit_test(&self.tables, self.tree.bounds(), self.root, x, y);
+                    let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
                     // A click is press and release on the *same* node, which is
                     // what makes dragging off a button cancel it.
                     if self.state.pressed != -1 && hit == self.state.pressed {
@@ -661,6 +698,10 @@ impl Engine {
         if !self.tables.grow(caps) {
             return false;
         }
+        // Grown, not rebuilt: a node keeps its id across growth — that is what
+        // append-and-abandon list arenas buy — so a box the user had scrolled must
+        // still be scrolled to the same place afterwards.
+        self.scroll.resize(caps.nodes as usize, [0.0, 0.0]);
         self.fresh = true;
         true
     }
@@ -717,7 +758,64 @@ impl Engine {
     }
 
     pub fn hit_test(&self, x: f32, y: f32) -> i32 {
-        hit_test(&self.tables, self.tree.bounds(), self.root, x, y)
+        hit_test(&self.tables, self.geometry(), self.root, x, y)
+    }
+
+    /// Where a node's content currently sits, `[x, y]`, both >= 0.
+    pub fn scroll_of(&self, node: usize) -> [f32; 2] {
+        self.scroll.get(node).copied().unwrap_or([0.0, 0.0])
+    }
+
+    /// Layout rects plus scroll offsets, which every walk needs together.
+    fn geometry(&self) -> Geometry<'_> {
+        Geometry {
+            bounds: self.tree.bounds(),
+            scroll: &self.scroll,
+        }
+    }
+
+    /// Scrolls the innermost scrollable box under `(px, py)` by `(dx, dy)` pixels.
+    ///
+    /// Returns whether anything moved, which is what decides a repaint. "Innermost"
+    /// and "under the cursor" together are what make nested scroll areas behave: a
+    /// list inside a page consumes the wheel, and the page only moves when the list
+    /// has nothing left to give.
+    ///
+    /// A box that cannot move in the requested direction passes the gesture to its
+    /// ancestors rather than swallowing it, which is the behaviour every platform
+    /// has and the reason this walks *up* from the deepest hit.
+    pub fn scroll_at(&mut self, px: f32, py: f32, dx: f32, dy: f32) -> bool {
+        let mut node = scrollable_at(&self.tables, self.geometry(), self.root, px, py);
+
+        while let Some(index) = node {
+            let extent = self.tree.overflow_of(index);
+            let current = self.scroll_of(index);
+            let wanted = [
+                (current[0] + dx).clamp(0.0, extent[0]),
+                (current[1] + dy).clamp(0.0, extent[1]),
+            ];
+
+            if wanted != current {
+                if let Some(slot) = self.scroll.get_mut(index) {
+                    *slot = wanted;
+                    self.needs_paint = true;
+                    return true;
+                }
+            }
+
+            // Nothing left in this box: hand the gesture to whatever contains it.
+            node = {
+                let mut up = self.tree.parent_of(index);
+                while let Some(candidate) = up {
+                    if is_scrollable(&self.tables, candidate) {
+                        break;
+                    }
+                    up = self.tree.parent_of(candidate);
+                }
+                up
+            };
+        }
+        false
     }
 }
 
@@ -790,6 +888,14 @@ pub(crate) fn repaint_pumping_engine(width: u32, height: u32) {
     engine.last_live_repaint = std::time::Instant::now();
     let _ = engine.resize_and_repaint(width, height);
 }
+
+/// Pixels per wheel notch.
+///
+/// SDL reports wheel deltas in notches, not pixels, so somebody has to choose. 48 is
+/// three 16px lines, which is what Windows defaults to and close enough to what a
+/// browser does that a trackpad feels ordinary. A trackpad sends fractional notches,
+/// so this multiplies rather than steps.
+const WHEEL_NOTCH_PX: f32 = 48.0;
 
 /// One frame at 60 Hz. A drag is a continuous gesture, so there is nothing to gain
 /// from painting faster than the display, and a great deal to lose: at 1040x560 a

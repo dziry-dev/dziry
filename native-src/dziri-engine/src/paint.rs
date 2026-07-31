@@ -49,6 +49,26 @@ fn compact(value: u32, mask: u32) -> u32 {
     out
 }
 
+/// Where the tree is, and how far each box's content has been scrolled.
+///
+/// One argument because they are one idea: a node's rect on screen is its layout rect
+/// minus what its ancestors have scrolled, and every walk in this file — paint,
+/// hit-test, scroll targeting — needs both halves or neither. Threading them
+/// separately is how they get out of step.
+#[derive(Clone, Copy)]
+pub struct Geometry<'a> {
+    /// Absolute layout rects, unscrolled. What the host reads.
+    pub bounds: &'a [[f32; 4]],
+    /// Per node, `[x, y]` of its own content offset, both >= 0.
+    pub scroll: &'a [[f32; 2]],
+}
+
+impl Geometry<'_> {
+    fn scroll_of(&self, node: usize) -> [f32; 2] {
+        self.scroll.get(node).copied().unwrap_or([0.0, 0.0])
+    }
+}
+
 /// One entry on the paint walk's stack.
 ///
 /// A plain node index was enough until clipping: a clip has to be *undone* when the
@@ -189,12 +209,12 @@ impl Painter {
         &mut self,
         canvas: &Canvas,
         tables: &Tables,
-        bounds: &[[f32; 4]],
+        geometry: Geometry,
         state: &InputState,
         measurer: &mut Measurer,
         root: usize,
     ) {
-        let count = bounds.len();
+        let count = geometry.bounds.len();
         let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
         let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
         let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
@@ -245,7 +265,7 @@ impl Painter {
             // drawn — Skia's own clip is still behind this.
             let visible = match viewport {
                 Some(vp) => {
-                    let [x, y, w, h] = bounds[node];
+                    let [x, y, w, h] = geometry.bounds[node];
                     !(x + w <= vp.left || x >= vp.right || y + h <= vp.top || y >= vp.bottom)
                 }
                 // An empty clip: nothing is visible, but the walk still has to
@@ -255,7 +275,7 @@ impl Painter {
             };
 
             if visible {
-                self.node(canvas, tables, bounds, state, measurer, node);
+                self.node(canvas, tables, geometry.bounds, state, measurer, node);
             }
 
             siblings.clear();
@@ -279,7 +299,7 @@ impl Painter {
             };
 
             if clip_x || clip_y {
-                let [x, y, w, h] = bounds[node];
+                let [x, y, w, h] = geometry.bounds[node];
                 let inset = self.border_of(tables, node, state);
                 // The unclipped axis keeps whatever bound is already in force, so a
                 // vertical-only clip does not quietly become a horizontal one. Taking
@@ -313,6 +333,18 @@ impl Painter {
                     // a stair-step against the border it is supposed to sit inside.
                     true,
                 );
+
+                // The scroll itself: shift the *content* up and left, inside the clip
+                // that was just set. Translating the canvas rather than adjusting
+                // every descendant's rect is what keeps `bounds` meaning "where
+                // layout put this", which is what the host reads and what the
+                // viewport reject compares against — and because the reject asks the
+                // canvas for its clip in local coordinates, rows scrolled out of view
+                // fail that test and never reach `measure`.
+                let offset = geometry.scroll_of(node);
+                if offset != [0.0, 0.0] {
+                    canvas.translate((-offset[0], -offset[1]));
+                }
                 stack.push(Step::Restore);
             }
 
@@ -503,20 +535,53 @@ impl Painter {
 /// node 0 agreed with the configured root in the sample and nowhere else: a
 /// non-zero root would have hit-tested a tree that is not on screen, which is
 /// the kind of divergence that only shows up in someone else's app.
-pub fn hit_test(tables: &Tables, bounds: &[[f32; 4]], root: usize, px: f32, py: f32) -> i32 {
-    let count = bounds.len();
+/// Whether the user may scroll this node, from its base style.
+///
+/// `hidden` clips without scrolling — that is the whole difference between it and
+/// `scroll` — so only `SCROLL` answers a wheel.
+///
+/// The *base* slot, not the variant-resolved one: a node whose scrollability changed
+/// on hover would be a trap rather than a feature, and the wheel arrives without a
+/// paint's notion of which predicates are live.
+pub fn is_scrollable(tables: &Tables, node: usize) -> bool {
+    let slot = tables
+        .u16s(NODES, protocol::nodes::STYLE)
+        .get(node)
+        .copied()
+        .unwrap_or(0) as usize;
+
+    [protocol::styles::OVERFLOW_X, protocol::styles::OVERFLOW_Y]
+        .iter()
+        .any(|&field| {
+            tables.u8s(STYLES, field).get(slot).copied() == Some(protocol::overflow::SCROLL)
+        })
+}
+
+/// The innermost scrollable node containing the point, or `None`.
+///
+/// Shares [`hit_test`]'s walk and differs in what it is looking for: the deepest
+/// match rather than the topmost interactive one, and no `INTERACTIVE` flag — a
+/// scrollable box need not be clickable.
+pub fn scrollable_at(
+    tables: &Tables,
+    geometry: Geometry,
+    root: usize,
+    px: f32,
+    py: f32,
+) -> Option<usize> {
+    let count = geometry.bounds.len();
     let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
-    let flags = tables.u8s(NODES, protocol::nodes::FLAGS);
     let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
     let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
 
-    let mut hit = -1i32;
-    let mut stack = vec![root];
+    let mut found = None;
+    // Each entry carries the scroll its ancestors have applied, exactly as the paint
+    // walk does — a point in window coordinates has to be compared against boxes
+    // that have been shifted.
+    let mut stack: Vec<(usize, f32, f32)> = vec![(root, 0.0, 0.0)];
     let mut budget = count.saturating_mul(2) + 16;
-    // Reused per node so the reversal below does not allocate per level.
-    let mut children: Vec<usize> = Vec::new();
 
-    while let Some(node) = stack.pop() {
+    while let Some((node, sx, sy)) = stack.pop() {
         if budget == 0 {
             break;
         }
@@ -526,7 +591,57 @@ pub fn hit_test(tables: &Tables, bounds: &[[f32; 4]], root: usize, px: f32, py: 
             continue;
         }
 
-        let [x, y, w, h] = bounds[node];
+        let [x, y, w, h] = geometry.bounds[node];
+        let (x, y) = (x - sx, y - sy);
+        if px < x || py < y || px >= x + w || py >= y + h {
+            continue;
+        }
+
+        if is_scrollable(tables, node) {
+            // Deeper wins, and children are visited after their parent.
+            found = Some(node);
+        }
+
+        let own = geometry.scroll_of(node);
+        let mut c = first.get(node).copied().unwrap_or(-1);
+        while c >= 0 && (c as usize) < count {
+            stack.push((c as usize, sx + own[0], sy + own[1]));
+            c = next[c as usize];
+        }
+    }
+
+    found
+}
+
+pub fn hit_test(tables: &Tables, geometry: Geometry, root: usize, px: f32, py: f32) -> i32 {
+    let count = geometry.bounds.len();
+    let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
+    let flags = tables.u8s(NODES, protocol::nodes::FLAGS);
+    let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
+    let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
+
+    let mut hit = -1i32;
+    // Each entry carries how far its ancestors have scrolled. Without this, clicking
+    // a scrolled row hits whichever node *used* to be under the cursor — the pointer
+    // is in window coordinates and `bounds` are unscrolled, so one of them has to
+    // move, and moving the box is what paint does too.
+    let mut stack: Vec<(usize, f32, f32)> = vec![(root, 0.0, 0.0)];
+    let mut budget = count.saturating_mul(2) + 16;
+    // Reused per node so the reversal below does not allocate per level.
+    let mut children: Vec<usize> = Vec::new();
+
+    while let Some((node, sx, sy)) = stack.pop() {
+        if budget == 0 {
+            break;
+        }
+        budget -= 1;
+
+        if node >= count || hidden.get(node).copied().unwrap_or(0) != 0 {
+            continue;
+        }
+
+        let [bx, by, w, h] = geometry.bounds[node];
+        let (x, y) = (bx - sx, by - sy);
         if px < x || py < y || px >= x + w || py >= y + h {
             // A child can still overflow its parent's box, but the TypeScript
             // runtime pruned here too and nothing in the corpus relies on it.
@@ -553,7 +668,14 @@ pub fn hit_test(tables: &Tables, bounds: &[[f32; 4]], root: usize, px: f32, py: 
                 break;
             }
         }
-        stack.extend(children.iter().rev());
+
+        let own = geometry.scroll_of(node);
+        stack.extend(
+            children
+                .iter()
+                .rev()
+                .map(|&c| (c, sx + own[0], sy + own[1])),
+        );
     }
 
     hit

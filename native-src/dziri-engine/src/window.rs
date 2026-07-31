@@ -40,6 +40,16 @@ pub enum RawInput {
         x: f32,
         y: f32,
     },
+    /// A wheel or trackpad scroll, with the cursor position it happened at.
+    ///
+    /// The position matters as much as the delta: which box scrolls is decided by
+    /// what is under the pointer, not by what has focus.
+    Wheel {
+        x: f32,
+        y: f32,
+        dx: f32,
+        dy: f32,
+    },
     MouseDown {
         x: f32,
         y: f32,
@@ -308,6 +318,26 @@ impl Window {
                 },
 
                 SdlEvent::MouseMotion { x, y, .. } => out.push(RawInput::MouseMotion { x, y }),
+
+                // SDL reports wheel deltas in *notches*, positive up and right, and
+                // separately reports where the pointer was. Converting notches to
+                // pixels is a policy decision, so it belongs in the engine rather
+                // than here — this layer says what the platform said.
+                //
+                // `y` is negated so positive means "content moves up", which is what
+                // a scroll offset counts.
+                SdlEvent::MouseWheel {
+                    x,
+                    y,
+                    mouse_x,
+                    mouse_y,
+                    ..
+                } => out.push(RawInput::Wheel {
+                    x: mouse_x,
+                    y: mouse_y,
+                    dx: -x,
+                    dy: -y,
+                }),
 
                 SdlEvent::MouseButtonDown {
                     mouse_btn: MouseButton::Left,

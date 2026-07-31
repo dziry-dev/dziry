@@ -248,6 +248,12 @@ body {
 
 .list {
     gap: 4px;
+    /* The rows scroll, the page does not: `overflow-y` alone, so a row's focus ring
+       or a future dropdown can still stick out sideways. `flex-grow` gives the box
+       the leftover height to be short *of* — without it the container is exactly its
+       content and there is nothing to scroll. */
+    flex-grow: 1;
+    overflow-y: auto;
 }
 
 .todo {
