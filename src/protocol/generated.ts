@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 2;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x6a590fb4;
+export const SCHEMA_HASH = 0x93a5318a;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -27,7 +27,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
   styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1],
   variants: [4, 4, 4],
   variantSlots: [2],
-  lists: [4, 4, 4, 4, 4],
+  lists: [4, 4, 4, 4, 4, 4, 4],
   layout: [4, 4, 4, 4],
   strings: [4, 4],
 };
@@ -38,7 +38,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
   styles: ["bg", "fg", "borderColor", "borderWidth", "radius", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflow"],
   variants: ["node", "mask", "runStart"],
   variantSlots: ["style"],
-  lists: ["node", "arenaStart", "stride", "capacity", "active"],
+  lists: ["container", "anchorPrev", "anchorNext", "arenaStart", "stride", "capacity", "active"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
 };
@@ -61,7 +61,7 @@ export type TableName = (typeof TABLE_NAMES)[number];
 export const F = {
   /** Tree structure and per-node indices. */
   nodes: {
-    kind: 0, // NodeKind: box, text, button, list
+    kind: 0, // NodeKind: box, text, button
     style: 1, // Index into the style table
     text: 2, // String slot, or -1
     parent: 3,
@@ -134,11 +134,13 @@ export const F = {
   },
   /** List arenas: homogeneous item subtrees addressed by stride. */
   lists: {
-    node: 0, // The LIST node owning this arena
-    arenaStart: 1,
-    stride: 2,
-    capacity: 3,
-    active: 4,
+    container: 0, // The node the rows are children of
+    anchorPrev: 1, // Static sibling before the rows, or -1 for firstChild
+    anchorNext: 2, // Static sibling after the rows, or -1 for end of chain
+    arenaStart: 3,
+    stride: 4,
+    capacity: 5,
+    active: 6,
   },
   /** Final bounds per node, written by the engine. */
   layout: {
@@ -160,7 +162,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
   styles: 48,
   variants: 3,
   variantSlots: 1,
-  lists: 5,
+  lists: 7,
   layout: 4,
   strings: 2,
 };
@@ -171,7 +173,7 @@ export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array],
   variants: [Int32Array, Uint32Array, Int32Array],
   variantSlots: [Uint16Array],
-  lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
+  lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
   layout: [Float32Array, Float32Array, Float32Array, Float32Array],
   strings: [Uint32Array, Uint32Array],
 };
@@ -248,7 +250,9 @@ export type SharedTables = {
     style: Uint16Array;
   };
   lists: {
-    node: Int32Array;
+    container: Int32Array;
+    anchorPrev: Int32Array;
+    anchorNext: Int32Array;
     arenaStart: Int32Array;
     stride: Int32Array;
     capacity: Int32Array;
@@ -276,7 +280,6 @@ export const NodeKind = {
   BOX: 0,
   TEXT: 1,
   BUTTON: 2,
-  LIST: 3,
 } as const;
 export type NodeKind = (typeof NodeKind)[keyof typeof NodeKind];
 

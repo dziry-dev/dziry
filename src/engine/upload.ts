@@ -253,8 +253,10 @@ export class Uploader {
   uploadLists(): void {
     const { lists } = this.#ui;
     const t = this.#tables.lists;
-    const count = Math.min(lists.count, t.node.length);
-    t.node.set(lists.node.subarray(0, count));
+    const count = Math.min(lists.count, t.container.length);
+    t.container.set(lists.container.subarray(0, count));
+    t.anchorPrev.set(lists.anchorPrev.subarray(0, count));
+    t.anchorNext.set(lists.anchorNext.subarray(0, count));
     t.arenaStart.set(lists.arenaStart.subarray(0, count));
     t.stride.set(lists.stride.subarray(0, count));
     t.capacity.set(lists.capacity.subarray(0, count));

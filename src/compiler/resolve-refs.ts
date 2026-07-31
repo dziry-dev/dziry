@@ -97,11 +97,11 @@ export function resolveRefs(
   }
 
   for (const list of result.lists) {
-    list.exportName = lookup(list.source, `the array behind a map() on node ${list.node}`).name;
+    list.exportName = lookup(list.source, `the array behind a map() in node ${list.container}`).name;
     for (const handler of list.itemHandlers) {
       handler.name = lookup(
         handler.ref,
-        `a per-row click handler in the list on node ${list.node}`,
+        `a per-row click handler in the list in node ${list.container}`,
       ).name;
     }
   }

@@ -126,7 +126,7 @@ function growArena(ui: CompiledUi, ref: ListBindingRef, needed: number): void {
   // Replicate item 0 of the old arena. Its internal links are untouched by the
   // runtime — only the item root's sibling link and the chain head are rewritten —
   // so it is still a faithful template.
-  const listNode = lists.node[ref.list]!;
+  const container = lists.container[ref.list]!;
   const slotStart = ui.strings.length;
 
   for (let item = 0; item < capacity; item++) {
@@ -137,7 +137,7 @@ function growArena(ui: CompiledUi, ref: ListBindingRef, needed: number): void {
       nodes.kind[dst] = nodes.kind[src]!;
       nodes.style[dst] = nodes.style[src]!;
       nodes.text[dst] = nodes.text[src]!;
-      nodes.parent[dst] = k === 0 ? listNode : nodes.parent[src]! + shift;
+      nodes.parent[dst] = k === 0 ? container : nodes.parent[src]! + shift;
       nodes.firstChild[dst] = nodes.firstChild[src]! === -1 ? -1 : nodes.firstChild[src]! + shift;
       nodes.nextSibling[dst] =
         k === 0 || nodes.nextSibling[src]! === -1 ? -1 : nodes.nextSibling[src]! + shift;
@@ -217,7 +217,6 @@ export function updateList(ui: CompiledUi, ref: ListBindingRef, array?: unknown[
   const arenaStart = lists.arenaStart[ref.list]!;
   const stride = lists.stride[ref.list]!;
   const capacity = lists.capacity[ref.list]!;
-  const listNode = lists.node[ref.list]!;
 
   let keys = slotKeys.get(ref);
   if (!keys) {
@@ -287,14 +286,30 @@ export function updateList(ui: CompiledUi, ref: ListBindingRef, array?: unknown[
     }
   }
 
-  // Chain the live slots in data order. Nodes do not move; only links change.
-  const first = items.length === 0 ? -1 : arenaStart + slotOf[0]! * stride;
-  if (nodes.firstChild[listNode] !== first) changed = true;
-  nodes.firstChild[listNode] = first;
+  // Splice the live slots into the container's chain, in data order. Nodes do
+  // not move; only links change.
+  //
+  // The rows are children of the container itself, between two static anchors,
+  // so an empty list is `prev -> next` and a full one is
+  // `prev -> row0 -> ... -> rowN -> next`. There is no wrapper node to own a
+  // `firstChild`, which is what used to make a list inside a grid render every
+  // row into one cell.
+  const container = lists.container[ref.list]!;
+  const prev = lists.anchorPrev[ref.list]!;
+  const after = lists.anchorNext[ref.list]!;
+
+  const first = items.length === 0 ? after : arenaStart + slotOf[0]! * stride;
+  if (prev === -1) {
+    if (nodes.firstChild[container] !== first) changed = true;
+    nodes.firstChild[container] = first;
+  } else {
+    if (nodes.nextSibling[prev] !== first) changed = true;
+    nodes.nextSibling[prev] = first;
+  }
 
   for (let i = 0; i < items.length; i++) {
     const node = arenaStart + slotOf[i]! * stride;
-    const next = i === items.length - 1 ? -1 : arenaStart + slotOf[i + 1]! * stride;
+    const next = i === items.length - 1 ? after : arenaStart + slotOf[i + 1]! * stride;
     if (nodes.nextSibling[node] !== next) changed = true;
     nodes.nextSibling[node] = next;
   }

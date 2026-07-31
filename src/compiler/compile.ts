@@ -10,13 +10,11 @@
  */
 import {
   Align,
-  CONTAINER_FIELDS,
   Direction,
   Display,
   Justify,
   INITIAL_STYLE,
   INHERITED_FIELDS,
-  emptyListTable,
   NodeKind,
   Predicate,
   STYLE_FIELDS,
@@ -155,22 +153,6 @@ const DISPLAY_VALUES: Record<string, number> = {
 function inheritFrom(parent: ComputedStyle): ComputedStyle {
   const style = { ...INITIAL_STYLE };
   for (const field of INHERITED_FIELDS) style[field] = parent[field];
-  return style;
-}
-
-/**
- * The style of a node that stands in for its parent's children.
- *
- * A LIST node is a wrapper the author never wrote: `<div class="list">` says how
- * its rows arrange, but the rows are children of the LIST node, not of the div.
- * So the LIST node takes the div's *container* properties — direction, gaps,
- * alignment, grid tracks — and nothing else. Copying paint or box properties
- * would double the padding and paint the background twice; copying none of them,
- * which is what this used to do, silently dropped `align-items` and `gap`.
- */
-function passThrough(parent: ComputedStyle): ComputedStyle {
-  const style = inheritFrom(parent);
-  for (const field of CONTAINER_FIELDS) style[field] = parent[field];
   return style;
 }
 
@@ -345,7 +327,12 @@ export type BuiltItemHandler = {
 };
 
 export type BuiltList = {
-  node: number;
+  /** The node the rows are children of. There is no wrapper. */
+  container: number;
+  /** Static sibling the rows follow, or -1 for the container's first child. */
+  anchorPrev: number;
+  /** Static sibling the last row points at, or -1 for end of chain. */
+  anchorNext: number;
   source: unknown;
   /** Filled in by the reference-resolution pass. */
   exportName: string;
@@ -405,6 +392,16 @@ export function compileTree(doc: Element, css: string): CompileResult {
   const textBindings: BuiltTextBinding[] = [];
   const handlers: BuiltHandler[] = [];
   const lists: BuiltList[] = [];
+  /**
+   * Where each list splices into its container, recorded while walking and
+   * resolved once every container's child array is final.
+   *
+   * `after` is how many static children the container had when the list was
+   * reached, so the anchors are `children[after - 1]` and `children[after]`.
+   * It cannot be read at the time: the sibling *following* the list has not
+   * been compiled yet.
+   */
+  const pendingAnchors: Array<{ list: number; container: number; after: number }> = [];
   const editables: BuiltEditable[] = [];
 
   /**
@@ -574,27 +571,14 @@ export function compileTree(doc: Element, css: string): CompileResult {
    * shifted by one stride, which is what keeps item-internal traversal ordinary.
    */
   function walkList(node: DynList, path: Element[], parentStyle: ComputedStyle, parent: number): number {
-    const self = nodes.length;
-    const listStyle = styles.intern(passThrough(parentStyle));
-    nodes.push({
-      kind: NodeKind.LIST,
-      style: listStyle,
-      hover: -1,
-      active: -1,
-      focus: -1,
-      mask: 0,
-      // Every run holds at least its base style, so an unconditional node is a
-      // one-entry run rather than an empty one. `expand` indexes it directly.
-      run: [listStyle],
-      text: -1,
-      parent,
-      children: [],
-    });
-
     // Item 0 is compiled normally; its bindings are captured relative to it.
+    // Its parent is the *container*, not a wrapper: rows are ordinary children
+    // spliced into the container's chain, so a grid container places each row
+    // in its own cell and a `justify-content` has more than one item to work
+    // with. See `ListTable.container` for what the wrapper cost.
     const arenaStart = nodes.length;
     const bindingsBefore = textBindings.length;
-    const templateRoot = walkChild(node.template, path, parentStyle, self);
+    const templateRoot = walkChild(node.template, path, parentStyle, parent);
     const stride = nodes.length - arenaStart;
 
     if (templateRoot !== arenaStart) {
@@ -661,7 +645,7 @@ export function compileTree(doc: Element, css: string): CompileResult {
           mask: src.mask,
           run: [...src.run],
           text: src.text,
-          parent: k === 0 ? self : src.parent + shift,
+          parent: k === 0 ? parent : src.parent + shift,
           children: src.children.map((c) => c + shift),
         });
       }
@@ -672,7 +656,13 @@ export function compileTree(doc: Element, css: string): CompileResult {
     }
 
     lists.push({
-      node: self,
+      container: parent,
+      // Resolved after the container's child loop finishes, because the sibling
+      // that follows the rows has not been compiled yet. Item 0's subtree is
+      // already in `nodes`, so the arena occupies indices the anchors are not
+      // allowed to name — which is why these are static children only.
+      anchorPrev: -1,
+      anchorNext: -1,
       source: node.source,
       exportName: "",
       arenaStart,
@@ -684,10 +674,14 @@ export function compileTree(doc: Element, css: string): CompileResult {
       slotStart,
     });
 
-    // The LIST node owns the arena; `firstChild` is set by the runtime, which
-    // decides how many slots are live and in what order.
-    nodes[self]!.children = [];
-    return self;
+    // No node of its own. The rows enter the container's chain at run time, so
+    // this contributes nothing static and the caller pushes nothing.
+    pendingAnchors.push({
+      list: lists.length - 1,
+      container: parent,
+      after: nodes[parent]?.children.length ?? 0,
+    });
+    return -1;
   }
 
   function walkChild(node: Node, path: Element[], parentStyle: ComputedStyle, parent: number): number {
@@ -735,6 +729,14 @@ export function compileTree(doc: Element, css: string): CompileResult {
     warnings.push(
       `document has ${elementChildren.length} top-level elements; they were wrapped in a synthetic root`,
     );
+  }
+
+  // Every container's child array is final now, so the splice points resolve.
+  for (const pending of pendingAnchors) {
+    const kids = nodes[pending.container]?.children ?? [];
+    const list = lists[pending.list]!;
+    list.anchorPrev = kids[pending.after - 1] ?? -1;
+    list.anchorNext = kids[pending.after] ?? -1;
   }
 
   return {
@@ -930,8 +932,28 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     // in-memory IR is used by tests and the variant probe, which are static.
     textBindings: [],
     handlers: [],
-    lists: emptyListTable(),
+    // The *table* needs no resolution — it is where each arena is and where it
+    // splices in, all of it compile-time. Only the binding refs need a signal,
+    // so returning an empty table here made every list invisible to anything
+    // using the in-memory IR, and a test that walked one would have read
+    // `undefined` and quietly agreed with itself.
+    lists: listTable(result.lists),
     root: result.root,
+  };
+}
+
+function listTable(lists: BuiltList[]): CompiledUi["lists"] {
+  const column = (pick: (l: BuiltList) => number) => Int32Array.from(lists, pick);
+  return {
+    count: lists.length,
+    container: column((l) => l.container),
+    anchorPrev: column((l) => l.anchorPrev),
+    anchorNext: column((l) => l.anchorNext),
+    arenaStart: column((l) => l.arenaStart),
+    stride: column((l) => l.stride),
+    capacity: column((l) => l.capacity),
+    active: new Int32Array(lists.length),
+    dataOffset: new Int32Array(lists.length),
   };
 }
 
@@ -1052,7 +1074,7 @@ export function emit(
       return (
         `  {\n` +
         `    list: ${result.lists.indexOf(l)},\n` +
-        `    signal: ${identifier(l.exportName, `the list on node ${l.node}`)},\n` +
+        `    signal: ${identifier(l.exportName, `the list in node ${l.container}`)},\n` +
         `    keyPath: ${JSON.stringify(l.keyPath)},\n` +
         `    slotStart: ${l.slotStart},\n` +
         `    slotsPerItem: ${l.bindings.length},\n` +
@@ -1167,7 +1189,9 @@ ${patchSource}
  */
 export const lists = {
   count: ${result.lists.length},
-  node: ${typedArray("Int32Array", result.lists.map((l) => l.node))},
+  container: ${typedArray("Int32Array", result.lists.map((l) => l.container))},
+  anchorPrev: ${typedArray("Int32Array", result.lists.map((l) => l.anchorPrev))},
+  anchorNext: ${typedArray("Int32Array", result.lists.map((l) => l.anchorNext))},
   arenaStart: ${typedArray("Int32Array", result.lists.map((l) => l.arenaStart))},
   stride: ${typedArray("Int32Array", result.lists.map((l) => l.stride))},
   capacity: ${typedArray("Int32Array", result.lists.map((l) => l.capacity))},

@@ -142,11 +142,17 @@ Two things worth knowing about that change:
   `Align` *from* `protocol/generated.ts` rather than declaring its own copies. A compiler
   that thought `center` was 1 while the engine thought 2 would be a wrong-looking frame,
   not a type error — the same class as a wrong byte offset, and the same fix.
-- **A LIST node is a pass-through.** It stands in for children the author never wrapped, so
-  it copies its parent's *container* properties — direction, gaps, alignment, grid tracks —
-  and nothing else. It used to get a default style, which silently dropped the container's
-  `align-items` and `gap`: rows shrink-wrapped and `flex: 1` inside them collapsed to zero
-  width. The demo caught it the moment a row had something to grow into.
+- **A list has no node of its own.** Rows are ordinary children of the container,
+  spliced into its chain between two compile-time anchors. There *was* a pass-through
+  `LIST` node that copied the container's direction, gaps, alignment and grid tracks —
+  a hand-rolled `display: contents`, since Taffy has no such thing — and it was right
+  for a flex column and wrong for everything else. In a grid it was one item in one
+  cell re-declaring the same tracks inside it, so every row landed in that cell; on
+  the main axis a `justify-content` had exactly one shrink-wrapped child to
+  distribute; and it silently became the containing block for an absolutely
+  positioned row. The sample never showed any of it because its one list is a flex
+  column. Deleting the node left the render byte-identical with one node fewer, which
+  is the same fact stated twice.
 
 **Inline styles**, both forms, resolved at build time:
 
@@ -499,8 +505,9 @@ Adjacent text children are coalesced, because JSX splits `Count: {n}` into two c
 IR text nodes would be laid out as two flex items — stacked vertically, since a box with no
 `display` defaults to COLUMN.
 
-**Dynamic lists are arenas, not reconciliation.** A `LIST` node owns a contiguous run of
-homogeneous item subtrees with their internal links materialized once. `src/runtime/list.ts`
+**Dynamic lists are arenas, not reconciliation.** Each list owns a contiguous run of
+homogeneous item subtrees with their internal links materialized once, spliced into its
+container's child chain. `src/runtime/list.ts`
 only rewrites the child chain, so layout, paint and hit-testing need no knowledge of lists at
 all. Measured in `src/spike-list.ts`: relinking 1000 items is 0.005 ms, reversing them 0.004 ms,
 and scrolling a 30-row window over 2000 items 0.052 ms — independent of the total, which is

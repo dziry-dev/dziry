@@ -144,10 +144,10 @@ test("flex-grow gives a row's leftover width to one child", () => {
 
 test("a list row stretches to its container", () => {
   const { engine, ui } = load();
-  const listNode = ui.lists.node[0]!;
+  const container = ui.lists.container[0]!;
   const row = ui.lists.arenaStart[0]!;
 
-  expect(engine.bounds(row)[2]).toBeCloseTo(engine.bounds(listNode)[2], 0);
+  expect(engine.bounds(row)[2]).toBeCloseTo(engine.bounds(container)[2], 0);
   engine.close();
 });
 

@@ -177,30 +177,6 @@ export const INHERITED_FIELDS: StyleField[] = STYLE_FIELDS.filter((f) => f[2]).m
 
 export const LAYOUT_FIELDS: StyleField[] = STYLE_FIELDS.filter((f) => f[3]).map((f) => f[0]);
 
-/**
- * Properties that describe how a box arranges its *children*, as opposed to how
- * the box itself is sized, spaced or painted.
- *
- * A LIST node is a transparent wrapper — the closest CSS has is `display:
- * contents`, which Taffy does not implement — so it copies these from the
- * container it stands in for. Without that, the container's `align-items` and
- * `gap` apply to the wrapper instead of to the rows, and the rows shrink-wrap
- * with no spacing. Paint and box properties are deliberately excluded: the
- * wrapper must add no background, no border and no padding of its own.
- */
-export const CONTAINER_FIELDS: StyleField[] = [
-  "display",
-  "direction",
-  "wrap",
-  "justify",
-  "align",
-  "gapRow",
-  "gapCol",
-  "gridCols",
-  "gridRows",
-  "justifyItems",
-];
-
 /** CSS initial values, in resolved px. The root inherits from this. */
 export const INITIAL_STYLE: ComputedStyle = {
   bg: 0x00000000, // transparent
@@ -362,8 +338,30 @@ export function findRow(sorted: Int32Array, value: number): number {
  */
 export type ListTable = {
   count: number;
-  /** The LIST node owning each arena. */
-  node: Int32Array;
+  /**
+   * Where the rows hang, as a splice point in the container's child chain.
+   *
+   * There is no wrapper node. An earlier design put a `LIST` node between the
+   * container and its rows and copied the container's `display`, tracks, gaps
+   * and alignment onto it, on the theory that a transparent box is what
+   * `display: contents` would have given us. That works for a flex column and
+   * is wrong for everything else: inside a grid the wrapper is one item in one
+   * cell with its own N tracks nested inside it, and a container's
+   * `justify-content` distributes exactly one shrink-wrapped child. It also
+   * silently became the containing block for any absolutely positioned row.
+   *
+   * Rows are children of the container instead, spliced between two anchors.
+   * `relink` rebuilds child lists from the chains on every structural change,
+   * so nothing has to know that part of a chain is arena-backed.
+   */
+  container: Int32Array;
+  /**
+   * The static sibling the rows follow, or `-1` for "the container's first
+   * child". Written by the compiler, never at run time.
+   */
+  anchorPrev: Int32Array;
+  /** The static sibling the last row points at, or `-1` for end-of-chain. */
+  anchorNext: Int32Array;
   arenaStart: Int32Array;
   /** Nodes per item. */
   stride: Int32Array;
@@ -420,15 +418,3 @@ export type CompiledUi = {
   root: number;
 };
 
-export function emptyListTable(): ListTable {
-  const none = new Int32Array(0);
-  return {
-    count: 0,
-    node: none,
-    arenaStart: none,
-    stride: none,
-    capacity: none,
-    active: none,
-    dataOffset: none,
-  };
-}

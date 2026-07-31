@@ -78,7 +78,7 @@ const NODES: Table = {
   doc: "Tree structure and per-node indices.",
   sizedBy: "nodes",
   fields: [
-    { name: "kind", type: "u8", doc: "NodeKind: box, text, button, list" },
+    { name: "kind", type: "u8", doc: "NodeKind: box, text, button" },
     { name: "style", type: "u16", doc: "Index into the style table" },
     { name: "text", type: "i32", doc: "String slot, or -1" },
     { name: "parent", type: "i32" },
@@ -217,7 +217,9 @@ const LISTS: Table = {
   doc: "List arenas: homogeneous item subtrees addressed by stride.",
   sizedBy: "own",
   fields: [
-    { name: "node", type: "i32", doc: "The LIST node owning this arena" },
+    { name: "container", type: "i32", doc: "The node the rows are children of" },
+    { name: "anchorPrev", type: "i32", doc: "Static sibling before the rows, or -1 for firstChild" },
+    { name: "anchorNext", type: "i32", doc: "Static sibling after the rows, or -1 for end of chain" },
     { name: "arenaStart", type: "i32" },
     { name: "stride", type: "i32" },
     { name: "capacity", type: "i32" },
@@ -287,7 +289,7 @@ export const ENUMS: EnumDef[] = [
     name: "NodeKind",
     doc: "What a node is. `nodes.kind`.",
     ty: "u8",
-    values: { BOX: 0, TEXT: 1, BUTTON: 2, LIST: 3 },
+    values: { BOX: 0, TEXT: 1, BUTTON: 2 },
   },
   {
     name: "Display",
@@ -413,7 +415,7 @@ export const ENUMS: EnumDef[] = [
  * Bumped on any change to the tables above. The engine refuses to start on a
  * mismatch rather than rendering garbage.
  */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
