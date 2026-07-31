@@ -239,6 +239,82 @@ fn text_is_measured_by_skia_not_guessed() {
     }
 }
 
+/// A border reserves room the way padding does, and it stacks with padding.
+///
+/// This is the whole content-box question in one assertion: the 200x100 root with
+/// a 10px border and 5px padding has a 170x70 content box starting at (15, 15).
+/// While `style_of` skipped `borderWidth` the child sat at (5, 5) at 190x90 —
+/// overlapping the border band, and 20px too big in each axis.
+#[test]
+fn a_border_reserves_room_like_padding() {
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+
+        // The root's own size comes from the window (200x100), not the table.
+        t.set_f32(STYLES, styles::BORDER_WIDTH, 0, 10.0);
+        for field in [
+            styles::PAD_TOP,
+            styles::PAD_RIGHT,
+            styles::PAD_BOTTOM,
+            styles::PAD_LEFT,
+        ] {
+            t.set_f32(STYLES, field, 0, 5.0);
+        }
+        // The child takes the content box, so its bounds *are* the content box.
+        t.set_u8(STYLES, styles::ALIGN_ITEMS, 0, align::STRETCH);
+        t.set_f32(STYLES, styles::FLEX_GROW, 1, 1.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+    }
+
+    engine.tick().expect("tick");
+
+    assert_eq!(
+        bound(&engine, 0),
+        [0.0, 0.0, 200.0, 100.0],
+        "the border is inside the box, not around it — border-box, as Tailwind assumes"
+    );
+    assert_eq!(
+        bound(&engine, 1),
+        [15.0, 15.0, 170.0, 70.0],
+        "content starts inside border + padding"
+    );
+}
+
+/// Non-finite is the "unset" sentinel everywhere in this table, and a negative
+/// width is a host bug. Either would otherwise hand Taffy room to give away.
+#[test]
+fn a_nonsense_border_width_reserves_nothing() {
+    for width in [f32::NAN, f32::INFINITY, -8.0] {
+        let mut engine = Engine::new(&config(2, 2)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            init_style(t, 0);
+            init_style(t, 1);
+            t.set_f32(STYLES, styles::BORDER_WIDTH, 0, width);
+            t.set_u8(STYLES, styles::ALIGN_ITEMS, 0, align::STRETCH);
+            t.set_f32(STYLES, styles::FLEX_GROW, 1, 1.0);
+
+            leaf(t, 0, 0);
+            leaf(t, 1, 1);
+            link(t, 0, &[1]);
+        }
+
+        engine.tick().expect("tick");
+
+        assert_eq!(
+            bound(&engine, 1),
+            [0.0, 0.0, 200.0, 100.0],
+            "border-width {width} should reserve nothing"
+        );
+    }
+}
+
 #[test]
 fn hidden_removes_a_subtree_from_layout() {
     let mut engine = Engine::new(&config(3, 2)).expect("engine");

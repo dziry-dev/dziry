@@ -116,8 +116,11 @@ export const STYLE_FIELDS = [
   ["bg", "Uint32Array", false, false],
   ["fg", "Uint32Array", true, false],
   ["borderColor", "Uint32Array", false, false],
-  // Borders are stroked inset, so width does not change the box.
-  ["borderWidth", "Float32Array", false, false],
+  // Width changes the box — the engine reserves the border like padding — so a
+  // toggle that only changes a border width still needs a relayout. Kept in the
+  // paint block because it is interned next to `borderColor`, which is paint-only;
+  // the fourth column, not the grouping, is what decides.
+  ["borderWidth", "Float32Array", false, true],
   ["radius", "Float32Array", false, false],
   // box
   ["padT", "Float32Array", false, true],

@@ -1,14 +1,18 @@
 //! Laid-out nodes into Skia draw calls.
 //!
-//! A direct port of `src/runtime/paint.ts`, kept deliberately faithful so the
-//! migration is comparable frame to frame: same fill-then-border-then-text order,
-//! same inset stroke, same button label centring, same baseline arithmetic.
+//! Started as a direct port of `src/runtime/paint.ts`, kept faithful so the
+//! migration was comparable frame to frame: same fill-then-border-then-text
+//! order, same button label centring, same baseline arithmetic.
+//!
+//! The border no longer matches it. The prototype's inset stroke gets the corners
+//! wrong — see `Painter::node` — and reproducing a known-wrong geometry is worth
+//! less than a correct one now that Taffy reserves the border in the box.
 //!
 //! Interaction state costs one integer comparison per node. The compiler already
 //! decided what a hovered or pressed node looks like, so there is nothing to
 //! resolve here beyond picking an index.
 
-use skia_safe::{Canvas, Color, Paint, PaintStyle, Rect};
+use skia_safe::{Canvas, Color, Paint, PaintStyle, RRect, Rect};
 
 use crate::protocol::{self, node_kind, predicate};
 use crate::tables::Tables;
@@ -68,8 +72,9 @@ impl InputState {
 }
 
 pub struct Painter {
+    /// The only paint there is. Borders are a two-rect fill rather than a stroke,
+    /// so nothing here needs `PaintStyle::Stroke` or a per-node stroke width.
     fill: Paint,
-    stroke: Paint,
     /// Predicate bits that hold for every node this frame.
     ///
     /// Media queries and colour scheme land here. They are the engine's to
@@ -94,11 +99,7 @@ impl Painter {
         fill.set_anti_alias(true);
         fill.set_style(PaintStyle::Fill);
 
-        let mut stroke = Paint::default();
-        stroke.set_anti_alias(true);
-        stroke.set_style(PaintStyle::Stroke);
-
-        Self { fill, stroke, globals: 0 }
+        Self { fill, globals: 0 }
     }
 
     /// Resolves which precompiled style a node wears right now.
@@ -227,7 +228,13 @@ impl Painter {
         let c = |field: usize| -> u32 { tables.u32s(STYLES, field).get(slot).copied().unwrap_or(0) };
 
         let [x, y, w, h] = bounds[node];
-        let radius = g(f::RADIUS);
+        // Sanitised once: both the fill and the border ring build round rects from
+        // this, and Skia has no defined answer for a NaN or infinite radius. The
+        // old `radius > 0.0` test happened to reject NaN and let infinity through.
+        let radius = match g(f::RADIUS) {
+            r if r.is_finite() && r > 0.0 => r,
+            _ => 0.0,
+        };
         let bg = c(f::BG);
 
         // A zero alpha channel means the box contributes no fill at all.
@@ -241,15 +248,43 @@ impl Painter {
             }
         }
 
-        let border_width = g(f::BORDER_WIDTH);
+        // Non-finite is the sentinel for "unset" everywhere else, and `style_of`
+        // already resolves it to no border for layout; paint must agree or the
+        // ring and the box disagree about where the content starts.
+        let border_width = match g(f::BORDER_WIDTH) {
+            t if t.is_finite() && t > 0.0 => t,
+            _ => 0.0,
+        };
         let border_color = c(f::BORDER_COLOR);
         if border_width > 0.0 && border_color >> 24 != 0 && w > 0.0 && h > 0.0 {
-            // Inset by half the stroke so the border sits inside the node's bounds.
-            let half = border_width / 2.0;
-            let rect = Rect::from_xywh(x + half, y + half, w - border_width, h - border_width);
-            self.stroke.set_color(Color::from(border_color));
-            self.stroke.set_stroke_width(border_width);
-            canvas.draw_round_rect(rect, radius, radius, &self.stroke);
+            // A ring between the border box and the padding box, not a stroke
+            // inset by half its width. The stroke was wrong at the corners: its
+            // outer edge is an arc of radius `radius + width/2`, so the fill
+            // underneath — drawn at `radius` — poked out past the border at each
+            // corner, and its inner edge was `radius - width/2` where CSS says
+            // `max(0, radius - width)`. Two rounded rects say exactly what CSS
+            // means, need no `set_stroke_width` per node, and `new_rect_radii`
+            // takes four corner radii the day the schema grows per-corner and
+            // per-side utilities, which a single stroked path cannot express.
+            let outer = RRect::new_rect_xy(Rect::from_xywh(x, y, w, h), radius, radius);
+            self.fill.set_color(Color::from(border_color));
+
+            let inner_w = w - border_width * 2.0;
+            let inner_h = h - border_width * 2.0;
+            if inner_w <= 0.0 || inner_h <= 0.0 {
+                // The border swallows the box. Skia's `draw_drrect` takes the
+                // difference of two rects and an empty or inverted inner one is
+                // not a shape it is defined on, so fill the outer instead.
+                canvas.draw_rrect(outer, &self.fill);
+            } else {
+                let inner_radius = (radius - border_width).max(0.0);
+                let inner = RRect::new_rect_xy(
+                    Rect::from_xywh(x + border_width, y + border_width, inner_w, inner_h),
+                    inner_radius,
+                    inner_radius,
+                );
+                canvas.draw_drrect(outer, inner, &self.fill);
+            }
         }
 
         let text_slot = tables
@@ -282,14 +317,24 @@ impl Painter {
 
         if kind == node_kind::BUTTON {
             // Centre the label in the content box, so asymmetric padding is
-            // honoured rather than averaged away.
+            // honoured rather than averaged away. The border counts: Taffy reports
+            // the border box, and since `style_of` now reserves the border the
+            // content box is inset by it on every side.
+            //
+            // The *measure* width stays the border box deliberately. It only
+            // decides where the label wraps, and it must never wrap earlier than
+            // the layout pass did — that pass measured against Taffy's available
+            // space, and a paint-side wrap the layout did not predict would double
+            // `line_height` and push the label off centre. Erring wide is
+            // harmless; erring narrow is visible.
             let (advance, line_height) = measurer.measure(text, size, weight, w);
             let ascent = measurer.face(size, weight).ascent;
-            let box_w = w - g(f::PAD_LEFT) - g(f::PAD_RIGHT);
-            let box_h = h - g(f::PAD_TOP) - g(f::PAD_BOTTOM);
+            let borders = border_width * 2.0;
+            let box_w = w - borders - g(f::PAD_LEFT) - g(f::PAD_RIGHT);
+            let box_h = h - borders - g(f::PAD_TOP) - g(f::PAD_BOTTOM);
 
-            let tx = x + g(f::PAD_LEFT) + (box_w - advance) / 2.0;
-            let ty = y + g(f::PAD_TOP) + (box_h - line_height) / 2.0 - ascent;
+            let tx = x + border_width + g(f::PAD_LEFT) + (box_w - advance) / 2.0;
+            let ty = y + border_width + g(f::PAD_TOP) + (box_h - line_height) / 2.0 - ascent;
             let font = &measurer.face(size, weight).font;
             canvas.draw_str(text, (tx, ty), font, &self.fill);
         } else {

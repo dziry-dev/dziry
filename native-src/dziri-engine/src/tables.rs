@@ -895,8 +895,13 @@ mod tests {
         // actually reads: `style_of` never looks at `radius`, and cannot lay out
         // without `width`.
         assert!(!protocol::styles::LAYOUT_AFFECTING[protocol::styles::RADIUS]);
-        assert!(!protocol::styles::LAYOUT_AFFECTING[protocol::styles::BORDER_WIDTH]);
         assert!(protocol::styles::LAYOUT_AFFECTING[protocol::styles::WIDTH]);
+        // The two halves of a border part ways here, and this pair is the reason
+        // the classification is per-field rather than per-table: recolouring a
+        // border is finished when `commit` copies the bytes, while *widening* it
+        // moves every descendant, because `style_of` reserves it in Taffy's box.
+        assert!(!protocol::styles::LAYOUT_AFFECTING[protocol::styles::BORDER_COLOR]);
+        assert!(protocol::styles::LAYOUT_AFFECTING[protocol::styles::BORDER_WIDTH]);
         // Not because Taffy reads it — it does not — but because the measure
         // callback does.
         assert!(protocol::styles::LAYOUT_AFFECTING[protocol::styles::FONT_SIZE]);

@@ -103,7 +103,9 @@ const STYLES: Table = {
     { name: "bg", type: "u32", affects: "paint" },
     { name: "fg", type: "u32", affects: "paint" },
     { name: "borderColor", type: "u32", affects: "paint" },
-    { name: "borderWidth", type: "f32", affects: "paint" },
+    // Layout, not paint: the engine reserves the border in Taffy's box, so a
+    // width change moves the content. `borderColor` above stays paint-only.
+    { name: "borderWidth", type: "f32", affects: "layout" },
     { name: "radius", type: "f32", affects: "paint" },
     // box
     { name: "padTop", type: "f32", affects: "layout" },

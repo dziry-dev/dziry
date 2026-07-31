@@ -213,21 +213,30 @@ test("absolute children are placed against their parent, out of flow", () => {
   expect(absolutes.length).toBeGreaterThan(0);
 
   for (const node of absolutes) {
-    const box = engine.bounds(ui.nodes.parent[node]!);
+    const parent = ui.nodes.parent[node]!;
+    const box = engine.bounds(parent);
     const [x, y, w, h] = engine.bounds(node);
     const slot = ui.nodes.style[node]!;
+
+    // An inset is measured from the containing block's *padding* box, so a
+    // bordered parent moves its absolute children in by the border width. The
+    // bounds the engine publishes are border boxes, hence this term. It was
+    // absent while `borderWidth` was excluded from layout, which is why this
+    // assertion is what caught that fix reaching Taffy.
+    const border = styles.borderWidth[ui.nodes.style[parent]!]!;
+    const inner = [box[0] + border, box[1] + border, box[2] - border * 2, box[3] - border * 2];
 
     // Each inset is checked only when the author set one, so editing the CSS
     // from `top` to `bottom` changes what is asserted rather than breaking it.
     const inset = (f: StyleField) => styles[f][slot]!;
 
-    if (!Number.isNaN(inset("insetT"))) expect(y).toBeCloseTo(box[1] + inset("insetT"), 0);
-    if (!Number.isNaN(inset("insetL"))) expect(x).toBeCloseTo(box[0] + inset("insetL"), 0);
+    if (!Number.isNaN(inset("insetT"))) expect(y).toBeCloseTo(inner[1]! + inset("insetT"), 0);
+    if (!Number.isNaN(inset("insetL"))) expect(x).toBeCloseTo(inner[0]! + inset("insetL"), 0);
     if (!Number.isNaN(inset("insetR"))) {
-      expect(x + w).toBeCloseTo(box[0] + box[2] - inset("insetR"), 0);
+      expect(x + w).toBeCloseTo(inner[0]! + inner[2]! - inset("insetR"), 0);
     }
     if (!Number.isNaN(inset("insetB"))) {
-      expect(y + h).toBeCloseTo(box[1] + box[3] - inset("insetB"), 0);
+      expect(y + h).toBeCloseTo(inner[1]! + inner[3]! - inset("insetB"), 0);
     }
 
     // Out of flow: it sits inside its parent rather than after its siblings.

@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 3;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x93a5318a;
+export const SCHEMA_HASH = 0xd22edf46;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -51,7 +51,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
  * can be checked against it rather than trusted to agree.
  */
 export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
-  styles: [false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+  styles: [false, false, false, true, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
 };
 
 export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "lists", "layout", "strings"] as const;

@@ -574,9 +574,15 @@ fn placement(start: i16, span: i16) -> Line<GridPlacement> {
 
 /// Resolves one node's Taffy style from the tables.
 ///
-/// Note what is *not* here: `borderWidth`. Borders are stroked inset by the
-/// painter, so they do not change the box — the same decision the TypeScript
-/// runtime made, kept so the migration stays pixel-comparable.
+/// `borderWidth` used to be excluded here, on the argument that the painter
+/// stroked borders inset so the box never changed — the TypeScript runtime's
+/// decision, kept while the migration wanted pixel-comparable frames. It was
+/// wrong as CSS: content overlapped the border band and a bordered box's content
+/// box was 2×width too big in each axis. Taffy implements border-box shrinking
+/// natively, so this is one `Rect` and paint drops the compensation it never had.
+/// The rejected alternative was subtracting the border from `width`/`height` in
+/// the compiler: that only works for definite sizes, and silently does nothing
+/// for `auto`, percentages and flex bases.
 fn style_of(tables: &Tables, node: usize) -> Style {
     use protocol::styles as f;
 
@@ -662,6 +668,18 @@ fn style_of(tables: &Tables, node: usize) -> Style {
         right: lp(f32f(f::PAD_RIGHT)),
         bottom: lp(f32f(f::PAD_BOTTOM)),
         left: lp(f32f(f::PAD_LEFT)),
+    };
+    // One width for all four sides until the schema grows per-side borders.
+    // `lp` maps the non-finite sentinels to 0, which is what "no border" means
+    // here — unlike `margin`, where non-finite means `auto` — and `max` rejects a
+    // negative width from a hostile table, which Taffy would otherwise treat as
+    // room it can hand back to the content.
+    let border = lp(f32f(f::BORDER_WIDTH).max(0.0));
+    s.border = Rect {
+        top: border,
+        right: border,
+        bottom: border,
+        left: border,
     };
     s.margin = Rect {
         top: lpa(f32f(f::MARGIN_TOP)),
