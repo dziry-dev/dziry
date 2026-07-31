@@ -504,7 +504,12 @@ pub unsafe extern "C" fn dziri_engine_take_png(handle: *mut Handle, out: *mut u8
     })
 }
 
-/// The resolved font family, as UTF-8. Returns its byte length.
+/// The resolved font family, as UTF-8.
+///
+/// `*written` answers whichever question was asked, on the same terms as
+/// [`dziri_last_error`]: with `buf` null it is the byte length the name needs,
+/// with a buffer it is how many bytes were written — the longest whole-codepoint
+/// prefix that fits.
 ///
 /// # Safety
 /// `buf` must be writable for `len` bytes, or null to query the length.
@@ -519,14 +524,13 @@ pub unsafe extern "C" fn dziri_engine_font_family(
         if written.is_null() {
             return fail(status::INVALID_ARGUMENT, "null out pointer");
         }
-        let bytes = engine.font_family().as_bytes();
-        // SAFETY: non-null, and writable by the caller's promise.
-        unsafe { *written = bytes.len() as u32 };
-        if !buf.is_null() && len > 0 {
-            let n = bytes.len().min(len as usize);
-            // SAFETY: `n <= len`, and the caller promises `len` writable bytes.
-            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n) };
-        }
+        // Whole codepoints only, and `written` reports what was written rather than
+        // what was wanted — a system font family is exactly the kind of string that
+        // is not ASCII ("宋体", "맑은 고딕"). Same rule as `dziri_last_error`,
+        // because it is the same function.
+        // SAFETY: `written` is non-null, and `buf`/`len` are the caller's promise.
+        let n = unsafe { error::copy_utf8_prefix(engine.font_family(), buf, len) };
+        unsafe { *written = n };
         status::OK
     })
 }

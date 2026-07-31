@@ -141,45 +141,52 @@ pub fn fail(code: i32, message: impl Into<String>) -> i32 {
     code
 }
 
-/// Copies the last error into a caller-owned buffer as UTF-8.
+/// Copies `text` into a caller-owned buffer as UTF-8, and reports the answer to
+/// whichever question was asked: with `buf` null, the byte length `text` needs, so
+/// a caller can size a buffer by asking first; with a buffer, how many bytes were
+/// *written*, which is the longest whole-codepoint prefix that fits.
 ///
-/// The return value answers whichever question was asked. With `buf` null it is
-/// the byte length the message needs, so a caller can size a buffer by asking
-/// first. With a buffer it is the number of bytes *written*, which is the longest
-/// whole-codepoint prefix that fits.
+/// Both halves of that matter, and getting either wrong is quiet. Truncating at
+/// `len` splits multi-byte codepoints — error details carry CSS text, font names
+/// and paths, and a font family is exactly the kind of string that is not ASCII —
+/// so a string that runs past the host's buffer could end mid-character, which the
+/// host's `TextDecoder` renders as U+FFFD, or throws on if it is ever constructed
+/// with `fatal`, replacing the real error with a decoding error while reporting it.
+/// And reporting the *needed* length while writing fewer bytes leaves the caller
+/// no way to know where the string stopped, so it decodes whatever a previous,
+/// longer string left in a reused buffer.
 ///
-/// Both halves of that matter. Truncating at `len` split multi-byte codepoints:
-/// error details carry CSS text, font names and paths, so a message that runs past
-/// the host's buffer can end mid-character, and the host's `TextDecoder` turns the
-/// fragment into U+FFFD — or throws, if it is ever constructed with `fatal`, which
-/// would replace the real error with a decoding error while reporting it. And
-/// returning the *needed* length while writing fewer bytes left the caller no way
-/// to know where the message stopped, so it decoded whatever the previous, longer
-/// error had left in a reused buffer.
+/// Shared by `dziri_last_error` and `dziri_engine_font_family`, which are the only
+/// two strings that cross the ABI, so the rule is stated and tested once.
+///
+/// # Safety
+/// `buf` must be writable for `len` bytes, or null when only the size is wanted.
+pub unsafe fn copy_utf8_prefix(text: &str, buf: *mut u8, len: u32) -> u32 {
+    let bytes = text.as_bytes();
+    if buf.is_null() || len == 0 {
+        return bytes.len() as u32;
+    }
+
+    // Back off any trailing continuation bytes. `is_char_boundary` is true at
+    // `bytes.len()`, so an untruncated string never enters the loop, and 0 is a
+    // boundary, so it always terminates.
+    let mut n = bytes.len().min(len as usize);
+    while !text.is_char_boundary(n) {
+        n -= 1;
+    }
+
+    // SAFETY: the caller promises `len` writable bytes, and `n <= len`.
+    unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n) };
+    n as u32
+}
+
+/// The calling thread's last error, on [`copy_utf8_prefix`]'s terms.
 ///
 /// # Safety
 /// `buf` must be writable for `len` bytes, or null when only the size is wanted.
 pub unsafe fn read_last_error(buf: *mut u8, len: u32) -> u32 {
-    LAST_ERROR.with(|slot| {
-        let text = slot.borrow();
-        let bytes = text.as_bytes();
-
-        if buf.is_null() || len == 0 {
-            return bytes.len() as u32;
-        }
-
-        // Back off any trailing continuation bytes. `is_char_boundary` is true at
-        // `bytes.len()`, so an untruncated message never enters the loop, and 0 is
-        // a boundary, so it always terminates.
-        let mut n = bytes.len().min(len as usize);
-        while !text.is_char_boundary(n) {
-            n -= 1;
-        }
-
-        // SAFETY: the caller promises `len` writable bytes, and `n <= len`.
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n) };
-        n as u32
-    })
+    // SAFETY: forwarding the caller's promise about `buf` and `len`.
+    LAST_ERROR.with(|slot| unsafe { copy_utf8_prefix(&slot.borrow(), buf, len) })
 }
 
 /// Runs `body` with panics contained, returning a status code either way.
@@ -250,6 +257,28 @@ mod tests {
         assert_eq!(
             unsafe { read_last_error(std::ptr::null_mut(), 0) },
             "a longer detail than the buffer".len() as u32
+        );
+    }
+
+    /// A multi-byte character wider than two bytes has to be backed off past every
+    /// one of its continuation bytes, not just one.
+    #[test]
+    fn a_four_byte_codepoint_is_dropped_whole() {
+        // "😀" is four bytes, so every cut at 1, 2 or 3 must yield the empty string
+        // — and a cut at 4 must yield the whole emoji.
+        let text = "😀!";
+        for cap in 1..=3u32 {
+            let mut buf = [0u8; 8];
+            let written = unsafe { copy_utf8_prefix(text, buf.as_mut_ptr(), cap) };
+            assert_eq!(written, 0, "a {cap}-byte buffer cannot hold any of it");
+        }
+
+        let mut buf = [0u8; 8];
+        let written = unsafe { copy_utf8_prefix(text, buf.as_mut_ptr(), 4) };
+        assert_eq!(written, 4);
+        assert_eq!(
+            std::str::from_utf8(&buf[..written as usize]).expect("valid UTF-8"),
+            "😀"
         );
     }
 

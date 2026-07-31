@@ -256,6 +256,39 @@ fn a_short_png_buffer_leaves_the_frame_to_retry() {
     unsafe { dziri_engine_destroy(handle) };
 }
 
+/// `written` means written, not wanted.
+///
+/// The boundary logic lives in `error::copy_utf8_prefix` and is tested there with
+/// strings a test can choose; the platform decides the font family, so what this
+/// pins is the contract at the ABI: a short buffer reports how much of the name it
+/// received, so the host cannot decode past it into whatever the buffer held
+/// before. It used to report the full length regardless.
+#[test]
+fn a_short_font_family_buffer_reports_what_it_wrote() {
+    let handle = create();
+
+    let mut needed = 0u32;
+    assert_eq!(
+        unsafe { dziri_engine_font_family(handle, std::ptr::null_mut(), 0, &mut needed) },
+        status::OK
+    );
+    assert!(needed > 4, "no platform resolves a family this short");
+
+    let mut buf = [0u8; 4];
+    let mut written = 99u32;
+    assert_eq!(
+        unsafe { dziri_engine_font_family(handle, buf.as_mut_ptr(), 4, &mut written) },
+        status::OK
+    );
+    assert_eq!(written, 4, "four bytes fit, and four were written");
+    assert!(
+        std::str::from_utf8(&buf[..written as usize]).is_ok(),
+        "whatever it wrote is a whole number of characters"
+    );
+
+    unsafe { dziri_engine_destroy(handle) };
+}
+
 #[test]
 fn a_headless_engine_paints_pixels() {
     let handle = create();
