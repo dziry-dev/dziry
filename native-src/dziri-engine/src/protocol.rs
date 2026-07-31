@@ -15,13 +15,13 @@ pub const PROTOCOL_VERSION: u32 = 4;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x4f93c6b7;
+pub const SCHEMA_HASH: u32 = 0x917d9cf3;
 
 pub const TABLE_COUNT: usize = 7;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
-pub const MAX_FIELD_COUNT: usize = 48;
+pub const MAX_FIELD_COUNT: usize = 49;
 pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "nodes",
     "styles",
@@ -171,12 +171,13 @@ pub mod styles {
     pub const FONT_SIZE: usize = 44;
     pub const FONT_WEIGHT: usize = 45;
     pub const LINE_CLAMP: usize = 46;
-    pub const OVERFLOW: usize = 47;
+    pub const OVERFLOW_X: usize = 47;
+    pub const OVERFLOW_Y: usize = 48;
 
-    pub const FIELD_COUNT: usize = 48;
+    pub const FIELD_COUNT: usize = 49;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [
         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2,
-        2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1,
+        2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1,
     ];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
         "bg",
@@ -226,7 +227,8 @@ pub mod styles {
         "fontSize",
         "fontWeight",
         "lineClamp",
-        "overflow",
+        "overflowX",
+        "overflowY",
     ];
 
     /// Whether a change to this field can move a box.
@@ -239,7 +241,7 @@ pub mod styles {
         false, false, false, true, false, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
-        true, true, true, true,
+        true, true, true, true, true,
     ];
 }
 

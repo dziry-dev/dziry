@@ -176,7 +176,11 @@ export const STYLE_FIELDS = [
   // Layout, not paint, even though its most visible effect is clipping: a scroll
   // container's automatic minimum size is 0 rather than its content, so whether a
   // node scrolls changes where its *siblings* end up.
-  ["overflow", "Uint8Array", false, true],
+  //
+  // Per axis, because the case that matters is asymmetric — a column that scrolls
+  // vertically and never horizontally.
+  ["overflowX", "Uint8Array", false, true],
+  ["overflowY", "Uint8Array", false, true],
 ] as const;
 
 export type StyleField = (typeof STYLE_FIELDS)[number][0];
@@ -248,7 +252,8 @@ export const INITIAL_STYLE: ComputedStyle = {
   insetL: AUTO,
   fontSize: 16,
   fontWeight: 400,
-  overflow: Overflow.VISIBLE,
+  overflowX: Overflow.VISIBLE,
+  overflowY: Overflow.VISIBLE,
 };
 
 /** Shape of the generated module, so the runtime can type its import. */

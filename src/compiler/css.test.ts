@@ -229,20 +229,32 @@ test("KNOWN WRONG: `border` neither resets nor honours `none`", () => {
 });
 
 test("overflow maps CSS's five keywords onto the three the engine has", () => {
-  expect(expand("overflow", "visible")).toEqual({ overflow: 0 });
+  expect(expand("overflow", "visible")).toEqual({ overflowX: 0, overflowY: 0 });
   // `clip` and `hidden` differ only in programmatic scrollability, which does not
   // exist yet.
-  expect(expand("overflow", "hidden")).toEqual({ overflow: 1 });
-  expect(expand("overflow", "clip")).toEqual({ overflow: 1 });
+  expect(expand("overflow", "hidden")).toEqual({ overflowX: 1, overflowY: 1 });
+  expect(expand("overflow", "clip")).toEqual({ overflowX: 1, overflowY: 1 });
   // `auto` is what the engine actually does — a scrollbar only when needed — so
   // `scroll` is the approximation rather than the other way round.
-  expect(expand("overflow", "auto")).toEqual({ overflow: 3 });
-  expect(expand("overflow", "scroll")).toEqual({ overflow: 3 });
+  expect(expand("overflow", "auto")).toEqual({ overflowX: 3, overflowY: 3 });
+  expect(expand("overflow", "scroll")).toEqual({ overflowX: 3, overflowY: 3 });
 
-  // Per-axis overflow needs two fields in the schema, and guessing which axis was
-  // meant would be wrong for the mixed case that motivates the property at all.
-  for (const bad of ["overflow-x", "overflow-y"]) {
-    expect(() => expand(bad, "auto"), bad).not.toThrow(); // warn-and-ignore, for now
-  }
   expect(() => expand("overflow", "overlay")).toThrow(CssError);
+});
+
+test("overflow is per axis, which is the case that matters", () => {
+  // The asymmetric one: scroll down, never sideways. This is what Tailwind's
+  // `overflow-y-auto` emits and what a scrolling column actually needs.
+  expect(expand("overflow-y", "auto")).toEqual({ overflowY: 3 });
+  expect(expand("overflow-x", "hidden")).toEqual({ overflowX: 1 });
+
+  // Two values are `<x> <y>`, as in CSS.
+  expect(expand("overflow", "hidden auto")).toEqual({ overflowX: 1, overflowY: 3 });
+  expect(() => expand("overflow", "hidden auto visible")).toThrow(CssError);
+
+  // A longhand after the shorthand wins, which the cascade relies on.
+  const out: Record<string, number> = {};
+  expandDeclaration("overflow", "hidden", out as never);
+  expandDeclaration("overflow-y", "auto", out as never);
+  expect(out).toEqual({ overflowX: 1, overflowY: 3 });
 });

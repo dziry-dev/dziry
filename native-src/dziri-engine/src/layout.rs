@@ -532,6 +532,19 @@ fn lpa(v: f32) -> LengthPercentageAuto {
     }
 }
 
+fn overflow_of(v: u8) -> Overflow {
+    match v {
+        // `ELLIPSIS` is `text-overflow` wearing this field's name — a schema wart
+        // kept for wire compatibility. For layout it contains its content, like
+        // `hidden`, which is the closest true thing.
+        protocol::overflow::HIDDEN | protocol::overflow::ELLIPSIS => Overflow::Hidden,
+        protocol::overflow::SCROLL => Overflow::Scroll,
+        // `VISIBLE` and anything unrecognised: spill, which is CSS's default and the
+        // only answer that cannot hide content.
+        _ => Overflow::Visible,
+    }
+}
+
 fn align_of(v: u8) -> Option<AlignItems> {
     match v {
         align::CENTER => Some(AlignItems::Center),
@@ -704,23 +717,12 @@ fn style_of(tables: &Tables, node: usize) -> Style {
         left: lpa(f32f(f::MARGIN_LEFT)),
     };
 
-    // One field for both axes until the schema has two; `css.ts` refuses
-    // `overflow-x`/`overflow-y` rather than guessing which axis was meant.
-    //
     // `scrollbar_width` stays 0, which makes Taffy treat `Scroll` exactly like
-    // `Hidden` for sizing. That is deliberate: reserving a gutter is only honest
-    // once a scrollbar is drawn into it, and this commit clips without scrolling.
-    let overflow = match u8f(f::OVERFLOW) {
-        protocol::overflow::VISIBLE => Overflow::Visible,
-        // `ELLIPSIS` is `text-overflow` wearing the wrong field's name — a schema
-        // wart. For layout it contains its content, like `hidden`.
-        protocol::overflow::HIDDEN | protocol::overflow::ELLIPSIS => Overflow::Hidden,
-        protocol::overflow::SCROLL => Overflow::Scroll,
-        _ => Overflow::Visible,
-    };
+    // `Hidden` for sizing. Deliberate: reserving a gutter is only honest once a
+    // scrollbar is drawn into it.
     s.overflow = Point {
-        x: overflow,
-        y: overflow,
+        x: overflow_of(u8f(f::OVERFLOW_X)),
+        y: overflow_of(u8f(f::OVERFLOW_Y)),
     };
 
     s.position = if u8f(f::POSITION) == protocol::position::ABSOLUTE {

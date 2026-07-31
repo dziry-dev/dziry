@@ -266,23 +266,48 @@ impl Painter {
             }
 
             // A node that contains its overflow clips its descendants to its own
-            // padding box. Ordered so `Restore` pops last: push it, then the
-            // children in reverse.
+            // padding box, on the axes that contain. Ordered so `Restore` pops last:
+            // push it, then the children in reverse.
             //
-            // The clip is the *padding* box rather than the border box, which is
-            // what CSS says and what makes a bordered scroll container look right:
-            // content scrolls under its own border rather than over it.
-            if !siblings.is_empty() && self.clips(tables, node, state) {
+            // The clip is the *padding* box rather than the border box, which is what
+            // CSS says and what makes a bordered scroll container look right: content
+            // scrolls under its own border rather than over it.
+            let (clip_x, clip_y) = if siblings.is_empty() {
+                (false, false)
+            } else {
+                self.clips(tables, node, state)
+            };
+
+            if clip_x || clip_y {
                 let [x, y, w, h] = bounds[node];
                 let inset = self.border_of(tables, node, state);
+                // The unclipped axis keeps whatever bound is already in force, so a
+                // vertical-only clip does not quietly become a horizontal one. Taking
+                // it from the live clip rather than from a large constant means an
+                // enclosing clip still wins.
+                let outer = canvas.local_clip_bounds().unwrap_or(Rect::new(
+                    f32::MIN / 4.0,
+                    f32::MIN / 4.0,
+                    f32::MAX / 4.0,
+                    f32::MAX / 4.0,
+                ));
+
+                let left = if clip_x { x + inset } else { outer.left };
+                let right = if clip_x {
+                    (x + w - inset).max(x + inset)
+                } else {
+                    outer.right
+                };
+                let top = if clip_y { y + inset } else { outer.top };
+                let bottom = if clip_y {
+                    (y + h - inset).max(y + inset)
+                } else {
+                    outer.bottom
+                };
+
                 canvas.save();
                 canvas.clip_rect(
-                    Rect::from_xywh(
-                        x + inset,
-                        y + inset,
-                        (w - inset * 2.0).max(0.0),
-                        (h - inset * 2.0).max(0.0),
-                    ),
+                    Rect::new(left, top, right, bottom),
                     None,
                     // Antialiased, or a clipped edge crossing a rounded corner shows
                     // a stair-step against the border it is supposed to sit inside.
@@ -296,19 +321,26 @@ impl Painter {
         }
     }
 
-    /// Whether this node contains its overflow, and so clips its descendants.
-    fn clips(&self, tables: &Tables, node: usize, state: &InputState) -> bool {
+    /// Which axes this node contains its overflow on, and so clips.
+    ///
+    /// Per axis because the useful case is asymmetric: a column that scrolls
+    /// vertically must *not* clip horizontally, or a focus ring or a dropdown that
+    /// legitimately sticks out sideways gets cut off.
+    fn clips(&self, tables: &Tables, node: usize, state: &InputState) -> (bool, bool) {
         let slot = self.style_for(tables, node, state);
-        matches!(
-            tables
-                .u8s(STYLES, protocol::styles::OVERFLOW)
-                .get(slot)
-                .copied(),
-            Some(
-                protocol::overflow::HIDDEN
-                    | protocol::overflow::ELLIPSIS
-                    | protocol::overflow::SCROLL
+        let contains = |field: usize| {
+            matches!(
+                tables.u8s(STYLES, field).get(slot).copied(),
+                Some(
+                    protocol::overflow::HIDDEN
+                        | protocol::overflow::ELLIPSIS
+                        | protocol::overflow::SCROLL
+                )
             )
+        };
+        (
+            contains(protocol::styles::OVERFLOW_X),
+            contains(protocol::styles::OVERFLOW_Y),
         )
     }
 

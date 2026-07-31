@@ -339,6 +339,31 @@ export function parseLength(raw: string): number {
 }
 
 /** Splits a 1-to-4-value box shorthand into [top, right, bottom, left]. */
+/**
+ * One `overflow` keyword, for either axis.
+ *
+ * CSS has five and the engine has three. `clip` collapses into `hidden` because they
+ * differ only in whether script may scroll the box, and nothing scrolls
+ * programmatically yet. `auto` and `scroll` both become `SCROLL` because the engine
+ * draws a scrollbar only when the content actually overflows — which *is* `auto`, so
+ * `scroll` is the approximated one, and erring toward "no scrollbar on content that
+ * fits" is the harmless direction.
+ */
+function overflowKeyword(keyword: string, whole: string): number {
+  switch (keyword) {
+    case "visible":
+      return Overflow.VISIBLE;
+    case "hidden":
+    case "clip":
+      return Overflow.HIDDEN;
+    case "auto":
+    case "scroll":
+      return Overflow.SCROLL;
+    default:
+      throw new CssError(`unsupported overflow "${whole}"`);
+  }
+}
+
 function boxShorthand(raw: string): [number, number, number, number] {
   const parts = raw.trim().split(/\s+/).map(parseLength);
   const [a, b, c, d] = parts;
@@ -770,31 +795,23 @@ export function expandDeclaration(
       return;
     }
 
-    // One field for both axes. `overflow-x`/`overflow-y` are *not* handled here:
-    // applying either to both axes would be wrong for the mixed case that motivates
-    // the properties at all (`overflow-x: hidden; overflow-y: auto`), and the schema
-    // has one `overflow` field to write. So they fall through to the same
-    // warn-and-ignore as any other unsupported property, and per-axis overflow needs
-    // a second schema field before it can mean anything.
+    // `overflow` takes one value for both axes or two as `<x> <y>`, and the two
+    // longhands set one axis each. The asymmetric case is the common one — a column
+    // that scrolls vertically and must never scroll sideways — so the schema carries
+    // an axis each rather than one field that would have to lie about the other.
     case "overflow": {
-      const v = value.trim().toLowerCase();
-      const known: Record<string, number> = {
-        visible: Overflow.VISIBLE,
-        // `clip` differs from `hidden` only in whether the box is *scrollable* by
-        // script; nothing here scrolls programmatically yet, so they are the same.
-        clip: Overflow.HIDDEN,
-        hidden: Overflow.HIDDEN,
-        // `auto` shows a scrollbar only when it is needed and `scroll` always does.
-        // The engine draws one only when the content overflows, which is `auto`'s
-        // behaviour — so `scroll` is the approximation, and it is the harmless one.
-        auto: Overflow.SCROLL,
-        scroll: Overflow.SCROLL,
-      };
-      const resolved = known[v];
-      if (resolved === undefined) throw new CssError(`unsupported overflow "${value}"`);
-      out.overflow = resolved;
+      const parts = value.trim().toLowerCase().split(/\s+/);
+      if (parts.length > 2) throw new CssError(`overflow takes one or two values, got "${value}"`);
+      out.overflowX = overflowKeyword(parts[0]!, value);
+      out.overflowY = overflowKeyword(parts[1] ?? parts[0]!, value);
       return;
     }
+    case "overflow-x":
+      out.overflowX = overflowKeyword(value.trim().toLowerCase(), value);
+      return;
+    case "overflow-y":
+      out.overflowY = overflowKeyword(value.trim().toLowerCase(), value);
+      return;
 
     case "display":
       return; // handled by the caller

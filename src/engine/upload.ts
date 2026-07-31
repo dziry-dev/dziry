@@ -81,7 +81,8 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
   ["insetLeft", "insetL"],
   ["fontSize", "fontSize"],
   ["fontWeight", "fontWeight"],
-  ["overflow", "overflow"],
+  ["overflowX", "overflowX"],
+  ["overflowY", "overflowY"],
 ];
 
 /** How much room to leave beyond what the IR needs right now. */

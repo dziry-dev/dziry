@@ -160,7 +160,11 @@ const STYLES: Table = {
     { name: "fontSize", type: "f32", affects: "layout" },
     { name: "fontWeight", type: "u16", affects: "layout" },
     { name: "lineClamp", type: "u16", affects: "layout", doc: "0 = unlimited; drives SkParagraph maxLines" },
-    { name: "overflow", type: "u8", affects: "layout", doc: "0 visible, 1 hidden, 2 ellipsis, 3 scroll" },
+    // Per axis, because the common case is asymmetric: a column that scrolls
+    // vertically and must not scroll horizontally. One field would make
+    // `overflow-y: auto` either a lie about the other axis or unexpressible.
+    { name: "overflowX", type: "u8", affects: "layout", doc: "0 visible, 1 hidden, 2 ellipsis, 3 scroll" },
+    { name: "overflowY", type: "u8", affects: "layout", doc: "0 visible, 1 hidden, 2 ellipsis, 3 scroll" },
   ],
 };
 
@@ -417,6 +421,8 @@ export const ENUMS: EnumDef[] = [
  * Bumped on any change to the tables above. The engine refuses to start on a
  * mismatch rather than rendering garbage.
  *
+ * v5 splits `overflow` into `overflowX`/`overflowY`.
+ *
  * Also bumped when the *C ABI* changes shape, even though the tables did not —
  * v4 is where the engine handle stopped being a pointer and became a `u32` token
  * into a handle table. `SCHEMA_HASH` cannot cover that: it hashes the tables, and
@@ -425,7 +431,7 @@ export const ENUMS: EnumDef[] = [
  * call that is safe to make against a binary of unknown vintage — which is why the
  * ABI's own version lives here.
  */
-export const PROTOCOL_VERSION = 4;
+export const PROTOCOL_VERSION = 5;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
