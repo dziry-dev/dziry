@@ -325,8 +325,10 @@ Everything below describes the TypeScript runtime as built and measured. It work
 the architecture. It is being replaced — see `ROADMAP.md` A0. Recorded here because the *reasons*
 are measurements, not preferences.
 
-**The A0 spike** wrapped Taffy in a C ABI (`native-src/taffy-ffi`) and measured it against our
-engine on a 1203-node page:
+**The A0 spike** wrapped Taffy in a C ABI and measured it against our engine on a 1203-node
+page. The crate is deleted — its conversion rules had drifted from `layout.rs`'s (only NaN
+treated as auto, no `BASELINE`, unset coerced to `flex-start`), so what survived was a second,
+wrong copy of the thing it helped decide. The measurements are the part worth keeping:
 
 | | Taffy over FFI | Ours |
 | --- | --- | --- |
