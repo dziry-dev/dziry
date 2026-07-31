@@ -301,12 +301,17 @@ impl Painter {
     }
 }
 
-/// Deepest interactive node containing the point, or `-1`.
+/// Topmost interactive node containing the point, or `-1`.
 ///
 /// Walks the live tree rather than a sorted `interactive` array: arena rows are
 /// numbered by slot, so after a list reorder those two orders diverge and only
 /// the tree matches what the user sees.
-pub fn hit_test(tables: &Tables, bounds: &[[f32; 4]], px: f32, py: f32) -> i32 {
+///
+/// It walks from `root` for the same reason [`Painter::paint`] does. Hardcoding
+/// node 0 agreed with the configured root in the sample and nowhere else: a
+/// non-zero root would have hit-tested a tree that is not on screen, which is
+/// the kind of divergence that only shows up in someone else's app.
+pub fn hit_test(tables: &Tables, bounds: &[[f32; 4]], root: usize, px: f32, py: f32) -> i32 {
     let count = bounds.len();
     let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
     let flags = tables.u8s(NODES, protocol::nodes::FLAGS);
@@ -314,8 +319,10 @@ pub fn hit_test(tables: &Tables, bounds: &[[f32; 4]], px: f32, py: f32) -> i32 {
     let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
 
     let mut hit = -1i32;
-    let mut stack = vec![0usize];
+    let mut stack = vec![root];
     let mut budget = count.saturating_mul(2) + 16;
+    // Reused per node so the reversal below does not allocate per level.
+    let mut children: Vec<usize> = Vec::new();
 
     while let Some(node) = stack.pop() {
         if budget == 0 {
@@ -335,15 +342,26 @@ pub fn hit_test(tables: &Tables, bounds: &[[f32; 4]], px: f32, py: f32) -> i32 {
         }
 
         if flags.get(node).copied().unwrap_or(0) & protocol::flags::INTERACTIVE != 0 {
-            // Deeper nodes are visited later and win, matching paint order.
+            // Later visits win, and the push order below makes "later" mean
+            // "painted on top".
             hit = node as i32;
         }
 
+        // Children are pushed **reversed** so they pop in document order, which
+        // makes the visit sequence exactly [`Painter::paint`]'s. Pushed forwards
+        // the stack visits the last sibling first and the *first* one wins — so
+        // two overlapping absolute siblings would hit-test to the one underneath
+        // while the user is pointing at the one on top.
+        children.clear();
         let mut c = first.get(node).copied().unwrap_or(-1);
         while c >= 0 && (c as usize) < count {
-            stack.push(c as usize);
+            children.push(c as usize);
             c = next[c as usize];
+            if children.len() > count {
+                break;
+            }
         }
+        stack.extend(children.iter().rev());
     }
 
     hit

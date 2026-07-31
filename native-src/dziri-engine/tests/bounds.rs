@@ -466,6 +466,68 @@ fn hit_testing_finds_the_deepest_interactive_node() {
 }
 
 #[test]
+fn hit_testing_starts_at_the_configured_root() {
+    // `root` is a config field that everything except `hit_test` honoured. Node
+    // 0 is deliberately left out of the tree: only the root's subtree is laid
+    // out, so a walk that starts at 0 reads unwritten bounds and finds nothing.
+    let mut config = config(3, 2);
+    config.root = 1;
+    let mut engine = Engine::new(&config).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 50.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 0);
+        leaf(t, 2, 1);
+        link(t, 1, &[2]);
+        t.set_u8(NODES, nodes::FLAGS, 2, protocol::flags::INTERACTIVE);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(bound(&engine, 1), [0.0, 0.0, 200.0, 100.0], "the root fills the window");
+    assert_eq!(engine.hit_test(10.0, 10.0), 2, "the interactive node under root 1");
+}
+
+#[test]
+fn overlapping_siblings_hit_test_to_the_one_on_top() {
+    // Two absolute siblings in the same place. Paint draws them in document
+    // order, so the *second* is on top and is the one being pointed at — but a
+    // stack walk that pushes children forwards visits them backwards, and the
+    // one underneath used to win.
+    let mut engine = Engine::new(&config(3, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+
+        t.set_u8(STYLES, styles::POSITION, 1, protocol::position::ABSOLUTE);
+        t.set_f32(STYLES, styles::INSET_TOP, 1, 0.0);
+        t.set_f32(STYLES, styles::INSET_LEFT, 1, 0.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 40.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 40.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 1);
+        link(t, 0, &[1, 2]);
+        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::INTERACTIVE);
+        t.set_u8(NODES, nodes::FLAGS, 2, protocol::flags::INTERACTIVE);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(bound(&engine, 1), bound(&engine, 2), "the two overlap exactly");
+    assert_eq!(engine.hit_test(20.0, 20.0), 2, "the later sibling is painted on top");
+}
+
+#[test]
 fn the_descriptor_matches_the_generated_schema() {
     let engine = Engine::new(&config(8, 4)).expect("engine");
     let mut spans = vec![

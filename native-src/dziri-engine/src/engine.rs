@@ -414,7 +414,7 @@ impl Engine {
                 RawInput::Quit => self.events.push(Event::of(event_kind::QUIT)),
 
                 RawInput::MouseMotion { x, y } => {
-                    let hit = hit_test(&self.tables, self.tree.bounds(), x, y);
+                    let hit = hit_test(&self.tables, self.tree.bounds(), self.root, x, y);
                     if hit != self.state.hovered {
                         self.state.hovered = hit;
                         // A hover is a repaint the host never hears about until
@@ -431,7 +431,7 @@ impl Engine {
                 }
 
                 RawInput::MouseDown { x, y } => {
-                    let hit = hit_test(&self.tables, self.tree.bounds(), x, y);
+                    let hit = hit_test(&self.tables, self.tree.bounds(), self.root, x, y);
                     // Clicking is the only way to acquire focus for now;
                     // keyboard traversal is A3.
                     self.state.pressed = hit;
@@ -447,7 +447,7 @@ impl Engine {
                 }
 
                 RawInput::MouseUp { x, y } => {
-                    let hit = hit_test(&self.tables, self.tree.bounds(), x, y);
+                    let hit = hit_test(&self.tables, self.tree.bounds(), self.root, x, y);
                     // A click is press and release on the *same* node, which is
                     // what makes dragging off a button cancel it.
                     if self.state.pressed != -1 && hit == self.state.pressed {
@@ -575,7 +575,7 @@ impl Engine {
     }
 
     pub fn hit_test(&self, x: f32, y: f32) -> i32 {
-        hit_test(&self.tables, self.tree.bounds(), x, y)
+        hit_test(&self.tables, self.tree.bounds(), self.root, x, y)
     }
 }
 
