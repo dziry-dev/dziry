@@ -536,10 +536,10 @@ fn a_cycle_in_the_child_chain_is_an_error_not_a_hang() {
 
     let result = engine.tick();
     assert!(result.is_err(), "a cycle must be reported, not spun on");
-    assert!(
-        result.unwrap_err().contains("cycle"),
-        "the message should name the problem"
-    );
+    let err = result.unwrap_err();
+    assert!(err.detail.contains("cycle"), "the message should name the problem");
+    // And the *category* travels: a malformed tree is not Skia failing.
+    assert_eq!(err.status, protocol::status::LAYOUT);
 }
 
 #[test]
@@ -561,10 +561,12 @@ fn a_parent_child_cycle_is_an_error_not_a_stack_overflow() {
 
     let result = engine.tick();
     assert!(result.is_err(), "a parent/child cycle must be reported");
+    let err = result.unwrap_err();
     assert!(
-        result.unwrap_err().contains("reachable twice"),
+        err.detail.contains("reachable twice"),
         "the message should name the problem"
     );
+    assert_eq!(err.status, protocol::status::LAYOUT);
 }
 
 #[test]
@@ -587,7 +589,7 @@ fn a_node_with_two_parents_is_refused() {
 
     let result = engine.tick();
     assert!(result.is_err(), "a shared child must be reported");
-    assert!(result.unwrap_err().contains("reachable twice"));
+    assert!(result.unwrap_err().detail.contains("reachable twice"));
 }
 
 #[test]

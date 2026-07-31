@@ -273,7 +273,19 @@ a segfault?
   `undefined` there (measured, 1.3.14) — so the "one field and one argument" estimate is void until
   either Bun populates it or we own the TSX transform, which is ruled out elsewhere. See the note in
   `jsx-dev-runtime.ts`.
-- Runtime error boundaries: catch a signal error and paint a red overlay instead of dying.
+- **Runtime error overlay — a red box, as React Native has.** Catch the failure and paint it
+  instead of dying. Today both drivers abort on a non-OK `tick()`, so the window simply
+  disappears, which is the failure mode this whole boundary was built to avoid.
+
+  Its prerequisite is done: `EngineError` carries `{status, detail}`, so the overlay has a
+  category to title itself with and a message to render. Two sources feed it — engine failures
+  crossing FFI as a status, and host failures (a signal throwing inside a handler) that never
+  reach the engine at all. Both should land in the same surface.
+
+  Two things it needs that do not exist yet: text *wrapping*, since a detail is longer than a
+  window is wide and `draw_str` is one line (A2's SkParagraph, or a naive measure-and-break in
+  the meantime), and a decision on dev-versus-production behaviour — React Native's red box is a
+  development affordance and a shipped app wants something quieter.
 - A `--explain` mode that shows why a node got the style it did (which rules matched, which won).
 
 ### Testing strategy

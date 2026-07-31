@@ -24,6 +24,8 @@ use sdl3::render::{Texture, TextureCreator, WindowCanvas};
 use sdl3::video::WindowContext;
 use sdl3::{EventPump, Sdl, VideoSubsystem};
 
+use crate::error::EngineError;
+
 /// Input as the platform reports it, before the engine decides what it means.
 #[derive(Debug, Clone)]
 pub enum RawInput {
@@ -52,9 +54,9 @@ pub struct Window {
 }
 
 impl Window {
-    pub fn new(title: &str, width: u32, height: u32, decorated: bool) -> Result<Self, String> {
-        let sdl = sdl3::init().map_err(|e| format!("SDL_Init: {e}"))?;
-        let video = sdl.video().map_err(|e| format!("SDL video subsystem: {e}"))?;
+    pub fn new(title: &str, width: u32, height: u32, decorated: bool) -> Result<Self, EngineError> {
+        let sdl = sdl3::init().map_err(|e| EngineError::sdl(format!("SDL_Init: {e}")))?;
+        let video = sdl.video().map_err(|e| EngineError::sdl(format!("SDL video subsystem: {e}")))?;
 
         let mut builder = video.window(title, width, height);
         builder.position_centered().resizable();
@@ -67,7 +69,7 @@ impl Window {
 
         let window = builder
             .build()
-            .map_err(|e| format!("SDL_CreateWindow: {e}"))?;
+            .map_err(|e| EngineError::sdl(format!("SDL_CreateWindow: {e}")))?;
 
         // Without this SDL delivers **no** `TextInput` events at all — not for
         // IME composition and not for plain Latin keys either. The event arm in
@@ -87,9 +89,9 @@ impl Window {
         let creator = canvas.texture_creator();
         let texture = creator
             .create_texture_streaming(PixelFormat::ARGB8888, width, height)
-            .map_err(|e| format!("SDL_CreateTexture: {e}"))?;
+            .map_err(|e| EngineError::sdl(format!("SDL_CreateTexture: {e}")))?;
 
-        let events = sdl.event_pump().map_err(|e| format!("SDL event pump: {e}"))?;
+        let events = sdl.event_pump().map_err(|e| EngineError::sdl(format!("SDL event pump: {e}")))?;
 
         Ok(Self {
             _sdl: sdl,
@@ -115,14 +117,14 @@ impl Window {
     }
 
     /// Reallocates the upload texture. The caller owns resizing its own surface.
-    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), EngineError> {
         if width == 0 || height == 0 || (width == self.width && height == self.height) {
             return Ok(());
         }
         let texture = self
             .creator
             .create_texture_streaming(PixelFormat::ARGB8888, width, height)
-            .map_err(|e| format!("SDL_CreateTexture on resize: {e}"))?;
+            .map_err(|e| EngineError::sdl(format!("SDL_CreateTexture on resize: {e}")))?;
 
         let old = std::mem::replace(&mut self.texture, texture);
         // `unsafe_textures` trades the borrow checker's help for a texture with
@@ -135,15 +137,15 @@ impl Window {
         Ok(())
     }
 
-    pub fn present(&mut self, pixels: &[u8], pitch: usize) -> Result<(), String> {
+    pub fn present(&mut self, pixels: &[u8], pitch: usize) -> Result<(), EngineError> {
         self.texture
             .update(None, pixels, pitch)
-            .map_err(|e| format!("SDL_UpdateTexture: {e}"))?;
+            .map_err(|e| EngineError::sdl(format!("SDL_UpdateTexture: {e}")))?;
 
         self.canvas.clear();
         self.canvas
             .copy(&self.texture, None, None)
-            .map_err(|e| format!("SDL_RenderTexture: {e}"))?;
+            .map_err(|e| EngineError::sdl(format!("SDL_RenderTexture: {e}")))?;
         self.canvas.present();
         Ok(())
     }

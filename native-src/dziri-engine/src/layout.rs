@@ -20,12 +20,32 @@ use taffy::style::{
 };
 use taffy::{Rect, Size, TaffyTree};
 
+use crate::error::EngineError;
 use crate::protocol::{self, align, display as display_enum, flex_direction, flex_wrap, justify};
 use crate::tables::Tables;
 use crate::text::Measurer;
 
 const NODES: usize = protocol::Table::Nodes as usize;
 const STYLES: usize = protocol::Table::Styles as usize;
+
+/// Names a Taffy failure as a layout failure.
+///
+/// The category is stated once for the module rather than at every call site,
+/// because it is a property of the stage: everything that can go wrong in here
+/// is either Taffy refusing, or the host-written tree not being a tree. What the
+/// *host* needs from that distinction is only that it is not Skia and not SDL —
+/// it means "the tree is wrong", so do not retry.
+///
+/// Takes `&'static str` rather than a formatted message so nothing allocates on
+/// the success path — `set_children` and `set_style` run once per node.
+fn taffy(what: &'static str) -> impl FnOnce(taffy::TaffyError) -> EngineError {
+    move |e| EngineError::layout(format!("{what}: {e:?}"))
+}
+
+/// The same, for the calls that are per-node and want to say which.
+fn taffy_at(what: &'static str, node: usize) -> impl FnOnce(taffy::TaffyError) -> EngineError {
+    move |e| EngineError::layout(format!("{what} on node {node}: {e:?}"))
+}
 
 pub struct LayoutTree {
     tree: TaffyTree<u32>,
@@ -72,7 +92,7 @@ impl LayoutTree {
     /// goes through [`relink_nodes`](Self::relink_nodes) instead — this
     /// allocates a whole `TaffyTree`, and its caller then pushes a style per
     /// node, both over table *capacity*.
-    pub fn rebuild(&mut self, tables: &Tables, root: usize) -> Result<(), String> {
+    pub fn rebuild(&mut self, tables: &Tables, root: usize) -> Result<(), EngineError> {
         let count = tables.capacities().nodes as usize;
         self.root = root;
 
@@ -85,7 +105,7 @@ impl LayoutTree {
             let id = self
                 .tree
                 .new_leaf_with_context(Style::default(), i as u32)
-                .map_err(|e| format!("taffy new_leaf: {e:?}"))?;
+                .map_err(taffy("taffy new_leaf"))?;
             self.ids.push(id);
         }
 
@@ -100,7 +120,7 @@ impl LayoutTree {
     /// budget here covers the rest, because this walks every node including
     /// unreachable ones — spare capacity and abandoned arena regions, which a bad
     /// write could still have left a sibling cycle in.
-    fn relink(&mut self, tables: &Tables) -> Result<(), String> {
+    fn relink(&mut self, tables: &Tables) -> Result<(), EngineError> {
         let count = self.ids.len();
         let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
         let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
@@ -132,7 +152,7 @@ impl LayoutTree {
     /// node linked for the first time already carries its real style, because
     /// [`Self::apply_all_styles`] walks table capacity rather than the reachable
     /// tree. That is the invariant this rests on; the comment there says so.
-    pub fn relink_nodes(&mut self, tables: &Tables, changed: &[u32]) -> Result<(), String> {
+    pub fn relink_nodes(&mut self, tables: &Tables, changed: &[u32]) -> Result<(), EngineError> {
         let count = self.ids.len();
         if count == 0 {
             return Ok(());
@@ -149,9 +169,9 @@ impl LayoutTree {
         for &node in changed {
             let node = node as usize;
             if node >= count {
-                return Err(format!(
+                return Err(EngineError::layout(format!(
                     "changed node {node} is past the {count}-node table"
-                ));
+                )));
             }
             affected.push(node);
             // Read before the relink loop overwrites it: this has to be the
@@ -185,7 +205,7 @@ impl LayoutTree {
         node: usize,
         children: &mut Vec<NodeId>,
         budget: &mut usize,
-    ) -> Result<(), String> {
+    ) -> Result<(), EngineError> {
         let count = self.ids.len();
         children.clear();
 
@@ -193,15 +213,15 @@ impl LayoutTree {
         while c >= 0 {
             let ci = c as usize;
             if ci >= count {
-                return Err(format!(
+                return Err(EngineError::layout(format!(
                     "node {node} has child {c}, past the {count}-node table"
-                ));
+                )));
             }
             if *budget == 0 {
-                return Err(format!(
+                return Err(EngineError::layout(format!(
                     "child chain from node {node} exceeded its budget — a cycle in \
                      firstChild/nextSibling"
-                ));
+                )));
             }
             *budget -= 1;
             children.push(self.ids[ci]);
@@ -211,7 +231,7 @@ impl LayoutTree {
 
         self.tree
             .set_children(self.ids[node], children)
-            .map_err(|e| format!("taffy set_children on node {node}: {e:?}"))
+            .map_err(taffy_at("taffy set_children", node))
     }
 
     /// Pushes a node's resolved style into Taffy.
@@ -227,15 +247,15 @@ impl LayoutTree {
     ///
     /// The saving that *is* safe is upstream, in `classify`: a field that layout
     /// never reads produces no entry, so this is not called at all.
-    pub fn apply_style(&mut self, tables: &Tables, node: usize) -> Result<(), String> {
+    pub fn apply_style(&mut self, tables: &Tables, node: usize) -> Result<(), EngineError> {
         let style = style_of(tables, node);
         self.tree
             .set_style(self.ids[node], style)
-            .map_err(|e| format!("taffy set_style on node {node}: {e:?}"))
+            .map_err(taffy_at("taffy set_style", node))
     }
 
     /// Pushes the resolved style of each listed node, and nothing else.
-    pub fn apply_styles_of(&mut self, tables: &Tables, nodes: &[u32]) -> Result<(), String> {
+    pub fn apply_styles_of(&mut self, tables: &Tables, nodes: &[u32]) -> Result<(), EngineError> {
         for &node in nodes {
             let node = node as usize;
             // Every caller derives these from a span whose capacity is the node
@@ -258,7 +278,7 @@ impl LayoutTree {
     /// A row whose `nodes.style` never changes — appended into a slot that
     /// already held the same value — would otherwise lay out with Taffy's
     /// `Style::default()` and no write anywhere to blame.
-    pub fn apply_all_styles(&mut self, tables: &Tables) -> Result<(), String> {
+    pub fn apply_all_styles(&mut self, tables: &Tables) -> Result<(), EngineError> {
         for i in 0..self.ids.len() {
             self.apply_style(tables, i)?;
         }
@@ -283,14 +303,16 @@ impl LayoutTree {
         measurer: &mut Measurer,
         width: f32,
         height: f32,
-    ) -> Result<(), String> {
+    ) -> Result<(), EngineError> {
         if self.ids.is_empty() {
             return Ok(());
         }
         let root = *self
             .ids
             .get(self.root)
-            .ok_or_else(|| format!("root node {} is outside the table", self.root))?;
+            .ok_or_else(|| {
+                EngineError::layout(format!("root node {} is outside the table", self.root))
+            })?;
 
         // Borrowed before the closure so it captures the tables, not `self`.
         let text = tables.i32s(NODES, protocol::nodes::TEXT);
@@ -315,12 +337,12 @@ impl LayoutTree {
             let mut style = self
                 .tree
                 .style(root)
-                .map_err(|e| format!("taffy style on root: {e:?}"))?
+                .map_err(taffy("taffy style on root"))?
                 .clone();
             style.size = want;
             self.tree
                 .set_style(root, style)
-                .map_err(|e| format!("taffy set_style on root: {e:?}"))?;
+                .map_err(taffy("taffy set_style on root"))?;
         }
 
         let space = Size {
@@ -362,14 +384,14 @@ impl LayoutTree {
                     height: known.height.unwrap_or(h),
                 }
             })
-            .map_err(|e| format!("taffy compute_layout: {e:?}"))?;
+            .map_err(taffy("taffy compute_layout"))?;
 
         self.read_back(tables)
     }
 
     /// Walks the tree accumulating parent offsets, turning Taffy's relative
     /// locations into the absolute rects everything downstream expects.
-    fn read_back(&mut self, tables: &Tables) -> Result<(), String> {
+    fn read_back(&mut self, tables: &Tables) -> Result<(), EngineError> {
         let count = self.ids.len();
         if self.bounds.len() != count {
             self.bounds = vec![[0.0; 4]; count];
@@ -388,14 +410,16 @@ impl LayoutTree {
 
         while let Some((node, ox, oy)) = stack.pop() {
             if budget == 0 {
-                return Err("layout read-back exceeded its budget — a cycle in the tree".into());
+                return Err(EngineError::layout(
+                    "layout read-back exceeded its budget — a cycle in the tree",
+                ));
             }
             budget -= 1;
 
             let l = self
                 .tree
                 .layout(self.ids[node])
-                .map_err(|e| format!("taffy layout on node {node}: {e:?}"))?;
+                .map_err(taffy_at("taffy layout", node))?;
 
             let x = ox + l.location.x;
             let y = oy + l.location.y;
@@ -431,12 +455,14 @@ impl LayoutTree {
 ///
 /// Visiting each node at most once also rules out a node appearing under two
 /// parents, which is not a tree either and which Taffy would silently accept.
-fn validate_tree(tables: &Tables, root: usize, count: usize) -> Result<(), String> {
+fn validate_tree(tables: &Tables, root: usize, count: usize) -> Result<(), EngineError> {
     if count == 0 {
         return Ok(());
     }
     if root >= count {
-        return Err(format!("root node {root} is outside the {count}-node table"));
+        return Err(EngineError::layout(format!(
+            "root node {root} is outside the {count}-node table"
+        )));
     }
 
     let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
@@ -451,15 +477,15 @@ fn validate_tree(tables: &Tables, root: usize, count: usize) -> Result<(), Strin
         while child >= 0 {
             let ci = child as usize;
             if ci >= count {
-                return Err(format!(
+                return Err(EngineError::layout(format!(
                     "node {node} has child {child}, past the {count}-node table"
-                ));
+                )));
             }
             if seen[ci] {
-                return Err(format!(
+                return Err(EngineError::layout(format!(
                     "node {ci} is reachable twice from the root — firstChild/nextSibling \
                      describe a cycle or a shared child, which is not a tree"
-                ));
+                )));
             }
             seen[ci] = true;
             stack.push(ci);

@@ -142,7 +142,7 @@ pub unsafe extern "C" fn dziri_engine_create(
                 *out = Box::into_raw(handle);
                 status::OK
             }
-            Err(message) => fail(status::SDL, message),
+            Err(e) => fail(e.status, e.detail),
         }
     })
 }
@@ -249,9 +249,12 @@ pub unsafe extern "C" fn dziri_engine_generation(handle: *mut Handle, out: *mut 
 /// presents.
 #[no_mangle]
 pub extern "C" fn dziri_engine_tick(handle: *mut Handle) -> i32 {
+    // The status is the error's own, not one guessed per entry point. `tick`
+    // reaches Taffy, Skia and SDL, and reporting all three as LAYOUT told a host
+    // out of video memory that its tree was wrong.
     with(handle, |engine| match engine.tick() {
         Ok(()) => status::OK,
-        Err(message) => fail(status::LAYOUT, message),
+        Err(e) => fail(e.status, e.detail),
     })
 }
 
@@ -303,7 +306,7 @@ pub unsafe extern "C" fn dziri_engine_grow(
 pub extern "C" fn dziri_engine_resize(handle: *mut Handle, width: u32, height: u32) -> i32 {
     with(handle, |engine| match engine.resize(width, height) {
         Ok(()) => status::OK,
-        Err(message) => fail(status::SDL, message),
+        Err(e) => fail(e.status, e.detail),
     })
 }
 

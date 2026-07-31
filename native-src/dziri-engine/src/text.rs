@@ -21,6 +21,7 @@ use std::collections::HashMap;
 
 use skia_safe::font_style::{Slant, Weight, Width};
 use skia_safe::{Font, FontMgr, FontStyle, Typeface};
+use crate::error::EngineError;
 
 /// Tried in order. A missing font family is not a crash: the last resort is
 /// whatever the platform considers its default sans-serif.
@@ -63,7 +64,7 @@ pub struct Measurer {
 }
 
 impl Measurer {
-    pub fn new() -> Result<Self, String> {
+    pub fn new() -> Result<Self, EngineError> {
         let font_mgr = FontMgr::new();
 
         let mut family = String::new();
@@ -82,10 +83,12 @@ impl Measurer {
             // still usable, just not with a name we can report.
             let count = font_mgr.count_families();
             if count == 0 {
-                return Err(format!(
+                // Skia's own font manager found nothing, so this is Skia's
+                // failure rather than a bad tree or a windowing problem.
+                return Err(EngineError::skia(format!(
                     "no usable font family (tried {}); the platform font manager reports none",
                     FAMILIES.join(", ")
-                ));
+                )));
             }
             family = font_mgr.family_name(0);
         }

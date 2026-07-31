@@ -24,6 +24,7 @@
 
 use skia_safe::{surfaces, Color, Surface};
 
+use crate::error::EngineError;
 use crate::layout::LayoutTree;
 use crate::paint::{hit_test, InputState, Painter};
 use crate::protocol::{self, event_kind};
@@ -134,12 +135,15 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(config: &EngineConfig) -> Result<Self, String> {
+    pub fn new(config: &EngineConfig) -> Result<Self, EngineError> {
         if config.protocol_version != protocol::PROTOCOL_VERSION {
-            return Err(format!(
-                "protocol mismatch: the host speaks v{}, this engine speaks v{}",
-                config.protocol_version,
-                protocol::PROTOCOL_VERSION
+            return Err(EngineError::new(
+                protocol::status::PROTOCOL_MISMATCH,
+                format!(
+                    "protocol mismatch: the host speaks v{}, this engine speaks v{}",
+                    config.protocol_version,
+                    protocol::PROTOCOL_VERSION
+                ),
             ));
         }
 
@@ -160,7 +164,11 @@ impl Engine {
         };
 
         let surface = surfaces::raster_n32_premul((width as i32, height as i32))
-            .ok_or_else(|| format!("Skia could not allocate a {width}x{height} raster surface"))?;
+            .ok_or_else(|| {
+                EngineError::skia(format!(
+                    "Skia could not allocate a {width}x{height} raster surface"
+                ))
+            })?;
 
         let window = if config.windowed != 0 {
             let title = read_title(config);
@@ -262,7 +270,7 @@ impl Engine {
 
     /// One frame: apply what Bun staged, relayout what that invalidated, paint,
     /// present, and collect input.
-    pub fn tick(&mut self) -> Result<(), String> {
+    pub fn tick(&mut self) -> Result<(), EngineError> {
         let started = std::time::Instant::now();
 
         // Input first, so a click staged by Bun last frame and a click arriving
@@ -309,7 +317,7 @@ impl Engine {
     /// the changed index set. Before this, *any* link write allocated a new
     /// `TaffyTree` with a leaf per node and pushed a style per node, over table
     /// capacity, for one appended list row.
-    fn resync(&mut self, diff: &Diff) -> Result<(), String> {
+    fn resync(&mut self, diff: &Diff) -> Result<(), EngineError> {
         if self.fresh || self.tree.node_count() != self.tables.capacities().nodes as usize {
             self.tree.rebuild(&self.tables, self.root)?;
             self.tree.apply_all_styles(&self.tables)?;
@@ -392,16 +400,16 @@ impl Engine {
         );
     }
 
-    fn present(&mut self) -> Result<(), String> {
+    fn present(&mut self) -> Result<(), EngineError> {
         if self.window.is_none() {
             return Ok(());
         }
         let Some(pixmap) = self.surface.peek_pixels() else {
-            return Err("Skia surface has no readable pixels".into());
+            return Err(EngineError::skia("Skia surface has no readable pixels"));
         };
         let row_bytes = pixmap.row_bytes();
         let Some(bytes) = pixmap.bytes() else {
-            return Err("Skia surface has no readable pixels".into());
+            return Err(EngineError::skia("Skia surface has no readable pixels"));
         };
 
         // Borrowed separately because `bytes` borrows the surface.
@@ -410,7 +418,7 @@ impl Engine {
     }
 
     /// Drains the platform queue, resolves hits, and records what Bun needs.
-    fn pump_input(&mut self) -> Result<(), String> {
+    fn pump_input(&mut self) -> Result<(), EngineError> {
         let Some(window) = self.window.as_mut() else {
             return Ok(());
         };
@@ -547,7 +555,7 @@ impl Engine {
         true
     }
 
-    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+    pub fn resize(&mut self, width: u32, height: u32) -> Result<(), EngineError> {
         let width = width.max(1);
         let height = height.max(1);
         if width == self.width && height == self.height {
@@ -555,7 +563,11 @@ impl Engine {
         }
 
         self.surface = surfaces::raster_n32_premul((width as i32, height as i32))
-            .ok_or_else(|| format!("Skia could not allocate a {width}x{height} raster surface"))?;
+            .ok_or_else(|| {
+                EngineError::skia(format!(
+                    "Skia could not allocate a {width}x{height} raster surface"
+                ))
+            })?;
         if let Some(window) = self.window.as_mut() {
             window.resize(width, height)?;
         }

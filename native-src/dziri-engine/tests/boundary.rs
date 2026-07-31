@@ -181,6 +181,29 @@ fn the_descriptor_survives_a_round_trip_through_the_abi() {
 }
 
 #[test]
+fn a_skia_failure_reports_skia_and_not_the_entry_point_s_guess() {
+    // `dziri_engine_resize` used to map every failure beneath it to `SDL`,
+    // including this one — Skia refusing to allocate the surface, before SDL is
+    // reached at all. The status is the host's only machine-readable signal, so
+    // the guess made "out of video memory" indistinguishable from "the window
+    // manager refused", and no host could key recovery on either.
+    //
+    // `u32::MAX as i32` is -1, which is the cheapest way to make the allocation
+    // fail without actually exhausting memory.
+    let handle = create();
+    let code = dziri_engine_resize(handle, u32::MAX, u32::MAX);
+
+    assert_eq!(code, status::SKIA, "{}", last_error());
+    assert!(
+        last_error().contains("raster surface"),
+        "the detail should still say what happened: {}",
+        last_error()
+    );
+
+    unsafe { dziri_engine_destroy(handle) };
+}
+
+#[test]
 fn a_headless_engine_paints_pixels() {
     let handle = create();
     assert_eq!(dziri_engine_tick(handle), status::OK, "{}", last_error());

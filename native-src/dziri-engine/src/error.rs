@@ -68,6 +68,65 @@ fn payload_message(payload: &(dyn std::any::Any + Send)) -> String {
     }
 }
 
+/// A failure, carrying the category as well as the words.
+///
+/// Internal fallible operations used to return `Result<_, String>`, which says
+/// what happened and not what kind of thing it was — so each FFI entry point had
+/// to pick one status for every path beneath it, and the picks were wrong for
+/// most of them. `tick()` reported `LAYOUT` whether Taffy refused a tree, Skia
+/// failed to allocate a surface, or SDL failed to upload a texture; `resize()`
+/// reported `SDL` even when it was Skia that ran out of memory.
+///
+/// The detail stays a `String` deliberately. It is only ever read by a human
+/// through `dziri_last_error`, and an error hierarchy would buy nothing across
+/// an `i32` boundary. What has to travel is the *category*, because the status
+/// code is the host's only machine-readable signal and it is the thing a host
+/// would key recovery on — retry a resize on `SDL`, surface a driver message on
+/// `SKIA`, refuse to render on `LAYOUT`.
+///
+/// There is deliberately no `From<String>`: a conversion would let a call site
+/// skip choosing, which is the habit this replaces.
+#[derive(Debug, Clone)]
+pub struct EngineError {
+    /// One of [`status`]. Never `OK`.
+    pub status: i32,
+    pub detail: String,
+}
+
+impl EngineError {
+    pub fn new(status: i32, detail: impl Into<String>) -> Self {
+        Self { status, detail: detail.into() }
+    }
+
+    /// Skia refused: surface allocation, encoding, no readable pixels.
+    pub fn skia(detail: impl Into<String>) -> Self {
+        Self::new(status::SKIA, detail)
+    }
+
+    /// SDL refused: window, texture, renderer, event pump.
+    pub fn sdl(detail: impl Into<String>) -> Self {
+        Self::new(status::SDL, detail)
+    }
+
+    /// Taffy refused, or the host-written tree is not one.
+    pub fn layout(detail: impl Into<String>) -> Self {
+        Self::new(status::LAYOUT, detail)
+    }
+
+    /// A request that does not fit, or an index outside the tables.
+    pub fn capacity(detail: impl Into<String>) -> Self {
+        Self::new(status::CAPACITY, detail)
+    }
+}
+
+impl std::fmt::Display for EngineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.detail)
+    }
+}
+
+impl std::error::Error for EngineError {}
+
 /// Records the detail behind a failure status.
 pub fn set_error(message: impl Into<String>) {
     LAST_ERROR.with(|slot| *slot.borrow_mut() = message.into());
