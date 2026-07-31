@@ -75,7 +75,9 @@ impl Geometry<'_> {
 /// subtree that opened it finishes, and an explicit stack has no natural "after the
 /// children" moment. This is that moment, made a value.
 enum Step {
-    Node(usize),
+    /// A node, plus the scroll its ancestors have applied — needed so the viewport
+    /// reject can compare a window-coordinate rect against a window-coordinate clip.
+    Node(usize, f32, f32),
     Restore,
 }
 
@@ -219,7 +221,7 @@ impl Painter {
         let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
         let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
 
-        // What is actually visible, asked once per frame rather than per node:
+        // What is visible on screen, asked once per frame rather than per node:
         // `local_clip_bounds` inverts the canvas matrix, and this loop runs over
         // every node in the tree.
         //
@@ -227,11 +229,25 @@ impl Painter {
         // exists — and for text the expensive part happens on this side of that
         // call: `measure` before `draw_str`. An off-screen list therefore paid full
         // price. `None` means the clip is empty, so nothing is visible at all.
+        //
+        // Read *before* any scroll translate, so it is in window coordinates. Each
+        // node's rect is compared after subtracting the scroll its ancestors have
+        // applied, which is what puts both sides in the same space.
         let viewport = canvas.local_clip_bounds();
 
+        // Whatever the canvas was, it is that again when this returns.
+        //
+        // The loop below can leave early — a budget exhausted by a hostile tree —
+        // with clips still on the stack, and a Skia canvas outlives the frame: an
+        // unbalanced `save` persists, the *next* frame's `clear` is clipped to
+        // whatever was left, and the window goes progressively blank. That is not a
+        // hypothetical; it is what "the window went all grey" was.
+        let base_save_count = canvas.save_count();
+
         // Pre-order, iterative: children paint over their parents, and a hostile
-        // tree must not be able to overflow the render thread's stack.
-        let mut stack = vec![Step::Node(root)];
+        // tree must not be able to overflow the render thread's stack. Each entry
+        // carries the scroll its ancestors have applied.
+        let mut stack = vec![Step::Node(root, 0.0, 0.0)];
         let mut siblings: Vec<usize> = Vec::with_capacity(16);
         let mut budget = count.saturating_mul(2) + 16;
 
@@ -244,8 +260,8 @@ impl Painter {
             // A clip ends when the subtree that opened it does. Pushed *before* the
             // children, so it pops after all of them — which is what makes an
             // explicit stack able to express save/restore at all.
-            let node = match step {
-                Step::Node(node) => node,
+            let (node, scrolled_x, scrolled_y) = match step {
+                Step::Node(node, sx, sy) => (node, sx, sy),
                 Step::Restore => {
                     canvas.restore();
                     continue;
@@ -265,7 +281,13 @@ impl Painter {
             // drawn — Skia's own clip is still behind this.
             let visible = match viewport {
                 Some(vp) => {
+                    // Where this node is *on screen*: its layout rect minus what its
+                    // ancestors have scrolled. Comparing the unscrolled rect against
+                    // a window-coordinate viewport is what made scrolled content
+                    // vanish — a footer at content y=600 is on screen once the page
+                    // has scrolled 500, and the stale comparison rejected it.
                     let [x, y, w, h] = geometry.bounds[node];
+                    let (x, y) = (x - scrolled_x, y - scrolled_y);
                     !(x + w <= vp.left || x >= vp.right || y + h <= vp.top || y >= vp.bottom)
                 }
                 // An empty clip: nothing is visible, but the walk still has to
@@ -296,6 +318,15 @@ impl Painter {
                 (false, false)
             } else {
                 self.clips(tables, node, state)
+            };
+
+            // A scroll offset only means anything on a box that clips: a node with
+            // `overflow: visible` has no scroll region for the wheel to move, so it
+            // must not translate its children either.
+            let own_scroll = if clip_x || clip_y {
+                geometry.scroll_of(node)
+            } else {
+                [0.0, 0.0]
             };
 
             if clip_x || clip_y {
@@ -337,20 +368,28 @@ impl Painter {
                 // The scroll itself: shift the *content* up and left, inside the clip
                 // that was just set. Translating the canvas rather than adjusting
                 // every descendant's rect is what keeps `bounds` meaning "where
-                // layout put this", which is what the host reads and what the
-                // viewport reject compares against — and because the reject asks the
-                // canvas for its clip in local coordinates, rows scrolled out of view
-                // fail that test and never reach `measure`.
-                let offset = geometry.scroll_of(node);
-                if offset != [0.0, 0.0] {
-                    canvas.translate((-offset[0], -offset[1]));
+                // layout put this", which is what the host reads — and the walk
+                // carries the same offset down the stack so the viewport reject can
+                // put both sides in window coordinates, which is what lets rows
+                // scrolled out of view fail that test and never reach `measure`.
+                if own_scroll != [0.0, 0.0] {
+                    canvas.translate((-own_scroll[0], -own_scroll[1]));
                 }
                 stack.push(Step::Restore);
             }
 
-            // Reversed, because the stack pops last-in first.
-            stack.extend(siblings.iter().rev().map(|&c| Step::Node(c)));
+            // Reversed, because the stack pops last-in first. Children inherit this
+            // node's scroll on top of their ancestors'.
+            stack.extend(
+                siblings.iter().rev().map(|&c| {
+                    Step::Node(c, scrolled_x + own_scroll[0], scrolled_y + own_scroll[1])
+                }),
+            );
         }
+
+        // Unconditional, and it must be: every `break` above and every clip left on
+        // the stack is undone here rather than leaking into the next frame.
+        canvas.restore_to_count(base_save_count);
     }
 
     /// Which axes this node contains its overflow on, and so clips.

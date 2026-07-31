@@ -469,3 +469,80 @@ fn overflow_clips_only_the_axes_that_contain() {
         "overflow-y: hidden must clip the child below the container"
     );
 }
+
+/// Content scrolled *into* view is painted.
+///
+/// The bug this pins was invisible to every existing test, because they all painted an
+/// unscrolled frame. The viewport reject read the canvas clip once, in window
+/// coordinates, and compared each node's *unscrolled* layout rect against it — so a
+/// row at content y=200 that a 100px scroll had brought on screen was still compared
+/// at 200 and thrown away. Scrolling made content disappear, and scrolling far enough
+/// made everything disappear but the root's background.
+#[test]
+fn a_row_scrolled_into_view_is_actually_drawn() {
+    // A 120x120 scroll container holding three 100px rows: 300 of content, 180 of
+    // scroll. Only the first row and a sliver of the second are visible at rest.
+    let mut engine = Engine::new(&config_of(4)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..4 {
+            init_style(t, slot);
+        }
+        t.set_u8(STYLES, styles::OVERFLOW_Y, 0, protocol::overflow::SCROLL);
+        for node in 1..4usize {
+            t.set_f32(STYLES, styles::HEIGHT, node, 100.0);
+            t.set_f32(STYLES, styles::FLEX_SHRINK, node, 0.0);
+        }
+        // Row 1 red, row 2 blue, row 3 red again — so "which row is at the top" is
+        // readable from one pixel.
+        t.set_u32(STYLES, styles::BG, 1, BG);
+        t.set_u32(STYLES, styles::BG, 2, BORDER);
+        t.set_u32(STYLES, styles::BG, 3, BG);
+
+        for node in 0..4 {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        for node in 1..4usize {
+            t.set_i32(NODES, nodes::PARENT, node, 0);
+            t.set_i32(
+                NODES,
+                nodes::NEXT_SIBLING,
+                node,
+                if node < 3 { node as i32 + 1 } else { -1 },
+            );
+        }
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(
+        what_is_at(&mut engine, 60, 50),
+        "background",
+        "row 1 at rest"
+    );
+
+    // Scroll 100: row 2 should now be at the top of the box.
+    assert!(engine.scroll_at(60.0, 60.0, 0.0, 100.0), "scrolled");
+    engine.tick().expect("tick");
+    assert_eq!(
+        what_is_at(&mut engine, 60, 50),
+        "border",
+        "row 2 scrolled into view and must be painted"
+    );
+
+    // Scroll to the very end: row 3 fills the box. Under the bug every row was
+    // rejected here and the frame was bare surface.
+    assert!(engine.scroll_at(60.0, 60.0, 0.0, 10_000.0));
+    engine.tick().expect("tick");
+    assert_eq!(
+        what_is_at(&mut engine, 60, 60),
+        "background",
+        "the last row is on screen at the end of the scroll, not blank"
+    );
+}
