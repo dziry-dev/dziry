@@ -58,7 +58,11 @@ const CORPUS: Check[] = [
   // nothing in a browser. Recorded in BROWSER-FACTS.md; testing the shorthand
   // here keeps this case about width rather than re-reporting that divergence.
   { decl: "border: 2px solid #3f3f46", field: "borderWidth", prop: "border-top-width", kind: "px" },
-  { decl: "border-radius: 6px", field: "radius", prop: "border-top-left-radius", kind: "px" },
+  { decl: "border-radius: 6px", field: "radTL", prop: "border-top-left-radius", kind: "px" },
+  // The corner CSS puts last, to pin the shorthand's expansion rather than only its
+  // first value — the case the one-field version could not have failed.
+  { decl: "border-radius: 1px 2px 3px 4px", field: "radBL", prop: "border-bottom-left-radius", kind: "px" },
+  { decl: "border-top-left-radius: 12px", field: "radTL", prop: "border-top-left-radius", kind: "px" },
 
   { decl: "padding: 8px", field: "padT", prop: "padding-top", kind: "px" },
   { decl: "padding: 4px 16px", field: "padL", prop: "padding-left", kind: "px" },

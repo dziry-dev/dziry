@@ -318,7 +318,7 @@ test("inline styles beat every selector", () => {
     expect(styles.bg[ui.nodes.style[node]!]).not.toBe(BTN_BG);
     // They still lay out as buttons: the class's padding and radius survive,
     // because inline only overrides what it actually declares.
-    expect(styles.radius[ui.nodes.style[node]!]).toBe(8); // rounded-lg
+    expect(styles.radTL[ui.nodes.style[node]!]).toBe(8); // rounded-lg
     expect(engine.bounds(node)[2]).toBeGreaterThan(0);
   }
 

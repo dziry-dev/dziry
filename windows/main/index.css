@@ -299,6 +299,26 @@
 .rounded-xl {
   border-radius: var(--radius-xl);
 }
+.rounded-t-2xl {
+  border-top-left-radius: var(--radius-2xl);
+  border-top-right-radius: var(--radius-2xl);
+}
+.rounded-l-2xl {
+  border-top-left-radius: var(--radius-2xl);
+  border-bottom-left-radius: var(--radius-2xl);
+}
+.rounded-tl-2xl {
+  border-top-left-radius: var(--radius-2xl);
+}
+.rounded-tr-2xl {
+  border-top-right-radius: var(--radius-2xl);
+}
+.rounded-br-2xl {
+  border-bottom-right-radius: var(--radius-2xl);
+}
+.rounded-bl-2xl {
+  border-bottom-left-radius: var(--radius-2xl);
+}
 .border {
   border-style: var(--tw-border-style);
   border-width: 1px;
@@ -326,6 +346,9 @@
 }
 .border-sky-400 {
   border-color: var(--color-sky-400);
+}
+.border-teal-400 {
+  border-color: var(--color-teal-400);
 }
 .border-violet-500 {
   border-color: var(--color-violet-500);

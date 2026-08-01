@@ -106,7 +106,15 @@ const STYLES: Table = {
     // Layout, not paint: the engine reserves the border in Taffy's box, so a
     // width change moves the content. `borderColor` above stays paint-only.
     { name: "borderWidth", type: "f32", affects: "layout" },
-    { name: "radius", type: "f32", affects: "paint" },
+    // Four corners, not one radius. CSS has no single-radius property — it has
+    // four longhands and a shorthand over them — and the one-field version could
+    // not express `rounded-t-lg`, which is most of what Tailwind's radius
+    // utilities are. `paint.rs` already built its border ring from two round
+    // rects specifically so this could grow without changing how borders draw.
+    { name: "radiusTopLeft", type: "f32", affects: "paint" },
+    { name: "radiusTopRight", type: "f32", affects: "paint" },
+    { name: "radiusBottomRight", type: "f32", affects: "paint" },
+    { name: "radiusBottomLeft", type: "f32", affects: "paint" },
     // box
     { name: "padTop", type: "f32", affects: "layout" },
     { name: "padRight", type: "f32", affects: "layout" },
@@ -505,7 +513,7 @@ export const ENUMS: EnumDef[] = [
  * call that is safe to make against a binary of unknown vintage — which is why the
  * ABI's own version lives here.
  */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

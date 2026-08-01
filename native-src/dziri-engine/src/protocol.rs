@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 7;
+pub const PROTOCOL_VERSION: u32 = 8;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,13 +15,13 @@ pub const PROTOCOL_VERSION: u32 = 7;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x01d0ee30;
+pub const SCHEMA_HASH: u32 = 0xe9084806;
 
 pub const TABLE_COUNT: usize = 8;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
-pub const MAX_FIELD_COUNT: usize = 52;
+pub const MAX_FIELD_COUNT: usize = 55;
 pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "nodes",
     "styles",
@@ -134,66 +134,72 @@ pub mod styles {
     pub const FG: usize = 1;
     pub const BORDER_COLOR: usize = 2;
     pub const BORDER_WIDTH: usize = 3;
-    pub const RADIUS: usize = 4;
-    pub const PAD_TOP: usize = 5;
-    pub const PAD_RIGHT: usize = 6;
-    pub const PAD_BOTTOM: usize = 7;
-    pub const PAD_LEFT: usize = 8;
-    pub const MARGIN_TOP: usize = 9;
-    pub const MARGIN_RIGHT: usize = 10;
-    pub const MARGIN_BOTTOM: usize = 11;
-    pub const MARGIN_LEFT: usize = 12;
-    pub const DISPLAY: usize = 13;
-    pub const FLEX_DIRECTION: usize = 14;
-    pub const FLEX_WRAP: usize = 15;
-    pub const JUSTIFY_CONTENT: usize = 16;
-    pub const ALIGN_ITEMS: usize = 17;
-    pub const ALIGN_SELF: usize = 18;
-    pub const JUSTIFY_ITEMS: usize = 19;
-    pub const JUSTIFY_SELF: usize = 20;
-    pub const FLEX_GROW: usize = 21;
-    pub const FLEX_SHRINK: usize = 22;
-    pub const FLEX_BASIS: usize = 23;
-    pub const GAP_ROW: usize = 24;
-    pub const GAP_COLUMN: usize = 25;
-    pub const GRID_COLUMNS: usize = 26;
-    pub const GRID_ROWS: usize = 27;
-    pub const GRID_COLUMN_START: usize = 28;
-    pub const GRID_COLUMN_SPAN: usize = 29;
-    pub const GRID_ROW_START: usize = 30;
-    pub const GRID_ROW_SPAN: usize = 31;
-    pub const WIDTH: usize = 32;
-    pub const HEIGHT: usize = 33;
-    pub const MIN_WIDTH: usize = 34;
-    pub const MIN_HEIGHT: usize = 35;
-    pub const MAX_WIDTH: usize = 36;
-    pub const MAX_HEIGHT: usize = 37;
-    pub const ASPECT_RATIO: usize = 38;
-    pub const POSITION: usize = 39;
-    pub const INSET_TOP: usize = 40;
-    pub const INSET_RIGHT: usize = 41;
-    pub const INSET_BOTTOM: usize = 42;
-    pub const INSET_LEFT: usize = 43;
-    pub const FONT_SIZE: usize = 44;
-    pub const FONT_WEIGHT: usize = 45;
-    pub const LINE_CLAMP: usize = 46;
-    pub const OVERFLOW_X: usize = 47;
-    pub const OVERFLOW_Y: usize = 48;
-    pub const SCROLLBAR_WIDTH: usize = 49;
-    pub const SCROLLBAR_THUMB: usize = 50;
-    pub const SCROLLBAR_TRACK: usize = 51;
+    pub const RADIUS_TOP_LEFT: usize = 4;
+    pub const RADIUS_TOP_RIGHT: usize = 5;
+    pub const RADIUS_BOTTOM_RIGHT: usize = 6;
+    pub const RADIUS_BOTTOM_LEFT: usize = 7;
+    pub const PAD_TOP: usize = 8;
+    pub const PAD_RIGHT: usize = 9;
+    pub const PAD_BOTTOM: usize = 10;
+    pub const PAD_LEFT: usize = 11;
+    pub const MARGIN_TOP: usize = 12;
+    pub const MARGIN_RIGHT: usize = 13;
+    pub const MARGIN_BOTTOM: usize = 14;
+    pub const MARGIN_LEFT: usize = 15;
+    pub const DISPLAY: usize = 16;
+    pub const FLEX_DIRECTION: usize = 17;
+    pub const FLEX_WRAP: usize = 18;
+    pub const JUSTIFY_CONTENT: usize = 19;
+    pub const ALIGN_ITEMS: usize = 20;
+    pub const ALIGN_SELF: usize = 21;
+    pub const JUSTIFY_ITEMS: usize = 22;
+    pub const JUSTIFY_SELF: usize = 23;
+    pub const FLEX_GROW: usize = 24;
+    pub const FLEX_SHRINK: usize = 25;
+    pub const FLEX_BASIS: usize = 26;
+    pub const GAP_ROW: usize = 27;
+    pub const GAP_COLUMN: usize = 28;
+    pub const GRID_COLUMNS: usize = 29;
+    pub const GRID_ROWS: usize = 30;
+    pub const GRID_COLUMN_START: usize = 31;
+    pub const GRID_COLUMN_SPAN: usize = 32;
+    pub const GRID_ROW_START: usize = 33;
+    pub const GRID_ROW_SPAN: usize = 34;
+    pub const WIDTH: usize = 35;
+    pub const HEIGHT: usize = 36;
+    pub const MIN_WIDTH: usize = 37;
+    pub const MIN_HEIGHT: usize = 38;
+    pub const MAX_WIDTH: usize = 39;
+    pub const MAX_HEIGHT: usize = 40;
+    pub const ASPECT_RATIO: usize = 41;
+    pub const POSITION: usize = 42;
+    pub const INSET_TOP: usize = 43;
+    pub const INSET_RIGHT: usize = 44;
+    pub const INSET_BOTTOM: usize = 45;
+    pub const INSET_LEFT: usize = 46;
+    pub const FONT_SIZE: usize = 47;
+    pub const FONT_WEIGHT: usize = 48;
+    pub const LINE_CLAMP: usize = 49;
+    pub const OVERFLOW_X: usize = 50;
+    pub const OVERFLOW_Y: usize = 51;
+    pub const SCROLLBAR_WIDTH: usize = 52;
+    pub const SCROLLBAR_THUMB: usize = 53;
+    pub const SCROLLBAR_TRACK: usize = 54;
 
-    pub const FIELD_COUNT: usize = 52;
+    pub const FIELD_COUNT: usize = 55;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [
-        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2,
-        2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4,
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2,
+        2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4,
     ];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
         "bg",
         "fg",
         "borderColor",
         "borderWidth",
-        "radius",
+        "radiusTopLeft",
+        "radiusTopRight",
+        "radiusBottomRight",
+        "radiusBottomLeft",
         "padTop",
         "padRight",
         "padBottom",
@@ -250,10 +256,10 @@ pub mod styles {
     /// every non-empty commit schedules is the entire response. A colour-only
     /// theme patch is the case this exists for.
     pub const LAYOUT_AFFECTING: [bool; FIELD_COUNT] = [
-        false, false, false, true, false, true, true, true, true, true, true, true, true, true,
+        false, false, false, true, false, false, false, false, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
-        true, true, true, true, true, false, false, false,
+        true, true, true, true, true, true, true, true, false, false, false,
     ];
 }
 

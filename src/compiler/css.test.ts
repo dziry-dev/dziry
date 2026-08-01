@@ -557,6 +557,36 @@ test("`none` is a missing oklch component, not a syntax error", () => {
   expect(rgb("oklch(50% none 180)")).toEqual(rgb("oklch(50% 0 180)"));
 });
 
+test("border-radius expands per corner, like padding does", () => {
+  // The one-field version took the first value and threw the rest away, so
+  // `border-radius: 8px 0 0 8px` was a fully rounded box — and `rounded-t-lg`, most
+  // of what Tailwind's radius utilities are, could not be expressed at all.
+  const r = (value: string) => {
+    const out: Record<string, number> = {};
+    expandDeclaration("border-radius", value, out as never);
+    return [out.radTL, out.radTR, out.radBR, out.radBL];
+  };
+
+  expect(r("8px")).toEqual([8, 8, 8, 8]);
+  // Two: top-left/bottom-right, then top-right/bottom-left — the diagonals.
+  expect(r("8px 2px")).toEqual([8, 2, 8, 2]);
+  expect(r("8px 2px 4px")).toEqual([8, 2, 4, 2]);
+  expect(r("1px 2px 3px 4px")).toEqual([1, 2, 3, 4]);
+
+  // The longhands, which is what Tailwind's `rounded-t-*` actually emits.
+  const one: Record<string, number> = {};
+  expandDeclaration("border-top-left-radius", "12px", one as never);
+  expandDeclaration("border-bottom-right-radius", "4px", one as never);
+  expect([one.radTL, one.radTR, one.radBR, one.radBL]).toEqual([12, undefined, 4, undefined]);
+});
+
+test("elliptical border-radius is refused, not half-read", () => {
+  // Taking the part before the slash would silently turn an ellipse into a circle,
+  // which is a wrong frame with no diagnostic. Two radii per corner would double
+  // the fields for a value almost nobody writes.
+  expect(() => expandDeclaration("border-radius", "10px / 20px", {} as never)).toThrow(CssError);
+});
+
 test("logical properties map onto the physical ones", () => {
   // `px-4`/`py-2` — the spacing utilities people actually use — compile to
   // `padding-inline`/`padding-block`, not to `padding-left`.

@@ -65,6 +65,18 @@ fn init_style(t: &mut Tables, slot: usize) {
     t.set_u16(STYLES, styles::FONT_WEIGHT, slot, 400);
 }
 
+/// One radius on all four corners — what a single `border-radius` means.
+fn radius(t: &mut Tables, slot: usize, value: f32) {
+    for field in [
+        styles::RADIUS_TOP_LEFT,
+        styles::RADIUS_TOP_RIGHT,
+        styles::RADIUS_BOTTOM_RIGHT,
+        styles::RADIUS_BOTTOM_LEFT,
+    ] {
+        t.set_f32(STYLES, field, slot, value);
+    }
+}
+
 fn pad(t: &mut Tables, slot: usize, value: f32) {
     for field in [
         styles::PAD_TOP,
@@ -164,7 +176,7 @@ fn main() {
         t.set_u32(STYLES, styles::BG, CARD, 0xff1a_1d24);
         t.set_u32(STYLES, styles::BORDER_COLOR, CARD, 0xff2f_3540);
         t.set_f32(STYLES, styles::BORDER_WIDTH, CARD, 1.0);
-        t.set_f32(STYLES, styles::RADIUS, CARD, 10.0);
+        radius(t, CARD, 10.0);
         pad(t, CARD, 20.0);
         t.set_f32(STYLES, styles::GAP_ROW, CARD, 12.0);
         t.set_f32(STYLES, styles::WIDTH, CARD, 420.0);
@@ -188,7 +200,7 @@ fn main() {
         ] {
             t.set_u32(STYLES, styles::BG, slot, bg);
             t.set_u32(STYLES, styles::FG, slot, 0xffff_ffff);
-            t.set_f32(STYLES, styles::RADIUS, slot, 8.0);
+            radius(t, slot, 8.0);
             t.set_f32(STYLES, styles::PAD_TOP, slot, 10.0);
             t.set_f32(STYLES, styles::PAD_BOTTOM, slot, 10.0);
             t.set_f32(STYLES, styles::PAD_LEFT, slot, 18.0);

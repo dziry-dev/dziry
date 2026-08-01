@@ -909,7 +909,7 @@ mod tests {
         // Spot-check both ends of the classification against what the engine
         // actually reads: `style_of` never looks at `radius`, and cannot lay out
         // without `width`.
-        assert!(!protocol::styles::LAYOUT_AFFECTING[protocol::styles::RADIUS]);
+        assert!(!protocol::styles::LAYOUT_AFFECTING[protocol::styles::RADIUS_TOP_LEFT]);
         assert!(protocol::styles::LAYOUT_AFFECTING[protocol::styles::WIDTH]);
         // The two halves of a border part ways here, and this pair is the reason
         // the classification is per-field rather than per-table: recolouring a

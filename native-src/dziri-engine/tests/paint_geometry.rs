@@ -94,7 +94,11 @@ fn painted_root(radius: f32, border_width: f32) -> Engine {
         t.set_u32(STYLES, styles::BG, 0, BG);
         t.set_u32(STYLES, styles::BORDER_COLOR, 0, BORDER);
         t.set_f32(STYLES, styles::BORDER_WIDTH, 0, border_width);
-        t.set_f32(STYLES, styles::RADIUS, 0, radius);
+        // All four corners, which is what a single `border-radius` means.
+        t.set_f32(STYLES, styles::RADIUS_TOP_LEFT, 0, radius);
+        t.set_f32(STYLES, styles::RADIUS_TOP_RIGHT, 0, radius);
+        t.set_f32(STYLES, styles::RADIUS_BOTTOM_RIGHT, 0, radius);
+        t.set_f32(STYLES, styles::RADIUS_BOTTOM_LEFT, 0, radius);
 
         t.set_u8(NODES, nodes::KIND, 0, protocol::node_kind::BOX);
         t.set_u16(NODES, nodes::STYLE, 0, 0);

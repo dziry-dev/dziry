@@ -127,7 +127,13 @@ export const STYLE_FIELDS = [
   // paint block because it is interned next to `borderColor`, which is paint-only;
   // the fourth column, not the grouping, is what decides.
   ["borderWidth", "Float32Array", false, true],
-  ["radius", "Float32Array", false, false],
+  // Four corners rather than one radius: CSS has four longhands and a shorthand
+  // over them, and `rounded-t-lg` — most of what Tailwind's radius utilities are —
+  // cannot be said with one field.
+  ["radTL", "Float32Array", false, false],
+  ["radTR", "Float32Array", false, false],
+  ["radBR", "Float32Array", false, false],
+  ["radBL", "Float32Array", false, false],
   // box
   ["padT", "Float32Array", false, true],
   ["padR", "Float32Array", false, true],
@@ -212,7 +218,10 @@ export const INITIAL_STYLE: ComputedStyle = {
   fg: 0xff000000, // black
   borderColor: 0x00000000,
   borderWidth: 0,
-  radius: 0,
+  radTL: 0,
+  radTR: 0,
+  radBR: 0,
+  radBL: 0,
   padT: 0,
   padR: 0,
   padB: 0,

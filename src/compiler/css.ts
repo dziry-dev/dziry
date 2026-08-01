@@ -1271,9 +1271,42 @@ export function expandDeclaration(
     case "color":
       out.fg = parseColor(value);
       return;
-    case "border-radius":
-      // Per-corner radii are out of scope; the first value wins.
-      out.radius = parseLength(splitTopLevel(value)[0]!);
+    /**
+     * `border-radius: <all> | <tl-br> <tr-bl> | <tl> <tr-bl> <br> | <tl> <tr> <br> <bl>`
+     *
+     * The same one/two/three/four expansion `padding` and `margin` use, and for the
+     * same reason: it is what CSS says, and guessing "the first value wins" made
+     * `border-radius: 8px 0 0 8px` a fully rounded box.
+     *
+     * The elliptical form — `border-radius: 10px / 20px` — is not supported. Two
+     * radii per corner would double the fields for a value almost nobody writes,
+     * and the `/` is refused rather than half-read: taking the part before it would
+     * silently make an ellipse a circle.
+     */
+    case "border-radius": {
+      if (value.includes("/")) {
+        throw new CssError(`elliptical border-radius is not supported ("${value}")`);
+      }
+      const parts = splitTopLevel(value).map(parseLength);
+      const [a, b = a, c = a, d = b] = parts as [number, number?, number?, number?];
+      out.radTL = a!;
+      out.radTR = b!;
+      out.radBR = c!;
+      out.radBL = d!;
+      return;
+    }
+
+    case "border-top-left-radius":
+      out.radTL = parseLength(splitTopLevel(value)[0]!);
+      return;
+    case "border-top-right-radius":
+      out.radTR = parseLength(splitTopLevel(value)[0]!);
+      return;
+    case "border-bottom-right-radius":
+      out.radBR = parseLength(splitTopLevel(value)[0]!);
+      return;
+    case "border-bottom-left-radius":
+      out.radBL = parseLength(splitTopLevel(value)[0]!);
       return;
 
     case "border": {

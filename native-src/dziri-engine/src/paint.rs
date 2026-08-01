@@ -13,7 +13,7 @@
 //! resolve here beyond picking an index.
 
 use skia_safe::textlayout::TextAlign;
-use skia_safe::{Canvas, Color, Paint, PaintStyle, RRect, Rect};
+use skia_safe::{Canvas, Color, Paint, PaintStyle, Point, RRect, Rect};
 
 use crate::protocol::{self, node_kind, predicate};
 use crate::tables::Tables;
@@ -944,9 +944,29 @@ impl Painter {
         // Sanitised once: both the fill and the border ring build round rects from
         // this, and Skia has no defined answer for a NaN or infinite radius. The
         // old `radius > 0.0` test happened to reject NaN and let infinity through.
-        let radius = match g(f::RADIUS) {
-            r if r.is_finite() && r > 0.0 => r,
-            _ => 0.0,
+        // Sanitised per corner, in Skia's order: top-left, top-right,
+        // bottom-right, bottom-left.
+        let corner = |field: usize| -> f32 {
+            match g(field) {
+                r if r.is_finite() && r > 0.0 => r,
+                _ => 0.0,
+            }
+        };
+        let radii = [
+            corner(f::RADIUS_TOP_LEFT),
+            corner(f::RADIUS_TOP_RIGHT),
+            corner(f::RADIUS_BOTTOM_RIGHT),
+            corner(f::RADIUS_BOTTOM_LEFT),
+        ];
+        let rounded = radii.iter().any(|r| *r > 0.0);
+        // Skia takes an (x, y) pair per corner; circular corners repeat the value.
+        let points = |radii: [f32; 4]| -> [Point; 4] {
+            [
+                Point::new(radii[0], radii[0]),
+                Point::new(radii[1], radii[1]),
+                Point::new(radii[2], radii[2]),
+                Point::new(radii[3], radii[3]),
+            ]
         };
         let bg = c(f::BG);
 
@@ -954,8 +974,8 @@ impl Painter {
         if bg >> 24 != 0 && w > 0.0 && h > 0.0 {
             let rect = Rect::from_xywh(x, y, w, h);
             self.fill.set_color(Color::from(bg));
-            if radius > 0.0 {
-                canvas.draw_round_rect(rect, radius, radius, &self.fill);
+            if rounded {
+                canvas.draw_rrect(RRect::new_rect_radii(rect, &points(radii)), &self.fill);
             } else {
                 canvas.draw_rect(rect, &self.fill);
             }
@@ -979,7 +999,7 @@ impl Painter {
             // means, need no `set_stroke_width` per node, and `new_rect_radii`
             // takes four corner radii the day the schema grows per-corner and
             // per-side utilities, which a single stroked path cannot express.
-            let outer = RRect::new_rect_xy(Rect::from_xywh(x, y, w, h), radius, radius);
+            let outer = RRect::new_rect_radii(Rect::from_xywh(x, y, w, h), &points(radii));
             self.fill.set_color(Color::from(border_color));
 
             let inner_w = w - border_width * 2.0;
@@ -990,11 +1010,13 @@ impl Painter {
                 // not a shape it is defined on, so fill the outer instead.
                 canvas.draw_rrect(outer, &self.fill);
             } else {
-                let inner_radius = (radius - border_width).max(0.0);
-                let inner = RRect::new_rect_xy(
+                // `max(0, radius - width)` per corner, which is what CSS says the
+                // inner edge of a border is. Per corner rather than once, or a box
+                // rounded on one side only would get that side's inset everywhere.
+                let inner_radii = radii.map(|r| (r - border_width).max(0.0));
+                let inner = RRect::new_rect_radii(
                     Rect::from_xywh(x + border_width, y + border_width, inner_w, inner_h),
-                    inner_radius,
-                    inner_radius,
+                    &points(inner_radii),
                 );
                 canvas.draw_drrect(outer, inner, &self.fill);
             }
