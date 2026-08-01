@@ -32,6 +32,14 @@ export const route = signal("/");
  * Each of these drives a conditional class, so an active tab costs a handful of
  * style-table writes when the route changes and nothing at all per frame.
  */
+/**
+ * Exact matches, where `router.matches()` would be wrong.
+ *
+ * `matches` is prefix-aware — `matches("products")` holds on `products/new` too,
+ * which is what a nav entry naming a section wants. These two are tabs *within*
+ * that section, so they need equality: on `products/new`, "New" is active and
+ * "First" is not.
+ */
 export const onNewProduct = computed(() => route.value === "products/new");
 export const onProductDetail = computed(() => route.value === "products/$id");
 

@@ -53,6 +53,14 @@ export type TogglePatch = {
   affectsLayout: boolean;
   /** Filled in by the reference-resolution pass. */
   exportName: string;
+  /**
+   * The expression to emit instead of the name, for a signal with no name.
+   *
+   * `router.matches("layout")` is created inside a component and cannot be an
+   * export, so the artifact contains the comparison rather than an import of it.
+   * `exportName` still names the route signal the expression reads.
+   */
+  exportExpression?: string;
 };
 
 export type VariantCompiled = {

@@ -304,13 +304,31 @@ const summary = () =>
 
 // --- headless mode -------------------------------------------------------------
 if (screenshotPath) {
-  // `--patch 0,1` flips those conditional classes on, so headless renders can
-  // exercise them without a mouse.
+  /**
+   * `--patch light,compact` flips those conditional classes on, so headless
+   * renders can exercise them without a mouse.
+   *
+   * By name, not by index. The index into `stylePatches` is whatever order the
+   * compiler's tree walk produced, so adding a conditional class anywhere
+   * renumbered every later one and `--patch 1` quietly began flipping something
+   * else — which is how eight nav highlights broke two golden scenarios that had
+   * nothing to do with them.
+   */
   const patchIndex = argv.indexOf("--patch");
   if (patchIndex !== -1 && argv[patchIndex + 1]) {
-    for (const raw of argv[patchIndex + 1]!.split(",")) {
-      const patch = stylePatches[Number(raw)];
-      if (patch) (patch.signal as Signal<boolean>).value = true;
+    const names = stylePatches.map((p) => p.className);
+
+    for (const wanted of argv[patchIndex + 1]!.split(",")) {
+      const patch = stylePatches.find((p) => p.className === wanted);
+      if (!patch) {
+        throw new Error(`no conditional class "${wanted}". Classes are ${names.join(", ")}.`);
+      }
+      // A patch driven by a derived cell — `router.matches(…)` — has no setter, and
+      // saying so beats "value is not writable" from three frames down.
+      if (!("value" in patch.signal) || Object.isFrozen(patch.signal)) {
+        throw new Error(`"${wanted}" is derived and cannot be set directly.`);
+      }
+      (patch.signal as Signal<boolean>).value = true;
     }
   }
 

@@ -25,7 +25,7 @@
  * from its own text. Shared components take the value as a prop: `<Title id={args.id} />`.
  */
 import { paramsOfPath, routeArgs } from "./route-args.ts";
-import type { ReadonlySignal } from "../runtime/signal.ts";
+import { computed, type ReadonlySignal } from "../runtime/signal.ts";
 
 /**
  * The parameter names in a route path.
@@ -121,7 +121,43 @@ export type Router = {
    * anything derived from it is an ordinary `computed`.
    */
   path: ReadonlySignal<string>;
+
+  /**
+   * True while the active route is `path`, or is nested under it.
+   *
+   * ```tsx
+   * <button className={cn("link", { active: router.matches("layout") })}>
+   * ```
+   *
+   * The comparison people reach for first is `router.path === "layout"`, and that
+   * cannot work: `router.path` is a *signal*, so `===` against a string is `false`
+   * at build time, for ever, and the nav would compile clean and never highlight.
+   * That is the exact shape of failure this project treats as worse than a crash,
+   * so the comparison has to be something the compiler can see rather than
+   * something JavaScript evaluates while the compiler is looking away.
+   *
+   * Prefix-aware: `matches("products")` holds on `products/new` too, because a nav
+   * entry names a section and the route table already says what nests under what.
+   * Exact equality is what `route.value === p` in the window's own module is for.
+   */
+  matches(path: string): ReadonlySignal<boolean>;
 };
+
+/**
+ * What a `matches()` cell was asking, so the emitter can rebuild the question.
+ *
+ * A `WeakMap` rather than a property on the cell: the cell is a real `computed` and
+ * this has to work whether or not that object accepts new keys. Read by
+ * `resolve-refs`, which turns it into the expression the artifact contains.
+ */
+const routeMatches = new WeakMap<object, { signal: ReadonlySignal<string>; path: string }>();
+
+/** The route signal and path behind a `matches()` cell, or undefined. */
+export function routeMatchOf(
+  value: unknown,
+): { signal: ReadonlySignal<string>; path: string } | undefined {
+  return typeof value === "object" && value !== null ? routeMatches.get(value) : undefined;
+}
 
 /**
  * Read access to the window's current route.
@@ -153,7 +189,24 @@ export function useRouter(): Router {
     );
   }
 
-  return { path: currentRouteSignal };
+  const route = currentRouteSignal;
+
+  return {
+    path: route,
+    matches(path: string) {
+      // A real `computed`, so it is a signal to everything downstream — `cn`
+      // records it as a toggle, `findToggles` finds it, the variant compiler
+      // resolves the class with it on and off. The only extra fact is *how it was
+      // derived*, which the emitter needs because a cell created here has no export
+      // name to import; it is written into the artifact as the expression it is.
+      const cell = computed(() => {
+        const active = route.value;
+        return path === "/" ? active === "/" : active === path || active.startsWith(`${path}/`);
+      });
+      routeMatches.set(cell, { signal: route, path });
+      return cell;
+    },
+  };
 }
 
 export function useRoute<const P extends string>(path: P): Route<P> {

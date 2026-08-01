@@ -28,7 +28,7 @@ import { RouteError, scanWindows, type WindowDef } from "./compiler/routes.ts";
 import { withPage, withWindowRoute } from "./compiler/route.ts";
 import { configOf, routeSignalOf, WindowError } from "./compiler/window.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./compiler/window-tree.ts";
-import { setCompiling } from "./runtime/signal.ts";
+import { setCompiling, signal } from "./runtime/signal.ts";
 import type { Element, Node } from "./compiler/html.ts";
 import { routeChain, type RouteNodes } from "./ir.ts";
 
@@ -135,7 +135,29 @@ async function compileWindow(window: WindowDef): Promise<Compiled> {
 
   try {
     const entryPath = join(projectDir, window.entry);
-    const entry = asNodes((await defaultComponent(entryPath, "window"))());
+    const shellComponent = await defaultComponent(entryPath, "window");
+
+    /**
+     * The shell is built twice, because of an ordering JSX fixes for nobody.
+     *
+     * `<Window route={route}>` is where a window declares its route, but JSX
+     * evaluates children before the element that contains them — so `<Nav/>`, and
+     * its `useRouter()`, run *before* `Window()` has seen the prop. The signal
+     * cannot be in scope for the call that reveals it.
+     *
+     * So: one pass to find it, discarding the tree, then the real pass with it in
+     * scope. Safe because a build-time component may read but never write — the
+     * rule the compile guard already enforces — so running one twice produces the
+     * same tree twice. Only the shell pays; pages are expanded once.
+     */
+    const discovery = withWindowRoute(signal(""), () => asNodes(shellComponent()));
+    const discovered = discovery[0];
+    const routeSignal =
+      discovered !== undefined && discovered.type === "element"
+        ? (routeSignalOf(discovered) ?? null)
+        : null;
+
+    const entry = withWindowRoute(routeSignal, () => asNodes(shellComponent()));
     const first = entry[0];
 
     if (entry.length !== 1 || first === undefined || first.type !== "element" || !configOf(first)) {

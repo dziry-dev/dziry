@@ -12,6 +12,7 @@
  * than a silently dead binding.
  */
 import type { CompileResult } from "./compile.ts";
+import { routeMatchOf } from "./route.ts";
 
 export type RefSource = {
   /** Import specifier the generated module should use, e.g. "./state.ts". */
@@ -22,8 +23,15 @@ export type RefSource = {
 
 export class RefError extends Error {}
 
-/** Which module and export a resolved reference came from. */
-export type ResolvedRef = { specifier: string; name: string };
+/**
+ * Which module and export a resolved reference came from.
+ *
+ * `expression` is set when the reference has no name of its own and the artifact
+ * has to contain the thing it was derived *from* — `router.matches("layout")`
+ * becomes `computed(() => route.value === "layout")`. `name` still points at the
+ * import that expression needs.
+ */
+export type ResolvedRef = { specifier: string; name: string; expression?: string };
 
 export function buildRefIndex(sources: RefSource[]): Map<unknown, ResolvedRef> {
   const index = new Map<unknown, ResolvedRef>();
@@ -47,7 +55,14 @@ export function buildRefIndex(sources: RefSource[]): Map<unknown, ResolvedRef> {
 export function resolveRefs(
   result: CompileResult,
   index: Map<unknown, ResolvedRef>,
-  variants?: { patches: { source: unknown; className: string; exportName: string }[] },
+  variants?: {
+    patches: {
+      source: unknown;
+      className: string;
+      exportName: string;
+      exportExpression?: string;
+    }[];
+  },
 ): { imports: Map<string, Set<string>> } {
   const imports = new Map<string, Set<string>>();
 
@@ -86,7 +101,47 @@ export function resolveRefs(
     names.add(ref.name);
   };
 
+  /**
+   * `router.matches("layout")` — a cell with no name, rebuilt as an expression.
+   *
+   * Every other reference survives the compiler/runtime boundary by being a
+   * module-level export the artifact can import. This one cannot be: it is created
+   * inside a component, and components are erased. What it *can* do is say how it
+   * was derived — a route signal and a path — and both of those the artifact can
+   * write down, so the emitted module contains the comparison rather than a name
+   * for it.
+   *
+   * `computed` is already a runtime export, so this costs no new runtime surface;
+   * the generated code says exactly what the author wrote.
+   */
+  const asRouteMatch = (value: unknown): ResolvedRef | null => {
+    const match = routeMatchOf(value);
+    if (!match) return null;
+
+    const route = index.get(match.signal);
+    if (!route) {
+      throw new RefError(
+        `router.matches(${JSON.stringify(match.path)}) reads a route signal that is not a\n` +
+          `  module-level export. <Window route={…}> has to be given an exported signal, because\n` +
+          `  the generated module imports it by name.`,
+      );
+    }
+
+    const active = `${route.name}.value`;
+    const test =
+      match.path === "/"
+        ? `${active} === "/"`
+        : `(${active} === ${JSON.stringify(match.path)} || ` +
+          `${active}.startsWith(${JSON.stringify(`${match.path}/`)}))`;
+
+    record(route, `a route match on "${match.path}"`);
+    return { specifier: route.specifier, name: route.name, expression: `computed(() => ${test})` };
+  };
+
   const lookup = (value: unknown, what: string): ResolvedRef => {
+    const derived = asRouteMatch(value);
+    if (derived) return derived;
+
     const ref = index.get(value);
     if (!ref) {
       throw new RefError(
@@ -133,10 +188,14 @@ export function resolveRefs(
   }
 
   for (const patch of variants?.patches ?? []) {
-    patch.exportName = lookup(
+    const ref = lookup(
       patch.source,
       `the signal driving the conditional class ".${patch.className}"`,
-    ).name;
+    );
+    // The expression when there is one, the export name otherwise. Emit tells them
+    // apart by `exportExpression` rather than by inspecting the string.
+    patch.exportName = ref.name;
+    patch.exportExpression = ref.expression;
   }
 
   return { imports };

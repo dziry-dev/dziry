@@ -24,6 +24,16 @@ export type StylePatchRef = {
   signal: ReadonlySignal<boolean>;
   affectsLayout: boolean;
   entries: FieldPatchRef[];
+  /**
+   * The conditional class this patch is, for tooling that has to name one.
+   *
+   * The runtime never reads it — a patch is applied by index and its class name was
+   * resolved away at build time. It exists because the headless flags used to take
+   * an *index* into this array, and the array's order is whatever the compiler's
+   * tree walk produced: adding a conditional class anywhere renumbered the rest, so
+   * `--patch 1` silently began flipping a different class. A name cannot do that.
+   */
+  className: string;
 };
 
 /** Last applied state per patch, so only genuine changes cost writes. */

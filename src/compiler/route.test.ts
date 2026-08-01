@@ -15,6 +15,7 @@ import {
   useRouter,
   withPage,
   withWindowRoute,
+  routeMatchOf,
   type Args,
 } from "./route.ts";
 import { signal } from "../runtime/signal.ts";
@@ -128,6 +129,66 @@ test("useRouter outside a window says the window has to declare its route", () =
   expect(run).toThrow(RouteHookError);
   expect(run).toThrow(/needs the window to declare its route/);
   expect(run).toThrow(/<Window route=/);
+});
+
+test("matches() is a live cell, not a comparison the compiler evaluated away", () => {
+  const route = signal("/");
+
+  withWindowRoute(route, () => {
+    const router = useRouter();
+    const onLayout = router.matches("layout");
+
+    // The trap this exists to remove: `router.path === "layout"` is a signal
+    // compared to a string, which is `false` at build time and stays false. The
+    // cell tracks instead.
+    expect(onLayout.value).toBe(false);
+    route.value = "layout";
+    expect(onLayout.value).toBe(true);
+  });
+});
+
+test("matches() is prefix-aware, because a nav entry names a section", () => {
+  const route = signal("products/new");
+
+  withWindowRoute(route, () => {
+    const router = useRouter();
+    expect(router.matches("products").value).toBe(true);
+    expect(router.matches("products/new").value).toBe(true);
+    expect(router.matches("products/$id").value).toBe(false);
+
+    // A prefix of the *string* is not a prefix of the path: `product` must not
+    // match `products/new`, or every nav entry would light up its neighbours.
+    expect(router.matches("product").value).toBe(false);
+  });
+});
+
+test("matches(\"/\") is exact, or the index would match everything", () => {
+  const route = signal("layout");
+
+  withWindowRoute(route, () => {
+    expect(useRouter().matches("/").value).toBe(false);
+    route.value = "/";
+    expect(useRouter().matches("/").value).toBe(true);
+  });
+});
+
+test("a matches() cell remembers what it asked, so the emitter can rebuild it", () => {
+  const route = signal("/");
+
+  withWindowRoute(route, () => {
+    const cell = useRouter().matches("layout");
+    const match = routeMatchOf(cell);
+
+    // It has no export name — it was created inside a component — so the artifact
+    // contains the comparison instead. That needs the signal *by identity* and the
+    // path as written.
+    expect(match).toBeDefined();
+    expect(match!.signal).toBe(route);
+    expect(match!.path).toBe("layout");
+  });
+
+  // An ordinary signal is not one of these.
+  expect(routeMatchOf(signal("x"))).toBeUndefined();
 });
 
 test("the window scope and the page scope are independent", () => {

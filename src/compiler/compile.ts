@@ -1350,9 +1350,19 @@ export function emit(
 
   // Signals and handlers are imported by name, so the emitted bindings hold the
   // real objects rather than keys to look up.
-  const importLines = [...imports]
-    .map(([specifier, names]) => `import { ${[...names].sort().join(", ")} } from ${JSON.stringify(specifier)};`)
-    .join("\n");
+  // A patch emitted as an expression builds its own cell, so the artifact needs
+  // `computed` — an existing runtime export, so this adds no runtime surface.
+  const needsComputed = (variants?.patches ?? []).some((p) => p.exportExpression);
+
+  const importLines = [
+    ...(needsComputed
+      ? [`import { computed } from "${source.typesFrom}/runtime/signal.ts";`]
+      : []),
+    ...[...imports].map(
+      ([specifier, names]) =>
+        `import { ${[...names].sort().join(", ")} } from ${JSON.stringify(specifier)};`,
+    ),
+  ].join("\n");
 
   /**
    * Every identifier interpolated into the generated module goes through here.
@@ -1441,7 +1451,8 @@ export function emit(
         .join("\n");
       return (
         `  {\n` +
-        `    signal: ${identifier(p.exportName, "a conditional class")},\n` +
+        `    className: ${JSON.stringify(p.className)},\n` +
+        `    signal: ${p.exportExpression ?? identifier(p.exportName, "a conditional class")},\n` +
         `    affectsLayout: ${p.affectsLayout},\n` +
         `    entries: [\n${entries}\n    ],\n` +
         `  },`

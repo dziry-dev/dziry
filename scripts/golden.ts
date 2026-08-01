@@ -32,9 +32,9 @@ const only = argv.filter((a) => !a.startsWith("--"));
 type Scenario = { name: string; args: string[] };
 
 /**
- * `--patch 0,1` flips conditional classes on: 0 is `.light` (paint-only) and 1 is
- * `.compact` (relayout). Covering both separately and together is deliberate —
- * together is where a patch-ordering bug would show.
+ * `--patch light,compact` flips conditional classes on by name: `light` is
+ * paint-only and `compact` forces a relayout. Covering both separately and together
+ * is deliberate — together is where a patch-ordering bug would show.
  *
  * The route scenarios cover what the patch ones cannot. `base` is the home route
  * with five routes resident and hidden, so it already proves the emitted `hidden`
@@ -54,14 +54,14 @@ const SCENARIOS: Scenario[] = [
   { name: "colors", args: ["--route", "colors"] },
   { name: "borders", args: ["--route", "borders"] },
 
-  // The framework's own features, and the two conditional classes: 0 is `light`
-  // (paint-only), 1 is `compact` (relayout). Covering them separately and together
+  // The framework's own features, and the two conditional classes: `light`
+  // (paint-only) and `compact` (relayout). Covering them separately and together
   // is deliberate — together is where a patch-ordering bug would show. They need
   // the route that carries them, since it is not the one the window opens on.
   { name: "features", args: ["--route", "features"] },
-  { name: "features-light", args: ["--route", "features", "--patch", "0"] },
-  { name: "features-compact", args: ["--route", "features", "--patch", "1"] },
-  { name: "features-light-compact", args: ["--route", "features", "--patch", "0,1"] },
+  { name: "features-light", args: ["--route", "features", "--patch", "light"] },
+  { name: "features-compact", args: ["--route", "features", "--patch", "compact"] },
+  { name: "features-light-compact", args: ["--route", "features", "--patch", "light,compact"] },
 
   // Nesting and parameters: the `products` layout stays visible because the active
   // route renders inside it, while its sibling does not.
