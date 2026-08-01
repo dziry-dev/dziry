@@ -339,7 +339,21 @@ the shared-memory protocol and the layout/paint pipeline, both of which are inte
 - **Attribute selectors and `data-state`.** shadcn uses `data-[state=open]:` throughout. Needs
   attribute selectors in the parser, a way for primitives to expose state as attributes, and those
   compiling to variants. Invisible today and on the critical path for Tier 2.
-- **Media queries — real `@media` blocks, not only Tailwind variants.** An earlier draft said
+- **Media queries — real `@media` blocks, not only Tailwind variants.** *This is now the thing
+  standing between dziri and a narrow window that looks right.* Reported 2026-08-01 from the real
+  window at ~400 px as "even buttons are out of container", and measured rather than assumed:
+  `layout-diff`'s `row-too-narrow` reproduces `app.css`'s `.newrow` — a `flex: 1` field and two
+  content-sized buttons in a container too small for their combined minimum — and **Chrome
+  overflows it by the same amount dziri does**, to within 0.05 px. A flex row past its minimum
+  overflows; that is CSS, not a bug, and no engine fix would change it.
+
+  What a browser would do instead is *stop being a row* below some width, and dziri cannot
+  express that: `parseCss` warn-and-skips every at-rule, so the demo's two-column layout can
+  never reflow to one column and its rows can never wrap. Text wrapping was the first obvious
+  bug at narrow widths; this is the second, and it is the last big one that is about layout
+  rather than about content.
+
+  An earlier draft said
   "media queries compile to signals", meaning `md:flex` became a conditional class over a
   `windowWidth >= 768` predicate. That covers Tailwind's *variant* syntax and nothing else:
   an author writing `@media (min-width: 768px) { .card { padding: 8px } }` in a stylesheet
