@@ -30,6 +30,7 @@ const ROOT = join(import.meta.dir, "..");
 const MDN = join(ROOT, "vendor/mdn/files/en-us/web/html/reference/elements");
 const argv = process.argv.slice(2);
 const SHOW_SAME = argv.includes("--same");
+const SHOW_KNOWN = argv.includes("--known");
 const onlyIdx = argv.indexOf("--only");
 const ONLY = onlyIdx > -1 ? argv[onlyIdx + 1]!.split(",") : null;
 
@@ -151,6 +152,60 @@ const px = (s: string) => Math.round(parseFloat(s) * 100) / 100;
 const DISPLAY_NAME = Object.fromEntries(Object.entries(Display).map(([k, v]) => [v, k])) as Record<number, string>;
 
 /**
+ * Differences that are decisions, not gaps.
+ *
+ * This table exists because the headline number was two unrelated things added
+ * together. `<p>` differs from Chrome because dziri has no default stylesheet yet
+ * — a real gap, and the reason this tool exists. `<span>` differs because dziri
+ * has no inline layout, deliberately, permanently. Printed identically, they
+ * forced every reader to re-derive which was which, and a backlog you have to
+ * mentally filter is a backlog nobody reads.
+ *
+ * Three rules keep this from decaying into a suppression list, which is how a
+ * report like this normally dies:
+ *
+ *  1. **Every entry carries a reason, and the reason is printed.** Not hidden in a
+ *     config file — `--known` shows the lot, and the count is always in the summary.
+ *  2. **An entry that matches nothing is a failure.** If the divergence it excuses
+ *     stops happening, the entry is stale and says so. That is the property a
+ *     comment cannot have: `layout-diff`'s box-sizing note was true when written,
+ *     became false hours later when the engine changed, and nothing noticed.
+ *  3. **Nothing is added here without it already being decided somewhere else.**
+ *     Both entries below cite where the decision lives. This table records
+ *     decisions; it does not make them, because a tool that can shrink its own
+ *     backlog by fiat is worthless.
+ */
+type KnownDivergence = {
+  id: string;
+  why: string;
+  /** `dziri` is null when the finding is "dziri has no field for this at all". */
+  when: (el: string, css: string, chrome: string, dziri: string | null) => boolean;
+};
+
+const KNOWN: KnownDivergence[] = [
+  {
+    id: "block-is-flex-column",
+    why: "no block layout: INITIAL_STYLE is display FLEX with direction COLUMN, which stacks children the way block does (src/ir.ts)",
+    when: (_el, css, chrome, dziri) => css === "display" && chrome === "block" && dziri === "FLEX",
+  },
+  {
+    id: "no-font-family-field",
+    why: "dziri has no font-family property at all — the engine always uses the platform sans, so no UA rule could set this",
+    when: (_el, css, _chrome, dziri) => css === "font-family" && dziri === null,
+  },
+];
+
+/** Which entries earned their place this run. An unused one is stale, not silent. */
+const matched = new Set<string>();
+
+function knownReason(el: string, css: string, chrome: string, dziri: string | null): string | null {
+  const hit = KNOWN.find((k) => k.when(el, css, chrome, dziri));
+  if (!hit) return null;
+  matched.add(hit.id);
+  return hit.why;
+}
+
+/**
  * Chrome's `display` for an element is one of block / inline / list-item / none
  * (mostly). dziri's initial is FLEX and it has **no inline layout at all** — a
  * committed non-goal — so `inline` vs `FLEX` would otherwise be reported on
@@ -180,8 +235,9 @@ function differs(kind: string, chrome: string, dziri: number): boolean {
 const dir = await mkdtemp(join(tmpdir(), "dziri-htmlcov-"));
 const session = await chromeSession();
 
-type Row = { el: string; diffs: string[]; missing: string[] };
+type Row = { el: string; diffs: string[]; missing: string[]; known: string[] };
 const rows: Row[] = [];
+const knownOnly: Row[] = [];
 const same: string[] = [];
 const skipped: string[] = [];
 const outOfScope: string[] = [];
@@ -213,6 +269,7 @@ try {
       `<body>${markup(el)}</body>`;
     const diffs: string[] = [];
     const missing: string[] = [];
+    const known: string[] = [];
 
     const chromeDisplay = (await session.computedIn(html, el, "display")).trim();
     if (chromeDisplay === "inline" || chromeDisplay === "inline-block") inlineElements.push(el);
@@ -222,7 +279,12 @@ try {
 
       if (css === "display") {
         const f = displayFinding(chrome, dz[field!]!);
-        if (f) diffs.push(f);
+        if (f) {
+          const name = DISPLAY_NAME[dz[field!]!] ?? String(dz[field!]);
+          const why = knownReason(el, css, chrome, name);
+          if (why) known.push(`${f}  — ${why}`);
+          else diffs.push(f);
+        }
         continue;
       }
 
@@ -237,14 +299,26 @@ try {
           (css === "text-decoration-line" && chrome === "none") ||
           (css === "list-style-type" && chromeDisplay !== "list-item") ||
           (css === "font-family" && !/mono|serif|cursive|fantasy/i.test(chrome));
-        if (!boring) missing.push(`${css}=${chrome}`);
+        if (!boring) {
+          const why = knownReason(el, css, chrome, null);
+          if (why) known.push(`no field · ${css}=${chrome}  — ${why}`);
+          else missing.push(`${css}=${chrome}`);
+        }
         continue;
       }
 
-      if (differs(kind, chrome, dz[field]!)) diffs.push(`${css}: chrome ${chrome} · dziri ${dz[field]}`);
+      if (differs(kind, chrome, dz[field]!)) {
+        const why = knownReason(el, css, chrome, String(dz[field]));
+        if (why) known.push(`${css}: chrome ${chrome} · dziri ${dz[field]}  — ${why}`);
+        else diffs.push(`${css}: chrome ${chrome} · dziri ${dz[field]}`);
+      }
     }
 
-    if (diffs.length || missing.length) rows.push({ el, diffs, missing });
+    // An element whose *only* differences are known ones is not backlog. It is
+    // counted separately rather than as "already match", because it does not
+    // match — it differs for a reason that has been accepted.
+    if (diffs.length || missing.length) rows.push({ el, diffs, missing, known });
+    else if (known.length) knownOnly.push({ el, diffs, missing, known });
     else same.push(el);
   }
 } finally {
@@ -258,13 +332,51 @@ for (const r of rows) {
   for (const m of r.missing) console.log(`      no field · ${m}`);
 }
 
+const knownCount = [...rows, ...knownOnly].reduce((n, r) => n + r.known.length, 0);
+
 console.log(
-  `\n  ${rows.length} differ · ${same.length} already match · ${outOfScope.length} out of scope · ` +
-    `${skipped.length} not rendered · ${broke.length} failed to compile`,
+  `\n  ${rows.length} differ · ${knownOnly.length} known only · ${same.length} already match · ` +
+    `${outOfScope.length} out of scope · ${skipped.length} not rendered · ${broke.length} failed to compile`,
 );
+console.log(`  ${knownCount} finding(s) accepted by ${matched.size}/${KNOWN.length} known-divergence entries`);
+
+if (SHOW_KNOWN) {
+  console.log("\nknown divergences — decisions, not backlog");
+  for (const r of [...knownOnly, ...rows].sort((a, b) => a.el.localeCompare(b.el))) {
+    if (!r.known.length) continue;
+    console.log(`  <${r.el}>`);
+    for (const k of r.known) console.log(`      ${k}`);
+  }
+} else if (knownCount) {
+  console.log(`  (--known to see them and why)`);
+}
+
 if (SHOW_SAME && same.length) console.log(`\nalready match:\n  ${same.join(", ")}`);
 if (broke.length) console.log(`\nfailed to compile:\n  ${broke.slice(0, 8).join("\n  ")}`);
 console.log(
   `\nThis table is the default stylesheet's spec. "no field" means the property is not in\n` +
     `STYLE_FIELDS yet and must exist before any rule can set it.`,
 );
+
+/**
+ * The one thing that makes the table above a ledger rather than a mute list: an
+ * entry that excuses nothing has outlived the divergence it was written for, and
+ * says so instead of sitting there being quietly wrong. This is the only condition
+ * under which this tool exits non-zero — 59 differences are a report, a stale
+ * exemption is a defect in the report itself.
+ *
+ * Note it can also fire for an innocent reason: `--only` narrows the run, so an
+ * entry that would have matched an element outside the filter looks unused. Hence
+ * the check is skipped when the corpus was filtered.
+ */
+const stale = ONLY ? [] : KNOWN.filter((k) => !matched.has(k.id));
+if (stale.length) {
+  console.log("\nSTALE known-divergence entries — they matched nothing this run:");
+  for (const k of stale) console.log(`  ${k.id}\n    was: ${k.why}`);
+  console.log(
+    `\nEither the divergence was fixed, in which case delete the entry, or the finding\n` +
+      `it matched changed shape, in which case it is no longer accepted and should be\n` +
+      `re-read rather than re-worded.`,
+  );
+  process.exit(1);
+}

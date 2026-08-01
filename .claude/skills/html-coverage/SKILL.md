@@ -9,7 +9,34 @@ description: Compare how each HTML element renders in dziri versus Chrome, produ
 bun run html-coverage                  # the difference table
 bun run html-coverage --only h1,ul,em  # a few elements
 bun run html-coverage --same           # also list elements that already match
+bun run html-coverage --known          # show accepted divergences and why
 ```
+
+## Known divergences are subtracted from the backlog
+
+The headline number used to be two unrelated things added together. `<p>` differs because dziri
+has no default stylesheet yet — a real gap, and the reason this tool exists. `<address>` differs
+because dziri has no block layout, deliberately and permanently. Printed identically, they forced
+every reader to re-derive which was which.
+
+`KNOWN` in the script names the second kind. Today two entries account for **37 findings across 17
+elements**, which is why the count reads `42 differ · 17 known only` rather than `59 differ`. 42 is
+the backlog.
+
+Three properties keep it from rotting into a suppression list:
+
+- **every entry carries a reason and the reason is printed** — `--known` shows them, and the
+  accepted count is always in the summary, so the exemptions cannot go quiet;
+- **an entry matching nothing fails the run** — this is the only way this tool exits non-zero, and
+  it is deliberate: 59 differences are a report, a stale exemption is a defect in the report;
+- **nothing goes in without being decided elsewhere first** — both current entries cite where
+  (`src/ir.ts` for flex-column, the absent `font-family` field for the other). This table records
+  decisions, it does not make them. A tool that can shrink its own backlog by fiat is worthless.
+
+The stale check is skipped under `--only`, because a filtered corpus makes a live entry look unused.
+
+Why an entry and not a comment: `layout-diff`'s box-sizing note was true when written, became false
+hours later when the engine changed, and nothing noticed for an afternoon. An entry expires loudly.
 
 Unlike `css-coverage`, this cannot be static analysis. dziri has no per-element table — it treats
 elements as generic boxes — so "supported" is not a lookup, it is a **behaviour**: is `<h1>` bold
