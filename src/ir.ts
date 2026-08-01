@@ -484,6 +484,66 @@ export type RouteRow = {
   parent: number;
 };
 
+/**
+ * A window's configuration, as `<Window>` declared it.
+ *
+ * Every field is a compile-time constant. It lives here rather than beside the
+ * component because it is the shape the generated artifact emits and the host
+ * reads — and, once `minWidth` reaches the engine, the shape `EngineConfig` grows.
+ */
+export type WindowConfig = {
+  title: string;
+  width?: number;
+  height?: number;
+  minWidth?: number;
+  minHeight?: number;
+};
+
+/**
+ * A route, as nodes rather than as a path.
+ *
+ * `roots` is what navigation writes: the top-level nodes this route contributed,
+ * which is normally one. Hiding them excludes the route from layout, paint and
+ * hit-testing, so switching route is a handful of byte writes and one relayout —
+ * no allocation, no table growth, nothing to rebuild.
+ *
+ * There is no span. A route's nodes are not contiguous, because a layout's subtree
+ * contains its children's routes, and a span would either overlap them or need the
+ * nesting encoded twice.
+ */
+export type RouteNodes = {
+  /** Route path, as the file path under `pages/` gave it. */
+  path: string;
+  roots: readonly number[];
+  /** Nearest prefix route in this window's list, or -1. Visible when this one is. */
+  parent: number;
+};
+
+/**
+ * A route and its ancestors — the set visible at once.
+ *
+ * An ancestor stays visible because the active route renders *inside* it; that is
+ * what makes a layout a layout, and it falls out of the parent chain rather than
+ * needing a rule anywhere.
+ *
+ * One definition because three things walk it and they must agree: the emitter
+ * deciding which routes start `hidden`, the driver reporting how many that was, and
+ * the host switching route. Two of those disagreeing would show as a frame that is
+ * correct until the first navigation.
+ *
+ * Tolerates a cycle rather than hanging on one. `parent` is compiler output and a
+ * cycle would be a compiler bug, but the failure mode of a `while` here is a build
+ * that never finishes and never says why.
+ */
+export function routeChain(routes: readonly RouteNodes[], index: number): Set<number> {
+  const chain = new Set<number>();
+  for (let i = index; i !== -1; i = routes[i]?.parent ?? -1) {
+    if (chain.has(i)) break;
+    chain.add(i);
+  }
+  return chain;
+}
+
 /** One window folder, and the contiguous span of `routes` it owns. */
 export type WindowRow = {
   /** Folder name under `windows/` — the window's id. There is no override. */

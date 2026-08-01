@@ -19,10 +19,13 @@ import {
   MediaKind,
   NodeKind,
   Predicate,
+  routeChain,
   STYLE_FIELDS,
   type CompiledUi,
   type ComputedStyle,
+  type RouteNodes,
   type StyleField,
+  type WindowConfig,
 } from "../ir.ts";
 import { parseHtml, type DynList, type Element, type Node, type TextPart } from "./html.ts";
 import { isItemSentinel, ItemExpressionError } from "./item-path.ts";
@@ -517,6 +520,36 @@ export type CompileResult = {
 /** A media condition as the wire carries it: a bit, an axis+side, a threshold. */
 export type BuiltMedia = { bit: number; kind: number; value: number };
 
+/** What the emitter needs to know about a window's routes. */
+export type EmittedRouting = {
+  /** Folder name — the window's id. */
+  window: string;
+  config: WindowConfig;
+  routes: RouteNodes[];
+  /** Index in `routes` of the route showing on the first frame. */
+  initial: number;
+};
+
+/**
+ * Nodes hidden on the first frame: everything off the initial route's chain.
+ *
+ * An ancestor of the active route stays visible, because the active route is
+ * rendered *inside* it — that is what makes a layout a layout. Everything else is
+ * resident and excluded, which is the measured design: 20 routes with 19 hidden
+ * cost 1.39 ms against 6.04 ms before the diff carried changed node indices.
+ */
+function hiddenAtStart(nodeCount: number, routing: EmittedRouting): number[] {
+  const hidden = new Array<number>(nodeCount).fill(0);
+  const chain = routeChain(routing.routes, routing.initial);
+
+  for (const [i, route] of routing.routes.entries()) {
+    if (chain.has(i)) continue;
+    for (const node of route.roots) hidden[node] = 1;
+  }
+
+  return hidden;
+}
+
 export function compile(html: string, css: string): CompileResult {
   return compileTree(parseHtml(html), css);
 }
@@ -526,7 +559,24 @@ export function compile(html: string, css: string): CompileResult {
  * runtime both produce this shape, so both authoring front-ends share every
  * downstream stage — cascade, variants, interning, emit.
  */
-export function compileTree(doc: Element, css: string): CompileResult {
+export function compileTree(
+  doc: Element,
+  css: string,
+  opts: {
+    /**
+     * Filled in with the node each element became, when a caller needs to find
+     * its way back.
+     *
+     * The router is the caller that does: it splices a page's tree into the
+     * window's and then has to know which nodes that page owns, so navigation can
+     * hide them. Nothing in the tree carries an identity the IR keeps — node ids
+     * are positions — so the mapping has to be handed out while the positions are
+     * being assigned or reconstructed by counting afterwards, and counting is the
+     * version that breaks the first time a node is dropped.
+     */
+    nodeOf?: Map<Element, number>;
+  } = {},
+): CompileResult {
   const rules = parseCss(css);
 
   // Assigned as conditions are met during the walk, so bit order is first-use
@@ -722,6 +772,7 @@ export function compileTree(doc: Element, css: string): CompileResult {
       parent,
       children: [],
     });
+    opts.nodeOf?.set(el, self);
 
     if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "" });
     if (el.bindValue) editables.push({ node: self, ref: el.bindValue, name: "" });
@@ -1240,6 +1291,14 @@ export function emit(
    * table without any node pointer changing.
    */
   variants?: VariantCompiled,
+  /**
+   * Present when the document is a window with routes.
+   *
+   * Its effect on the tables is one column: every route off the initial chain
+   * starts `hidden`, so frame 1 shows one route rather than all of them. The rest
+   * is data the host reads — which nodes each route owns, and what nests in what.
+   */
+  routing?: EmittedRouting,
 ): string {
   const { strings, nodes, root } = result;
 
@@ -1375,7 +1434,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable } from "${source.typesFrom}/ir.ts";
+import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${source.typesFrom}/ir.ts";
 import type { EditableRef } from "${source.typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${source.typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${source.typesFrom}/runtime/patches.ts";
@@ -1398,7 +1457,7 @@ export const nodes = {
   firstChild: ${typedArray("Int32Array", firstChild)},
   nextSibling: ${typedArray("Int32Array", nextSibling)},
   list: new Int16Array(${nodes.length}).fill(-1),
-  hidden: new Uint8Array(${nodes.length}),
+  hidden: ${routing ? typedArray("Uint8Array", hiddenAtStart(nodes.length, routing)) : `new Uint8Array(${nodes.length})`},
 } satisfies NodeTable;
 
 /**
@@ -1481,6 +1540,51 @@ export const media = {
 } satisfies MediaTable;
 
 export const root: number = ${root};
+${routing ? routingSource(routing) : ""}`;
+}
+
+/**
+ * The routing half of a window's artifact.
+ *
+ * Node ids rather than paths, because the host's job at navigation is to write
+ * `hidden` — matching a concrete path against the route table is a separate
+ * question with a separate table, and eventually the engine's.
+ */
+function routingSource(routing: EmittedRouting): string {
+  const routes = routing.routes
+    .map(
+      (r) =>
+        `  { path: ${JSON.stringify(r.path)}, roots: [${r.roots.join(", ")}],` +
+        ` parent: ${r.parent} },`,
+    )
+    .join("\n");
+
+  const config = Object.entries(routing.config)
+    .filter(([, v]) => v !== undefined)
+    .map(([k, v]) => `  ${k}: ${JSON.stringify(v)},`)
+    .join("\n");
+
+  return `
+/** The window this artifact is, as \`<Window>\` declared it. */
+export const windowConfig = {
+${config}
+} satisfies WindowConfig;
+
+/**
+ * Each route's own top-level nodes, in the window's match order.
+ *
+ * Navigation writes \`hidden\` over the routes leaving the chain and clears it over
+ * the ones joining — bounded by route count, not by node count.
+ */
+export const routeNodes = [
+${routes}
+] satisfies RouteNodes[];
+
+/** Index in \`routeNodes\` of the route the emitted \`hidden\` column shows. */
+export const initialRoute: number = ${routing.initial};
+
+/** Folder name of the window, for diagnostics and multi-window dispatch later. */
+export const windowId: string = ${JSON.stringify(routing.window)};
 `;
 }
 

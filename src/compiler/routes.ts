@@ -351,16 +351,29 @@ export function emitRoutes(
     typesFrom: string;
   },
 ): string {
-  const flat = windows.flatMap((w) => w.routes);
-
-  const routeRows = flat
-    .map(
-      (r) =>
-        `  { window: ${JSON.stringify(r.window)}, path: ${JSON.stringify(r.path)},` +
-        ` segments: ${listOf(r.segments)}, params: ${listOf(r.params)},` +
-        ` parent: ${r.parent}, file: ${JSON.stringify(r.file)} },`,
-    )
+  /**
+   * `parent` is rebased here, because it changes meaning at this line.
+   *
+   * The scan links parents within one window, since that is the only scope where
+   * nesting exists — two windows' route trees are unrelated. `routes` is the
+   * concatenation of all of them, so a parent of 0 in the second window would
+   * point at the *first* window's first route: a silently wrong edge, and one that
+   * a single-window project can never surface.
+   */
+  const routeRows = windows
+    .flatMap((w, i) => {
+      const offset = windows.slice(0, i).reduce((sum, prev) => sum + prev.routes.length, 0);
+      return w.routes.map(
+        (r) =>
+          `  { window: ${JSON.stringify(r.window)}, path: ${JSON.stringify(r.path)},` +
+          ` segments: ${listOf(r.segments)}, params: ${listOf(r.params)},` +
+          ` parent: ${r.parent === -1 ? -1 : r.parent + offset},` +
+          ` file: ${JSON.stringify(r.file)} },`,
+      );
+    })
     .join("\n");
+
+  const flat = windows.flatMap((w) => w.routes);
 
   let first = 0;
   const windowRows = windows

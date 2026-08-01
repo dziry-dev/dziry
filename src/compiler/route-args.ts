@@ -142,6 +142,27 @@ export function paramNameOf(value: unknown): string {
 }
 
 /**
+ * A bare `{args.id}`, which is right and does not work yet.
+ *
+ * Its own error rather than `ParamExpressionError`, because the diagnosis differs:
+ * nothing was computed, so telling the author to use `computed()` would be advice
+ * for a mistake they did not make. The recorder reaches the tree exactly as it
+ * should and the emitter has nothing to do with it, which is a hole in the
+ * compiler and should read as one.
+ */
+export class ParamNotEmittedError extends Error {
+  constructor(name: string) {
+    super(
+      `a route parameter cannot be rendered yet (args.${name}).\n` +
+        `  useRoute types its args and the compiler checks the path against the file, but\n` +
+        `  turning a parameter read into a text binding is the next piece of the router and\n` +
+        `  is not built. Until it is, a page can name its route but not display the value.`,
+    );
+    this.name = "ParamNotEmittedError";
+  }
+}
+
+/**
  * Turns a leaked sentinel into the error the author needs.
  *
  * Every route that reaches here computed with a parameter instead of reading it.

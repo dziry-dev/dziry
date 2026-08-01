@@ -18,6 +18,7 @@ import {
   type ReadonlySignal,
 } from "../runtime/signal.ts";
 import { isRecorder, pathOf, recorder } from "./item-path.ts";
+import { isRouteParam, ParamNotEmittedError, paramNameOf } from "./route-args.ts";
 import type { DynList, DynText, Element, Node, TextPart } from "./html.ts";
 
 export class ListError extends Error {}
@@ -328,6 +329,13 @@ function flatten(child: Child, out: Node[]): void {
   if (isRecorder(child)) {
     out.push({ type: "dyntext", parts: [{ item: pathOf(child) }] });
     return;
+  }
+
+  // `{args.id}` — a route parameter, recognised before it is mistaken for a node.
+  // Checked here rather than left to the proxy's own trap, which would fire on the
+  // `.type` read below and report a computed expression that nobody wrote.
+  if (isRouteParam(child)) {
+    throw new ParamNotEmittedError(paramNameOf(child));
   }
 
   // `{count}` — a signal reached the tree as an object, so it is a binding.

@@ -373,6 +373,28 @@ test("the generated module round-trips the table it was built from", async () =>
   }
 });
 
+test("a second window's parent edges are rebased into the flat table", async () => {
+  const root = await project({
+    "windows/main/index.tsx": PAGE,
+    "windows/main/pages/index.tsx": PAGE,
+    "windows/settings/index.tsx": PAGE,
+    "windows/settings/pages/index.tsx": PAGE,
+    "windows/settings/pages/account.tsx": PAGE,
+    "windows/settings/pages/account/email.tsx": PAGE,
+  });
+
+  const windows = scanWindows(root);
+  const outPath = join(root, "rebased.gen.ts");
+  await writeFile(outPath, emitRoutes(windows, { from: "windows", typesFrom: "../src" }));
+  const mod = (await import(pathToFileURL(outPath).href)) as { routes: readonly RouteRow[] };
+
+  // Within `settings`, `account` is route 1 of that window; in the flat table it
+  // is row 2. An unrebased edge would point `account/email` at main's index route.
+  const email = mod.routes.find((r) => r.path === "account/email")!;
+  expect(mod.routes[email.parent]!.path).toBe("account");
+  expect(mod.routes[email.parent]!.window).toBe("settings");
+});
+
 test("a window with no routes emits `never` rather than an empty union", () => {
   const windows: WindowDef[] = [{ id: "main", entry: "windows/main/index.tsx", routes: [] }];
   expect(hrefUnion([])).toBe("never");

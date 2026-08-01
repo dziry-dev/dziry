@@ -101,6 +101,16 @@ test("useRoute with no page being compiled says so, rather than guessing", () =>
   expect(run).toThrow(/module scope/);
 });
 
+test("withPage refuses an async callback instead of scoping nothing", () => {
+  // The scope closes when the callback returns, and an async one returns at its
+  // first await — so the component would expand outside it and `useRoute` would
+  // report no page at all, three frames from the cause. Found exactly that way.
+  const run = () => withPage(PRODUCT, async () => useRoute("products/$id"));
+  expect(run).toThrow(RouteHookError);
+  expect(run).toThrow(/async callback/);
+  expect(run).toThrow(/Import the module first/);
+});
+
 test("page scope nests and unwinds, including through a throw", () => {
   withPage(PRODUCT, () => {
     expect(useRoute("products/$id").path).toBe("products/$id");

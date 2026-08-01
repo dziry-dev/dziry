@@ -51,7 +51,33 @@ export function resolveRefs(
 ): { imports: Map<string, Set<string>> } {
   const imports = new Map<string, Set<string>>();
 
-  const record = (ref: ResolvedRef): void => {
+  /**
+   * Which module each imported name came from.
+   *
+   * Only interesting because the router made this a many-module pass. With one
+   * entry and its `state.ts` a name could not collide; with a module per page, two
+   * pages exporting `draft` and both using it would emit two `import { draft }`
+   * lines and an artifact that cannot parse — reported as a syntax error in
+   * generated code, pointing nowhere near the two files that caused it.
+   *
+   * Keyed on *used* names rather than on every export, so two pages may each have
+   * their own private `draft` as long as at most one of them reaches the tree.
+   */
+  const from = new Map<string, string>();
+
+  const record = (ref: ResolvedRef, what: string): void => {
+    const previous = from.get(ref.name);
+    if (previous !== undefined && previous !== ref.specifier) {
+      throw new RefError(
+        `two modules export "${ref.name}", and ${what} needs both:\n` +
+          `    ${previous}\n    ${ref.specifier}\n` +
+          `  The generated module imports every signal and handler by name, so one name\n` +
+          `  cannot mean two things. Rename one of them, or move the shared one into a\n` +
+          `  module both import.`,
+      );
+    }
+    from.set(ref.name, ref.specifier);
+
     let names = imports.get(ref.specifier);
     if (!names) {
       names = new Set();
@@ -70,7 +96,7 @@ export function resolveRefs(
           `  because components are erased at build time.`,
       );
     }
-    record(ref);
+    record(ref, what);
     return ref;
   };
 

@@ -57,12 +57,30 @@ export type Route<P extends string> = {
  */
 let currentPage: { path: string; file: string } | null = null;
 
-/** Scopes a page's expansion, so `useRoute` inside it knows what it is. */
+/**
+ * Scopes a page's expansion, so `useRoute` inside it knows what it is.
+ *
+ * Synchronous, and it refuses to be handed anything else. `finally` runs when
+ * `run` *returns*, so an `async` callback would restore the cursor at its first
+ * `await` and the component would expand outside the scope that was opened for
+ * it — reported as `useRoute` running with no page at all, which is a true
+ * statement about a cause three frames up. Importing is the caller's job; this
+ * wraps the call.
+ */
 export function withPage<T>(page: { path: string; file: string }, run: () => T): T {
   const previous = currentPage;
   currentPage = page;
   try {
-    return run();
+    const result = run();
+    if (typeof (result as { then?: unknown } | null)?.then === "function") {
+      throw new RouteHookError(
+        `withPage was given an async callback, which cannot be scoped.\n` +
+          `  The page cursor is restored when the callback returns, and an async one returns\n` +
+          `  at its first await — before the component runs. Import the module first, then\n` +
+          `  call its default export inside withPage.`,
+      );
+    }
+    return result;
   } finally {
     currentPage = previous;
   }
