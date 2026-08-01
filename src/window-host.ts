@@ -44,7 +44,7 @@ import {
   dispatchItem,
   type ListBindingRef,
 } from "./runtime/list-runtime.ts";
-import * as generated from "../windows/main/ui.gen.ts";
+import { artifacts, windowIds, type WindowId } from "../windows/windows.gen.ts";
 
 /** SDL keycodes. Two constants is cheaper than binding the whole keysym table. */
 const KEY_BACKSPACE = 8;
@@ -61,6 +61,25 @@ const numberFlag = (name: string): number => {
   return i !== -1 && argv[i + 1] ? Number(argv[i + 1]) : -1;
 };
 
+/**
+ * Which window to open. `--window tailwind`, defaulting to the first.
+ *
+ * One at a time, not one per process by choice: `Window::new` creates an
+ * `EventPump` per engine and SDL's queue is process-global, so two windows would
+ * fight over events. Opening either from one host is what this needs; opening both
+ * at once is an engine refactor.
+ */
+const generated = (() => {
+  const i = argv.indexOf("--window");
+  const wanted = i !== -1 ? argv[i + 1] : null;
+  if (!wanted) return artifacts[windowIds[0]!];
+
+  if (!(wanted in artifacts)) {
+    throw new Error(`no window "${wanted}". Windows are ${windowIds.join(", ")}.`);
+  }
+  return artifacts[wanted as WindowId];
+})();
+
 // The generated module *is* the IR — no parsing, no deserialization.
 //
 // And no assertion either. This used to end in `as unknown as CompiledUi`, which
@@ -70,10 +89,10 @@ const numberFlag = (name: string): number => {
 // types, so a field the compiler renames is a compile error in the artifact
 // rather than a `TypeError` in whichever test happens to touch it first.
 //
-// Statically imported for the same reason. One window until `Window::new` stops
-// creating an `EventPump` per engine — SDL's queue is process-global, so a second
-// window fights the first for events, which is an engine refactor independent of
-// anything here.
+// The registry keeps that property across windows: `artifacts` is a record of
+// statically imported modules, so reading `.routeNodes` off one is checked. A
+// dynamic `import(id)` would return `any` and give up the one interface this
+// project cannot afford to stop checking.
 const ui: CompiledUi = {
   strings: generated.strings,
   styles: generated.styles,

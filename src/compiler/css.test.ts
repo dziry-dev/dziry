@@ -537,6 +537,26 @@ test("oklch() converts to the sRGB Chrome paints", () => {
   expect(Math.abs(a[2]! - 153)).toBeLessThanOrEqual(1);
 });
 
+test("`none` is a missing oklch component, not a syntax error", () => {
+  // CSS Color 4 §4.2: `none` means the component is missing, and outside
+  // interpolation it computes to zero. Tailwind 4.3 emits exactly this for every
+  // neutral — `--color-zinc-50: oklch(98.5% 0 none)` — so rejecting it failed the
+  // greys a UI is mostly made of while the saturated colours parsed, which reads
+  // like a bad token rather than a missing feature. Found by the Tailwind window.
+  const rgb = (c: string) => {
+    const v = parseColor(c);
+    return [(v >>> 16) & 255, (v >>> 8) & 255, v & 255, (v >>> 24) & 255];
+  };
+
+  // A hue of `none` is a hue of 0, so these two must agree exactly.
+  expect(rgb("oklch(98.5% 0 none)")).toEqual(rgb("oklch(98.5% 0 0)"));
+  expect(rgb("oklch(98.5% 0 none)")).toEqual([250, 250, 250, 255]); // zinc-50
+
+  // And in the other components, for the same reason.
+  expect(rgb("oklch(none 0 0)")).toEqual([0, 0, 0, 255]);
+  expect(rgb("oklch(50% none 180)")).toEqual(rgb("oklch(50% 0 180)"));
+});
+
 test("logical properties map onto the physical ones", () => {
   // `px-4`/`py-2` — the spacing utilities people actually use — compile to
   // `padding-inline`/`padding-block`, not to `padding-left`.

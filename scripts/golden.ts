@@ -50,6 +50,16 @@ const SCENARIOS: Scenario[] = [
   { name: "route-routing", args: ["--route", "routing"] },
   { name: "route-nested", args: ["--route", "products/new"] },
   { name: "route-param", args: ["--route", "products/$id"] },
+
+  // The Tailwind window, one scenario per utility family. These are the coverage
+  // claim: real Tailwind output through the compiler, so a regression in the
+  // cascade, in oklch conversion, or in a single property shows up as pixels.
+  { name: "tw-overview", args: ["--window", "tailwind"] },
+  { name: "tw-layout", args: ["--window", "tailwind", "--route", "layout"] },
+  { name: "tw-spacing", args: ["--window", "tailwind", "--route", "spacing"] },
+  { name: "tw-typography", args: ["--window", "tailwind", "--route", "typography"] },
+  { name: "tw-colors", args: ["--window", "tailwind", "--route", "colors"] },
+  { name: "tw-borders", args: ["--window", "tailwind", "--route", "borders"] },
 ];
 
 /** IHDR is always the first chunk: width and height are bytes 16..24, big-endian. */

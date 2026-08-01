@@ -690,7 +690,20 @@ function parseOklch(args: string, raw: string): number {
   // Lightness is 0..1, or a percentage of that. Chroma is an absolute number, and
   // a percentage there is relative to 0.4 per the spec. Hue is degrees.
   const pct = (s: string) => s.trim().endsWith("%");
-  const num = (s: string) => Number(s.trim().replace("%", ""));
+
+  /**
+   * `none` is a *missing component*, not a syntax error — CSS Color 4 §4.2.
+   *
+   * Outside interpolation a missing component computes to zero, which for hue is
+   * what an achromatic colour means. Tailwind 4.3 emits exactly this for the greys:
+   * `--color-zinc-50: oklch(98.5% 0 none)`. Rejecting it failed every neutral in
+   * the palette — the colours a UI is mostly made of — while the saturated ones
+   * parsed, so the failure looked like a bad token rather than a missing feature.
+   */
+  const num = (s: string) => {
+    const t = s.trim().replace("%", "");
+    return t === "none" ? 0 : Number(t);
+  };
 
   const L = pct(parts[0]!) ? num(parts[0]!) / 100 : num(parts[0]!);
   const C = pct(parts[1]!) ? (num(parts[1]!) / 100) * 0.4 : num(parts[1]!);

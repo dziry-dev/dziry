@@ -235,10 +235,10 @@ path extends it renders inside. No directory convention, no layout declaration.
 ### Built
 
 ```
-bun run routes            # scan ./windows -> windows/routes.gen.ts
-bun run routes --list     # the table, with parameters and nesting
-bun run window            # compile windows/<id>/ -> windows/<id>/ui.gen.ts
-bun run window:run        # show it; --route products/new to show another
+bun run dev               # compile every window, open the first
+bun run run --window tailwind --route colors
+bun run routes --list     # the route table, with parameters and nesting
+bun run window            # compile only; -o diverts the artifact
 ```
 
 - `src/compiler/routes.ts` — the scan, the route table, the `Href` union, and every rejection:
@@ -258,8 +258,14 @@ bun run window:run        # show it; --route products/new to show another
   from layout, paint and hit-testing. `routeChain` in `ir.ts` is the one definition of what is
   visible together, shared by the emitter and the host so frame 1 and every frame after agree.
 
-`windows/main/` is a working demo — a layout route, a parameter route, and shared components in
-the window folder. Three golden scenarios render it.
+**The application is a window.** `windows/main/` is the demo that used to be `app/`: the feature
+demo is the route at `/`, with a layout route, a parameter route, and shared components in the
+window folder. `windows/tailwind/` is a second window, one route per Tailwind utility family.
+Thirteen golden scenarios render the two of them.
+
+One host serves any window — `windows/windows.gen.ts` is a generated registry of statically
+imported artifacts, so `--window <id>` costs no type safety. Opening two at *once* still needs one
+SDL event pump.
 
 Not built: `navigate`/`back` (the host has `showRoute`, which is the mechanism; what is missing
 is the matcher and the one-entry history), the emitter reading parameter recorders into text

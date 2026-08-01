@@ -1,5 +1,0 @@
-/* Only theme + utilities: preflight is a UA reset whose selectors (:host, *,
-   ::before, [hidden]) dziri deliberately refuses, and it is optional. */
-@import "tailwindcss/theme.css";
-@import "tailwindcss/utilities.css" source(none);
-@source "./index.html";
