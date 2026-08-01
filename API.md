@@ -139,6 +139,8 @@ export const configOnDisk = source<Config>(
 windows/
   main/
     index.tsx                 the window
+    Header.tsx                an ordinary component — imported, not routed
+    Sidebar.tsx               "
     pages/
       index.tsx               → "/"
       about.tsx               → "about"
@@ -149,6 +151,10 @@ windows/
       docs/
         get-started.mdx       → "docs/get-started"
 ```
+
+Only two names are special: **`index.tsx` is the window**, and **`pages/` holds the routes**.
+Every other file in the window folder is a normal module — colocated components, imported the
+usual way. Nothing scans them and nothing infers anything from them.
 
 ```tsx
 // windows/main/index.tsx
