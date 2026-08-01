@@ -188,11 +188,17 @@ const KNOWN: KnownDivergence[] = [
     why: "no block layout: INITIAL_STYLE is display FLEX with direction COLUMN, which stacks children the way block does (src/ir.ts)",
     when: (_el, css, chrome, dziri) => css === "display" && chrome === "block" && dziri === "FLEX",
   },
-  {
-    id: "no-font-family-field",
-    why: "dziri has no font-family property at all — the engine always uses the platform sans, so no UA rule could set this",
-    when: (_el, css, _chrome, dziri) => css === "font-family" && dziri === null,
-  },
+  // There was a second entry here, `no-font-family-field`, and removing it is the
+  // clearest illustration of the bar above. It excused every `font-family`
+  // difference on the grounds that dziri has no such field — citing layout-diff's
+  // header, which says exactly that. But that sentence is a statement of a *current
+  // limitation*, written to justify pinning Chrome's font in a reset. It is not a
+  // decision that the field will never exist, and HTML-ELEMENT-COVERAGE-RESEARCH.md
+  // lists `font-family` first among the ten properties Tier 0b needs.
+  //
+  // So the entry was an exemption hiding backlog, which is the one thing this table
+  // must never do. "Cite where the decision was made" has to mean a decision, not
+  // any sentence that describes the same fact.
 ];
 
 /** Which entries earned their place this run. An unused one is stale, not silent. */
