@@ -156,6 +156,11 @@ Only two names are special: **`index.tsx` is the window**, and **`pages/` holds 
 Every other file in the window folder is a normal module — colocated components, imported the
 usual way. Nothing scans them and nothing infers anything from them.
 
+**`pages/` contains routes and nothing else.** Every file under it is a route, with no marker
+filename and no opt-out prefix — which is why a page's own components live in the window folder
+rather than beside it. Next's `page.tsx` and SvelteKit's `+page.svelte` exist to make the other
+files in a route folder ordinary; here there are no other files.
+
 ```tsx
 // windows/main/index.tsx
 export default function Main() {
