@@ -21,8 +21,9 @@ Claude's output from a brainstorm session, not agreed design. Do not treat them 
     which reverses the previous bullet deliberately.
   - **Links are concrete paths**, as on the web: `<a href="products/1">` and
     `` href={`products/${id}`} ``. Not pattern + args.
-  - **Params arrive as props, typed from a generated per-route module** — not from a repeated
-    path string. See Routing below.
+  - **Params come from a typed hook**, `useRoute("products/$id")`. The path string is repeated
+    from the filename because TypeScript cannot know which file a call is in; the compiler
+    verifies it against the file path, so drift is a build error. See Routing below.
   - **History is the previous route only**, per window. `back()` returns to it.
   - **One route is resident at a time.** Navigation swaps the page's nodes and text; the style
     table stays global and interned.
@@ -73,8 +74,8 @@ Anything that trades robustness for capability stays a proposal.
 - **Sequencing is a dependency, not a preference.** Pooled templates need M6 (disposal scopes)
   underneath and M10 (virtualization) to bound the pool to viewport size.
 
-> Last brainstorm: 2026-08-01 (routing rewritten — windows, file-path routes, generated param
-> props, concrete-path links, per-route text residency). Supersedes 2026-07-31's routing.
+> Last brainstorm: 2026-08-01 (routing rewritten — windows, file-path routes, `useRoute` params,
+> concrete-path links, per-route text residency). Supersedes 2026-07-31's routing.
 > Earlier: 2026-07-31 (routing, data fetching, `source`, UA CSS, trees).
 > Rationale lives in `framework-design.md` and `data-layer-design.md`. This file is the surface.
 
@@ -98,7 +99,8 @@ Anything that trades robustness for capability stays a proposal.
 | `onFrame(dt)` | planned | — |
 | `<Overlay>` | planned | M11 |
 | `<Window>` / `navigate` / `back` / `href` / `<Outlet>` | planned — surface settled, see Routing | M7 |
-| `defineScreen` | planned — `args` moved to generated props; only `data` remains | M8 |
+| `useRoute` | planned — typed params, see Routing | M7 |
+| `defineScreen` | planned — `args` moved to `useRoute`; only `data` remains | M8 |
 | `defineQuery` / `defineMutation` | planned | — |
 | default stylesheet | planned | — |
 
@@ -175,19 +177,24 @@ export default function Main() {
 `windows/*/index.tsx` is a window; `windows/*/pages/**` are its routes. The route path is the
 file path under `pages/`, recursively; `$segment` is a parameter.
 
-**Params are props, typed from a generated module.** No path string is repeated anywhere.
+**Params come from a typed hook.**
 
 ```tsx
 // windows/main/pages/products/$id.tsx
-import type { PageProps } from "@routes/products/$id";
-
-export default function Product({ args }: PageProps) {   // args: { id: string }
+export default function Product() {
+  const { args } = useRoute("products/$id");   // args: { id: string }
   return <h1>{args.id}</h1>;
 }
 ```
 
-A page with no parameters imports nothing. Renaming `$id.tsx` regenerates the tree, breaks the
-import, and TypeScript points at the rename — drift is a compile error, not silent wrongness.
+`args` is typed from the string alone, by template literal types — no generated module, no import.
+A page with no parameters calls nothing.
+
+The string repeats the filename, and that is deliberate: **TypeScript cannot know which file a
+call is in**, so a bare `useRoute()` has nothing to infer from. The repetition is what makes the
+type work, and the compiler checks the string against the file's own path — a rename that is not
+mirrored is a build error, not silent drift. (TanStack repeats it for the same reason, and needs
+an editor plugin to keep the two in sync; here the compiler simply refuses.)
 
 **Links are concrete paths.**
 
