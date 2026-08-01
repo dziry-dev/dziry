@@ -38,7 +38,7 @@ the final count, and which elements remain and why.
 
 ## Watch for
 
-- **`em` does not mean what Chrome means.** `css.ts:994` resolves `em` against the root's 16px,
+- **`em` does not mean what Chrome means.** `css.ts:1056-1059` resolves `em` against the root's 16px,
   not the element's own font-size. Chrome's sheet writes headings as `2em` with `0.67em` margins;
   copying that computes 10.72px where Chrome computes 21.44px. Use px, and remember px values
   encode a 16px root.
@@ -54,4 +54,4 @@ the final count, and which elements remain and why.
 | Pass | Result |
 |---|---|
 | mechanism (`94e1457`) | 45 → 42 |
-| headings (`d8a54c1`) | 42 → 36 |
+| headings (`6b9fbe2`) | 42 → 36 |
