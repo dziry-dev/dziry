@@ -24,12 +24,9 @@
  * already fixed, and the stale `.dll` was the reason. So a Rust edit gets a staleness
  * warning instead — instant, and it names the trap directly.
  */
-import { existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..", "..");
-const ENGINE_SRC = join(ROOT, "native-src", "dziri-engine", "src");
-const ENGINE_DLL = join(ROOT, "native-src", "dziri-engine", "target", "release", "dziri_engine.dll");
 
 /** A hook that throws is a hook that blocks every edit, so nothing here may throw. */
 function bail(): never {
@@ -73,74 +70,42 @@ if (rel.length === 0 || rel.startsWith("..")) bail();
 type Rule = { when: RegExp; run: string[] };
 
 /**
- * **`characterize` is deliberately absent, and it used to be here.**
+ * One rule, and the list shrank to it twice.
  *
- * It compiles the sample app, so it fails on any *intermediate* state — and an
- * agent partway through a refactor has a broken compiler by construction: edit one
- * of three, the type does not exist yet. The first thing this hook caught in anger
- * was exactly that, a half-written `var()` change referencing `EMPTY_VARS` a few
- * lines above where it was about to be defined. `characterize` was right, the hook
- * blocked, and the "bug" fixed itself a minute later when the edit was finished.
- * Nothing was learned and a turn was interrupted.
+ * The test a check has to pass to live here: **can it be red simply because the
+ * work is not finished yet?** If so it does not belong in a hook, because a hook
+ * fires on intermediate states and an agent halfway through a change is producing
+ * intermediate states on purpose.
  *
- * The rule it leaves behind: **a hook may only assert something that is wrong at
- * rest and still wrong mid-edit.** Whole-program compile checks are not that; they
- * belong at a resting point — end of turn, or CI.
+ * Three failed that test, each in the same way and each discovered by it firing
+ * for real rather than by reasoning:
  *
- * The two below survive it because their failures are actionable the instant they
- * fire rather than a side effect of being halfway through. `protocol-guard` going
- * red after a `schema.ts` edit *is* the message — it means `gen:protocol` has not
- * run yet, which is a step you owe, not a state you are passing through.
+ *  - `characterize` compiles the sample app. The first thing this hook ever caught
+ *    was a half-written `var()` change referencing `EMPTY_VARS` a few lines above
+ *    where it was about to be defined. The report was true and the "bug" fixed
+ *    itself a minute later when the edit was finished.
+ *  - `protocol-guard` is red after any `schema.ts` edit until `gen:protocol` runs.
+ *    That is not a bug being caught, it is the second half of a two-step edit.
+ *  - the engine-staleness note is red after any `.rs` edit until `cargo build`.
+ *    During Rust work that is every single edit.
+ *
+ * All three are still worth running — their skills say when, and that is enough.
+ * `golden` and `layout-diff` are the ones that actually care whether the engine
+ * binary is current, so that check belongs at the top of those tools rather than
+ * on the keystroke that made it briefly untrue.
+ *
+ * `doc-lint` survives because its failures are not a function of being unfinished:
+ * a citation points at code that already exists, so breaking one means the code
+ * moved, which is true whether you are halfway or done.
  */
 const RULES: Rule[] = [
-  // The symptom this catches is Rust failing to find a constant that plainly
-  // exists in schema.ts, which is otherwise a genuinely confusing hour.
-  { when: /^src\/protocol\/schema\.ts$/, run: ["protocol-guard"] },
   // doc-lint walks the whole tree including `.claude`, so any .md can rot.
   { when: /\.md$/, run: ["doc-lint"] },
 ];
 
 const tools = [...new Set(RULES.filter((r) => r.when.test(rel)).flatMap((r) => r.run))];
 
-/** Newest mtime under the engine's `src/`, or 0 if it cannot be read. */
-function newestRustMtime(dir: string): number {
-  let newest = 0;
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return 0;
-  }
-  for (const e of entries) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) newest = Math.max(newest, newestRustMtime(p));
-    else if (e.name.endsWith(".rs")) {
-      try {
-        newest = Math.max(newest, statSync(p).mtimeMs);
-      } catch {
-        /* raced with a write; not worth failing an edit over */
-      }
-    }
-  }
-  return newest;
-}
-
-const notes: string[] = [];
-
-if (/^native-src\/.*\.rs$/.test(rel)) {
-  if (!existsSync(ENGINE_DLL)) {
-    notes.push(
-      "engine is not built — `golden`, `layout-diff` and `boundary-diff --live` cannot run.\n" +
-        "  Run `bun run engine`.",
-    );
-  } else if (newestRustMtime(ENGINE_SRC) > statSync(ENGINE_DLL).mtimeMs) {
-    notes.push(
-      "engine binary is older than its Rust source. `golden` and `layout-diff` load the\n" +
-        "  compiled engine, so until you run `bun run engine` they measure the previous\n" +
-        "  build — which reads as a real divergence and is not one.",
-    );
-  }
-}
+if (tools.length === 0) bail();
 
 const failures: string[] = [];
 for (const tool of tools) {
@@ -151,9 +116,8 @@ for (const tool of tools) {
   }
 }
 
-if (failures.length === 0 && notes.length === 0) process.exit(0);
+if (failures.length === 0) process.exit(0);
 
 // Exit 2 is Claude Code's "feed stderr back to the model" channel.
-for (const n of notes) console.error(`${rel}: ${n}`);
 for (const f of failures) console.error(f);
 process.exit(2);

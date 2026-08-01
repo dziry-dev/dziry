@@ -96,6 +96,7 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     textBindings: m.textBindings,
     handlers: m.handlers,
     lists: m.lists,
+    media: m.media,
     root: m.root,
   };
 }

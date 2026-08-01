@@ -162,6 +162,7 @@ if (LIVE) {
       textBindings: ui.textBindings,
       handlers: ui.handlers,
       lists: ui.lists,
+      media: ui.media,
       root: ui.root,
     };
 

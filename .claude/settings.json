@@ -15,14 +15,14 @@
             "if": "Edit",
             "command": "bun run scripts/hooks/after-edit.ts",
             "timeout": 60,
-            "statusMessage": "Checking what that edit implies"
+            "statusMessage": "Checking citations"
           },
           {
             "type": "command",
             "if": "Write",
             "command": "bun run scripts/hooks/after-edit.ts",
             "timeout": 60,
-            "statusMessage": "Checking what that edit implies"
+            "statusMessage": "Checking citations"
           }
         ]
       }
