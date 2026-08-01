@@ -314,21 +314,27 @@ test("the IR for one small document is exactly this", () => {
       "tree",
       "  #0 box  style=0",
       "    #1 box  style=1",
-      '      #2 text "Hi"  style=1',
-      "    #3 box  style=2",
-      '      #4 button "Go"  style=3 hover=4',
-      "      #5 box  style=2",
-      '        #6 text "x"  style=5',
+      '      #2 text "Hi"  style=2',
+      "    #3 box  style=3",
+      '      #4 button "Go"  style=4 hover=5',
+      "      #5 box  style=3",
+      '        #6 text "x"  style=6',
       "",
-      "styles (6 unique)",
+      // Seven, not six: the UA sheet gives `h1` a margin, and margins do not
+      // inherit — so the heading and its text run are no longer the same computed
+      // style and stop sharing a slot. Every index after it shifts by one. That is
+      // the interner working, not a regression: `.row` and the nested `.row` span
+      // still share style 3, which is the sharing this fixture exists to pin.
+      "styles (7 unique)",
       "    0  fg=#eeeeee padT=8 padR=8 padB=8 padL=8 gapRow=4 gapCol=4",
-      "    1  fg=#eeeeee fontSize=20 fontWeight=700",
-      "    2  fg=#eeeeee direction=row gapRow=4 gapCol=4",
-      "    3  bg=#123456 fg=#eeeeee borderColor=#abcdef borderWidth=1 radius=6 " +
+      "    1  fg=#eeeeee marT=21.44 marB=21.44 fontSize=20 fontWeight=700",
+      "    2  fg=#eeeeee fontSize=20 fontWeight=700",
+      "    3  fg=#eeeeee direction=row gapRow=4 gapCol=4",
+      "    4  bg=#123456 fg=#eeeeee borderColor=#abcdef borderWidth=1 radius=6 " +
         "padT=2 padR=6 padB=2 padL=6",
-      "    4  bg=#2244aa fg=#eeeeee borderColor=#abcdef borderWidth=1 radius=6 " +
+      "    5  bg=#2244aa fg=#eeeeee borderColor=#abcdef borderWidth=1 radius=6 " +
         "padT=2 padR=6 padB=2 padL=6",
-      "    5  fg=#eeeeee",
+      "    6  fg=#eeeeee",
       "",
       "strings (3)",
       '    0  "Hi"',
