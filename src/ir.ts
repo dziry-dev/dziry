@@ -456,6 +456,45 @@ export type CompiledUi = {
 };
 
 /**
+ * One route, as the compiler found it on disk.
+ *
+ * The route path *is* the file path under `pages/`, so this row carries no
+ * identity of its own — nothing here was authored, and a rename changes it.
+ * `segments` is the path already split, because the only run-time consumer is a
+ * matcher comparing segment by segment.
+ */
+export type RouteRow = {
+  /** Owning window's folder name. */
+  window: string;
+  /** `"/"` for the index; otherwise the path with no leading slash. */
+  path: string;
+  /** Repo-relative source file, forward slashes. Diagnostics only. */
+  file: string;
+  /** `path` split on `/`; `$name` segments kept verbatim. Empty for `"/"`. */
+  segments: readonly string[];
+  /** Parameter names in path order — the `$` stripped. */
+  params: readonly string[];
+  /**
+   * Index in `routes` of the nearest route whose path is a proper prefix, or -1.
+   *
+   * Path-prefix nesting, which is *potential* nesting: whether that route is
+   * actually a layout depends on it rendering an `<Outlet/>`, which is not
+   * knowable until it is compiled.
+   */
+  parent: number;
+};
+
+/** One window folder, and the contiguous span of `routes` it owns. */
+export type WindowRow = {
+  /** Folder name under `windows/` — the window's id. There is no override. */
+  id: string;
+  /** Repo-relative `windows/<id>/index.tsx`. */
+  entry: string;
+  firstRoute: number;
+  routeCount: number;
+};
+
+/**
  * Media conditions, as thresholds the engine tests against the surface.
  *
  * One row per atomic condition rather than per `@media` block: a block with two

@@ -30,6 +30,7 @@
     "engine:window": "cd native-src/dziri-engine && cargo run --release --example window",
     "engine:shot": "cd native-src/dziri-engine && cargo run --release --example window -- --screenshot ../../engine-frame.png",
     "compile": "bun run src/compile.ts",
+    "routes": "bun run src/routes.ts",
     "dev": "bun run src/compile.ts && bun run src/app.ts",
     "app": "bun run src/app.ts",
     "variants": "bun run src/variants.ts",
