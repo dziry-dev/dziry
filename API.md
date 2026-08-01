@@ -98,8 +98,11 @@ Anything that trades robustness for capability stays a proposal.
 | `token()` (context) | planned | — |
 | `onFrame(dt)` | planned | — |
 | `<Overlay>` | planned | M11 |
-| `<Window>` / `navigate` / `back` / `href` / `<Outlet>` | planned — surface settled, see Routing | M7 |
-| `useRoute` | planned — typed params, see Routing | M7 |
+| `<Window>` / `navigate` / `back` / `<Outlet>` | planned — surface settled, see Routing | M7 |
+| route table from `windows/*/pages/**` | **done** — `src/compiler/routes.ts`, `bun run routes` | M7 |
+| `Href` union codegen | **done** — emitted per window into `routes.gen.ts` | M7 |
+| `useRoute` typing + path check | **done** — `src/compiler/route.ts` | M7 |
+| `useRoute` params as bindings | planned — recorders exist; the emitter does not read them yet | M7 |
 | `defineScreen` | planned — `args` moved to `useRoute`; only `data` remains | M8 |
 | `defineQuery` / `defineMutation` | planned | — |
 | default stylesheet | planned | — |
@@ -226,6 +229,26 @@ path extends it renders inside. No directory convention, no layout declaration.
 
 ---
 
+### Built
+
+The compiler half, which needs nothing from the engine:
+
+```
+bun run routes            # scan ./windows -> windows/routes.gen.ts
+bun run routes --list     # the table, with parameters and nesting
+```
+
+- `src/compiler/routes.ts` — the scan, the route table, the `Href` union, and every rejection:
+  a non-route file under `pages/`, two files claiming one route, two routes of one shape.
+- `src/compiler/route.ts` — `useRoute`, `Args<P>`, and the check that the string matches the
+  file. Zero runtime bytes; it runs during compilation and returns recorders.
+- `src/compiler/route-args.ts` — `args.id` as a recorder, deliberately parallel to
+  `item-path.ts`. Computing with a parameter produces an un-internable sentinel and a named
+  error, never a constant frozen into the page.
+
+Not built: `<Window>`, `<Outlet>`, `navigate`, `back`, and the emitter reading parameter
+recorders into text bindings. Nothing consumes `routes.gen.ts` yet.
+
 ### Proposed, not decided
 
 Everything above is Decided. These are open:
@@ -236,7 +259,10 @@ Everything above is Decided. These are open:
   windows of the same folder, each with its own route and history.
 - Precedence when a static path and a parameter path both match: **static wins**, so
   `products/new` beats `products/$id`. Two routes of the same shape (`$id` vs `$slug`) are a
-  build error.
+  build error. *Both are implemented as proposed, because the route table has to have an order
+  and an unresolvable pair has to do something. Static-wins is the emitted sort order, so a
+  matcher that stops at the first hit gets it for free — `compareRoutes` is the whole rule, and
+  reversing it is reversing that comparator. Still awaiting a ruling.*
 - `<Outlet fallback error notFound grace>` — boundaries, from the previous draft, unrevisited.
 - `defineScreen({ load })`, parallel ancestor loads, and hover-prefetch — deferred to the data
   layer. `args` no longer comes from here; only `data` would.
@@ -486,8 +512,13 @@ Compile errors that are part of the surface:
 
 ```
 const rows = projectList()          at module scope -> a query ran during compilation
-navigate("abuot.tsx")               -> no such file (dead links are a build failure)
-navigate(`p/${id}.tsx`)             -> href/navigate take string literals only
+<a href="prodcuts/1">               -> not in the Href union (typo), then not a route (shape)
+navigate(someComputedString)        -> nothing static to verify; dead links are a build failure
+useRoute("about") in $id.tsx        -> the string must match the file's own path
+{`#${args.id}`}                     -> a parameter is recorded, not computed with
+pages/helpers.ts                    -> pages/ contains routes and nothing else
+products.tsx + products/index.tsx   -> two files, one route
+$id.tsx + $slug.tsx                 -> same shape; a concrete path matches both
 defineQuery(() => db.run(sql`…`))   -> unanalysable; declare reads: []
 defineMutation(syncFn, {optimistic})-> sync commits before the next frame; dead code
 <Suspense> over only-sync queries   -> nothing here can pend
