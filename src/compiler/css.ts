@@ -70,11 +70,27 @@ export type MediaCond = {
   px: number;
 };
 
+/**
+ * Cascade origin. Higher wins, and it outranks specificity — that is what makes
+ * it an origin rather than just an earlier stylesheet.
+ *
+ * Concatenating the UA sheet ahead of the author's and relying on source order
+ * would be right almost always, because UA rules use type selectors and lose
+ * every specificity contest anyway. "Almost always" is the problem: a UA rule
+ * with two type selectors beats an author rule with one, and the author would
+ * have no way to win short of raising specificity against a sheet they cannot
+ * see. Origin is cheap to carry and removes the class of bug entirely.
+ */
+export const Origin = { UA: 0, AUTHOR: 1 } as const;
+export type OriginValue = (typeof Origin)[keyof typeof Origin];
+
 export type Rule = {
   selectors: Selector[];
   decls: Map<string, string>;
   /** Source order, for breaking specificity ties. */
   order: number;
+  /** Which stylesheet this came from. Absent means author. */
+  origin?: OriginValue;
   /**
    * Conditions that must *all* hold for this rule to apply. Absent on an
    * unconditional rule, which is the overwhelming majority.
@@ -169,11 +185,14 @@ const TRANSPARENT_GROUPS = new Set(["@layer"]);
  */
 const ROOT_DECL_GROUPS = new Set(["@theme"]);
 
-export function parseCss(src: string): Rule[] {
+export function parseCss(src: string, origin: OriginValue = Origin.AUTHOR): Rule[] {
   const text = stripComments(src);
   const rules: Rule[] = [];
   const order = { n: 0 };
   parseRuleList(text, 0, text.length, rules, order);
+  // Stamped after the walk rather than threaded through it: `order` is per-call,
+  // so UA and author rules can share numbers, and only origin keeps them apart.
+  if (origin !== Origin.AUTHOR) for (const r of rules) r.origin = origin;
   return rules;
 }
 
@@ -570,9 +589,14 @@ export function parseSelector(src: string, at = -1): Selector {
 
 /** CSS cascade order: specificity, then source order. */
 export function compareCascade(
-  a: { specificity: [number, number, number]; order: number },
-  b: { specificity: [number, number, number]; order: number },
+  a: { specificity: [number, number, number]; order: number; origin?: OriginValue },
+  b: { specificity: [number, number, number]; order: number; origin?: OriginValue },
 ): number {
+  // Origin outranks specificity, which is the whole point of it: an author rule
+  // beats a UA rule it would lose to on selector weight alone.
+  const ao = a.origin ?? Origin.AUTHOR;
+  const bo = b.origin ?? Origin.AUTHOR;
+  if (ao !== bo) return ao - bo;
   for (let k = 0; k < 3; k++) {
     if (a.specificity[k] !== b.specificity[k]) return a.specificity[k]! - b.specificity[k]!;
   }

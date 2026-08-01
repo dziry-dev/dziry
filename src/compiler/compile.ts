@@ -36,14 +36,17 @@ import {
   expandDeclaration,
   extendVarEnv,
   parseCss,
+  Origin,
   parseInlineStyle,
   substituteVars,
+  type OriginValue,
   type MediaCond,
   type Pseudo,
   type Rule,
   type Selector,
   type VarEnv,
 } from "./css.ts";
+import { UA_SHEET } from "./ua-sheet.ts";
 
 /** The environment at the root, before any `--*` declaration has been seen. */
 const EMPTY_VARS: VarEnv = new Map<string, string>();
@@ -97,7 +100,13 @@ function matches(sel: Selector, path: Element[]): boolean {
   return true;
 }
 
-type Candidate = { specificity: [number, number, number]; order: number; decls: Map<string, string> };
+type Candidate = {
+  specificity: [number, number, number];
+  order: number;
+  decls: Map<string, string>;
+  /** Carried through so `compareCascade` can rank origin above specificity. */
+  origin?: OriginValue;
+};
 
 /**
  * Declarations applying to `path`'s subject when the given pseudo-class states
@@ -128,7 +137,12 @@ function collectDecls(
     for (const sel of rule.selectors) {
       if (!states.includes(sel.pseudo)) continue;
       if (!matches(sel, path)) continue;
-      candidates.push({ specificity: sel.specificity, order: rule.order, decls: rule.decls });
+      candidates.push({
+        specificity: sel.specificity,
+        order: rule.order,
+        decls: rule.decls,
+        origin: rule.origin,
+      });
     }
   }
 
@@ -577,7 +591,9 @@ export function compileTree(
     nodeOf?: Map<Element, number>;
   } = {},
 ): CompileResult {
-  const rules = parseCss(css);
+  // UA rules first in the array purely for readability; `Origin.UA` is what
+  // actually keeps them below the author's, and it beats specificity.
+  const rules = [...parseCss(UA_SHEET, Origin.UA), ...parseCss(css)];
 
   // Assigned as conditions are met during the walk, so bit order is first-use
   // order and a sheet's unused breakpoints cost nothing.
