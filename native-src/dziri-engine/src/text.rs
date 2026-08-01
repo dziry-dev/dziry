@@ -58,6 +58,28 @@ const FAMILIES: &[&str] = &["DejaVu Sans", "Liberation Sans", "Noto Sans", "Aria
 /// A million pixels is past any surface this will ever run on.
 const MAX_LAYOUT_WIDTH: f32 = 1.0e6;
 
+/// The width paint adds before laying a paragraph out again.
+///
+/// Paint must never wrap earlier than the layout pass did. Layout measured the
+/// string, Taffy sized a box from that measurement, and paint then subtracts border
+/// and padding back off to recover the width it was measured at — a float round trip
+/// that lands a fraction of a *thousandth* of a pixel low often enough to matter.
+/// Skia takes "fits in exactly this width" literally, so a hair under is a break, and
+/// the last glyph drops onto a second line inside a box sized for one. That is what
+/// "Clear" rendering as "Clea/r" was, and it hit every short label in the demo.
+///
+/// So the tolerance is one-sided, which is the same asymmetry the old single-line
+/// centring documented: erring wide is invisible, erring narrow is a broken word.
+/// A twentieth of a pixel is far above float round-trip error and far below the
+/// width of any glyph, so it cannot change where a line actually breaks — a break
+/// decision would have to be balanced within 0.05 px to flip.
+///
+/// It is applied here rather than to the measurement on purpose. Slack in the
+/// *measurement* becomes slack in the box, which every downstream box inherits and
+/// which `layout-diff` reports as up to a pixel of disagreement with Chrome per text
+/// node. Slack in paint costs nothing outside this function.
+const PAINT_SLACK: f32 = 0.05;
+
 /// Measurements are cached because dynamic text makes the key space unbounded —
 /// a counter alone mints a new string on every increment. The TypeScript runtime
 /// bounded the same cache at 4096 entries.
@@ -160,6 +182,8 @@ impl Measurer {
     /// Not cached, and deliberately: a `Paragraph` owns its shaped glyphs, and the
     /// measurement cache exists so that *layout* — which runs over every node,
     /// including ones paint will skip — never builds one.
+    ///
+    /// Laid out to `width + PAINT_SLACK`; see that constant for why exact is wrong.
     pub fn paragraph(
         &mut self,
         text: &str,
@@ -173,7 +197,7 @@ impl Measurer {
         // A non-finite or negative width would be a caller bug rather than a
         // constraint, and Skia has no defined answer for it.
         paragraph.layout(if width.is_finite() && width > 0.0 {
-            width
+            width + PAINT_SLACK
         } else {
             MAX_LAYOUT_WIDTH
         });
@@ -227,28 +251,16 @@ impl Measurer {
             (paragraph.max_intrinsic_width(), paragraph.height())
         };
 
-        // Rounded up, and this is load-bearing rather than tidiness.
+        // Returned exactly as Skia reported it, with no rounding of any kind.
         //
-        // Taffy rounds laid-out boxes to whole pixels as `round(x + w) - round(x)`,
-        // which for a fractional `w` yields either `floor(w)` or `ceil(w)` depending
-        // on where the box happens to sit. Landing on `floor` makes the box one pixel
-        // narrower than the text measured, and paint then lays the same string out
-        // into it and breaks the last glyph onto a second line — in a box whose
-        // height was computed for one. That is precisely what "Clear" rendering as
-        // "Clea/r" was, and every short label in the demo did it.
-        //
-        // An integral `w` is immune: adding an integer does not change a fractional
-        // part, so `round(x + w) - round(x) == w` exactly, for every `x`. Ceiling the
-        // measurement therefore makes the rounding pass a no-op on text boxes
-        // instead of a coin flip.
-        //
-        // The cost is up to a pixel of width against Chrome, which does not round
-        // its layout at all. That is the right side to err on: a pixel wide is
-        // invisible, a pixel narrow is a broken word. The residue is a box whose
-        // *padding* is fractional, where the content width can still land low —
-        // rare, since padding is nearly always integral, and it would need Taffy's
-        // rounding disabled outright to fix properly.
-        let wh = (raw.0.ceil(), raw.1.ceil());
+        // An earlier version ceiled both numbers, to stop Taffy's whole-pixel rounding
+        // making a box narrower than the text it was measured for. That worked, and it
+        // was treating the symptom: it cost up to a pixel of width against Chrome on
+        // every text node, and it left the box a pixel wider than the text really is.
+        // Taffy's rounding is off now (see `new_tree`), so there is nothing to defend
+        // against here, and paint carries the one-sided tolerance instead — which is
+        // where it belongs, because it costs nothing outside paint.
+        let wh = raw;
 
         self.measured.insert(key, wh);
         self.order.push_back(key);

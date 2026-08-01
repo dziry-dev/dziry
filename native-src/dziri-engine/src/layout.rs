@@ -78,10 +78,29 @@ impl Default for LayoutTree {
     }
 }
 
+/// Every `TaffyTree` in this file, so none of them can be built unconfigured.
+///
+/// Taffy rounds laid-out boxes to whole pixels by default, as
+/// `round(x + w) - round(x)`. Browsers do not: they keep sub-pixel layout and let
+/// rasterisation deal with it. Rounding cost dziri a visible bug rather than just
+/// fidelity — a box one pixel narrower than the text it was measured for makes
+/// paint break the last glyph onto a second line, inside a box whose height was
+/// computed for one, which is what turned "Clear" into "Clea/r".
+///
+/// It is a function and not a line in `new` because `rebuild` **replaces** the
+/// tree, and the first attempt at this configured only `new` — so the setting was
+/// discarded the moment anything relaid out, and the experiment silently measured
+/// the unchanged engine. Two constructors, one of them the real one.
+fn new_tree(capacity: usize) -> TaffyTree<u32> {
+    let mut tree = TaffyTree::with_capacity(capacity);
+    tree.disable_rounding();
+    tree
+}
+
 impl LayoutTree {
     pub fn new() -> Self {
         Self {
-            tree: TaffyTree::new(),
+            tree: new_tree(0),
             ids: Vec::new(),
             bounds: Vec::new(),
             overflow: Vec::new(),
@@ -132,7 +151,7 @@ impl LayoutTree {
         let count = tables.capacities().nodes as usize;
         self.root = root;
 
-        self.tree = TaffyTree::with_capacity(count);
+        self.tree = new_tree(count);
         self.ids = Vec::with_capacity(count);
         self.bounds = vec![[0.0; 4]; count];
         self.overflow = vec![[0.0; 2]; count];

@@ -191,6 +191,27 @@ const CORPUS: Scenario[] = [
     css: `.outer { width: 260px; padding: 10px }`,
   },
 
+  // The scenario that makes a wrong text measurement *visible*.
+  //
+  // Every `wrap-*` case above pins its container's width, and text rows are compared
+  // on `y`/`h` only — so the measured *width* of a string reaches nothing that is
+  // checked, and all five stay green even when the engine is deliberately made to
+  // measure 3 px too wide. Verified by injecting exactly that. Here the boxes are
+  // content-sized inside a row, so the text's width is the box's width, and the box
+  // is an ordinary element whose width is compared directly.
+  {
+    name: "text-sizes-its-box",
+    asks: "a content-sized box is exactly as wide as the text measured",
+    width: 600,
+    height: 200,
+    html:
+      `<body><div class="row">` +
+      `<div class="tag">Clear</div><div class="tag">object</div><div class="tag">a</div>` +
+      `</div></body>`,
+    css: `.row { flex-direction: row; gap: 8px }
+.tag { padding: 8px 14px; border: 1px solid #333 }`,
+  },
+
   // Reported from the real window at ~400px: "even button are out of container".
   // This is `app.css`'s `.newrow` — a `flex: 1` field and two content-sized
   // buttons — in a container too narrow to hold their combined minimum. The
