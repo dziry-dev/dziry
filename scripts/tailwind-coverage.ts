@@ -25,6 +25,12 @@ const ROOT = join(import.meta.dir, "..");
 const TMP = join(ROOT, ".tw-tmp");
 const argv = process.argv.slice(2);
 const SHOW_MISSING = argv.includes("--missing");
+const WHAT_IF = argv.includes("--what-if");
+const whatIfIdx = argv.indexOf("--what-if");
+const WHAT_IF_SET =
+  whatIfIdx > -1 && argv[whatIfIdx + 1] && !argv[whatIfIdx + 1]!.startsWith("--")
+    ? argv[whatIfIdx + 1]!
+    : null;
 const sampleIdx = argv.indexOf("--sample");
 const SAMPLE = sampleIdx > -1 ? argv[sampleIdx + 1]! : null;
 
@@ -134,10 +140,21 @@ function rulesByClass(css: string): Map<string, { props: Set<string>; values: st
  * blocked by *how* a value is written even when the property itself is supported.
  */
 const VALUE_FEATURES: { name: string; test: RegExp }[] = [
-  { name: "var() / custom properties", test: /var\(--/ },
-  { name: "oklch() colours", test: /\boklch\(/ },
   { name: "color-mix()", test: /\bcolor-mix\(/ },
-  { name: "calc()", test: /\bcalc\(/ },
+
+  // `var()` and plain `calc()` are gone from this list because they are
+  // implemented: the compiler resolves custom properties through the cascade and
+  // folds calc() to a number. What is left of calc() is the part that cannot be
+  // folded — a length that is not knowable until layout runs. Those are still
+  // blockers, and narrowing the pattern rather than deleting the entry is what
+  // keeps this honest: the number moved because the feature landed, not because
+  // the measuring stick was shortened.
+  { name: "calc() over percentages / viewport units", test: /calc\([^)]*(%|\d(vw|vh|vmin|vmax)\b)/ },
+
+  // A registered custom property is not the same thing as a custom property.
+  // `@property` gives one a type, an initial value and inheritance behaviour, and
+  // Tailwind uses that to make `--tw-*` animatable and to give them defaults that
+  // apply without ever being declared. Substitution alone does not supply those.
   { name: "@property / registered custom properties", test: /^--tw-/ },
 ];
 
@@ -158,8 +175,12 @@ let clean = 0;
 for (const [name, { props, values }] of rules) {
   const why = new Set<string>();
   for (const p of props) {
-    if (p.startsWith("--")) why.add("var() / custom properties");
-    else if (!supported.has(p)) why.add(`property: ${p}`);
+    // Declaring a custom property is no longer a blocker — the compiler keeps
+    // `--*` declarations, inherits them, and substitutes `var()` before any
+    // property parser runs. Only `--tw-*` is still special, and `VALUE_FEATURES`
+    // says why.
+    if (p.startsWith("--")) continue;
+    if (!supported.has(p)) why.add(`property: ${p}`);
   }
   for (const f of VALUE_FEATURES) if (f.test.test(values)) why.add(f.name);
   if (why.size) blockers.set(name, why);
@@ -178,6 +199,51 @@ console.log(
 console.log("  blockers, ranked by classes unblocked:");
 for (const [why, n] of [...impact].sort((a, b) => b[1] - a[1]).slice(0, 18)) {
   console.log(`    ${String(n).padStart(6)}  ${why}`);
+}
+
+/**
+ * What the ranked list above cannot answer: a class usually has *several*
+ * blockers, so the counts overlap and do not add up. "20431 for var()" is the
+ * number of classes that would stop being blocked *by var()*, not the number that
+ * would start working. This walks the ranked list cumulatively, removing one
+ * blocker at a time and reporting how many classes end up with no reasons left —
+ * which is the only figure a plan can be built on.
+ */
+if (WHAT_IF) {
+  console.log("\n  cumulative, in rank order — classes that actually work once each lands:");
+  const order = [...impact].sort((a, b) => b[1] - a[1]).map(([why]) => why);
+  const removed = new Set<string>();
+  let previous = clean;
+  for (const why of order.slice(0, 12)) {
+    removed.add(why);
+    const works = [...rules.keys()].filter((n) => {
+      const w = blockers.get(n);
+      return !w || [...w].every((r) => removed.has(r));
+    }).length;
+    const pct = ((works / rules.size) * 100).toFixed(1);
+    const delta = works - previous;
+    console.log(
+      `    +${String(delta).padStart(6)}  ->  ${String(works).padStart(6)}/${rules.size} (${pct.padStart(5)}%)  after ${why}`,
+    );
+    previous = works;
+  }
+
+  // And an arbitrary combination, because the cumulative list can only answer
+  // questions in rank order — "var() and calc(), but not masks" is not a prefix
+  // of it, and that is exactly the shape of a real plan.
+  if (WHAT_IF_SET) {
+    const wanted = WHAT_IF_SET.split(",").map((s) => s.trim().toLowerCase());
+    const matches = (r: string) => wanted.some((w) => r.toLowerCase().includes(w));
+    const named = [...impact.keys()].filter(matches);
+    const works = [...rules.keys()].filter((n) => {
+      const w = blockers.get(n);
+      return !w || [...w].every(matches);
+    }).length;
+    console.log(
+      `\n  just [${named.join(", ")}]:\n` +
+        `    ${works}/${rules.size} (${((works / rules.size) * 100).toFixed(1)}%), up from ${clean} (${((clean / rules.size) * 100).toFixed(1)}%)`,
+    );
+  }
 }
 
 if (SHOW_MISSING) {

@@ -352,3 +352,192 @@ test("a visible axis becomes scrollable when the other axis scrolls", () => {
   expect(declared("overflow: visible")).toEqual({ x: VISIBLE, y: VISIBLE });
   expect(declared("width: 10px")).toEqual({ x: VISIBLE, y: VISIBLE });
 });
+
+// ---------------------------------------------------------------------------
+// calc(), folded at compile time
+// ---------------------------------------------------------------------------
+
+test("calc() folds to a number, with CSS's precedence", () => {
+  expect(parseLength("calc(4px + 6px)")).toBe(10);
+  expect(parseLength("calc(10px - 2px)")).toBe(8);
+  // `*` and `/` bind tighter than `+` and `-`.
+  expect(parseLength("calc(2px + 3px * 4)")).toBe(14);
+  expect(parseLength("calc((2px + 3px) * 4)")).toBe(20);
+  expect(parseLength("calc(20px / 4)")).toBe(5);
+  // Units are resolved before the arithmetic, so mixing them is fine.
+  expect(parseLength("calc(1rem + 4px)")).toBe(20);
+  expect(parseLength("calc(100px - 2rem)")).toBe(68);
+  // A nested calc() is just a parenthesised sub-expression, per spec.
+  expect(parseLength("calc(calc(2px + 2px) * 3)")).toBe(12);
+  // Unary minus, which is what `calc(-1 * x)` leaves after substitution.
+  expect(parseLength("calc(-4px + 10px)")).toBe(6);
+});
+
+test("calc() refuses what it cannot know at compile time", () => {
+  // A percentage has no answer until the containing block exists, and guessing
+  // one would be worse than refusing: it would silently lay out wrongly.
+  expect(() => parseLength("calc(100% - 10px)")).toThrow(/percentage/);
+  expect(() => parseLength("calc(4px + )")).toThrow();
+  expect(() => parseLength("calc(4px / 0)")).toThrow(/division by zero/);
+  expect(() => parseLength("calc((4px)")).toThrow(/unclosed/);
+});
+
+// ---------------------------------------------------------------------------
+// Custom properties and var()
+// ---------------------------------------------------------------------------
+
+test("custom properties inherit, and var() resolves through the cascade", () => {
+  const rules = parseCss(`.a { --pad: 8px; --brand: #3b82f6 }`);
+  // The declaration survives parsing with its case and its `--` intact.
+  expect(rules[0]!.decls.get("--pad")).toBe("8px");
+  expect(rules[0]!.decls.get("--brand")).toBe("#3b82f6");
+});
+
+test("custom property names keep their case, unlike every other property", () => {
+  // `--Foo` and `--foo` are two different properties in CSS. Ordinary property
+  // names are folded to lower case; doing that to these would merge them.
+  const rules = parseCss(`.a { --Foo: 1px; --foo: 2px; COLOR: red }`);
+  expect(rules[0]!.decls.get("--Foo")).toBe("1px");
+  expect(rules[0]!.decls.get("--foo")).toBe("2px");
+  expect(rules[0]!.decls.get("color")).toBe("red");
+});
+
+test("substituteVars handles fallbacks, nesting and cycles", async () => {
+  const { substituteVars } = await import("./css.ts");
+  const env = new Map([
+    ["--a", "4px"],
+    ["--b", "var(--a)"],
+    ["--loop", "var(--loop2)"],
+    ["--loop2", "var(--loop)"],
+  ]);
+
+  expect(substituteVars("var(--a)", env)).toBe("4px");
+  // A variable whose value is itself a var() resolves through.
+  expect(substituteVars("var(--b)", env)).toBe("4px");
+  // The fallback is everything after the *first* comma, not the next token.
+  expect(substituteVars("var(--nope, 1px 2px)", env)).toBe("1px 2px");
+  expect(substituteVars("var(--nope, var(--a))", env)).toBe("4px");
+  // var() can supply part of a value, not only the whole of one.
+  expect(substituteVars("calc(var(--a) * 2)", env)).toBe("calc(4px * 2)");
+  expect(substituteVars("var(--a) 9px var(--a)", env)).toBe("4px 9px 4px");
+  // Unset with no fallback invalidates the declaration, which is `null` here.
+  expect(substituteVars("var(--nope)", env)).toBeNull();
+  // A cycle is invalid rather than a hang.
+  expect(substituteVars("var(--loop)", env)).toBeNull();
+});
+
+// ---------------------------------------------------------------------------
+// At-rules
+// ---------------------------------------------------------------------------
+
+test("an at-rule no longer eats the rule that follows it", () => {
+  // The old scan took the first `}` after the prelude, which for a nested block
+  // is the *inner* one — so parsing resumed mid-at-rule and the next real rule
+  // was lost or misparsed. This is the regression test for that.
+  const rules = parseCss(`@media (min-width: 700px) { .a { padding: 99px } }\n.b { padding: 4px }`);
+  expect(rules.length).toBe(1);
+  expect(rules[0]!.decls.get("padding")).toBe("4px");
+});
+
+test("@layer is transparent and @theme declares on :root", () => {
+  const rules = parseCss(`@layer utilities { .a { color: red } }`);
+  expect(rules.length).toBe(1);
+  expect(rules[0]!.decls.get("color")).toBe("red");
+
+  const theme = parseCss(`@theme { --brand: #3b82f6 }`);
+  expect(theme.length).toBe(1);
+  expect(theme[0]!.selectors[0]!.root).toBe(true);
+  expect(theme[0]!.decls.get("--brand")).toBe("#3b82f6");
+});
+
+test("a box shorthand containing calc() is one value, not three", () => {
+  // `padding: calc(4px * 2)` splits on whitespace into `calc(4px`, `*`, `2)`
+  // unless the split is paren-aware. It reached a length parser as "4p".
+  const patch: Record<string, number> = {};
+  expandDeclaration("padding", "calc(4px * 2)", patch as never);
+  expect(patch.padT).toBe(8);
+  expect(patch.padL).toBe(8);
+});
+
+test("oklch() converts to the sRGB Chrome paints", () => {
+  // Not a nicety: Tailwind v4's whole palette is oklch, so without this every
+  // bg-*/text-*/border-* in a Tailwind sheet fails and the frame renders black.
+  //
+  // Every expectation here was read out of Chrome's own rasteriser — fill a 1x1
+  // canvas and read the pixel — rather than computed from the same matrices this
+  // is being tested against, which would only prove it agrees with itself.
+  const rgb = (c: string) => {
+    const v = parseColor(c);
+    return [(v >>> 16) & 255, (v >>> 8) & 255, v & 255, (v >>> 24) & 255];
+  };
+
+  expect(rgb("oklch(21% 0.006 285.885)")).toEqual([24, 24, 27, 255]); // zinc-900
+  expect(rgb("oklch(62.3% 0.214 259.815)")).toEqual([43, 127, 255, 255]); // blue-500
+  expect(rgb("oklch(63.7% 0.237 25.331)")).toEqual([251, 44, 54, 255]); // red-500
+  expect(rgb("oklch(72.3% 0.219 149.579)")).toEqual([0, 201, 80, 255]); // green-500
+  expect(rgb("oklch(100% 0 0)")).toEqual([255, 255, 255, 255]);
+  expect(rgb("oklch(0% 0 0)")).toEqual([0, 0, 0, 255]);
+
+  // Alpha after a slash. Chrome rasterises this as 245,52,153,128; the one-unit
+  // differences are 8-bit rounding from different intermediate precision.
+  const a = rgb("oklch(65.6% 0.241 354.308 / 0.5)");
+  expect(a[3]).toBe(128);
+  expect(Math.abs(a[0]! - 245)).toBeLessThanOrEqual(1);
+  expect(Math.abs(a[1]! - 52)).toBeLessThanOrEqual(1);
+  expect(Math.abs(a[2]! - 153)).toBeLessThanOrEqual(1);
+});
+
+test("logical properties map onto the physical ones", () => {
+  // `px-4`/`py-2` — the spacing utilities people actually use — compile to
+  // `padding-inline`/`padding-block`, not to `padding-left`.
+  const p: Record<string, number> = {};
+  expandDeclaration("padding-inline", "4px", p as never);
+  expandDeclaration("padding-block", "2px", p as never);
+  expect(p.padL).toBe(4);
+  expect(p.padR).toBe(4);
+  expect(p.padT).toBe(2);
+  expect(p.padB).toBe(2);
+
+  // Two values are start then end, as in CSS.
+  const q: Record<string, number> = {};
+  expandDeclaration("margin-inline", "1px 9px", q as never);
+  expect(q.marL).toBe(1);
+  expect(q.marR).toBe(9);
+
+  const r: Record<string, number> = {};
+  expandDeclaration("padding-inline-start", "7px", r as never);
+  expandDeclaration("padding-block-end", "3px", r as never);
+  expect(r.padL).toBe(7);
+  expect(r.padB).toBe(3);
+});
+
+test("a statement at-rule does not swallow the rule after it", () => {
+  // `@layer properties;` has no block, so a scan that looks for the next `{`
+  // runs past its semicolon and takes the following selector into its prelude.
+  // Tailwind v4 opens with exactly that, and the rule it ate was the `:root`
+  // block holding every design token — so the sheet parsed and every
+  // `var(--color-*)` in it silently resolved to nothing.
+  const rules = parseCss(`@layer properties;\n:root { --brand: #123456 }\n.a { color: var(--brand) }`);
+  expect(rules.length).toBe(2);
+  expect(rules[0]!.selectors[0]!.root).toBe(true);
+  expect(rules[0]!.decls.get("--brand")).toBe("#123456");
+});
+
+test(":host parses and matches nothing, so :root, :host still works", () => {
+  // Tailwind writes `:root, :host` for its theme block. Refusing `:host` would
+  // throw the `:root` half away with it.
+  const rules = parseCss(`:root, :host { --brand: red }`);
+  expect(rules[0]!.selectors.length).toBe(2);
+  expect(rules[0]!.selectors[0]!.root).toBe(true);
+  expect(rules[0]!.selectors[1]!.never).toBe(true);
+});
+
+test("a nested block inside a rule body is skipped, not misread", () => {
+  // CSS nesting is real and Tailwind emits it. Splitting a body on `;` hands the
+  // parser a bare `}` and it reports "declaration without a colon".
+  const rules = parseCss(`.container { width: 100%; @media (width >= 40rem) { max-width: 40rem } color: red }`);
+  expect(rules[0]!.decls.get("width")).toBe("100%");
+  expect(rules[0]!.decls.get("color")).toBe("red");
+  // The nested block contributed nothing — it needs predicates that do not exist.
+  expect(rules[0]!.decls.has("max-width")).toBe(false);
+});

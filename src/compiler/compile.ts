@@ -29,12 +29,18 @@ import { hasState, type VariantCompiled } from "./variant-compile.ts";
 import {
   compareCascade,
   expandDeclaration,
+  extendVarEnv,
   parseCss,
   parseInlineStyle,
+  substituteVars,
   type Pseudo,
   type Rule,
   type Selector,
+  type VarEnv,
 } from "./css.ts";
+
+/** The environment at the root, before any `--*` declaration has been seen. */
+const EMPTY_VARS: VarEnv = new Map<string, string>();
 
 // ---------------------------------------------------------------------------
 // Selector matching
@@ -55,6 +61,11 @@ function matchCompound(el: Element, c: { tag: string | null; id: string | null; 
  * sibling combinators there is nothing to backtrack for.
  */
 function matches(sel: Selector, path: Element[]): boolean {
+  if (sel.never) return false;
+  // `:root` is the element with no ancestors. `path` is the chain from the tree's
+  // top down to the subject, so a length of one *is* "this is the root".
+  if (sel.root) return path.length === 1;
+
   let ci = sel.compounds.length - 1;
   let pi = path.length - 1;
 
@@ -157,14 +168,35 @@ function inheritFrom(parent: ComputedStyle): ComputedStyle {
   return style;
 }
 
-function applyDecls(base: ComputedStyle, decls: Map<string, string>, where: string): ComputedStyle {
+function applyDecls(
+  base: ComputedStyle,
+  decls: Map<string, string>,
+  where: string,
+  vars: VarEnv = EMPTY_VARS,
+): ComputedStyle {
   const patch: Partial<Record<StyleField, number>> = {};
 
   for (const [prop, value] of decls) {
+    // A custom property is a value carrier, not a style field. It has already
+    // been folded into `vars` by the caller; expanding it here would be an error
+    // about a property nothing implements.
+    if (prop.startsWith("--")) continue;
+
+    // Substituted before the expander sees it, which is what lets `var()` supply
+    // part of a value — `padding: var(--y) 4px` — rather than only whole ones.
+    const resolved = value.includes("var(") ? substituteVars(value, vars) : value;
+    if (resolved === null) {
+      // CSS drops a declaration whose `var()` cannot resolve, rather than taking
+      // a partial value. Silent because it is a legitimate authoring pattern:
+      // `color: var(--maybe-unset)` is how a theme opts out of setting a colour.
+      continue;
+    }
+
     try {
-      expandDeclaration(prop, value, patch);
+      expandDeclaration(prop, resolved, patch);
     } catch (e) {
-      throw new Error(`${where}: ${prop}: ${value} — ${(e as Error).message}`);
+      const via = resolved === value ? "" : ` (via ${value})`;
+      throw new Error(`${where}: ${prop}: ${resolved}${via} — ${(e as Error).message}`);
     }
   }
 
@@ -502,11 +534,22 @@ export function compileTree(doc: Element, css: string): CompileResult {
   };
 
   /** Returns the index of the node created for `el`. */
-  function walk(el: Element, path: Element[], parentStyle: ComputedStyle, parent: number): number {
+  function walk(
+    el: Element,
+    path: Element[],
+    parentStyle: ComputedStyle,
+    parent: number,
+    parentVars: VarEnv = EMPTY_VARS,
+  ): number {
     const where = describe(path);
 
     const inherited = inheritFrom(parentStyle);
-    const style = applyDecls(inherited, withInline(collectDecls(rules, path, ["none"]), el), where);
+    const base = withInline(collectDecls(rules, path, ["none"]), el);
+    // Custom properties inherit, so the environment is the parent's with this
+    // node's own laid over it — and it is built from the *cascaded* declarations,
+    // so `--x` obeys specificity like everything else.
+    const vars = extendVarEnv(parentVars, base);
+    const style = applyDecls(inherited, base, where, vars);
 
     // Precomputed variants: the compiler emits finished styles and the runtime
     // only picks an index. Each state is resolved as a full cascade from
@@ -545,10 +588,15 @@ export function compileTree(doc: Element, css: string): CompileResult {
         label += `:${pseudo}`;
       }
 
+      // Each combination re-derives its own environment: `:hover { --tone: … }`
+      // is a legitimate way to theme a state, and reusing the base environment
+      // here would resolve the hover cascade against the resting variables.
+      const stateDecls = withInline(collectDecls(rules, path, states), el);
       const resolved = applyDecls(
         inherited,
-        withInline(collectDecls(rules, path, states), el),
+        stateDecls,
         label,
+        extendVarEnv(parentVars, stateDecls),
       );
       run[combo] = styles.intern(resolved);
     }
@@ -591,7 +639,7 @@ export function compileTree(doc: Element, css: string): CompileResult {
     }
 
     for (const child of kids) {
-      const childIndex = walkChild(child, path, style, self);
+      const childIndex = walkChild(child, path, style, self, vars);
       if (childIndex !== -1) nodes[self]!.children.push(childIndex);
     }
 
@@ -606,7 +654,13 @@ export function compileTree(doc: Element, css: string): CompileResult {
    * layout of node *slots*. Replication then copies those nodes with their links
    * shifted by one stride, which is what keeps item-internal traversal ordinary.
    */
-  function walkList(node: DynList, path: Element[], parentStyle: ComputedStyle, parent: number): number {
+  function walkList(
+    node: DynList,
+    path: Element[],
+    parentStyle: ComputedStyle,
+    parent: number,
+    parentVars: VarEnv = EMPTY_VARS,
+  ): number {
     // Item 0 is compiled normally; its bindings are captured relative to it.
     // Its parent is the *container*, not a wrapper: rows are ordinary children
     // spliced into the container's chain, so a grid container places each row
@@ -614,7 +668,7 @@ export function compileTree(doc: Element, css: string): CompileResult {
     // with. See `ListTable.container` for what the wrapper cost.
     const arenaStart = nodes.length;
     const bindingsBefore = textBindings.length;
-    const templateRoot = walkChild(node.template, path, parentStyle, parent);
+    const templateRoot = walkChild(node.template, path, parentStyle, parent, parentVars);
     const stride = nodes.length - arenaStart;
 
     if (templateRoot !== arenaStart) {
@@ -720,8 +774,14 @@ export function compileTree(doc: Element, css: string): CompileResult {
     return -1;
   }
 
-  function walkChild(node: Node, path: Element[], parentStyle: ComputedStyle, parent: number): number {
-    if (node.type === "dynlist") return walkList(node, path, parentStyle, parent);
+  function walkChild(
+    node: Node,
+    path: Element[],
+    parentStyle: ComputedStyle,
+    parent: number,
+    parentVars: VarEnv = EMPTY_VARS,
+  ): number {
+    if (node.type === "dynlist") return walkList(node, path, parentStyle, parent, parentVars);
 
     if (node.type === "text" || node.type === "dyntext") {
       const self = nodes.length;
@@ -753,7 +813,7 @@ export function compileTree(doc: Element, css: string): CompileResult {
       }
       return self;
     }
-    return walk(node, [...path, node], parentStyle, parent);
+    return walk(node, [...path, node], parentStyle, parent, parentVars);
   }
 
   const rootIndex =

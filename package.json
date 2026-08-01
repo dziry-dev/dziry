@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "bun test && bun run engine:test",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc --noEmit -p architecture",
     "lint": "cd native-src/dziri-engine && cargo fmt --check && cargo clippy --release --all-targets",
     "gen:protocol": "bun run scripts/gen-protocol.ts",
     "probe": "bun run scripts/probe.ts",
@@ -22,6 +22,8 @@
     "boundary-diff": "bun run scripts/boundary-diff.ts",
     "layout-diff": "bun run scripts/layout-diff.ts",
     "probe:serve": "bun run scripts/probe-server.ts",
+    "arch": "bun run architecture/serve.ts",
+    "arch:check": "bun run architecture/check.ts",
     "engine": "cd native-src/dziri-engine && cargo build --release",
     "engine:test": "cd native-src/dziri-engine && cargo test --release",
     "engine:smoke": "bun test src/engine/smoke.test.ts",
@@ -32,6 +34,9 @@
     "app": "bun run src/app.ts",
     "variants": "bun run src/variants.ts",
     "shot": "bun run src/compile.ts && bun run src/app.ts --screenshot engine-demo.png",
+    "tw:css": "bunx @tailwindcss/cli -i demo-tailwind/in.css -o demo-tailwind/app.css --content demo-tailwind/index.html",
+    "tw": "bun run tw:css && bun run src/compile.ts demo-tailwind/index.html demo-tailwind/app.css -o app/ui.gen.ts && bun run src/app.ts; bun run src/compile.ts",
+    "tw:shot": "bun run tw:css && bun run src/compile.ts demo-tailwind/index.html demo-tailwind/app.css -o app/ui.gen.ts && bun run src/app.ts --screenshot demo-tailwind/shot.png --size 900x560; bun run src/compile.ts",
     "bench": "bun run scripts/bench.ts",
     "runtime-surface": "bun run scripts/runtime-surface.ts"
   },

@@ -37,6 +37,22 @@ export type Selector = {
   pseudo: Pseudo;
   /** [ids, classes+pseudos, types] */
   specificity: [number, number, number];
+  /**
+   * `:root` — matches only the element at the top of the tree.
+   *
+   * A flag rather than a compound, because it is a statement about *position*
+   * and compounds only describe an element's own tag, id and classes. It exists
+   * because Tailwind v4's `@theme` block is where every design token lives, and
+   * the natural home for those is the root: custom properties inherit, so one
+   * declaration there reaches the whole tree.
+   */
+  root?: true;
+  /**
+   * A selector that is understood and matches nothing, as distinct from one that
+   * is refused. `:host` is the case: it is meaningful CSS, it simply cannot
+   * select anything in a tree with no shadow DOM.
+   */
+  never?: true;
 };
 
 export type Rule = {
@@ -103,30 +119,136 @@ function stripComments(src: string): string {
   return src.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "));
 }
 
+/**
+ * At-rules whose body is a list of *rules*, not declarations, and which apply
+ * unconditionally — so their contents are lifted into the enclosing sheet.
+ *
+ * `@layer` changes the cascade in a way nothing here models yet: every layer is
+ * treated as if it were unlayered, which is right for a single-layer sheet and
+ * wrong for a sheet that uses layers to order overrides. Tailwind v4 wraps its
+ * output in `@layer theme, base, components, utilities` and relies on that order,
+ * so this is a real approximation rather than a free one — recorded here because
+ * it will produce a wrong cascade before it produces an error.
+ *
+ * **`@supports` is deliberately not here.** Its body applies only if its condition
+ * holds, and dziri cannot evaluate conditions like
+ * `(-webkit-hyphens: none) and (not (margin-trim: inline))` — so inlining it would
+ * be asserting the condition is true. Tailwind ships exactly that as a fallback
+ * for engines without `@property`, and inlining it exposed a `*, ::before` rule
+ * that is not meant for an engine that has the feature. Skipped, like `@media`.
+ */
+const TRANSPARENT_GROUPS = new Set(["@layer"]);
+
+/**
+ * At-rules whose body is a list of *declarations* that behave as though they were
+ * written on `:root`.
+ *
+ * `@theme` is Tailwind v4's: it is where every `--color-*`, `--spacing-*` and
+ * `--font-*` is defined, and with it dropped, every `var()` in Tailwind's output
+ * resolves to nothing. `:root` is the closest thing dziri already understands.
+ */
+const ROOT_DECL_GROUPS = new Set(["@theme"]);
+
 export function parseCss(src: string): Rule[] {
   const text = stripComments(src);
   const rules: Rule[] = [];
-  let i = 0;
-  let order = 0;
+  const order = { n: 0 };
+  parseRuleList(text, 0, text.length, rules, order);
+  return rules;
+}
 
-  while (i < text.length) {
+/**
+ * Finds the `}` matching the `{` at `open`, skipping nested blocks and strings.
+ *
+ * This used to be `text.indexOf("}", open)`, which is correct only for a flat
+ * sheet. Given `@media (…) { .a { … } }` it returned the *inner* brace, so the
+ * skip consumed half the at-rule and parsing resumed in the middle of it — which
+ * is why a single at-rule anywhere in a sheet also broke the rule after it, not
+ * just itself.
+ */
+function matchingBrace(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"' || ch === "'") {
+      const quote = ch;
+      i++;
+      while (i < text.length && text[i] !== quote) {
+        if (text[i] === "\\") i++;
+        i++;
+      }
+      continue;
+    }
+    if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return i;
+  }
+  return -1;
+}
+
+function parseRuleList(
+  text: string,
+  from: number,
+  to: number,
+  rules: Rule[],
+  order: { n: number },
+): void {
+  let i = from;
+
+  while (i < to) {
     const open = text.indexOf("{", i);
-    if (open === -1) break;
+    if (open === -1 || open >= to) break;
+
+    // A statement at-rule — `@layer properties;`, `@import "…";`, `@charset` —
+    // has no block, so scanning to the next `{` runs straight past its semicolon
+    // and swallows whatever follows into its prelude. Tailwind v4 opens with
+    // `@layer properties;` and the very next rule is the `:root` block holding
+    // every design token, so this silently discarded the entire theme: the sheet
+    // parsed, and every `var(--color-…)` in it then resolved to nothing.
+    const semi = text.indexOf(";", i);
+    if (semi !== -1 && semi < open) {
+      const statement = text.slice(i, semi).trim();
+      if (statement.startsWith("@")) {
+        i = semi + 1;
+        continue;
+      }
+    }
 
     const raw = text.slice(i, open);
     const prelude = raw.trim();
     const preludeAt = i + raw.length - raw.trimStart().length;
-    const close = text.indexOf("}", open);
+    const close = matchingBrace(text, open);
     if (close === -1) {
       throw new CssError(`unclosed rule for selector "${prelude}"`, open);
     }
 
-    const body = text.slice(open + 1, close);
+    const bodyFrom = open + 1;
+    const bodyTo = close;
     i = close + 1;
 
     if (prelude.startsWith("@")) {
-      // At-rules (media queries, font-face) are an explicit non-goal.
-      console.warn(`  warn: ignoring at-rule "${prelude.split(/\s+/)[0]}"`);
+      const keyword = prelude.split(/[\s({]/)[0]!.toLowerCase();
+
+      if (TRANSPARENT_GROUPS.has(keyword)) {
+        // A prelude with no block of its own — `@layer a, b;` — has already been
+        // consumed as an empty body by the scan above; recursing over it is a
+        // no-op, which is the right outcome.
+        parseRuleList(text, bodyFrom, bodyTo, rules, order);
+        continue;
+      }
+
+      if (ROOT_DECL_GROUPS.has(keyword)) {
+        rules.push({
+          selectors: [parseSelector(":root", preludeAt)],
+          decls: parseDeclarations(text.slice(bodyFrom, bodyTo), bodyFrom),
+          order: order.n++,
+        });
+        continue;
+      }
+
+      // Everything else — `@media`, `@font-face`, `@keyframes` — is skipped, but
+      // now skipped *correctly*: the whole block goes, and the sheet after it
+      // still parses.
+      console.warn(`  warn: ignoring at-rule "${keyword}"`);
       continue;
     }
     if (prelude === "") continue;
@@ -141,26 +263,79 @@ export function parseCss(src: string): Rule[] {
       at += part.length + 1; // the comma
     }
 
-    rules.push({ selectors, decls: parseDeclarations(body, open + 1), order: order++ });
+    rules.push({
+      selectors,
+      decls: parseDeclarations(text.slice(bodyFrom, bodyTo), bodyFrom),
+      order: order.n++,
+    });
   }
+}
 
-  return rules;
+/**
+ * Splits a rule body into declarations, skipping any nested block.
+ *
+ * A rule body is no longer only declarations. CSS nesting is real, and Tailwind
+ * v4 emits it heavily — `.container { width: 100%; @media (width >= 40rem) {
+ * max-width: 40rem } }` is its ordinary output. Splitting such a body on `;`
+ * hands the parser the fragment `}` and it reports "declaration without a colon",
+ * pointing at a brace the author never wrote as a declaration.
+ *
+ * Nested blocks are *skipped*, not applied: a nested `@media` needs the predicate
+ * machinery that does not exist yet, and a nested style rule needs `&`. Skipping
+ * keeps the surrounding declarations — which are the unconditional ones, and the
+ * right answer at the default window size.
+ */
+function splitDeclarations(body: string): { text: string; at: number }[] {
+  const out: { text: string; at: number }[] = [];
+  let start = 0;
+  let i = 0;
+
+  const push = (end: number) => {
+    const raw = body.slice(start, end);
+    if (raw.trim()) out.push({ text: raw.trim(), at: start + (raw.length - raw.trimStart().length) });
+  };
+
+  while (i < body.length) {
+    const ch = body[i];
+    if (ch === "{") {
+      // Everything from the last boundary up to here is the nested rule's
+      // prelude, not a declaration, so it is dropped along with the block.
+      let depth = 0;
+      let j = i;
+      for (; j < body.length; j++) {
+        if (body[j] === "{") depth++;
+        else if (body[j] === "}" && --depth === 0) break;
+      }
+      i = j + 1;
+      start = i;
+      continue;
+    }
+    if (ch === ";") {
+      push(i);
+      start = i + 1;
+    }
+    i++;
+  }
+  push(body.length);
+  return out;
 }
 
 function parseDeclarations(body: string, at: number): Map<string, string> {
   const decls = new Map<string, string>();
-  let cursor = at;
-  for (const part of body.split(";")) {
-    const chunk = part.trim();
-    const start = cursor + (part.length - part.trimStart().length);
-    cursor += part.length + 1; // the semicolon
-    if (!chunk) continue;
+  for (const part of splitDeclarations(body)) {
+    const chunk = part.text;
+    const start = at + part.at;
     const colon = chunk.indexOf(":");
     if (colon === -1) {
       throw new CssError(`declaration without a colon: "${chunk}"`, start);
     }
     // Later duplicates win, matching CSS.
-    decls.set(chunk.slice(0, colon).trim().toLowerCase(), chunk.slice(colon + 1).trim());
+    //
+    // Custom property names keep their case. CSS folds ordinary property names to
+    // lower case but `--Foo` and `--foo` are two different properties, so
+    // lowercasing them would silently merge a theme that distinguishes them.
+    const name = chunk.slice(0, colon).trim();
+    decls.set(name.startsWith("--") ? name : name.toLowerCase(), chunk.slice(colon + 1).trim());
   }
   return decls;
 }
@@ -169,6 +344,21 @@ export function parseSelector(src: string, at = -1): Selector {
   if (!src) throw new CssError("empty selector", at);
   if (/[>+~]/.test(src)) {
     throw new CssError(`only the descendant combinator is supported, got "${src}"`, at);
+  }
+
+  // `:root` on its own, which is the only form of it that means anything here.
+  // Specificity is a pseudo-class's (0,1,0), as the spec says.
+  if (src.trim() === ":root") {
+    return { compounds: [], pseudo: "none", specificity: [0, 1, 0], root: true };
+  }
+
+  // `:host` matches the shadow host from inside a shadow tree. dziri has no
+  // shadow DOM, so it matches nothing — which is the correct answer, not a
+  // limitation. It is accepted rather than refused because Tailwind writes
+  // `:root, :host` for its theme block, and refusing half of a selector list
+  // would throw away the `:root` half with it.
+  if (src.trim() === ":host") {
+    return { compounds: [], pseudo: "none", specificity: [0, 1, 0], never: true };
   }
 
   const compounds: Compound[] = [];
@@ -310,7 +500,78 @@ export function parseColor(raw: string): number {
     return ((alpha << 24) | (r << 16) | (g << 8) | b) >>> 0;
   }
 
+  const oklchArgs = v.match(/^oklch\(([^)]+)\)$/);
+  if (oklchArgs) return parseOklch(oklchArgs[1]!, raw);
+
   throw new CssError(`unsupported color "${raw}"`);
+}
+
+/**
+ * `oklch(L C H)` / `oklch(L C H / A)` converted to packed sRGB.
+ *
+ * Not an optional nicety: **Tailwind v4's entire colour palette is oklch**. Every
+ * `--color-*` token it ships is one, so without this every `bg-*`, `text-*` and
+ * `border-*` in a Tailwind sheet fails to parse, and the demo renders black.
+ *
+ * The conversion is OKLCh -> OKLab -> LMS -> linear sRGB -> sRGB, with the matrices
+ * from Björn Ottosson's definition, which is what the CSS Color 4 spec references.
+ * It is done here, at compile time, because a colour is a constant — the engine
+ * receives a packed `u32` and never learns that oklch exists.
+ *
+ * **Out-of-gamut colours are clipped per channel**, which is the simple choice and
+ * not the spec's: CSS Color 4 asks for gamut *mapping*, which preserves hue by
+ * reducing chroma. Clipping can shift the hue of a saturated colour. Tailwind's
+ * palette is inside sRGB, so this is exact for the case that motivated it —
+ * checked against Chrome rather than assumed, see `css.test.ts`.
+ */
+function parseOklch(args: string, raw: string): number {
+  const [coords, alphaPart] = args.split("/");
+  const parts = coords!.trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 3) throw new CssError(`bad oklch() color "${raw}"`);
+
+  // Lightness is 0..1, or a percentage of that. Chroma is an absolute number, and
+  // a percentage there is relative to 0.4 per the spec. Hue is degrees.
+  const pct = (s: string) => s.trim().endsWith("%");
+  const num = (s: string) => Number(s.trim().replace("%", ""));
+
+  const L = pct(parts[0]!) ? num(parts[0]!) / 100 : num(parts[0]!);
+  const C = pct(parts[1]!) ? (num(parts[1]!) / 100) * 0.4 : num(parts[1]!);
+  const H = num(parts[2]!);
+  if (!Number.isFinite(L) || !Number.isFinite(C) || !Number.isFinite(H)) {
+    throw new CssError(`bad oklch() color "${raw}"`);
+  }
+
+  const alpha =
+    alphaPart === undefined
+      ? 255
+      : Math.round(Math.max(0, Math.min(1, pct(alphaPart) ? num(alphaPart) / 100 : num(alphaPart))) * 255);
+
+  const hr = (H * Math.PI) / 180;
+  const a = C * Math.cos(hr);
+  const b = C * Math.sin(hr);
+
+  // OKLab -> LMS', cubed to undo the cube root the space is defined with.
+  const l_ = L + 0.3963377774 * a + 0.2158037573 * b;
+  const m_ = L - 0.1055613458 * a - 0.0638541728 * b;
+  const s_ = L - 0.0894841775 * a - 1.291485548 * b;
+  const l = l_ * l_ * l_;
+  const m = m_ * m_ * m_;
+  const s = s_ * s_ * s_;
+
+  const lin = [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+
+  const channel = (c: number) => {
+    // The sRGB transfer function. Negative inputs happen for out-of-gamut
+    // colours and are clipped rather than reflected.
+    const v = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(Math.max(c, 0), 1 / 2.4) - 0.055;
+    return Math.round(Math.max(0, Math.min(1, v)) * 255);
+  };
+
+  return ((alpha << 24) | (channel(lin[0]!) << 16) | (channel(lin[1]!) << 8) | channel(lin[2]!)) >>> 0;
 }
 
 /**
@@ -339,11 +600,227 @@ export function splitTopLevel(value: string): string[] {
   return parts;
 }
 
+/**
+ * The custom properties in scope at one element, resolved.
+ *
+ * A plain map because that is all inheritance needs: a child's environment is its
+ * parent's with its own `--*` declarations laid over the top, which is exactly how
+ * custom properties inherit.
+ */
+export type VarEnv = ReadonlyMap<string, string>;
+
+/** How deep `var()` referring to `var()` may go before it is called a cycle. */
+const VAR_DEPTH_LIMIT = 32;
+
+/**
+ * Replaces every `var(--name, fallback)` in a value with what it resolves to.
+ *
+ * Substitution is textual and happens before any property parser sees the value,
+ * which is what the spec describes and also what makes this work for properties
+ * whose grammar we never taught anything about: `var()` can supply a whole
+ * declaration value, part of one, or a piece of a function's arguments.
+ *
+ * Three details that are easy to get wrong, all of them things Tailwind relies on:
+ *
+ *  - **The fallback is everything after the first comma**, not the next token.
+ *    `var(--a, 1px 2px)` has one fallback of `1px 2px`, and
+ *    `var(--a, var(--b, 3px))` nests. Splitting on every comma breaks both.
+ *  - **An unset variable with no fallback makes the declaration invalid**, and CSS
+ *    says the whole declaration is dropped rather than the property taking a
+ *    partial value. That is reported here as `null` so the caller can skip it.
+ *  - **A variable's own value may contain `var()`**, so resolution recurses. The
+ *    depth limit is what stops `--a: var(--b); --b: var(--a)` from hanging the
+ *    compiler; CSS calls that a cycle and treats it as invalid.
+ */
+export function substituteVars(value: string, env: VarEnv, depth = 0): string | null {
+  const start = value.indexOf("var(");
+  if (start === -1) return value;
+  if (depth >= VAR_DEPTH_LIMIT) return null;
+
+  // Find this `var(`'s matching paren, so a nested one is not mistaken for it.
+  let cursor = start + 4;
+  let nesting = 1;
+  while (cursor < value.length && nesting > 0) {
+    if (value[cursor] === "(") nesting++;
+    else if (value[cursor] === ")") nesting--;
+    cursor++;
+  }
+  if (nesting > 0) return null; // unclosed `var(`
+
+  const inner = value.slice(start + 4, cursor - 1);
+  const comma = topLevelComma(inner);
+  const name = (comma === -1 ? inner : inner.slice(0, comma)).trim();
+  const fallback = comma === -1 ? null : inner.slice(comma + 1).trim();
+
+  let resolved: string | null;
+  if (env.has(name)) {
+    resolved = substituteVars(env.get(name)!, env, depth + 1);
+  } else if (fallback !== null) {
+    resolved = substituteVars(fallback, env, depth + 1);
+  } else {
+    resolved = null;
+  }
+  if (resolved === null) return null;
+
+  // Re-run over the whole string: the replacement may itself have introduced a
+  // `var()`, and there may be more after this one.
+  return substituteVars(value.slice(0, start) + resolved + value.slice(cursor), env, depth + 1);
+}
+
+/** Index of the first comma not inside parentheses, or -1. */
+function topLevelComma(s: string): number {
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "(") depth++;
+    else if (ch === ")") depth--;
+    else if (ch === "," && depth === 0) return i;
+  }
+  return -1;
+}
+
+/**
+ * The environment a node sees: its parent's, plus its own `--*` declarations.
+ *
+ * The declarations arrive already in cascade order, so a later one wins by being
+ * written last — the same rule the rest of `collectDecls` runs on. Values are
+ * resolved lazily rather than here, because a variable may refer to one declared
+ * after it on the same element, which CSS allows.
+ */
+export function extendVarEnv(parent: VarEnv, decls: Map<string, string>): VarEnv {
+  let own: Map<string, string> | null = null;
+  for (const [prop, value] of decls) {
+    if (!prop.startsWith("--")) continue;
+    own ??= new Map(parent);
+    own.set(prop, value);
+  }
+  return own ?? parent;
+}
+
+/**
+ * Folds `calc()` down to a single px length, at compile time.
+ *
+ * This is the compile-time-first principle applied to arithmetic: an expression
+ * whose operands are all absolute lengths has one answer, and that answer belongs
+ * in the style table rather than in an evaluator the engine carries. Nothing about
+ * `calc(1rem + 2px)` needs to survive to run time.
+ *
+ * What is deliberately *not* folded is anything whose value depends on layout —
+ * percentages, `vw`/`vh`, and the other viewport units. Those cannot be a number
+ * until the box or the window exists, so they are rejected here with the same
+ * message any other unsupported length gets, rather than being guessed at. When
+ * they matter they need Taffy's own calc support, which is a different change.
+ *
+ * Nested `calc()` is unwrapped rather than special-cased: the spec says a nested
+ * one is just a parenthesised sub-expression, and that is what stripping the
+ * keyword leaves behind.
+ */
+function foldCalc(raw: string): number {
+  const inner = raw.trim().slice(raw.trim().indexOf("(") + 1, -1);
+  const tokens = tokeniseCalc(inner.replace(/\bcalc\(/g, "("));
+  const parser = new CalcParser(tokens, raw);
+  const value = parser.expression();
+  parser.expectEnd();
+  return value;
+}
+
+/** Numbers, units, operators and parens — whitespace-separated or not. */
+function tokeniseCalc(src: string): string[] {
+  const out: string[] = [];
+  const re = /\s*(-?\d*\.?\d+(?:e[-+]?\d+)?[a-z%]*|[()+\-*/])/giy;
+  let m: RegExpExecArray | null;
+  let at = 0;
+  while (at < src.length) {
+    re.lastIndex = at;
+    m = re.exec(src);
+    if (!m) break;
+    out.push(m[1]!);
+    at = re.lastIndex;
+  }
+  if (src.slice(at).trim()) throw new CssError(`cannot parse calc() near "${src.slice(at).trim()}"`);
+  return out;
+}
+
+/**
+ * Recursive descent over `+ -` then `* /` then atoms, which is the precedence CSS
+ * specifies. Written out rather than reached for from a library because the
+ * grammar is four lines and the error messages matter more than the parser does.
+ */
+class CalcParser {
+  #tokens: string[];
+  #at = 0;
+  #whole: string;
+
+  constructor(tokens: string[], whole: string) {
+    this.#tokens = tokens;
+    this.#whole = whole;
+  }
+
+  #peek(): string | undefined {
+    return this.#tokens[this.#at];
+  }
+
+  expectEnd(): void {
+    if (this.#at !== this.#tokens.length) {
+      throw new CssError(`trailing "${this.#tokens.slice(this.#at).join(" ")}" in "${this.#whole}"`);
+    }
+  }
+
+  expression(): number {
+    let left = this.term();
+    for (;;) {
+      const op = this.#peek();
+      if (op !== "+" && op !== "-") return left;
+      this.#at++;
+      const right = this.term();
+      left = op === "+" ? left + right : left - right;
+    }
+  }
+
+  term(): number {
+    let left = this.atom();
+    for (;;) {
+      const op = this.#peek();
+      if (op !== "*" && op !== "/") return left;
+      this.#at++;
+      const right = this.atom();
+      if (op === "/" && right === 0) {
+        throw new CssError(`division by zero in "${this.#whole}"`);
+      }
+      left = op === "*" ? left * right : left / right;
+    }
+  }
+
+  atom(): number {
+    const tok = this.#peek();
+    if (tok === undefined) throw new CssError(`"${this.#whole}" ends mid-expression`);
+    this.#at++;
+
+    if (tok === "(") {
+      const value = this.expression();
+      if (this.#peek() !== ")") throw new CssError(`unclosed "(" in "${this.#whole}"`);
+      this.#at++;
+      return value;
+    }
+    // Unary minus, as in `calc(-1 * var(--x))` once the var has been substituted.
+    if (tok === "-") return -this.atom();
+    if (tok === "+") return this.atom();
+    if (tok === "(" || tok === ")" || tok === "*" || tok === "/") {
+      throw new CssError(`unexpected "${tok}" in "${this.#whole}"`);
+    }
+
+    // A bare number is a scalar (a multiplier); anything else is a length, and
+    // `parseLength` is what decides which units this engine can answer for.
+    return /^-?[\d.]+(e[-+]?\d+)?$/i.test(tok) ? Number(tok) : parseLength(tok);
+  }
+}
+
 /** Parses a length to px. `auto` becomes NaN; percentages are unsupported. */
 export function parseLength(raw: string): number {
   const v = raw.trim().toLowerCase();
   if (v === "auto") return AUTO;
   if (v === "0") return 0;
+  if (v.startsWith("calc(")) return foldCalc(v);
   if (v.endsWith("%")) throw new CssError(`percentage lengths are not supported ("${raw}")`);
 
   const m = v.match(/^(-?[\d.]+)(px|pt|rem|em)?$/);
@@ -396,7 +873,11 @@ function overflowKeyword(keyword: string, whole: string): number {
 }
 
 function boxShorthand(raw: string): [number, number, number, number] {
-  const parts = raw.trim().split(/\s+/).map(parseLength);
+  // `splitTopLevel`, not `split(/\s+/)`: `padding: calc(4px * 2)` is *one* value,
+  // and a naive split makes it the three lengths `calc(4px`, `*` and `2)`. The
+  // paren-aware split already existed for colour functions; calc() is the same
+  // problem arriving from the other direction.
+  const parts = splitTopLevel(raw).map(parseLength);
   const [a, b, c, d] = parts;
   if (a === undefined) throw new CssError(`empty box shorthand "${raw}"`);
   if (b === undefined) return [a, a, a, a];
@@ -572,12 +1053,12 @@ export function expandDeclaration(
       return;
     case "border-radius":
       // Per-corner radii are out of scope; the first value wins.
-      out.radius = parseLength(value.split(/\s+/)[0]!);
+      out.radius = parseLength(splitTopLevel(value)[0]!);
       return;
 
     case "border": {
       // `<width> <style> <color>`, in any order, style ignored.
-      const parts = value.split(/\s+/);
+      const parts = splitTopLevel(value);
       for (const part of parts) {
         if (/^(none|solid|dashed|dotted)$/i.test(part)) continue;
         if (/^-?[\d.]/.test(part)) out.borderWidth = parseLength(part);
@@ -601,6 +1082,82 @@ export function expandDeclaration(
       out.padL = l;
       return;
     }
+
+    /*
+     * Logical properties, mapped onto the physical ones.
+     *
+     * dziri has one writing mode — horizontal, left to right — so `inline` is the
+     * horizontal axis and `block` is the vertical one, always. That is an
+     * assumption, and it is the same one the rest of the engine already makes:
+     * there is no `writing-mode` or `direction` field anywhere in `STYLE_FIELDS`.
+     * When one arrives these have to be resolved against it rather than fixed here.
+     *
+     * Worth the mapping because these are not an edge case in Tailwind — `px-*`
+     * and `py-*` are the spacing utilities people actually reach for, and they
+     * compile to `padding-inline` and `padding-block`, not to `padding-left`.
+     * Without this the demo's chips had no horizontal padding at all.
+     */
+    case "padding-inline": {
+      const [a, b] = boxShorthand(value);
+      out.padL = a;
+      out.padR = b;
+      return;
+    }
+    case "padding-block": {
+      const [a, b] = boxShorthand(value);
+      out.padT = a;
+      out.padB = b;
+      return;
+    }
+    case "padding-inline-start":
+      out.padL = parseLength(value);
+      return;
+    case "padding-inline-end":
+      out.padR = parseLength(value);
+      return;
+    case "padding-block-start":
+      out.padT = parseLength(value);
+      return;
+    case "padding-block-end":
+      out.padB = parseLength(value);
+      return;
+
+    case "margin-inline": {
+      const [a, b] = boxShorthand(value);
+      out.marL = a;
+      out.marR = b;
+      return;
+    }
+    case "margin-block": {
+      const [a, b] = boxShorthand(value);
+      out.marT = a;
+      out.marB = b;
+      return;
+    }
+    case "margin-inline-start":
+      out.marL = parseLength(value);
+      return;
+    case "margin-inline-end":
+      out.marR = parseLength(value);
+      return;
+    case "margin-block-start":
+      out.marT = parseLength(value);
+      return;
+    case "margin-block-end":
+      out.marB = parseLength(value);
+      return;
+    case "inset-inline-start":
+      out.insetL = parseLength(value);
+      return;
+    case "inset-inline-end":
+      out.insetR = parseLength(value);
+      return;
+    case "inset-block-start":
+      out.insetT = parseLength(value);
+      return;
+    case "inset-block-end":
+      out.insetB = parseLength(value);
+      return;
     case "padding-top":
       out.padT = parseLength(value);
       return;
@@ -696,7 +1253,7 @@ export function expandDeclaration(
         return;
       }
 
-      const parts = v.split(/\s+/);
+      const parts = splitTopLevel(v);
       const grow = Number(parts[0]);
       if (!Number.isFinite(grow)) throw new CssError(`bad flex "${value}"`);
       out.grow = grow;
@@ -722,7 +1279,7 @@ export function expandDeclaration(
     case "gap":
     case "grid-gap": {
       // One value sets both axes; two are `<row> <column>`, as in CSS.
-      const parts = value.split(/\s+/);
+      const parts = splitTopLevel(value);
       out.gapRow = parseLength(parts[0]!);
       out.gapCol = parts[1] ? parseLength(parts[1]) : out.gapRow;
       return;
