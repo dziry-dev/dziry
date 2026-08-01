@@ -98,11 +98,14 @@ Anything that trades robustness for capability stays a proposal.
 | `token()` (context) | planned | — |
 | `onFrame(dt)` | planned | — |
 | `<Overlay>` | planned | M11 |
-| `<Window>` / `navigate` / `back` / `<Outlet>` | planned — surface settled, see Routing | M7 |
 | route table from `windows/*/pages/**` | **done** — `src/compiler/routes.ts`, `bun run routes` | M7 |
 | `Href` union codegen | **done** — emitted per window into `routes.gen.ts` | M7 |
 | `useRoute` typing + path check | **done** — `src/compiler/route.ts` | M7 |
+| `<Window>` / `<Outlet>` | **done** — `src/compiler/window.ts`, spliced by `bun run window` | M7 |
+| one table set per window, inactive routes `hidden` | **done** — emitted `hidden` column, `routeChain` | M7 |
+| `navigate` / `back` | partial — `showRoute` in `src/window-host.ts`; no matcher, no history | M7 |
 | `useRoute` params as bindings | planned — recorders exist; the emitter does not read them yet | M7 |
+| `href` checked against the route table | planned — needs `<a>` as a tag the compiler accepts | M7 |
 | `defineScreen` | planned — `args` moved to `useRoute`; only `data` remains | M8 |
 | `defineQuery` / `defineMutation` | planned | — |
 | default stylesheet | planned | — |
@@ -231,11 +234,11 @@ path extends it renders inside. No directory convention, no layout declaration.
 
 ### Built
 
-The compiler half, which needs nothing from the engine:
-
 ```
 bun run routes            # scan ./windows -> windows/routes.gen.ts
 bun run routes --list     # the table, with parameters and nesting
+bun run window            # compile windows/<id>/ -> windows/<id>/ui.gen.ts
+bun run window:run        # show it; --route products/new to show another
 ```
 
 - `src/compiler/routes.ts` — the scan, the route table, the `Href` union, and every rejection:
@@ -245,9 +248,23 @@ bun run routes --list     # the table, with parameters and nesting
 - `src/compiler/route-args.ts` — `args.id` as a recorder, deliberately parallel to
   `item-path.ts`. Computing with a parameter produces an un-internable sentinel and a named
   error, never a constant frozen into the page.
+- `src/compiler/window.ts`, `window-tree.ts` — `<Window>` (the window's root box, a `body`)
+  and `<Outlet>`; pages spliced into one tree by path prefix, recursively. A layout with no
+  outlet and an outlet with no routes are both build errors: nesting by prefix and being a
+  layout are independent facts that have to agree.
+- `src/compile-window.ts` — every module imported, each page called inside `withPage`,
+  spliced, compiled **once**. One table set per window, so styles intern across every route.
+- `hidden` is emitted, not computed at startup: routes off the initial chain start excluded
+  from layout, paint and hit-testing. `routeChain` in `ir.ts` is the one definition of what is
+  visible together, shared by the emitter and the host so frame 1 and every frame after agree.
 
-Not built: `<Window>`, `<Outlet>`, `navigate`, `back`, and the emitter reading parameter
-recorders into text bindings. Nothing consumes `routes.gen.ts` yet.
+`windows/main/` is a working demo — a layout route, a parameter route, and shared components in
+the window folder. Three golden scenarios render it.
+
+Not built: `navigate`/`back` (the host has `showRoute`, which is the mechanism; what is missing
+is the matcher and the one-entry history), the emitter reading parameter recorders into text
+bindings, and `href` checking — `<a>` is not yet a tag the compiler accepts, so the demo's links
+are inert. Nothing consumes `routes.gen.ts` yet.
 
 ### Proposed, not decided
 
@@ -255,8 +272,13 @@ Everything above is Decided. These are open:
 
 - `<Window>` props carrying window config — `title`, `width`, `height`, `minWidth`, `minHeight`.
   All compile-time constants except `title`, which needs a binding for document windows.
+  *Implemented as proposed, because a window entry cannot compile without knowing what it
+  accepts. `title` is required and the four sizes are optional integers; `minWidth` is emitted
+  but not yet on the wire, so `window.rs` still hardcodes its 564x320 floor. Awaiting a ruling.*
 - `openWindow("main", "products/2")`, and windows as *kinds* rather than instances — two document
-  windows of the same folder, each with its own route and history.
+  windows of the same folder, each with its own route and history. *Deferred, not decided: the
+  compiler emits one table set per window **folder**, and nothing assumes there is only one of
+  it. Settling this before the host grows a second window is still the cheaper order.*
 - Precedence when a static path and a parameter path both match: **static wins**, so
   `products/new` beats `products/$id`. Two routes of the same shape (`$id` vs `$slug`) are a
   build error. *Both are implemented as proposed, because the route table has to have an order

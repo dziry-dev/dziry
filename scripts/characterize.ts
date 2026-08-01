@@ -30,7 +30,19 @@ const argv = process.argv.slice(2);
 const ACCEPT = argv.includes("--accept");
 const only = argv.filter((a) => !a.startsWith("--"));
 
-type Case = { name: string; input: string; css: string };
+type Case = {
+  name: string;
+  input: string;
+  css: string;
+  /**
+   * How to compile it, when the single-entry CLI is not the thing under test.
+   *
+   * A window is many modules spliced into one tree, so it has its own driver — and
+   * the part of its output worth freezing is the part the app case cannot have: the
+   * `hidden` column and the route table.
+   */
+  command?: (tmp: string) => string[];
+};
 
 async function cases(): Promise<Case[]> {
   const out: Case[] = [
@@ -38,6 +50,17 @@ async function cases(): Promise<Case[]> {
     // per-row handlers, conditional classes, derived values, inline styles.
     { name: "app", input: join(ROOT, "app", "app.tsx"), css: join(ROOT, "app", "app.css") },
   ];
+
+  // The demo window, if it is there: routes spliced by path prefix, the inactive
+  // ones hidden on the first frame.
+  if (existsSync(join(ROOT, "windows", "main", "index.tsx"))) {
+    out.push({
+      name: "window-main",
+      input: join(ROOT, "windows", "main", "index.tsx"),
+      css: join(ROOT, "windows", "main", "index.css"),
+      command: (tmp) => ["bun", "run", "src/compile-window.ts", "main", "-o", tmp],
+    });
+  }
   if (existsSync(CASES)) {
     for (const f of (await readdir(CASES)).sort()) {
       if (![".tsx", ".jsx", ".html"].includes(extname(f))) continue;
@@ -78,7 +101,10 @@ let blessed = 0;
 
 for (const c of list) {
   const tmp = join(tmpdir(), `dziri-char-${c.name}-${process.pid}.ts`);
-  const proc = Bun.spawn(["bun", "run", "src/compile.ts", c.input, c.css, "-o", tmp], {
+  const command = c.command
+    ? c.command(tmp)
+    : ["bun", "run", "src/compile.ts", c.input, c.css, "-o", tmp];
+  const proc = Bun.spawn(command, {
     cwd: ROOT,
     stdout: "pipe",
     stderr: "pipe",

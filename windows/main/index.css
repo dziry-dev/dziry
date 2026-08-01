@@ -1,0 +1,108 @@
+/*
+ * The window's stylesheet, interned across every route in it.
+ *
+ * Global on purpose, and measured: two pages of one design system shared 6 of 8
+ * style rows, union 9 — so per-route style loading would buy one row back and cost
+ * a refcount table and an eviction pass. Text is the table that grows without
+ * converging; that is where residency work belongs.
+ */
+
+body {
+  background: #14161a;
+  color: #e6e9ef;
+  font-size: 15px;
+  padding: 0;
+}
+
+/* No width or height: the window root already gets the window rect, and its one
+   child growing is what fills it. Percentage lengths do not compile yet. */
+.shell {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+}
+
+.nav {
+  display: flex;
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 20px;
+  background: #1b1e24;
+}
+
+.brand {
+  font-size: 16px;
+  font-weight: 600;
+  color: #f2f5fa;
+}
+
+.links {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.link {
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: #22262e;
+  color: #aeb6c4;
+  font-size: 13px;
+}
+
+.link:hover {
+  background: #2d323c;
+  color: #e6e9ef;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
+  padding: 24px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  background: #1b1e24;
+  border: 1px solid #2a2f38;
+  border-radius: 10px;
+}
+
+.title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #f2f5fa;
+}
+
+.body {
+  font-size: 14px;
+  color: #aeb6c4;
+}
+
+.tabs {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+}
+
+.tab {
+  padding: 5px 10px;
+  border-radius: 5px;
+  background: #22262e;
+  color: #aeb6c4;
+  font-size: 13px;
+}
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+  background: #171a1f;
+  border: 1px solid #262b33;
+  border-radius: 8px;
+}

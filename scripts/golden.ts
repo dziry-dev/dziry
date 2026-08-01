@@ -34,11 +34,33 @@ const only = argv.filter((a) => !a.startsWith("--"));
  * writes) and 1 is `.compact` (relayout, 6 writes). Covering both separately and
  * together is deliberate — together is where a patch-ordering bug would show.
  */
-const SCENARIOS: { name: string; args: string[] }[] = [
+/**
+ * What compiles a scenario and what renders it.
+ *
+ * Two now, because a window is not the single-entry app: it is many modules
+ * spliced into one tree by its own driver, and its host picks a route rather than
+ * flipping patches.
+ */
+const TARGETS = {
+  app: { build: "src/compile.ts", host: "src/app.ts" },
+  window: { build: "src/compile-window.ts", host: "src/window-host.ts" },
+} as const;
+
+type Scenario = { name: string; args: string[]; target?: keyof typeof TARGETS };
+
+const SCENARIOS: Scenario[] = [
   { name: "base", args: [] },
   { name: "light", args: ["--patch", "0"] },
   { name: "compact", args: ["--patch", "1"] },
   { name: "light-compact", args: ["--patch", "0,1"] },
+
+  // Routing. `route-home` proves the emitted `hidden` column — four routes are
+  // resident and one shows. The other two prove the parent chain: the `products`
+  // layout is visible because the active route renders inside it, while its
+  // sibling route is not.
+  { name: "route-home", args: [], target: "window" },
+  { name: "route-nested", args: ["--route", "products/new"], target: "window" },
+  { name: "route-param", args: ["--route", "products/$id"], target: "window" },
 ];
 
 /** IHDR is always the first chunk: width and height are bytes 16..24, big-endian. */
@@ -61,12 +83,19 @@ if (!list.length) {
   process.exit(1);
 }
 
-// One compile for all scenarios — they differ only in runtime state, and
-// recompiling per scenario would hide a compile that is itself nondeterministic.
-const build = Bun.spawn(["bun", "run", "src/compile.ts"], { cwd: ROOT, stdout: "pipe", stderr: "pipe" });
-if ((await build.exited) !== 0) {
-  console.log("FAILED to compile:\n" + (await new Response(build.stderr).text()).trim());
-  process.exit(1);
+// One compile per target, not per scenario — scenarios of a target differ only in
+// runtime state, and recompiling per scenario would hide a compile that is itself
+// nondeterministic.
+for (const name of new Set(list.map((s) => s.target ?? "app"))) {
+  const build = Bun.spawn(["bun", "run", TARGETS[name].build], {
+    cwd: ROOT,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if ((await build.exited) !== 0) {
+    console.log(`FAILED to compile ${name}:\n` + (await new Response(build.stderr).text()).trim());
+    process.exit(1);
+  }
 }
 
 let changed = 0;
@@ -75,7 +104,8 @@ let blessed = 0;
 
 for (const s of list) {
   const tmp = join(tmpdir(), `dziri-golden-${s.name}-${process.pid}.png`);
-  const proc = Bun.spawn(["bun", "run", "src/app.ts", "--screenshot", tmp, ...s.args], {
+  const host = TARGETS[s.target ?? "app"].host;
+  const proc = Bun.spawn(["bun", "run", host, "--screenshot", tmp, ...s.args], {
     cwd: ROOT,
     stdout: "pipe",
     stderr: "pipe",
