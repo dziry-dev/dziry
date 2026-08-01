@@ -153,7 +153,24 @@ const session = await chromeSession();
 
 const cases = ONLY ? CORPUS.filter((c) => c.decl.includes(ONLY) || c.prop.includes(ONLY)) : CORPUS;
 let pass = 0;
+/**
+ * Declarations where dziri differs from Chrome **on purpose**, keyed by the
+ * declaration exactly as it appears in CORPUS, valued by the reason.
+ *
+ * Empty today, and that is the honest state: all 23 cases agree. It exists so the
+ * first real divergence has somewhere to go that is not "delete the case", which
+ * is what happens to a corpus with no way to say "expected".
+ *
+ * The bar for adding one, same as `html-coverage`'s: the decision must already be
+ * written down somewhere else, and the entry cites it. This records decisions, it
+ * does not make them. An entry that stops matching fails the run, so the list
+ * cannot rot into a way of not fixing things — that check is at the bottom.
+ */
+const KNOWN: Record<string, string> = {};
+const matched = new Set<string>();
+
 const fails: string[] = [];
+const known: string[] = [];
 const errors: string[] = [];
 
 try {
@@ -177,7 +194,13 @@ try {
       pass++;
       if (VERBOSE) console.log(`ok    ${c.decl.padEnd(34)} ${c.prop} = ${chrome}`);
     } else {
-      fails.push(`${c.decl.padEnd(34)} ${c.prop}\n        chrome ${want}   dziri ${got}   (raw: "${chrome}" / ${dz})`);
+      const why = KNOWN[c.decl];
+      if (why) {
+        matched.add(c.decl);
+        known.push(`${c.decl.padEnd(34)} ${c.prop}  chrome ${want} · dziri ${got}\n        — ${why}`);
+      } else {
+        fails.push(`${c.decl.padEnd(34)} ${c.prop}\n        chrome ${want}   dziri ${got}   (raw: "${chrome}" / ${dz})`);
+      }
     }
   }
 } finally {
@@ -186,9 +209,23 @@ try {
 }
 
 for (const f of fails) console.log(`FAIL  ${f}`);
+for (const k of known) console.log(`KNOWN ${k}`);
 for (const e of errors) console.log(`ERR   ${e}`);
 
 const total = cases.length;
 const pct = total ? Math.round((pass / total) * 1000) / 10 : 0;
-console.log(`\nconformance ${pass}/${total} (${pct}%)  ${fails.length} disagree, ${errors.length} error`);
-process.exit(fails.length || errors.length ? 1 : 0);
+console.log(
+  `\nconformance ${pass}/${total} (${pct}%)  ${fails.length} disagree, ` +
+    `${known.length} known, ${errors.length} error`,
+);
+
+// A recorded divergence that stopped happening is news, and the only reason this
+// list cannot quietly become a way of not fixing things. See KNOWN's comment.
+const stale = Object.keys(KNOWN).filter((d) => !matched.has(d));
+if (stale.length) {
+  console.log(`\nSTALE known-divergence entries — these declarations now agree with Chrome:`);
+  for (const d of stale) console.log(`  ${d}\n    was: ${KNOWN[d]}`);
+  console.log(`Delete them from KNOWN; the divergence they excuse no longer exists.`);
+}
+
+process.exit(fails.length || errors.length || stale.length ? 1 : 0);

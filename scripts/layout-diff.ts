@@ -434,9 +434,32 @@ if (!list.length) {
   process.exit(1);
 }
 
+/**
+ * Scenarios that differ from Chrome **on purpose**, keyed by scenario name.
+ *
+ * Empty today, and deliberately so. The one scenario that currently differs,
+ * `wrap-unbreakable`, is a bug — dziri splits a token with no break opportunity
+ * across two lines where Chrome keeps it on one and lets it overflow — and a bug
+ * is something to fix, not something to accept. Putting it here would be using
+ * the mechanism to make a red run green, which is precisely the failure this is
+ * shaped to avoid.
+ *
+ * The bar, same as `html-coverage`'s: the decision is already written down
+ * somewhere else and the entry cites it. An entry that stops matching fails the
+ * run, so the list cannot quietly become a way of not fixing things.
+ *
+ * Worth knowing why this exists at all, given it is empty: box-sizing *was* a
+ * deliberate divergence, recorded in three sentences at the top of this file. It
+ * was fixed in `d56611d` and the comment went on asserting it for hours. A comment
+ * cannot notice it has stopped being true; an entry here fails the next run.
+ */
+const KNOWN: Record<string, string> = {};
+const matchedKnown = new Set<string>();
+
 let agreed = 0;
 let disagreed = 0;
 let broke = 0;
+let knownCount = 0;
 
 try {
   for (const [i, s] of list.entries()) {
@@ -479,6 +502,15 @@ try {
       continue;
     }
 
+    const why = KNOWN[s.name];
+    if (why) {
+      matchedKnown.add(s.name);
+      knownCount++;
+      console.log(`KNOWN  ${s.name} — ${why}`);
+      for (const b of bad) console.log(`       ${b}`);
+      continue;
+    }
+
     disagreed++;
     console.log(`DIFFER ${s.name} @ ${s.width}x${s.height}`);
     console.log(`       asks: ${s.asks}`);
@@ -492,6 +524,16 @@ try {
 const total = list.length;
 console.log(
   `\nlayout-diff ${agreed}/${total} scenarios agree within ${TOLERANCE}px` +
-    `  ${disagreed} differ, ${broke} error`,
+    `  ${disagreed} differ, ${knownCount} known, ${broke} error`,
 );
-process.exit(disagreed || broke ? 1 : 0);
+
+// Skipped under --only for the same reason as html-coverage's: a filtered corpus
+// makes a live entry look unused, which would turn a narrowing flag into a failure.
+const stale = ONLY ? [] : Object.keys(KNOWN).filter((n) => !matchedKnown.has(n));
+if (stale.length) {
+  console.log(`\nSTALE known-divergence entries — these scenarios now agree:`);
+  for (const n of stale) console.log(`  ${n}\n    was: ${KNOWN[n]}`);
+  console.log(`Delete them; the divergence they excuse no longer exists.`);
+}
+
+process.exit(disagreed || broke || stale.length ? 1 : 0);
