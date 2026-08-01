@@ -44,22 +44,34 @@ type Scenario = { name: string; args: string[] };
  */
 const SCENARIOS: Scenario[] = [
   { name: "base", args: [] },
-  { name: "light", args: ["--patch", "0"] },
-  { name: "compact", args: ["--patch", "1"] },
-  { name: "light-compact", args: ["--patch", "0,1"] },
-  { name: "route-routing", args: ["--route", "routing"] },
+
+  // The utility families. Real Tailwind output through the compiler, so a
+  // regression in the cascade, in oklch conversion, or in one property shows up as
+  // pixels rather than as a coverage number nobody re-derives.
+  { name: "layout", args: ["--route", "layout"] },
+  { name: "spacing", args: ["--route", "spacing"] },
+  { name: "typography", args: ["--route", "typography"] },
+  { name: "colors", args: ["--route", "colors"] },
+  { name: "borders", args: ["--route", "borders"] },
+
+  // The framework's own features, and the two conditional classes: 0 is `light`
+  // (paint-only), 1 is `compact` (relayout). Covering them separately and together
+  // is deliberate — together is where a patch-ordering bug would show. They need
+  // the route that carries them, since it is not the one the window opens on.
+  { name: "features", args: ["--route", "features"] },
+  { name: "features-light", args: ["--route", "features", "--patch", "0"] },
+  { name: "features-compact", args: ["--route", "features", "--patch", "1"] },
+  { name: "features-light-compact", args: ["--route", "features", "--patch", "0,1"] },
+
+  // Nesting and parameters: the `products` layout stays visible because the active
+  // route renders inside it, while its sibling does not.
   { name: "route-nested", args: ["--route", "products/new"] },
   { name: "route-param", args: ["--route", "products/$id"] },
 
-  // The Tailwind window, one scenario per utility family. These are the coverage
-  // claim: real Tailwind output through the compiler, so a regression in the
-  // cascade, in oklch conversion, or in a single property shows up as pixels.
-  { name: "tw-overview", args: ["--window", "tailwind"] },
-  { name: "tw-layout", args: ["--window", "tailwind", "--route", "layout"] },
-  { name: "tw-spacing", args: ["--window", "tailwind", "--route", "spacing"] },
-  { name: "tw-typography", args: ["--window", "tailwind", "--route", "typography"] },
-  { name: "tw-colors", args: ["--window", "tailwind", "--route", "colors"] },
-  { name: "tw-borders", args: ["--window", "tailwind", "--route", "borders"] },
+  // Hover, which is a predicate bit and an escaped selector — and which was
+  // silently dropped for every Tailwind `hover:` utility until `@media (hover:
+  // hover)` stopped being skipped.
+  { name: "hover-nav", args: ["--hover", "11"] },
 ];
 
 /** IHDR is always the first chunk: width and height are bytes 16..24, big-endian. */

@@ -1,0 +1,69 @@
+/*
+ * Tailwind input for the app. `bun run tw:css` turns this into `index.css`, which is
+ * what dziri's compiler actually reads.
+ *
+ * Theme + utilities only, no preflight. Tailwind's reset is a user-agent
+ * stylesheet written in selectors dziri does not have — `:host`, `*`, `::before`,
+ * `[hidden]` — and it is optional by design. dziri ships its own UA sheet, which is
+ * the same job done at the right origin.
+ *
+ * `source(none)` plus an explicit `@source` is load-bearing. Tailwind v4 otherwise
+ * scans the whole project, finds class-shaped strings inside the compiler's own
+ * TypeScript, and emits utilities for them — which inflates the sheet with rules no
+ * page uses and makes any coverage claim from this demo meaningless.
+ */
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css" source(none);
+@source "./index.tsx";
+@source "./Nav.tsx";
+@source "./pages/**/*.tsx";
+
+/* ---------------------------------------------------------------------------
+ * Authored CSS, passed through by the Tailwind CLI.
+ *
+ * These are the two *conditional classes*, hand-written on purpose: a conditional
+ * class compiles to a set of style-table patches, and what makes that mechanism
+ * worth testing is one patch that only repaints and one that forces a relayout.
+ * `light` changes colours; `compact` changes padding. `upload.test.ts` asserts on
+ * exactly that distinction (`affectsLayout`), so the pair has to stay.
+ * ------------------------------------------------------------------------- */
+
+body {
+    background: #09090b;
+    color: #e4e4e7;
+    font-size: 14px;
+    /* The page scrolls, which is what a browser does with a document taller than
+       its viewport. Only `overflow-y`: a window too narrow still overflows
+       sideways, and that needs a horizontal scrollbar rather than a silently
+       clipped right edge. */
+    overflow-y: auto;
+    scrollbar-color: #52525b transparent;
+}
+
+/* Paint-only: colours, no geometry. */
+body.light {
+    background: #fafafa;
+    color: #18181b;
+}
+
+body.light .card {
+    background: #ffffff;
+}
+
+body.light .sunken {
+    background: #f4f4f5;
+}
+
+body.light .heading {
+    color: #18181b;
+}
+
+body.light .muted {
+    color: #52525b;
+}
+
+/* Layout-affecting: tighter rows, so applying it forces a relayout. */
+.compact .row {
+    padding-top: 2px;
+    padding-bottom: 2px;
+}

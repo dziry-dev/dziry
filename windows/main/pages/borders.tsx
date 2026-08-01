@@ -42,12 +42,12 @@ export default function Borders() {
       </div>
 
       <div className="flex flex-col gap-3 rounded-xl bg-zinc-900 p-6">
-        <div className="text-lg font-semibold text-zinc-50">corners on their own</div>
-        <div className="text-xs text-zinc-400">rounded-t-2xl · rounded-l-2xl · rounded-br-2xl</div>
-        <div className="flex flex-row items-start gap-3">
-          <div className="h-16 w-16 rounded-t-2xl bg-teal-500" />
-          <div className="h-16 w-16 rounded-l-2xl bg-teal-500" />
-          <div className="h-16 w-16 rounded-br-2xl bg-teal-500" />
+        <div className="text-lg font-semibold text-zinc-50">not here: per-corner radii</div>
+        <div className="text-xs text-zinc-400">
+          rounded-t-*, rounded-l-* and rounded-br-* are absent on purpose. The style table holds
+          one radius per node, so the per-corner longhands do not compile — they would render as
+          square corners while the page claimed otherwise, and a demo that shows a utility working
+          when it does not is the one thing this window must never do.
         </div>
       </div>
     </div>

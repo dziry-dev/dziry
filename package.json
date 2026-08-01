@@ -35,9 +35,9 @@
     "dev": "bun run src/compile-window.ts && bun run src/window-host.ts",
     "variants": "bun run src/variants.ts",
     "shot": "bun run src/compile-window.ts && bun run src/window-host.ts --screenshot engine-demo.png",
-    "tw:css": "bunx @tailwindcss/cli -i windows/tailwind/in.css -o windows/tailwind/index.css",
-    "tw": "bun run tw:css && bun run src/compile-window.ts && bun run src/window-host.ts --window tailwind",
-    "tw:shot": "bun run tw:css && bun run src/compile-window.ts && bun run src/window-host.ts --window tailwind --screenshot windows/tailwind/shot.png",
+    "tw:css": "bunx @tailwindcss/cli -i windows/main/in.css -o windows/main/index.css",
+    "tw": "bun run tw:css && bun run dev",
+    "tw:shot": "bun run tw:css && bun run src/compile-window.ts && bun run src/window-host.ts --screenshot windows/main/shot.png",
     "bench": "bun run scripts/bench.ts",
     "runtime-surface": "bun run scripts/runtime-surface.ts",
     "run": "bun run src/window-host.ts"

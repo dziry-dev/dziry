@@ -1,579 +1,674 @@
-/* Everything here is resolved at build time. The runtime never sees it.
-   This file is also the coverage list: every property below compiles to an
-   integer in the style table and is honoured by the engine. */
-
+/*! tailwindcss v4.3.3 | MIT License | https://tailwindcss.com */
+@layer properties;
+:root, :host {
+  --color-red-400: oklch(70.4% 0.191 22.216);
+  --color-red-500: oklch(63.7% 0.237 25.331);
+  --color-orange-500: oklch(70.5% 0.213 47.604);
+  --color-amber-300: oklch(87.9% 0.169 91.605);
+  --color-amber-400: oklch(82.8% 0.189 84.429);
+  --color-amber-500: oklch(76.9% 0.188 70.08);
+  --color-amber-950: oklch(27.9% 0.077 45.635);
+  --color-yellow-500: oklch(79.5% 0.184 86.047);
+  --color-lime-500: oklch(76.8% 0.233 130.85);
+  --color-green-500: oklch(72.3% 0.219 149.579);
+  --color-emerald-400: oklch(76.5% 0.177 163.223);
+  --color-emerald-500: oklch(69.6% 0.17 162.48);
+  --color-teal-400: oklch(77.7% 0.152 181.912);
+  --color-teal-500: oklch(70.4% 0.14 182.503);
+  --color-teal-950: oklch(27.7% 0.046 192.524);
+  --color-cyan-500: oklch(71.5% 0.143 215.221);
+  --color-sky-50: oklch(97.7% 0.013 236.62);
+  --color-sky-100: oklch(95.1% 0.026 236.824);
+  --color-sky-200: oklch(90.1% 0.058 230.902);
+  --color-sky-300: oklch(82.8% 0.111 230.318);
+  --color-sky-400: oklch(74.6% 0.16 232.661);
+  --color-sky-500: oklch(68.5% 0.169 237.323);
+  --color-sky-600: oklch(58.8% 0.158 241.966);
+  --color-sky-700: oklch(50% 0.134 242.749);
+  --color-sky-800: oklch(44.3% 0.11 240.79);
+  --color-sky-900: oklch(39.1% 0.09 240.876);
+  --color-sky-950: oklch(29.3% 0.066 243.157);
+  --color-blue-500: oklch(62.3% 0.214 259.815);
+  --color-indigo-200: oklch(87% 0.065 274.039);
+  --color-indigo-300: oklch(78.5% 0.115 274.713);
+  --color-indigo-400: oklch(67.3% 0.182 276.935);
+  --color-indigo-500: oklch(58.5% 0.233 277.117);
+  --color-violet-50: oklch(96.9% 0.016 293.756);
+  --color-violet-300: oklch(81.1% 0.111 293.571);
+  --color-violet-400: oklch(70.2% 0.183 293.541);
+  --color-violet-500: oklch(60.6% 0.25 292.717);
+  --color-violet-900: oklch(38% 0.189 293.745);
+  --color-purple-500: oklch(62.7% 0.265 303.9);
+  --color-fuchsia-500: oklch(66.7% 0.295 322.15);
+  --color-pink-500: oklch(65.6% 0.241 354.308);
+  --color-rose-50: oklch(96.9% 0.015 12.422);
+  --color-rose-300: oklch(81% 0.117 11.638);
+  --color-rose-400: oklch(71.2% 0.194 13.428);
+  --color-rose-500: oklch(64.5% 0.246 16.439);
+  --color-rose-950: oklch(27.1% 0.105 12.094);
+  --color-slate-500: oklch(55.4% 0.046 257.417);
+  --color-zinc-50: oklch(98.5% 0 none);
+  --color-zinc-100: oklch(96.7% 0.001 286.375);
+  --color-zinc-200: oklch(92% 0.004 286.32);
+  --color-zinc-300: oklch(87.1% 0.006 286.286);
+  --color-zinc-400: oklch(70.5% 0.015 286.067);
+  --color-zinc-500: oklch(55.2% 0.016 285.938);
+  --color-zinc-600: oklch(44.2% 0.017 285.786);
+  --color-zinc-700: oklch(37% 0.013 285.805);
+  --color-zinc-800: oklch(27.4% 0.006 286.033);
+  --color-zinc-900: oklch(21% 0.006 285.885);
+  --color-zinc-950: oklch(14.1% 0.005 285.823);
+  --spacing: 0.25rem;
+  --container-sm: 24rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: calc(1 / 0.75);
+  --text-sm: 0.875rem;
+  --text-sm--line-height: calc(1.25 / 0.875);
+  --text-base: 1rem;
+  --text-base--line-height: calc(1.5 / 1);
+  --text-lg: 1.125rem;
+  --text-lg--line-height: calc(1.75 / 1.125);
+  --text-xl: 1.25rem;
+  --text-xl--line-height: calc(1.75 / 1.25);
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: calc(2 / 1.5);
+  --text-3xl: 1.875rem;
+  --text-3xl--line-height: calc(2.25 / 1.875);
+  --font-weight-light: 300;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+  --radius-2xl: 1rem;
+}
+.visible {
+  visibility: visible;
+}
+.absolute {
+  position: absolute;
+}
+.fixed {
+  position: fixed;
+}
+.relative {
+  position: relative;
+}
+.static {
+  position: static;
+}
+.top-2\.5 {
+  top: calc(var(--spacing) * 2.5);
+}
+.right-2\.5 {
+  right: calc(var(--spacing) * 2.5);
+}
+.bottom-2\.5 {
+  bottom: calc(var(--spacing) * 2.5);
+}
+.left-2\.5 {
+  left: calc(var(--spacing) * 2.5);
+}
+.col-span-2 {
+  grid-column: span 2 / span 2;
+}
+.container {
+  width: 100%;
+  @media (width >= 40rem) {
+    max-width: 40rem;
+  }
+  @media (width >= 48rem) {
+    max-width: 48rem;
+  }
+  @media (width >= 64rem) {
+    max-width: 64rem;
+  }
+  @media (width >= 80rem) {
+    max-width: 80rem;
+  }
+  @media (width >= 96rem) {
+    max-width: 96rem;
+  }
+}
+.ml-0 {
+  margin-left: 0px;
+}
+.ml-4 {
+  margin-left: calc(var(--spacing) * 4);
+}
+.ml-8 {
+  margin-left: calc(var(--spacing) * 8);
+}
+.ml-12 {
+  margin-left: calc(var(--spacing) * 12);
+}
+.flex {
+  display: flex;
+}
+.grid {
+  display: grid;
+}
+.hidden {
+  display: none;
+}
+.inline {
+  display: inline;
+}
+.table {
+  display: table;
+}
+.aspect-square {
+  aspect-ratio: 1 / 1;
+}
+.size-12 {
+  width: calc(var(--spacing) * 12);
+  height: calc(var(--spacing) * 12);
+}
+.h-6 {
+  height: calc(var(--spacing) * 6);
+}
+.h-8 {
+  height: calc(var(--spacing) * 8);
+}
+.h-10 {
+  height: calc(var(--spacing) * 10);
+}
+.h-12 {
+  height: calc(var(--spacing) * 12);
+}
+.h-14 {
+  height: calc(var(--spacing) * 14);
+}
+.h-16 {
+  height: calc(var(--spacing) * 16);
+}
+.h-24 {
+  height: calc(var(--spacing) * 24);
+}
+.w-6 {
+  width: calc(var(--spacing) * 6);
+}
+.w-8 {
+  width: calc(var(--spacing) * 8);
+}
+.w-10 {
+  width: calc(var(--spacing) * 10);
+}
+.w-12 {
+  width: calc(var(--spacing) * 12);
+}
+.w-14 {
+  width: calc(var(--spacing) * 14);
+}
+.w-16 {
+  width: calc(var(--spacing) * 16);
+}
+.w-24 {
+  width: calc(var(--spacing) * 24);
+}
+.w-32 {
+  width: calc(var(--spacing) * 32);
+}
+.max-w-sm {
+  max-width: var(--container-sm);
+}
+.grow {
+  flex-grow: 1;
+}
+.grid-cols-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.grid-cols-4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.grid-cols-6 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+.flex-col {
+  flex-direction: column;
+}
+.flex-row {
+  flex-direction: row;
+}
+.flex-wrap {
+  flex-wrap: wrap;
+}
+.items-center {
+  align-items: center;
+}
+.items-start {
+  align-items: flex-start;
+}
+.justify-between {
+  justify-content: space-between;
+}
+.gap-1 {
+  gap: var(--spacing);
+}
+.gap-2 {
+  gap: calc(var(--spacing) * 2);
+}
+.gap-2\.5 {
+  gap: calc(var(--spacing) * 2.5);
+}
+.gap-3 {
+  gap: calc(var(--spacing) * 3);
+}
+.gap-4 {
+  gap: calc(var(--spacing) * 4);
+}
+.gap-5 {
+  gap: calc(var(--spacing) * 5);
+}
+.gap-6 {
+  gap: calc(var(--spacing) * 6);
+}
+.gap-8 {
+  gap: calc(var(--spacing) * 8);
+}
+.self-center {
+  align-self: center;
+}
+.self-end {
+  align-self: flex-end;
+}
+.self-stretch {
+  align-self: stretch;
+}
+.rounded {
+  border-radius: 0.25rem;
+}
+.rounded-2xl {
+  border-radius: var(--radius-2xl);
+}
+.rounded-lg {
+  border-radius: var(--radius-lg);
+}
+.rounded-md {
+  border-radius: var(--radius-md);
+}
+.rounded-none {
+  border-radius: 0;
+}
+.rounded-sm {
+  border-radius: var(--radius-sm);
+}
+.rounded-xl {
+  border-radius: var(--radius-xl);
+}
+.border {
+  border-style: var(--tw-border-style);
+  border-width: 1px;
+}
+.border-2 {
+  border-style: var(--tw-border-style);
+  border-width: 2px;
+}
+.border-4 {
+  border-style: var(--tw-border-style);
+  border-width: 4px;
+}
+.border-8 {
+  border-style: var(--tw-border-style);
+  border-width: 8px;
+}
+.border-amber-500 {
+  border-color: var(--color-amber-500);
+}
+.border-emerald-500 {
+  border-color: var(--color-emerald-500);
+}
+.border-red-500 {
+  border-color: var(--color-red-500);
+}
+.border-sky-400 {
+  border-color: var(--color-sky-400);
+}
+.border-violet-500 {
+  border-color: var(--color-violet-500);
+}
+.bg-amber-300 {
+  background-color: var(--color-amber-300);
+}
+.bg-amber-400 {
+  background-color: var(--color-amber-400);
+}
+.bg-amber-500 {
+  background-color: var(--color-amber-500);
+}
+.bg-blue-500 {
+  background-color: var(--color-blue-500);
+}
+.bg-cyan-500 {
+  background-color: var(--color-cyan-500);
+}
+.bg-emerald-500 {
+  background-color: var(--color-emerald-500);
+}
+.bg-fuchsia-500 {
+  background-color: var(--color-fuchsia-500);
+}
+.bg-green-500 {
+  background-color: var(--color-green-500);
+}
+.bg-indigo-200 {
+  background-color: var(--color-indigo-200);
+}
+.bg-indigo-300 {
+  background-color: var(--color-indigo-300);
+}
+.bg-indigo-400 {
+  background-color: var(--color-indigo-400);
+}
+.bg-indigo-500 {
+  background-color: var(--color-indigo-500);
+}
+.bg-lime-500 {
+  background-color: var(--color-lime-500);
+}
+.bg-orange-500 {
+  background-color: var(--color-orange-500);
+}
+.bg-pink-500 {
+  background-color: var(--color-pink-500);
+}
+.bg-purple-500 {
+  background-color: var(--color-purple-500);
+}
+.bg-red-500 {
+  background-color: var(--color-red-500);
+}
+.bg-rose-300 {
+  background-color: var(--color-rose-300);
+}
+.bg-rose-400 {
+  background-color: var(--color-rose-400);
+}
+.bg-rose-500 {
+  background-color: var(--color-rose-500);
+}
+.bg-sky-50 {
+  background-color: var(--color-sky-50);
+}
+.bg-sky-100 {
+  background-color: var(--color-sky-100);
+}
+.bg-sky-200 {
+  background-color: var(--color-sky-200);
+}
+.bg-sky-300 {
+  background-color: var(--color-sky-300);
+}
+.bg-sky-400 {
+  background-color: var(--color-sky-400);
+}
+.bg-sky-500 {
+  background-color: var(--color-sky-500);
+}
+.bg-sky-600 {
+  background-color: var(--color-sky-600);
+}
+.bg-sky-700 {
+  background-color: var(--color-sky-700);
+}
+.bg-sky-800 {
+  background-color: var(--color-sky-800);
+}
+.bg-sky-900 {
+  background-color: var(--color-sky-900);
+}
+.bg-sky-950 {
+  background-color: var(--color-sky-950);
+}
+.bg-slate-500 {
+  background-color: var(--color-slate-500);
+}
+.bg-teal-400 {
+  background-color: var(--color-teal-400);
+}
+.bg-teal-500 {
+  background-color: var(--color-teal-500);
+}
+.bg-violet-300 {
+  background-color: var(--color-violet-300);
+}
+.bg-violet-400 {
+  background-color: var(--color-violet-400);
+}
+.bg-violet-500 {
+  background-color: var(--color-violet-500);
+}
+.bg-yellow-500 {
+  background-color: var(--color-yellow-500);
+}
+.bg-zinc-400 {
+  background-color: var(--color-zinc-400);
+}
+.bg-zinc-500 {
+  background-color: var(--color-zinc-500);
+}
+.bg-zinc-600 {
+  background-color: var(--color-zinc-600);
+}
+.bg-zinc-700 {
+  background-color: var(--color-zinc-700);
+}
+.bg-zinc-800 {
+  background-color: var(--color-zinc-800);
+}
+.bg-zinc-900 {
+  background-color: var(--color-zinc-900);
+}
+.bg-zinc-950 {
+  background-color: var(--color-zinc-950);
+}
+.p-2 {
+  padding: calc(var(--spacing) * 2);
+}
+.p-3 {
+  padding: calc(var(--spacing) * 3);
+}
+.p-4 {
+  padding: calc(var(--spacing) * 4);
+}
+.p-5 {
+  padding: calc(var(--spacing) * 5);
+}
+.p-6 {
+  padding: calc(var(--spacing) * 6);
+}
+.px-2 {
+  padding-inline: calc(var(--spacing) * 2);
+}
+.px-3 {
+  padding-inline: calc(var(--spacing) * 3);
+}
+.px-4 {
+  padding-inline: calc(var(--spacing) * 4);
+}
+.px-5 {
+  padding-inline: calc(var(--spacing) * 5);
+}
+.px-6 {
+  padding-inline: calc(var(--spacing) * 6);
+}
+.py-1 {
+  padding-block: var(--spacing);
+}
+.py-2 {
+  padding-block: calc(var(--spacing) * 2);
+}
+.py-3 {
+  padding-block: calc(var(--spacing) * 3);
+}
+.py-4 {
+  padding-block: calc(var(--spacing) * 4);
+}
+.text-2xl {
+  font-size: var(--text-2xl);
+  line-height: var(--tw-leading, var(--text-2xl--line-height));
+}
+.text-3xl {
+  font-size: var(--text-3xl);
+  line-height: var(--tw-leading, var(--text-3xl--line-height));
+}
+.text-base {
+  font-size: var(--text-base);
+  line-height: var(--tw-leading, var(--text-base--line-height));
+}
+.text-lg {
+  font-size: var(--text-lg);
+  line-height: var(--tw-leading, var(--text-lg--line-height));
+}
+.text-sm {
+  font-size: var(--text-sm);
+  line-height: var(--tw-leading, var(--text-sm--line-height));
+}
+.text-xl {
+  font-size: var(--text-xl);
+  line-height: var(--tw-leading, var(--text-xl--line-height));
+}
+.text-xs {
+  font-size: var(--text-xs);
+  line-height: var(--tw-leading, var(--text-xs--line-height));
+}
+.font-bold {
+  --tw-font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-bold);
+}
+.font-light {
+  --tw-font-weight: var(--font-weight-light);
+  font-weight: var(--font-weight-light);
+}
+.font-medium {
+  --tw-font-weight: var(--font-weight-medium);
+  font-weight: var(--font-weight-medium);
+}
+.font-normal {
+  --tw-font-weight: var(--font-weight-normal);
+  font-weight: var(--font-weight-normal);
+}
+.font-semibold {
+  --tw-font-weight: var(--font-weight-semibold);
+  font-weight: var(--font-weight-semibold);
+}
+.text-amber-400 {
+  color: var(--color-amber-400);
+}
+.text-amber-950 {
+  color: var(--color-amber-950);
+}
+.text-emerald-400 {
+  color: var(--color-emerald-400);
+}
+.text-red-400 {
+  color: var(--color-red-400);
+}
+.text-rose-50 {
+  color: var(--color-rose-50);
+}
+.text-rose-950 {
+  color: var(--color-rose-950);
+}
+.text-sky-50 {
+  color: var(--color-sky-50);
+}
+.text-sky-400 {
+  color: var(--color-sky-400);
+}
+.text-teal-950 {
+  color: var(--color-teal-950);
+}
+.text-violet-50 {
+  color: var(--color-violet-50);
+}
+.text-violet-400 {
+  color: var(--color-violet-400);
+}
+.text-violet-900 {
+  color: var(--color-violet-900);
+}
+.text-zinc-50 {
+  color: var(--color-zinc-50);
+}
+.text-zinc-100 {
+  color: var(--color-zinc-100);
+}
+.text-zinc-200 {
+  color: var(--color-zinc-200);
+}
+.text-zinc-300 {
+  color: var(--color-zinc-300);
+}
+.text-zinc-400 {
+  color: var(--color-zinc-400);
+}
+.text-zinc-500 {
+  color: var(--color-zinc-500);
+}
+@media (hover: hover) {
+  .hover\:bg-emerald-500:hover {
+    background-color: var(--color-emerald-500);
+  }
+  .hover\:bg-rose-500:hover {
+    background-color: var(--color-rose-500);
+  }
+  .hover\:bg-sky-500:hover {
+    background-color: var(--color-sky-500);
+  }
+  .hover\:bg-zinc-700:hover {
+    background-color: var(--color-zinc-700);
+  }
+}
+@media (width >= 48rem) {
+  .md\:flex-row {
+    flex-direction: row;
+  }
+}
 body {
-    background: #18181b;
-    color: #e4e4e7;
-    font-size: 14px;
-    padding: 18px;
-    /* The page scrolls, which is what a browser does with a document taller than
-       its viewport: the body keeps its children at their natural size and the
-       *viewport* moves. The alternative — a fixed shell with one scrolling pane —
-       needs `min-height: 0` down the whole ancestor chain to let the middle
-       collapse, which is real CSS and a different layout, not a smaller version of
-       this one.
-
-       Only `overflow-y`: a window too narrow still overflows sideways, and that
-       needs a horizontal scrollbar rather than a silently clipped right edge. */
-    overflow-y: auto;
-    /* Thumb then track, in that order, which is what CSS says. `scrollbar-color`
-       inherits and `scrollbar-width` does not — measured, and the asymmetry is easy
-       to miss because the two properties are always described together. Declared here
-       to exercise the authored path: with neither property the engine picks its own
-       overlay colours from `color` above, which is the interesting default but not
-       proof that an author can override it.
-
-       The track is `transparent` on purpose. These bars are *overlay* — they reserve no
-       layout room and are drawn on top of the content — so a filled track paints a
-       full-height band over text that is still there underneath, which reads as a gutter
-       that does not exist. A coloured track only tells the truth once the gutter is
-       reserved, which needs a second layout pass; see ROADMAP under A4. Until then the
-       honest bar is a thumb alone. */
-    scrollbar-color: #52525b transparent;
+  background: #09090b;
+  color: #e4e4e7;
+  font-size: 14px;
+  overflow-y: auto;
+  scrollbar-color: #52525b transparent;
 }
-
-.app {
-    gap: 14px;
-}
-
-/* ---- header: flex row, space-between ------------------------------------- */
-
-.header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.title {
-    font-size: 22px;
-    font-weight: 600;
-    color: #fafafa;
-}
-
-.subtitle {
-    font-size: 12px;
-    color: #71717a;
-}
-
-.toolbar {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-/* ---- the page is a grid --------------------------------------------------
-   Two equal tracks. `1fr` is what Tailwind's `grid-cols-2` generates, and it
-   is the only track kind supported: `repeat(auto-fit, minmax(…))` needs
-   intrinsic sizing and is a compile error rather than an approximation. */
-
-.panels {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 14px;
-}
-
-.card {
-    background: #1f1f24;
-    border: 1px solid #2f2f37;
-    border-radius: 10px;
-    padding: 14px;
-    gap: 10px;
-}
-
-.card-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: #a1a1aa;
-}
-
-/* ---- stats: a 4-track grid with a spanning cell -------------------------- */
-
-.stats {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-}
-
-.stat {
-    background: #232329;
-    border: 1px solid #2f2f37;
-    border-radius: 8px;
-    padding: 10px 12px;
-    gap: 2px;
-}
-
-/* Two tracks wide: the demonstration that spans work. */
-.stat.wide {
-    grid-column: span 2;
-    background: #1c2536;
-    border-color: #2f4468;
-}
-
-.stat-value {
-    font-size: 20px;
-    font-weight: 600;
-    color: #fafafa;
-}
-
-.stat-label {
-    font-size: 11px;
-    color: #71717a;
-}
-
-/* ---- flex growth ---------------------------------------------------------
-   The field takes the leftover space; the buttons keep their content size.
-   `flex: 1` is `1 1 0`, so the field sizes from the track rather than from
-   its own text. */
-
-.newrow {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.field {
-    flex: 1;
-    background: #232329;
-    border: 1px solid #3f3f46;
-    border-radius: 6px;
-    padding: 9px 12px;
-    color: #f4f4f5;
-    font-size: 14px;
-}
-
-.field:focus {
-    border-color: #3b82f6;
-}
-
-/* ---- wrapping ------------------------------------------------------------
-   A row that runs out of width and starts a second line. `row-gap` and
-   `column-gap` are separate here, which is why the IR splits `gap` in two. */
-
-.chips {
-    display: flex;
-    flex-wrap: wrap;
-    row-gap: 6px;
-    column-gap: 6px;
-    align-items: center;
-}
-
-.chip {
-    background: #27272e;
-    border: 1px solid #3f3f46;
-    border-radius: 999px;
-    padding: 4px 10px;
-    font-size: 12px;
-    color: #a1a1aa;
-}
-
-.chip:hover {
-    background: #32323a;
-    color: #f4f4f5;
-    border-color: #52525b;
-}
-
-/* ---- align-self and aspect-ratio ----------------------------------------- */
-
-.align-demo {
-    display: flex;
-    gap: 8px;
-    align-items: flex-start;
-    height: 74px;
-}
-
-.swatch {
-    width: 34px;
-    aspect-ratio: 1;
-    border-radius: 6px;
-    background: #3b82f6;
-}
-
-.swatch.mid {
-    align-self: center;
-    background: #8b5cf6;
-}
-
-.swatch.low {
-    align-self: flex-end;
-    background: #ec4899;
-}
-
-.swatch.tall {
-    align-self: stretch;
-    aspect-ratio: auto;
-    background: #22c55e;
-}
-
-/* ---- absolute positioning ------------------------------------------------
-   Taken out of flow and placed against its parent's box. The parent needs no
-   `position: relative`: Taffy positions an absolute child against its own
-   parent, which is simpler than CSS's containing-block search and covers the
-   case people actually use. */
-
-.stage {
-    height: 96px;
-    background: #232329;
-    border: 1px solid #2f2f37;
-    border-radius: 8px;
-}
-
-.badge {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    background: #3b82f6;
-    color: #ffffff;
-    border-radius: 999px;
-    padding: 3px 9px;
-    font-size: 11px;
-    font-weight: 600;
-}
-
-.pinned {
-    position: absolute;
-    left: 10px;
-    bottom: 10px;
-    font-size: 12px;
-    color: #71717a;
-}
-
-/* ---- buttons ------------------------------------------------------------- */
-
-.btn {
-    background: #27272e;
-    color: #d4d4d8;
-    border: 1px solid #3f3f46;
-    border-radius: 6px;
-    padding: 8px 14px;
-    font-size: 13px;
-}
-
-.btn:hover {
-    background: #32323a;
-    color: #f4f4f5;
-}
-
-.btn:active {
-    background: #1c1c22;
-}
-
-.btn.primary {
-    background: #3b82f6;
-    color: #ffffff;
-    border-color: #3b82f6;
-}
-
-.btn.primary:hover {
-    background: #60a5fa;
-}
-
-/* ---- list ---------------------------------------------------------------- */
-
-.list {
-    gap: 4px;
-}
-
-.todo {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: #1a1a1f;
-    border-radius: 6px;
-    padding: 7px 10px;
-}
-
-.check {
-    background: #27272e;
-    border: 1px solid #52525b;
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 13px;
-    color: #a1a1aa;
-}
-
-.check:hover {
-    background: #32323a;
-    color: #f4f4f5;
-}
-
-/* The label eats the leftover width, which pushes the delete button right
-   without a spacer element. */
-.label {
-    flex: 1;
-    font-size: 14px;
-    color: #e4e4e7;
-}
-
-.del {
-    background: #27272e;
-    border: 1px solid #3f3f46;
-    border-radius: 4px;
-    padding: 2px 8px;
-    font-size: 13px;
-    color: #a1a1aa;
-}
-
-.del:hover {
-    background: #7f1d1d;
-    color: #fecaca;
-    border-color: #991b1b;
-}
-
-/* ---- footer -------------------------------------------------------------- */
-
-.inline-demo {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-}
-
-.footer {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.hint {
-    font-size: 12px;
-    color: #71717a;
-}
-
-/* ---- conditional classes -------------------------------------------------
-   `.light` touches only colours, so the compiler marks it paint-only and the
-   engine repaints without relaying out. `.compact` changes geometry. */
-
 body.light {
-    background: #fafafa;
-    color: #18181b;
+  background: #fafafa;
+  color: #18181b;
 }
-
-body.light .title {
-    color: #09090b;
-}
-
 body.light .card {
-    background: #ffffff;
-    border-color: #e4e4e7;
+  background: #ffffff;
 }
-
-body.light .stat {
-    background: #ffffff;
-    border-color: #e4e4e7;
+body.light .sunken {
+  background: #f4f4f5;
 }
-
-body.light .stat.wide {
-    background: #eff6ff;
-    border-color: #bfdbfe;
+body.light .heading {
+  color: #18181b;
 }
-
-body.light .stat-value {
-    color: #09090b;
+body.light .muted {
+  color: #52525b;
 }
-
-body.light .stage {
-    background: #f4f4f5;
-    border-color: #e4e4e7;
+.compact .row {
+  padding-top: 2px;
+  padding-bottom: 2px;
 }
-
-body.light .todo {
-    background: #f4f4f5;
+@property --tw-border-style {
+  syntax: "*";
+  inherits: false;
+  initial-value: solid;
 }
-
-body.light .label {
-    color: #27272a;
+@property --tw-font-weight {
+  syntax: "*";
+  inherits: false;
 }
-
-body.light .field {
-    background: #ffffff;
-    color: #18181b;
-    border-color: #d4d4d8;
-}
-
-body.light .btn {
-    background: #f4f4f5;
-    color: #3f3f46;
-    border-color: #d4d4d8;
-}
-
-body.light .chip {
-    background: #f4f4f5;
-    color: #52525b;
-    border-color: #e4e4e7;
-}
-
-body.light .check {
-    background: #f4f4f5;
-    color: #52525b;
-    border-color: #d4d4d8;
-}
-
-body.light .del {
-    background: #f4f4f5;
-    color: #52525b;
-    border-color: #d4d4d8;
-}
-
-.app.compact {
-    gap: 8px;
-}
-
-.app.compact .card {
-    padding: 8px;
-    gap: 6px;
-}
-
-.app.compact .todo {
-    padding: 2px 8px;
-}
-
-.app.compact .list {
-    gap: 1px;
-}
-
-.app.compact .stat {
-    padding: 6px 10px;
-}
-
-/* ---- the window shell: chrome that stays put across navigation ------------
-   Class names here are prefixed `route-` where they would otherwise collide
-   with the demo's own `.card`, `.title` and `.body` above. Two stylesheets
-   merged into one window share a namespace, because the style table is global
-   and interned across every route — which is the decided design and was
-   measured: two pages of one design system shared 6 of 8 style rows. */
-
-.shell {
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-    gap: 14px;
-}
-
-.nav {
-    display: flex;
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: center;
-    padding: 10px 14px;
-    background: #202024;
-    border-radius: 10px;
-}
-
-.brand {
-    font-size: 15px;
-    font-weight: 600;
-    color: #fafafa;
-}
-
-.links {
-    display: flex;
-    flex-direction: row;
-    gap: 6px;
-}
-
-.link {
-    padding: 5px 11px;
-    border-radius: 6px;
-    background: #27272a;
-    color: #a1a1aa;
-    font-size: 13px;
-}
-
-.link:hover {
-    background: #34343a;
-    color: #e4e4e7;
-}
-
-.page {
-    display: flex;
-    flex-direction: column;
-    flex-grow: 1;
-}
-
-/* ---- the routing pages, which are deliberately plain ---------------------- */
-
-.route-card {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    padding: 18px;
-    background: #202024;
-    border-radius: 10px;
-}
-
-.route-title {
-    font-size: 18px;
-    font-weight: 600;
-    color: #fafafa;
-}
-
-.route-body {
-    font-size: 14px;
-    color: #a1a1aa;
-}
-
-.route-panel {
-    display: flex;
-    flex-direction: column;
-    padding: 12px;
-    background: #18181b;
-    border-radius: 8px;
-}
-
-.tabs {
-    display: flex;
-    flex-direction: row;
-    gap: 8px;
-}
-
-.tab {
-    padding: 5px 10px;
-    border-radius: 5px;
-    background: #27272a;
-    color: #a1a1aa;
-    font-size: 13px;
-}
-
-/* ---- the shell in light mode ---------------------------------------------
-   `body.light X` outranks `.X` on specificity, so these work appended rather
-   than needing to sit beside the dark rules. */
-
-body.light .nav {
-    background: #f4f4f5;
-}
-
-body.light .brand {
-    color: #18181b;
-}
-
-body.light .link {
-    background: #e4e4e7;
-    color: #52525b;
-}
-
-body.light .link:hover {
-    background: #d4d4d8;
-    color: #18181b;
-}
-
-body.light .route-card {
-    background: #ffffff;
-}
-
-body.light .route-title {
-    color: #18181b;
-}
-
-body.light .route-body {
-    color: #52525b;
-}
-
-body.light .route-panel {
-    background: #f4f4f5;
-}
-
-body.light .tab {
-    background: #e4e4e7;
-    color: #52525b;
+@layer properties {
+  @supports ((-webkit-hyphens: none) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color:rgb(from red r g b)))) {
+    *, ::before, ::after, ::backdrop {
+      --tw-border-style: solid;
+      --tw-font-weight: initial;
+    }
+  }
 }

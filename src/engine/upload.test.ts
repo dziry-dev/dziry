@@ -17,7 +17,7 @@
  */
 import { expect, test } from "bun:test";
 import { Align, Display, FlexWrap, Position } from "../protocol/generated.ts";
-import { INITIAL_STYLE, type CompiledUi, type StyleField } from "../ir.ts";
+import { INITIAL_STYLE, routeChain, type CompiledUi, type StyleField } from "../ir.ts";
 import { Engine } from "./host.ts";
 import { NUMBER_FIELDS, Uploader, capacitiesFor } from "./upload.ts";
 import { applyTextBindings } from "../runtime/bindings.ts";
@@ -27,6 +27,29 @@ import * as generated from "../../windows/main/ui.gen.ts";
 
 const WIDTH = 1040;
 const HEIGHT = 560;
+
+/**
+ * Shows one route, the way the host does.
+ *
+ * The window opens on its overview and everything these tests assert about — the
+ * grid, the list, the absolute children — lives on the `features` route, which
+ * ships `hidden`. Without this every assertion measures a `display: none` subtree
+ * and reads zero, which is a correct frame and a useless test.
+ *
+ * Deliberately the same `routeChain` the emitter and the host use, so a change to
+ * what "visible together" means cannot leave the tests measuring something the
+ * application never shows.
+ */
+function showRoute(path: string): void {
+  const routes = generated.routeNodes;
+  const target = routes.findIndex((r) => r.path === path);
+  if (target === -1) throw new Error(`no route "${path}" — routes are ${routes.map((r) => r.path).join(", ")}`);
+
+  const chain = routeChain(routes, target);
+  for (const [i, route] of routes.entries()) {
+    for (const node of route.roots) generated.nodes.hidden[node] = chain.has(i) ? 0 : 1;
+  }
+}
 
 function load(): {
   ui: CompiledUi;
@@ -49,6 +72,8 @@ function load(): {
 
   const patches: StylePatchRef[] = generated.stylePatches;
 
+  showRoute("features");
+
   applyTextBindings(ui, []);
   updateLists(ui, generated.listBindings satisfies ListBindingRef[]);
   applyStylePatches(ui, patches);
@@ -68,11 +93,34 @@ function load(): {
   return { ui, engine, uploader, patches };
 }
 
-/** Nodes whose style satisfies a predicate, in document order. */
+/**
+ * Nodes whose style satisfies a predicate, in document order, **on the visible
+ * route only**.
+ *
+ * Finding a node by what it *is* rather than by id is what let every assertion here
+ * survive the page being renumbered. Residency broke the uniqueness that depended
+ * on: nine other routes are in this table too, and the `borders` route also has a
+ * four-track grid — so "the node with four grid tracks" silently started matching a
+ * subtree the frame does not show, and the assertions measured zeros.
+ *
+ * Skipping hidden subtrees restores the property and is what the tests meant all
+ * along: they assert about what is on screen.
+ */
 function nodesWhere(ui: CompiledUi, pred: (get: (f: StyleField) => number) => boolean): number[] {
   const styles: Record<StyleField, ArrayLike<number>> = ui.styles;
+
+  const excluded = new Set<number>();
+  const bury = (node: number): void => {
+    excluded.add(node);
+    for (let c = ui.nodes.firstChild[node]!; c !== -1; c = ui.nodes.nextSibling[c]!) bury(c);
+  };
+  for (let i = 0; i < ui.nodes.count; i++) {
+    if (ui.nodes.hidden[i] !== 0) bury(i);
+  }
+
   const out: number[] = [];
   for (let i = 0; i < ui.nodes.count; i++) {
+    if (excluded.has(i)) continue;
     const slot = ui.nodes.style[i]!;
     if (pred((f) => styles[f][slot]!)) out.push(i);
   }
@@ -144,7 +192,7 @@ test("flex-grow gives a row's leftover width to one child", () => {
   // property holds by construction rather than by copying fields onto a
   // stand-in.
   expect(label![2]).toBeGreaterThan(100);
-  expect(del![0] + del![2]).toBeCloseTo(rowBox[0] + rowBox[2] - 10, 0);
+  expect(del![0] + del![2]).toBeCloseTo(rowBox[0] + rowBox[2] - 12, 0);
   expect(label![0]).toBeGreaterThanOrEqual(check![0] + check![2]);
 
   engine.close();
@@ -181,7 +229,7 @@ test("align-self overrides the parent's align-items per item", () => {
 
   // The row holding the swatches, found through them rather than by guessing at
   // its own style.
-  const swatches = nodesWhere(ui, (g) => g("width") === 34);
+  const swatches = nodesWhere(ui, (g) => g("width") === 32);
   expect(swatches.length).toBeGreaterThan(0);
   const row = ui.nodes.parent[swatches[0]!]!;
 
@@ -201,12 +249,12 @@ test("align-self overrides the parent's align-items per item", () => {
 
 test("aspect-ratio squares a box from its width alone", () => {
   const { engine, ui } = load();
-  const [swatch] = nodesWhere(ui, (g) => g("aspectRatio") === 1 && g("width") === 34);
+  const [swatch] = nodesWhere(ui, (g) => g("aspectRatio") === 1 && g("width") === 32);
   expect(swatch).toBeDefined();
 
   const [, , w, h] = engine.bounds(swatch!);
-  expect(w).toBe(34);
-  expect(h).toBe(34);
+  expect(w).toBe(32);
+  expect(h).toBe(32);
   engine.close();
 });
 
@@ -256,10 +304,10 @@ test("inline styles beat every selector", () => {
   const { engine, ui } = load();
   const styles: Record<StyleField, ArrayLike<number>> = ui.styles;
 
-  // `.btn` paints #27272e. The two inline-styled buttons override it — one from
+  // `.btn`/BTN paints zinc-800. The two inline-styled buttons override it — one from
   // a string, one from an object — which is the precedence a browser gives an
   // inline declaration.
-  const BTN_BG = 0xff27272e;
+  const BTN_BG = 0xff27272a; // bg-zinc-800
   const inline = nodesWhere(
     ui,
     (g) => g("bg") === 0xffb91c1c || g("bg") === 0xff15803d,
@@ -270,7 +318,7 @@ test("inline styles beat every selector", () => {
     expect(styles.bg[ui.nodes.style[node]!]).not.toBe(BTN_BG);
     // They still lay out as buttons: the class's padding and radius survive,
     // because inline only overrides what it actually declares.
-    expect(styles.radius[ui.nodes.style[node]!]).toBe(6);
+    expect(styles.radius[ui.nodes.style[node]!]).toBe(8); // rounded-lg
     expect(engine.bounds(node)[2]).toBeGreaterThan(0);
   }
 
@@ -286,13 +334,13 @@ test("inline styles beat every selector", () => {
 
 test("text is measured, not guessed", () => {
   const { engine, ui } = load();
-  // The title, "dziri" at 22px/600.
-  const [title] = nodesWhere(ui, (g) => g("fontSize") === 22 && g("fontWeight") === 600);
+  // The features heading, at 18px/600 — text-lg font-semibold.
+  const [title] = nodesWhere(ui, (g) => g("fontSize") === 18 && g("fontWeight") === 600);
   expect(title).toBeDefined();
 
   const [, , w, h] = engine.bounds(title!);
   expect(w).toBeGreaterThan(0);
-  expect(h).toBeGreaterThan(22);
+  expect(h).toBeGreaterThan(18);
   engine.close();
 });
 

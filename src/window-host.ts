@@ -167,13 +167,26 @@ function showRoute(index: number): void {
   }
 }
 
-/** `--route routing`, by exact path — matching a *concrete* path is the matcher's job. */
+/**
+ * A path to a route index.
+ *
+ * Exact paths only. Binding `products/1` to `products/$id` is the matcher's job,
+ * and the matcher is decided to live in the engine next to the media-query
+ * evaluator — which needs the route table on the wire. Until then a window can
+ * navigate between its static routes, which is what the parameter route's own
+ * `useRoute` is waiting on rather than something this should guess at.
+ */
+function indexOf(path: string): number {
+  return routeNodes.findIndex((r) => r.path === path);
+}
+
+/** `--route routing`, for starting somewhere other than the initial route. */
 function requestedRoute(): number {
   const i = argv.indexOf("--route");
   const wanted = i !== -1 ? argv[i + 1] : null;
   if (!wanted) return initialRoute;
 
-  const found = routeNodes.findIndex((r) => r.path === wanted);
+  const found = indexOf(wanted);
   if (found === -1) {
     const paths = routeNodes.map((r) => r.path).join(", ");
     throw new Error(`no route "${wanted}" in window ${windowId}. Routes are ${paths}.`);
@@ -181,7 +194,7 @@ function requestedRoute(): number {
   return found;
 }
 
-const active = requestedRoute();
+let active = requestedRoute();
 
 // --- state, before the engine exists -----------------------------------------
 //
@@ -224,6 +237,26 @@ subscribeStylePatches(stylePatches, () => {
   applyStylePatches(ui, stylePatches);
   dirty = true;
 });
+
+/**
+ * Navigation, all of it.
+ *
+ * The window's route signal changes, the path is looked up in the compiled table,
+ * and `hidden` is written over the routes that left the chain. No allocation, no
+ * table growth, nothing rebuilt — and no `await`, so a click cannot hang the
+ * window. An unknown path is ignored rather than blanking the window, because a
+ * dead link is meant to be a *build* error and silently showing nothing is the
+ * failure this design exists to avoid.
+ */
+if (generated.routeSignal) {
+  generated.routeSignal.subscribe(() => {
+    const next = indexOf(generated.routeSignal!.value);
+    if (next === -1 || next === active) return;
+    active = next;
+    showRoute(active);
+    dirty = true;
+  });
+}
 
 /**
  * Pushes the IR's current state at the engine.

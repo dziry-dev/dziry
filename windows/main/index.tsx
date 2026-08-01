@@ -1,22 +1,26 @@
 /** @jsxImportSource ../../src/compiler */
 
 /**
- * The window: chrome that stays put, and an `<Outlet/>` where the route goes.
+ * The application: a Tailwind-styled window, one route per utility family plus the
+ * framework's own features and the routing demo.
  *
- * `Nav.tsx` sits beside this file rather than under `pages/`, which is the whole
- * point of the split — `pages/` contains routes and nothing else, so a component
- * shared by every route lives here and nothing scans it.
+ * Every class on these pages is real Tailwind v4 output, resolved at build time into
+ * a style table — `bun run tw:css` runs the actual CLI, and a utility that does not
+ * compile makes the build say so. The pages are the coverage claim made concrete:
+ * `bun run tailwind-coverage` reports a percentage, and this shows what is behind it.
  *
- * The theme toggle is on `<Window>` because that is where it has to be: the
- * stylesheet's dark/light rules are written `body.light .card`, and `<Window>` *is*
- * the body. `cn` keeps the signal visible to the compiler, which turns the class
- * into style-table writes rather than something the runtime resolves. Density is
- * per page, on `.app`, for the same reason — `.app.compact .card` is where that
- * cascade starts.
+ * `route` is what makes the nav work. It is passed in rather than imported from the
+ * framework because a route belongs to a window, and two windows on different routes
+ * is the normal case.
+ *
+ * `light` is on `<Window>` because the theme rules are written `body.light …` and
+ * `<Window>` *is* the body. `cn` keeps the signal visible to the compiler, which
+ * turns the class into style-table writes rather than something the runtime resolves.
  */
 import { cn } from "../../src/compiler/jsx-runtime.ts";
 import { Outlet, Window } from "../../src/compiler/window.ts";
 import { Nav } from "./Nav.tsx";
+import { route } from "./router.ts";
 import { isLight } from "./state.ts";
 
 export default function Main() {
@@ -24,14 +28,15 @@ export default function Main() {
     <Window
       title="dziri — compiled UI"
       width={1040}
-      height={620}
-      minWidth={480}
-      minHeight={360}
+      height={700}
+      minWidth={520}
+      minHeight={400}
+      route={route}
       className={cn({ light: isLight })}
     >
-      <div className="shell">
+      <div className="flex flex-col grow gap-6 p-6">
         <Nav />
-        <div className="page">
+        <div className="flex flex-col grow gap-6">
           <Outlet />
         </div>
       </div>

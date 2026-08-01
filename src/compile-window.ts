@@ -18,7 +18,7 @@
  */
 import { join, relative, resolve, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { compileTree, emit, dump, type EmittedRouting } from "./compiler/compile.ts";
 import { CssError, formatCssError } from "./compiler/css.ts";
 import { buildRefIndex, resolveRefs, RefError, type RefSource } from "./compiler/resolve-refs.ts";
@@ -26,7 +26,7 @@ import { compileVariants, findToggles, type VariantCompiled } from "./compiler/v
 import { toDocument } from "./compiler/jsx-runtime.ts";
 import { RouteError, scanWindows, type WindowDef } from "./compiler/routes.ts";
 import { withPage } from "./compiler/route.ts";
-import { configOf, WindowError } from "./compiler/window.ts";
+import { configOf, routeSignalOf, WindowError } from "./compiler/window.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./compiler/window-tree.ts";
 import { setCompiling } from "./runtime/signal.ts";
 import type { Element, Node } from "./compiler/html.ts";
@@ -82,6 +82,27 @@ function asNodes(value: unknown): Node[] {
   return Array.isArray(value) ? (value as Node[]) : [value as Node];
 }
 
+/**
+ * Warnings, deduplicated with a count.
+ *
+ * One unsupported property in a stylesheet is not one warning — it is one per node
+ * that inherits a rule mentioning it, and Tailwind's `text-*` utilities set
+ * `line-height` beside every font size. The Tailwind window printed 110 identical
+ * lines, which is worse than printing none: it buries the *distinct* warnings, and
+ * the summary line the author is actually waiting for scrolls off the top.
+ *
+ * Grouped rather than capped, because the count is the useful part — 110 nodes
+ * affected is a different story from two, and a cap would hide which it was.
+ */
+function reportWarnings(warnings: readonly string[]): void {
+  const counts = new Map<string, number>();
+  for (const w of warnings) counts.set(w, (counts.get(w) ?? 0) + 1);
+
+  for (const [message, n] of counts) {
+    console.warn(`  warn: ${message}${n > 1 ? `  (x${n})` : ""}`);
+  }
+}
+
 type Compiled = {
   window: WindowDef;
   outPath: string;
@@ -126,13 +147,30 @@ async function compileWindow(window: WindowDef): Promise<Compiled> {
     }
     shell = first;
 
-    // A window may keep its signals and handlers in a sibling `state.ts`, exactly
-    // as `app/` does. Listed first so its name wins when a page re-exports one.
-    const statePath = join(dir, "state.ts");
-    if (existsSync(statePath)) {
+    /**
+     * Every module in the window folder is a reference source.
+     *
+     * Not just `state.ts`: the design says the window folder holds ordinary modules,
+     * and a window that splits its signals across `state.ts` and `router.ts` is
+     * doing exactly what that invites. Hardcoding one filename made the second one
+     * fail with "not a module-level export" about a function that plainly was.
+     *
+     * `state.ts` still goes first, so its name wins when the same object is
+     * re-exported elsewhere. The folder only — pages are added as they are compiled,
+     * and nothing recurses, because a window's own components are its direct
+     * children by convention.
+     */
+    const folderModules = readdirSync(dir, { withFileTypes: true })
+      .filter((e) => e.isFile() && /\.(ts|tsx)$/.test(e.name))
+      .map((e) => e.name)
+      .filter((name) => name !== "index.tsx" && name !== "ui.gen.ts")
+      .sort((a, b) => (a === "state.ts" ? -1 : b === "state.ts" ? 1 : a < b ? -1 : 1));
+
+    for (const name of folderModules) {
+      const path = join(dir, name);
       sources.push({
-        specifier: specifierFor(statePath),
-        exports: (await import(pathToFileURL(statePath).href)) as Record<string, unknown>,
+        specifier: specifierFor(path),
+        exports: (await import(pathToFileURL(path).href)) as Record<string, unknown>,
       });
     }
     sources.push({
@@ -183,7 +221,32 @@ async function compileWindow(window: WindowDef): Promise<Compiled> {
     }
   }
 
-  const { imports } = resolveRefs(result, buildRefIndex(sources), variants);
+  const index = buildRefIndex(sources);
+  const { imports } = resolveRefs(result, index, variants);
+
+  /**
+   * The route signal, resolved to the export name the artifact will import.
+   *
+   * Same rule as every other signal reference: it survives the compiler/runtime
+   * file boundary only as a name, so it has to be a module-level export.
+   */
+  let routeSignalName: string | null = null;
+  const routeSignal = routeSignalOf(shell);
+  if (routeSignal) {
+    const ref = index.get(routeSignal);
+    if (!ref) {
+      throw new WindowError(
+        `<Window route={…}> was given a signal that is not a module-level export.\n` +
+          `  The generated artifact imports it by name, so it has to be exported — from the\n` +
+          `  window's state.ts, its entry, or a page. A signal created inside a component has\n` +
+          `  nowhere to live, because components are erased at build time.`,
+      );
+    }
+    routeSignalName = ref.name;
+    const names = imports.get(ref.specifier) ?? new Set<string>();
+    names.add(ref.name);
+    imports.set(ref.specifier, names);
+  }
 
   /**
    * A route's roots as node ids.
@@ -209,6 +272,7 @@ async function compileWindow(window: WindowDef): Promise<Compiled> {
     config: configOf(shell)!,
     routes: routeNodes,
     initial,
+    routeSignal: routeSignalName,
   };
 
   const typesFrom = relative(dirname(outPath), join(ROOT, "src")).replaceAll("\\", "/");
@@ -222,7 +286,7 @@ async function compileWindow(window: WindowDef): Promise<Compiled> {
 
   await Bun.write(outPath, source);
 
-  for (const w of result.warnings) console.warn(`  warn: ${w}`);
+  reportWarnings(result.warnings);
   if (flags.has("--dump")) console.log(`\n${dump(result)}\n`);
 
   const chain = routeChain(routeNodes, initial);

@@ -542,6 +542,13 @@ export type EmittedRouting = {
   routes: RouteNodes[];
   /** Index in `routes` of the route showing on the first frame. */
   initial: number;
+  /**
+   * Export name of the window's route signal, or null when it declared none.
+   *
+   * A window without one is not broken — it renders its initial route and never
+   * changes, which is what every screenshot and golden scenario wants.
+   */
+  routeSignal: string | null;
 };
 
 /**
@@ -1453,7 +1460,7 @@ ${importLines ? "\n" + importLines + "\n" : ""}
 import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${source.typesFrom}/ir.ts";
 import type { EditableRef } from "${source.typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${source.typesFrom}/runtime/list-runtime.ts";
-import type { StylePatchRef } from "${source.typesFrom}/runtime/patches.ts";
+import type { StylePatchRef } from "${source.typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${source.typesFrom}/runtime/signal.ts";` : ""}
 
 /** Mutable past the static entries: text bindings overwrite their own slots. */
 export const strings: string[] = ${JSON.stringify(strings)};
@@ -1598,6 +1605,14 @@ ${routes}
 
 /** Index in \`routeNodes\` of the route the emitted \`hidden\` column shows. */
 export const initialRoute: number = ${routing.initial};
+
+/**
+ * The window's route, if it declared one — \`<Window route={…}>\`.
+ *
+ * Navigation's entire runtime: the host subscribes, resolves the path against
+ * \`routeNodes\`, and writes \`hidden\`. Null when the window never navigates.
+ */
+export const routeSignal: ReadonlySignal<string> | null = ${routing.routeSignal ?? "null"};
 
 /** Folder name of the window, for diagnostics and multi-window dispatch later. */
 export const windowId: string = ${JSON.stringify(routing.window)};

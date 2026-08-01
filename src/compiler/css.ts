@@ -215,6 +215,41 @@ export function parseCss(src: string, origin: OriginValue = Origin.AUTHOR): Rule
  * are not: a comma is an *or*, which cannot be expressed as a set of bits that all
  * have to hold.
  */
+/**
+ * Media features that always hold here, and therefore need no predicate bit.
+ *
+ * A pointer that can hover *is* the target: an SDL window on a desktop. Modelling
+ * these as conditions would spend a mask bit on something that can never be false,
+ * and skipping them silently loses every rule inside — which is what happened to
+ * Tailwind's entire `hover:` family.
+ *
+ * `hover: none` and `pointer: coarse` are deliberately **not** listed. They are the
+ * negations, they are false here, and a block guarded by one should be dropped —
+ * which is what the skip path already does.
+ */
+const ALWAYS_TRUE_MEDIA = new Set([
+  "hover:hover",
+  "any-hover:hover",
+  "pointer:fine",
+  "any-pointer:fine",
+]);
+
+/**
+ * True when every condition in the prelude is one that always holds.
+ *
+ * All of them, not any: `(hover: hover) and (min-width: 40rem)` still has a real
+ * condition in it and has to go through the normal path, or the width would be
+ * asserted rather than evaluated.
+ */
+function alwaysTrueMedia(prelude: string): boolean {
+  const parts = prelude
+    .split(/\band\b/)
+    .map((p) => p.trim().replace(/^\(|\)$/g, "").replace(/\s+/g, "").toLowerCase())
+    .filter(Boolean);
+
+  return parts.length > 0 && parts.every((p) => ALWAYS_TRUE_MEDIA.has(p));
+}
+
 export function parseMediaQuery(prelude: string): MediaCond[] | null {
   const src = prelude.trim().toLowerCase();
   if (src.includes(",")) return null;
@@ -357,6 +392,20 @@ function parseRuleList(
         continue;
       }
 
+      if (keyword === "@media" && alwaysTrueMedia(prelude.slice("@media".length))) {
+        // Conditions that are simply *true* for a native desktop window, so the
+        // block is unwrapped rather than skipped.
+        //
+        // This is not a nicety: Tailwind v4 wraps every `hover:` utility in
+        // `@media (hover: hover)`, and skipping it dropped all of them. Hover
+        // appeared not to work at all, while the compiler reported one line about a
+        // media query — a symptom nowhere near its cause. dziri renders into an SDL
+        // window with a mouse; `(hover: hover)` and `(pointer: fine)` hold, and
+        // pretending otherwise is the wrong answer to a question we can answer.
+        parseRuleList(text, bodyFrom, bodyTo, rules, order);
+        continue;
+      }
+
       if (keyword === "@media") {
         // A query this engine cannot evaluate — `print`, `prefers-color-scheme`,
         // `hover: hover` — is skipped rather than refused. Skipping degrades to
@@ -365,7 +414,7 @@ function parseRuleList(
         // a feature that was never going to apply.
         const conds = parseMediaQuery(prelude.slice("@media".length));
         if (conds === null) {
-          console.warn(`  warn: ignoring media query "${prelude.trim()}"`);
+          warnOnce(`ignoring media query "${prelude.trim()}"`);
           continue;
         }
         const inner: Rule[] = [];
@@ -381,7 +430,7 @@ function parseRuleList(
 
       // Everything else — `@font-face`, `@keyframes` — is skipped, but skipped
       // *correctly*: the whole block goes, and the sheet after it still parses.
-      console.warn(`  warn: ignoring at-rule "${keyword}"`);
+      warnOnce(`ignoring at-rule "${keyword}"`);
       continue;
     }
     if (prelude === "") continue;
@@ -1621,6 +1670,27 @@ export function expandDeclaration(
       return; // handled by the caller
 
     default:
-      console.warn(`  warn: ignoring unsupported property "${prop}"`);
+      warnOnce(`ignoring unsupported property "${prop}"`);
   }
+}
+
+/**
+ * A warning printed once per process, however many nodes hit it.
+ *
+ * An unsupported property is one *fact* about the stylesheet, but this runs per
+ * declaration per node, so Tailwind's `text-*` utilities — which set `line-height`
+ * beside every font size — produced 110 identical lines. That is worse than
+ * printing nothing: it buries the distinct warnings and pushes the summary the
+ * author is waiting for off the top of the terminal.
+ *
+ * Process-wide rather than per-parse, because the same window is parsed several
+ * times over (baseline, then once per conditional-class variant) and the second
+ * pass has nothing new to say.
+ */
+const warned = new Set<string>();
+
+function warnOnce(message: string): void {
+  if (warned.has(message)) return;
+  warned.add(message);
+  console.warn(`  warn: ${message}`);
 }

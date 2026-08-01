@@ -33,6 +33,7 @@ import { jsx } from "./jsx-runtime.ts";
 import type { Element } from "./html.ts";
 import type { Props } from "./jsx-runtime.ts";
 import type { WindowConfig } from "../ir.ts";
+import type { ReadonlySignal } from "../runtime/signal.ts";
 
 /** The marker tag `<Outlet/>` leaves in the tree. Never reaches the cascade. */
 export const OUTLET_TAG = "#outlet";
@@ -54,7 +55,22 @@ export const OUTLET_TAG = "#outlet";
  */
 export type { WindowConfig };
 
-export type WindowProps = Props & WindowConfig;
+export type WindowProps = Props &
+  WindowConfig & {
+    /**
+     * The window's current route path, as a signal.
+     *
+     * This is the whole of navigation's plumbing: the host subscribes, looks the
+     * path up in the route table, and writes `hidden` over the routes that left the
+     * chain. Everything else about a route is compile-time.
+     *
+     * A signal rather than a `navigate()` import because a window's route is *per
+     * window* — a module-level `let currentRoute` would make two windows share one
+     * route, and two windows on different routes is the normal case. Passing it in
+     * makes the ownership explicit and leaves `navigate`'s eventual shape open.
+     */
+    route?: ReadonlySignal<string>;
+  };
 
 /**
  * Configs by the element `Window` produced.
@@ -65,6 +81,9 @@ export type WindowProps = Props & WindowConfig;
  * whether it *is* a window rather than looking one up by guess.
  */
 const configs = new Map<Element, WindowConfig>();
+
+/** Route signals by window root, kept apart from the config because it is not data. */
+const routeSignals = new Map<Element, ReadonlySignal<string>>();
 
 export class WindowError extends Error {
   constructor(message: string) {
@@ -109,6 +128,8 @@ export function Window(props: WindowProps): Element {
     minHeight: props.minHeight,
   });
 
+  if (props.route) routeSignals.set(root, props.route);
+
   return root;
 }
 
@@ -131,4 +152,9 @@ export function isOutlet(node: { type: string; tag?: string }): boolean {
 /** The config of a window root, or `undefined` if this element is not one. */
 export function configOf(root: Element): WindowConfig | undefined {
   return configs.get(root);
+}
+
+/** The route signal `<Window route=…>` was given, if any. */
+export function routeSignalOf(root: Element): ReadonlySignal<string> | undefined {
+  return routeSignals.get(root);
 }
