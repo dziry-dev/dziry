@@ -26,6 +26,7 @@ import {
 } from "../ir.ts";
 import { parseHtml, type DynList, type Element, type Node, type TextPart } from "./html.ts";
 import { isItemSentinel, ItemExpressionError } from "./item-path.ts";
+import { isParamSentinel, ParamExpressionError } from "./route-args.ts";
 import { hasState, type VariantCompiled } from "./variant-compile.ts";
 import {
   compareCascade,
@@ -564,10 +565,11 @@ export function compileTree(doc: Element, css: string): CompileResult {
    *
    * A stringified recording proxy is the only way a non-authored string reaches
    * here, and it would otherwise intern cleanly and render as a frozen constant
-   * in every row.
+   * in every row — or, for a route parameter, in every navigation.
    */
   const checkAuthored = (s: string): string => {
     if (isItemSentinel(s)) throw new ItemExpressionError(s);
+    if (isParamSentinel(s)) throw new ParamExpressionError(s);
     return s;
   };
 
