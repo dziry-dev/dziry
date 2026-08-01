@@ -55,11 +55,31 @@ export type Selector = {
   never?: true;
 };
 
+/**
+ * One atomic media condition, already resolved to px.
+ *
+ * `and` is not represented: a block with several conditions produces several of
+ * these on the rule, and "all of them hold" is the rule's requirement. That is
+ * what lets the existing variant machinery resolve a conjunction without knowing
+ * the word `and` — it is just the combination where several bits are live.
+ */
+export type MediaCond = {
+  axis: "width" | "height";
+  /** `min` holds at the threshold and above, `max` at it and below, as in CSS. */
+  side: "min" | "max";
+  px: number;
+};
+
 export type Rule = {
   selectors: Selector[];
   decls: Map<string, string>;
   /** Source order, for breaking specificity ties. */
   order: number;
+  /**
+   * Conditions that must *all* hold for this rule to apply. Absent on an
+   * unconditional rule, which is the overwhelming majority.
+   */
+  media?: MediaCond[];
 };
 
 /**
@@ -158,6 +178,79 @@ export function parseCss(src: string): Rule[] {
 }
 
 /**
+ * Parses a media query prelude into the conditions this engine can test, or
+ * `null` when any part of it is one it cannot.
+ *
+ * Deliberately all-or-nothing. A query is a conjunction, so understanding half of
+ * `(min-width: 40rem) and (orientation: landscape)` and applying it would make the
+ * rules inside apply in a case they were written to exclude — which is worse than
+ * not applying them at all. `null` means "skip the block", and the caller says so.
+ *
+ * Two syntaxes, because both are in the wild and Tailwind v4 emits the second:
+ *
+ *   (min-width: 768px)      the long-standing form
+ *   (width >= 48rem)        CSS Media Queries 4 range syntax
+ *
+ * `only screen`, and a bare `screen`, are accepted and ignored — there is one
+ * medium here and it is a screen. `print`, `not`, and comma-separated query lists
+ * are not: a comma is an *or*, which cannot be expressed as a set of bits that all
+ * have to hold.
+ */
+export function parseMediaQuery(prelude: string): MediaCond[] | null {
+  const src = prelude.trim().toLowerCase();
+  if (src.includes(",")) return null;
+
+  const out: MediaCond[] = [];
+  // `and` is the only combinator that survives; splitting on it is safe because
+  // the features themselves never contain the word.
+  for (const rawTerm of src.split(/\band\b/)) {
+    const term = rawTerm.trim();
+    if (term === "" || term === "screen" || term === "only screen") continue;
+
+    const body = term.startsWith("(") && term.endsWith(")") ? term.slice(1, -1).trim() : null;
+    if (body === null) return null;
+
+    // `min-width: 768px`
+    const colon = body.match(/^(min|max)-(width|height)\s*:\s*(.+)$/);
+    if (colon) {
+      const px = safeLength(colon[3]!);
+      if (px === null) return null;
+      out.push({ axis: colon[2] as "width" | "height", side: colon[1] as "min" | "max", px });
+      continue;
+    }
+
+    // `width >= 48rem`. `>` and `<` are exclusive bounds and the engine's test is
+    // inclusive, so they are refused rather than silently widened by a pixel.
+    const range = body.match(/^(width|height)\s*(>=|<=)\s*(.+)$/);
+    if (range) {
+      const px = safeLength(range[3]!);
+      if (px === null) return null;
+      out.push({
+        axis: range[1] as "width" | "height",
+        side: range[2] === ">=" ? "min" : "max",
+        px,
+      });
+      continue;
+    }
+
+    return null;
+  }
+
+  // `@media screen { … }` parses to no conditions at all, which is unconditional.
+  return out;
+}
+
+/** `parseLength`, but a value this subset cannot express is `null` not a throw. */
+function safeLength(raw: string): number | null {
+  try {
+    const px = parseLength(raw);
+    return Number.isFinite(px) ? px : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Finds the `}` matching the `{` at `open`, skipping nested blocks and strings.
  *
  * This used to be `text.indexOf("}", open)`, which is correct only for a flat
@@ -245,9 +338,30 @@ function parseRuleList(
         continue;
       }
 
-      // Everything else — `@media`, `@font-face`, `@keyframes` — is skipped, but
-      // now skipped *correctly*: the whole block goes, and the sheet after it
-      // still parses.
+      if (keyword === "@media") {
+        // A query this engine cannot evaluate — `print`, `prefers-color-scheme`,
+        // `hover: hover` — is skipped rather than refused. Skipping degrades to
+        // "the unconditional styles only", which is exactly the behaviour before
+        // media queries existed; refusing would reject whole real stylesheets over
+        // a feature that was never going to apply.
+        const conds = parseMediaQuery(prelude.slice("@media".length));
+        if (conds === null) {
+          console.warn(`  warn: ignoring media query "${prelude.trim()}"`);
+          continue;
+        }
+        const inner: Rule[] = [];
+        parseRuleList(text, bodyFrom, bodyTo, inner, order);
+        for (const rule of inner) {
+          // Nested `@media` intersects: the inner block's conditions are added to
+          // whatever the outer one already required.
+          rule.media = [...conds, ...(rule.media ?? [])];
+          rules.push(rule);
+        }
+        continue;
+      }
+
+      // Everything else — `@font-face`, `@keyframes` — is skipped, but skipped
+      // *correctly*: the whole block goes, and the sheet after it still parses.
       console.warn(`  warn: ignoring at-rule "${keyword}"`);
       continue;
     }
@@ -340,6 +454,17 @@ function parseDeclarations(body: string, at: number): Map<string, string> {
   return decls;
 }
 
+/**
+ * Drops the backslashes from an escaped CSS identifier.
+ *
+ * Only the `\<char>` form, which is the one a class name needs and the only one
+ * Tailwind emits. The `\26 ` hex form is not handled: it would need the trailing
+ * space rule and nothing in reach produces it.
+ */
+function unescapeIdent(s: string): string {
+  return s.includes("\\") ? s.replace(/\\(.)/g, "$1") : s;
+}
+
 export function parseSelector(src: string, at = -1): Selector {
   if (!src) throw new CssError("empty selector", at);
   if (/[>+~]/.test(src)) {
@@ -374,7 +499,14 @@ export function parseSelector(src: string, at = -1): Selector {
     const compound: Compound = { tag: null, id: null, classes: [] };
 
     // Split on the punctuation while keeping it: "div.a#b:hover" -> tokens.
-    const tokens = part.match(/[#.:]?[A-Za-z0-9_-]+/g);
+    //
+    // `\\.` is in the character set because a CSS identifier may escape any
+    // character with a backslash, and Tailwind's variants rely on it: `md:flex-row`
+    // is a *class name containing a colon*, written `.md\:flex-row` in a selector.
+    // Without this the token scan stopped at the backslash, the coverage check
+    // below rejected the whole selector, and every responsive, hover or dark
+    // variant in a Tailwind sheet failed to parse.
+    const tokens = part.match(/[#.:]?(?:\\.|[A-Za-z0-9_-])+/g);
     if (!tokens) throw new CssError(`could not parse compound selector "${part}"`, partAt);
 
     // The tokens must *cover* the input, not merely be found in it.
@@ -402,10 +534,12 @@ export function parseSelector(src: string, at = -1): Selector {
 
     for (const token of tokens) {
       if (token.startsWith("#")) {
-        compound.id = token.slice(1);
+        compound.id = unescapeIdent(token.slice(1));
         spec[0]++;
       } else if (token.startsWith(".")) {
-        compound.classes.push(token.slice(1));
+        // Unescaped, because the class *attribute* holds the real character:
+        // `class="md:flex-row"` is matched by the selector `.md\:flex-row`.
+        compound.classes.push(unescapeIdent(token.slice(1)));
         spec[1]++;
       } else if (token.startsWith(":")) {
         const name = token.slice(1).toLowerCase();

@@ -68,6 +68,9 @@
 .w-64 {
   width: calc(var(--spacing) * 64);
 }
+.flex-col {
+  flex-direction: column;
+}
 .flex-row {
   flex-direction: row;
 }
@@ -185,6 +188,11 @@
 }
 .text-zinc-900 {
   color: var(--color-zinc-900);
+}
+@media (width >= 48rem) {
+  .md\:flex-row {
+    flex-direction: row;
+  }
 }
 @property --tw-border-style {
   syntax: "*";

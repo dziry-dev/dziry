@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 6;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x49274de5;
+export const SCHEMA_HASH = 0x01d0ee30;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -27,6 +27,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
   styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4],
   variants: [4, 4, 4],
   variantSlots: [2],
+  media: [4, 1, 4],
   lists: [4, 4, 4, 4, 4, 4, 4],
   layout: [4, 4, 4, 4],
   strings: [4, 4],
@@ -38,6 +39,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
   styles: ["bg", "fg", "borderColor", "borderWidth", "radius", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack"],
   variants: ["node", "mask", "runStart"],
   variantSlots: ["style"],
+  media: ["bit", "kind", "value"],
   lists: ["container", "anchorPrev", "anchorNext", "arenaStart", "stride", "capacity", "active"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
@@ -54,7 +56,7 @@ export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
   styles: [false, false, false, true, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false],
 };
 
-export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "lists", "layout", "strings"] as const;
+export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "layout", "strings"] as const;
 export type TableName = (typeof TABLE_NAMES)[number];
 
 /** Field index per table, in descriptor order. */
@@ -136,6 +138,12 @@ export const F = {
   variantSlots: {
     style: 0,
   },
+  /** Global predicates the engine re-evaluates from the surface size each frame. */
+  media: {
+    bit: 0, // The Predicate bit this condition sets when it holds
+    kind: 1, // MediaKind: which axis, and which side of the threshold
+    value: 2, // Threshold in CSS px, already resolved from rem/em
+  },
   /** List arenas: homogeneous item subtrees addressed by stride. */
   lists: {
     container: 0, // The node the rows are children of
@@ -166,6 +174,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
   styles: 52,
   variants: 3,
   variantSlots: 1,
+  media: 3,
   lists: 7,
   layout: 4,
   strings: 2,
@@ -177,6 +186,7 @@ export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array],
   variants: [Int32Array, Uint32Array, Int32Array],
   variantSlots: [Uint16Array],
+  media: [Uint32Array, Uint8Array, Float32Array],
   lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
   layout: [Float32Array, Float32Array, Float32Array, Float32Array],
   strings: [Uint32Array, Uint32Array],
@@ -256,6 +266,11 @@ export type SharedTables = {
   };
   variantSlots: {
     style: Uint16Array;
+  };
+  media: {
+    bit: Uint32Array;
+    kind: Uint8Array;
+    value: Float32Array;
   };
   lists: {
     container: Int32Array;
@@ -364,6 +379,15 @@ export const ScrollbarWidth = {
   NONE: 2,
 } as const;
 export type ScrollbarWidth = (typeof ScrollbarWidth)[keyof typeof ScrollbarWidth];
+
+/** `media.kind`. Which axis a threshold tests, and which side of it counts as true. `MIN_*` holds at the threshold and above, `MAX_*` at it and below — the same inclusive bounds `min-width`/`max-width` have in CSS, which is why a `min-width: 768px` and a `max-width: 768px` query are both true at exactly 768. */
+export const MediaKind = {
+  MIN_WIDTH: 0,
+  MAX_WIDTH: 1,
+  MIN_HEIGHT: 2,
+  MAX_HEIGHT: 3,
+} as const;
+export type MediaKind = (typeof MediaKind)[keyof typeof MediaKind];
 
 /** Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care. */
 export const Predicate = {

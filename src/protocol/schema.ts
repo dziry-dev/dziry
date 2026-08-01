@@ -227,6 +227,35 @@ const VARIANT_SLOTS: Table = {
   fields: [{ name: "style", type: "u16" }],
 };
 
+/**
+ * Media queries, as thresholds the engine tests against the surface each frame.
+ *
+ * One row per *atomic* condition, not per `@media` block. A block written
+ * `@media (min-width: 40rem) and (max-width: 60rem)` becomes two rows and two
+ * bits, and the rules inside it declare both — which means the existing variant
+ * machinery resolves the conjunction for free, as the combination where both bits
+ * are live. Nothing here has to understand `and`.
+ *
+ * The thresholds are px, resolved by the compiler: `40rem` is 640 here, and the
+ * engine never learns that `rem` exists.
+ *
+ * This is the smallest thing that could be on the wire. It is on the wire at all
+ * because a media query is the first styling input whose answer *changes* — the
+ * window is resized — so unlike `var()` or `calc()` it cannot be folded away at
+ * compile time. What is still compile-time is everything else about it: which
+ * rules it governs, and the finished style each combination produces.
+ */
+const MEDIA: Table = {
+  name: "media",
+  doc: "Global predicates the engine re-evaluates from the surface size each frame.",
+  sizedBy: "own",
+  fields: [
+    { name: "bit", type: "u32", doc: "The Predicate bit this condition sets when it holds" },
+    { name: "kind", type: "u8", doc: "MediaKind: which axis, and which side of the threshold" },
+    { name: "value", type: "f32", doc: "Threshold in CSS px, already resolved from rem/em" },
+  ],
+};
+
 /** Dynamic list arenas — the one place node count is a runtime value. */
 const LISTS: Table = {
   name: "lists",
@@ -270,7 +299,16 @@ const STRINGS: Table = {
   ],
 };
 
-export const TABLES: Table[] = [NODES, STYLES, VARIANTS, VARIANT_SLOTS, LISTS, LAYOUT, STRINGS];
+export const TABLES: Table[] = [
+  NODES,
+  STYLES,
+  VARIANTS,
+  VARIANT_SLOTS,
+  MEDIA,
+  LISTS,
+  LAYOUT,
+  STRINGS,
+];
 
 // ---------------------------------------------------------------------------
 // Enumerations
@@ -370,6 +408,16 @@ export const ENUMS: EnumDef[] = [
     values: { AUTO: 0, THIN: 1, NONE: 2 },
   },
   {
+    name: "MediaKind",
+    doc:
+      "`media.kind`. Which axis a threshold tests, and which side of it counts as true. " +
+      "`MIN_*` holds at the threshold and above, `MAX_*` at it and below — the same " +
+      "inclusive bounds `min-width`/`max-width` have in CSS, which is why a `min-width: 768px` " +
+      "and a `max-width: 768px` query are both true at exactly 768.",
+    ty: "u8",
+    values: { MIN_WIDTH: 0, MAX_WIDTH: 1, MIN_HEIGHT: 2, MAX_HEIGHT: 3 },
+  },
+  {
     name: "Predicate",
     doc:
       "Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are " +
@@ -457,7 +505,7 @@ export const ENUMS: EnumDef[] = [
  * call that is safe to make against a binary of unknown vintage — which is why the
  * ABI's own version lives here.
  */
-export const PROTOCOL_VERSION = 6;
+export const PROTOCOL_VERSION = 7;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

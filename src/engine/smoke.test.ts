@@ -43,6 +43,7 @@ const engine = Engine.open({
   styles: 3,
   variants: 1,
   variantSlots: 4,
+  media: 1,
   lists: 1,
   strings: 4,
   stringBytes: 256,

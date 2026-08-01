@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 6;
+pub const PROTOCOL_VERSION: u32 = 7;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,9 +15,9 @@ pub const PROTOCOL_VERSION: u32 = 6;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x49274de5;
+pub const SCHEMA_HASH: u32 = 0x01d0ee30;
 
-pub const TABLE_COUNT: usize = 7;
+pub const TABLE_COUNT: usize = 8;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
@@ -27,6 +27,7 @@ pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "styles",
     "variants",
     "variantSlots",
+    "media",
     "lists",
     "layout",
     "strings",
@@ -39,9 +40,10 @@ pub enum Table {
     Styles = 1,
     Variants = 2,
     VariantSlots = 3,
-    Lists = 4,
-    Layout = 5,
-    Strings = 6,
+    Media = 4,
+    Lists = 5,
+    Layout = 6,
+    Strings = 7,
 }
 
 impl Table {
@@ -55,6 +57,7 @@ pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [
     styles::FIELD_COUNT,
     variants::FIELD_COUNT,
     variant_slots::FIELD_COUNT,
+    media::FIELD_COUNT,
     lists::FIELD_COUNT,
     layout::FIELD_COUNT,
     strings::FIELD_COUNT,
@@ -62,8 +65,9 @@ pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [
 
 /// How each table is sized, so the engine can turn a capacity request into byte
 /// spans without a hand-written mapping that could drift from the schema.
-pub const SIZED_BY: [&str; TABLE_COUNT] =
-    ["nodes", "styles", "own", "own", "own", "nodes", "strings"];
+pub const SIZED_BY: [&str; TABLE_COUNT] = [
+    "nodes", "styles", "own", "own", "own", "own", "nodes", "strings",
+];
 
 /// Element size per field, indexed by table. Empty for an unknown table.
 pub fn elem_sizes(table: usize) -> &'static [usize] {
@@ -72,9 +76,10 @@ pub fn elem_sizes(table: usize) -> &'static [usize] {
         1 => &styles::ELEM_SIZES,
         2 => &variants::ELEM_SIZES,
         3 => &variant_slots::ELEM_SIZES,
-        4 => &lists::ELEM_SIZES,
-        5 => &layout::ELEM_SIZES,
-        6 => &strings::ELEM_SIZES,
+        4 => &media::ELEM_SIZES,
+        5 => &lists::ELEM_SIZES,
+        6 => &layout::ELEM_SIZES,
+        7 => &strings::ELEM_SIZES,
         _ => &[],
     }
 }
@@ -86,9 +91,10 @@ pub fn field_names(table: usize) -> &'static [&'static str] {
         1 => &styles::FIELD_NAMES,
         2 => &variants::FIELD_NAMES,
         3 => &variant_slots::FIELD_NAMES,
-        4 => &lists::FIELD_NAMES,
-        5 => &layout::FIELD_NAMES,
-        6 => &strings::FIELD_NAMES,
+        4 => &media::FIELD_NAMES,
+        5 => &lists::FIELD_NAMES,
+        6 => &layout::FIELD_NAMES,
+        7 => &strings::FIELD_NAMES,
         _ => &[],
     }
 }
@@ -273,6 +279,18 @@ pub mod variant_slots {
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["style"];
 }
 
+/// Global predicates the engine re-evaluates from the surface size each frame.
+pub mod media {
+    /// Field indices, in descriptor order.
+    pub const BIT: usize = 0;
+    pub const KIND: usize = 1;
+    pub const VALUE: usize = 2;
+
+    pub const FIELD_COUNT: usize = 3;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 1, 4];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["bit", "kind", "value"];
+}
+
 /// List arenas: homogeneous item subtrees addressed by stride.
 pub mod lists {
     /// Field indices, in descriptor order.
@@ -398,6 +416,14 @@ pub mod scrollbar_width {
     pub const AUTO: u8 = 0;
     pub const THIN: u8 = 1;
     pub const NONE: u8 = 2;
+}
+
+/// `media.kind`. Which axis a threshold tests, and which side of it counts as true. `MIN_*` holds at the threshold and above, `MAX_*` at it and below — the same inclusive bounds `min-width`/`max-width` have in CSS, which is why a `min-width: 768px` and a `max-width: 768px` query are both true at exactly 768.
+pub mod media_kind {
+    pub const MIN_WIDTH: u8 = 0;
+    pub const MAX_WIDTH: u8 = 1;
+    pub const MIN_HEIGHT: u8 = 2;
+    pub const MAX_HEIGHT: u8 = 3;
 }
 
 /// Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care.

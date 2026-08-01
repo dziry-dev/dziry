@@ -6,7 +6,7 @@
 // 0 text bindings, 0 handlers.
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { HandlerBinding, ListTable, NodeTable, StyleTable, TextBinding, VariantTable } from "../../../workspace/skia-proto/src/ir.ts";
+import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable } from "../../../workspace/skia-proto/src/ir.ts";
 import type { EditableRef } from "../../../workspace/skia-proto/src/runtime/bindings.ts";
 import type { ListBindingRef } from "../../../workspace/skia-proto/src/runtime/list-runtime.ts";
 import type { StylePatchRef } from "../../../workspace/skia-proto/src/runtime/patches.ts";
@@ -146,5 +146,19 @@ export const lists = {
 export const listBindings = [
 
 ] satisfies ListBindingRef[];
+
+/**
+ * Media conditions, one row per distinct threshold, in predicate-bit order.
+ *
+ * The engine re-evaluates these against the surface between a resize and the
+ * relayout. Bun uploads them once and never looks at them again — routing a
+ * resize back through Bun would lag a frame and stall whenever Bun is busy.
+ */
+export const media = {
+  count: 0,
+  bit: new Uint32Array([]),
+  kind: new Uint8Array([]),
+  value: new Float32Array([]),
+} satisfies MediaTable;
 
 export const root: number = 0;

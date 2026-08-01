@@ -108,6 +108,7 @@ const ui: CompiledUi = {
   textBindings: generated.textBindings,
   handlers: generated.handlers,
   lists: generated.lists,
+  media: generated.media,
   root: generated.root,
 };
 

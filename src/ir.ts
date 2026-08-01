@@ -16,6 +16,7 @@ import {
   NodeKind as SchemaNodeKind,
   Overflow as SchemaOverflow,
   Position as SchemaPosition,
+  MediaKind as SchemaMediaKind,
   Predicate as SchemaPredicate,
   ScrollbarWidth as SchemaScrollbarWidth,
 } from "./protocol/generated.ts";
@@ -52,6 +53,7 @@ export const Align = {
 } as const;
 
 export const Predicate = SchemaPredicate;
+export const MediaKind = SchemaMediaKind;
 export const Display = SchemaDisplay;
 export const FlexWrap = SchemaFlexWrap;
 export const Position = SchemaPosition;
@@ -449,6 +451,25 @@ export type CompiledUi = {
    */
   interactive: Int32Array;
   lists: ListTable;
+  media: MediaTable;
   root: number;
+};
+
+/**
+ * Media conditions, as thresholds the engine tests against the surface.
+ *
+ * One row per atomic condition rather than per `@media` block: a block with two
+ * conditions produces two rows and two predicate bits, and the rules inside it
+ * require both. That is what lets the variant machinery resolve a conjunction
+ * without anything having to understand `and`.
+ */
+export type MediaTable = {
+  count: number;
+  /** The predicate bit this condition sets when it holds. */
+  bit: Uint32Array;
+  /** `MediaKind` — which axis, and which side of the threshold counts as true. */
+  kind: Uint8Array;
+  /** Threshold in px; `rem` was resolved by the compiler. */
+  value: Float32Array;
 };
 

@@ -31,8 +31,13 @@ const { i32, u32, f32, ptr: PTR } = FFIType;
 
 /** Matches `SpanDesc` in `tables.rs`: two `i32`, a `u64` (8-aligned), two `u32`. */
 const SPAN_SIZE = 24;
-/** Matches `EngineConfig` in `engine.rs`, including the pointer's alignment padding. */
-const CONFIG_SIZE = 64;
+/**
+ * Matches `EngineConfig` in `engine.rs`, including the pointer's alignment padding.
+ *
+ * 12 `u32` (48) + two `u8` and two reserved (52) + 4 bytes of padding so the title
+ * pointer lands 8-aligned at 56 (64) + a `u32` length (68) + 4 to a multiple of 8.
+ */
+const CONFIG_SIZE = 72;
 /** Matches `Event` in `engine.rs`: six 4-byte fields plus 32 inline text bytes. */
 export const EVENT_SIZE = 56;
 
@@ -149,6 +154,7 @@ export type EngineOptions = {
   /** Exact row counts, not headroom — every row is searched. */
   variants: number;
   variantSlots: number;
+  media: number;
   lists: number;
   strings: number;
   stringBytes: number;
@@ -213,6 +219,12 @@ export class Engine {
     const u8v = new Uint8Array(config);
     const u64v = new BigUint64Array(config);
 
+    /* Field order mirrors `EngineConfig` in engine.rs exactly, and the capacity
+       order mirrors `TABLES` — `media` sits between `variantSlots` and `lists`
+       in both. Inserting it moved every offset after it, which is what
+       PROTOCOL_VERSION 7 announces: a v6 host against a v7 binary would write
+       its list capacity into the media slot and be refused at the version check
+       rather than misread. */
     u32v[0] = PROTOCOL_VERSION;
     u32v[1] = options.width ?? 720;
     u32v[2] = options.height ?? 420;
@@ -220,15 +232,16 @@ export class Engine {
     u32v[4] = options.styles;
     u32v[5] = options.variants;
     u32v[6] = options.variantSlots;
-    u32v[7] = options.lists;
-    u32v[8] = options.strings;
-    u32v[9] = options.stringBytes;
-    u32v[10] = options.root ?? 0;
-    u8v[44] = options.windowed === false ? 0 : 1;
-    u8v[45] = options.decorated === false ? 0 : 1;
-    /* The title pointer sits at byte 48, not 44: `#[repr(C)]` aligns it to 8. */
-    u64v[6] = BigInt(ptr(title));
-    u32v[14] = title.length;
+    u32v[7] = options.media;
+    u32v[8] = options.lists;
+    u32v[9] = options.strings;
+    u32v[10] = options.stringBytes;
+    u32v[11] = options.root ?? 0;
+    u8v[48] = options.windowed === false ? 0 : 1;
+    u8v[49] = options.decorated === false ? 0 : 1;
+    /* The title pointer sits at byte 56, not 52: `#[repr(C)]` aligns it to 8. */
+    u64v[7] = BigInt(ptr(title));
+    u32v[16] = title.length;
 
     // One `u32`, not a pointer-sized slot: the handle is a table token.
     const out = new Uint32Array(1);
@@ -451,19 +464,21 @@ export class Engine {
     styles: number;
     variants: number;
     variantSlots: number;
+    media: number;
     lists: number;
     strings: number;
     stringBytes: number;
   }): boolean {
-    /* Matches `Capacities` in `tables.rs`: six `u32`, no padding. */
-    const buf = new Uint32Array(7);
+    /* Matches `Capacities` in `tables.rs`: eight `u32`, no padding, same order. */
+    const buf = new Uint32Array(8);
     buf[0] = caps.nodes;
     buf[1] = caps.styles;
     buf[2] = caps.variants;
     buf[3] = caps.variantSlots;
-    buf[4] = caps.lists;
-    buf[5] = caps.strings;
-    buf[6] = caps.stringBytes;
+    buf[4] = caps.media;
+    buf[5] = caps.lists;
+    buf[6] = caps.strings;
+    buf[7] = caps.stringBytes;
 
     check(engine.dziri_engine_grow(this.#handle, ptr(buf) as Pointer), "dziri_engine_grow");
 

@@ -39,6 +39,7 @@ function load(): {
     textBindings: generated.textBindings,
     handlers: generated.handlers,
     lists: generated.lists,
+    media: generated.media,
     root: generated.root,
   };
 
@@ -339,6 +340,7 @@ test("typing does not resize the arena on every keystroke", () => {
     textBindings: generated.textBindings,
     handlers: generated.handlers,
     lists: generated.lists,
+    media: generated.media,
     root: generated.root,
   };
 
@@ -415,6 +417,7 @@ test("a capacity request is a power of two", () => {
     textBindings: [],
     handlers: [],
     lists: generated.lists,
+    media: generated.media,
     root: 0,
   };
   const bytes = capacitiesFor(ui).stringBytes;

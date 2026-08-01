@@ -19,6 +19,7 @@ fn config() -> EngineConfig {
         style_capacity: 2,
         variant_capacity: 1,
         variant_slot_capacity: 8,
+        media_capacity: 1,
         list_capacity: 1,
         string_capacity: 2,
         string_bytes: 32,

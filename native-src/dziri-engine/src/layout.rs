@@ -27,6 +27,8 @@ use crate::text::Measurer;
 
 const NODES: usize = protocol::Table::Nodes as usize;
 const STYLES: usize = protocol::Table::Styles as usize;
+const VARIANTS: usize = protocol::Table::Variants as usize;
+const VARIANT_SLOTS: usize = protocol::Table::VariantSlots as usize;
 
 /// Names a Taffy failure as a layout failure.
 ///
@@ -70,6 +72,11 @@ pub struct LayoutTree {
     /// did, so it cannot be wrong about it.
     parents: Vec<i32>,
     root: usize,
+    /// Global predicates currently satisfied — media queries today.
+    ///
+    /// Layout needs its own copy because `style_of` resolves a node's variant run
+    /// with it, and layout runs from callers that never see the painter.
+    globals: u32,
 }
 
 impl Default for LayoutTree {
@@ -106,6 +113,7 @@ impl LayoutTree {
             overflow: Vec::new(),
             parents: Vec::new(),
             root: 0,
+            globals: 0,
         }
     }
 
@@ -126,6 +134,29 @@ impl LayoutTree {
     /// The same, for every node at once — what a walk needs alongside `bounds`.
     pub fn overflow(&self) -> &[[f32; 2]] {
         &self.overflow
+    }
+
+    /// Adopts a new set of global predicates, restyling if they moved.
+    ///
+    /// Layout has to participate in predicates, not just paint. The variant
+    /// machinery was paint-only until now, which was invisible while the only
+    /// predicates were `:hover`, `:active` and `:focus` — those are usually
+    /// colours — and becomes the whole point with `@media`, where a breakpoint
+    /// exists precisely to change a layout.
+    ///
+    /// Restyling everything on a change rather than tracking which nodes read
+    /// which bit: globals only move when the window crosses a threshold, so this
+    /// is O(nodes) per *breakpoint crossing*, not per frame. Tracking would buy
+    /// nothing at that rate and would need its own invalidation.
+    ///
+    /// Returns without touching Taffy when the bits are unchanged, which is every
+    /// frame that is not a crossing.
+    pub fn set_globals(&mut self, tables: &Tables, globals: u32) -> Result<(), EngineError> {
+        if globals == self.globals {
+            return Ok(());
+        }
+        self.globals = globals;
+        self.apply_all_styles(tables)
     }
 
     /// Who this tree linked `node` under, or `None` at the root.
@@ -304,7 +335,7 @@ impl LayoutTree {
     /// The saving that *is* safe is upstream, in `classify`: a field that layout
     /// never reads produces no entry, so this is not called at all.
     pub fn apply_style(&mut self, tables: &Tables, node: usize) -> Result<(), EngineError> {
-        let style = style_of(tables, node);
+        let style = style_of(tables, node, self.globals);
         self.tree
             .set_style(self.ids[node], style)
             .map_err(taffy_at("taffy set_style", node))
@@ -676,7 +707,74 @@ fn placement(start: i16, span: i16) -> Line<GridPlacement> {
 /// The rejected alternative was subtracting the border from `width`/`height` in
 /// the compiler: that only works for definite sizes, and silently does nothing
 /// for `auto`, percentages and flex bases.
-fn style_of(tables: &Tables, node: usize) -> Style {
+/// The style slot a node wears under the given global predicates.
+///
+/// The same resolution `Painter::style_for` does, minus the per-node input state:
+/// hover, active and focus are deliberately *not* consulted here. Including them
+/// would mean a relayout on every pointer move over an interactive node, and no
+/// rule in this codebase changes layout on hover. Media bits are the opposite —
+/// they exist to change layout — so they are.
+///
+/// That asymmetry is a real limitation and worth naming: `:hover { padding: … }`
+/// will repaint at the new padding without relaying out. It is the same gap that
+/// existed before media queries, just now visible from one side.
+fn style_slot(tables: &Tables, node: usize, globals: u32) -> usize {
+    let base = tables
+        .u16s(NODES, protocol::nodes::STYLE)
+        .get(node)
+        .copied()
+        .unwrap_or(0) as usize;
+
+    if globals == 0 {
+        return base;
+    }
+
+    let ids = tables.i32s(VARIANTS, protocol::variants::NODE);
+    let Ok(row) = ids.binary_search(&(node as i32)) else {
+        return base;
+    };
+
+    let mask = tables.u32s(VARIANTS, protocol::variants::MASK)[row];
+    let selected = globals & mask;
+    if selected == 0 {
+        return base;
+    }
+
+    let run_start = tables.i32s(VARIANTS, protocol::variants::RUN_START)[row];
+    if run_start < 0 {
+        return base;
+    }
+
+    let index = compact_bits(selected, mask) as usize;
+    tables
+        .u16s(VARIANT_SLOTS, protocol::variant_slots::STYLE)
+        .get(run_start as usize + index)
+        .copied()
+        .map(|s| s as usize)
+        .unwrap_or(base)
+}
+
+/// Gathers the bits of `value` set in `mask` down to a dense index.
+///
+/// Duplicated from paint's `compact` rather than shared, because the two are the
+/// same three lines and moving them into a common module would put a
+/// predicate-resolution helper in neither of the files that resolve predicates.
+fn compact_bits(value: u32, mask: u32) -> u32 {
+    let mut out = 0;
+    let mut bit = 0;
+    let mut remaining = mask;
+    while remaining != 0 {
+        let lowest = remaining & remaining.wrapping_neg();
+        if value & lowest != 0 {
+            out |= 1 << bit;
+        }
+        bit += 1;
+        remaining &= remaining - 1;
+    }
+    out
+}
+
+fn style_of(tables: &Tables, node: usize, globals: u32) -> Style {
     use protocol::styles as f;
 
     // Taffy's `Style::default()` is `BoxSizing::BorderBox`; CSS's initial value for
@@ -711,11 +809,7 @@ fn style_of(tables: &Tables, node: usize) -> Style {
         return s;
     }
 
-    let slot = tables
-        .u16s(NODES, protocol::nodes::STYLE)
-        .get(node)
-        .copied()
-        .unwrap_or(0) as usize;
+    let slot = style_slot(tables, node, globals);
 
     let u8f = |field: usize| -> u8 { tables.u8s(STYLES, field).get(slot).copied().unwrap_or(0) };
     let u16f = |field: usize| -> u16 { tables.u16s(STYLES, field).get(slot).copied().unwrap_or(0) };

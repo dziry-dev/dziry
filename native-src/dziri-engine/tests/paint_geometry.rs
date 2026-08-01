@@ -40,6 +40,7 @@ fn config_of(nodes: u32) -> EngineConfig {
         style_capacity: nodes.max(1),
         variant_capacity: 1,
         variant_slot_capacity: 1,
+        media_capacity: 1,
         list_capacity: 1,
         string_capacity: 1,
         string_bytes: 32,

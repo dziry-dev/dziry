@@ -129,6 +129,7 @@ fn main() {
         // capacity — this table is never headroom.
         variant_capacity: 1,
         variant_slot_capacity: 8,
+        media_capacity: 1,
         list_capacity: 1,
         string_capacity: 4,
         string_bytes: 256,

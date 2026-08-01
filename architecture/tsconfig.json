@@ -1,0 +1,11 @@
+{
+  // Its own project because this is the only code in the repo that runs in a
+  // browser. Adding "DOM" to the root tsconfig would let `document` typecheck
+  // inside `src/`, where reaching for it is always a mistake.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": ["."]
+}

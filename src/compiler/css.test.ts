@@ -434,9 +434,59 @@ test("an at-rule no longer eats the rule that follows it", () => {
   // The old scan took the first `}` after the prelude, which for a nested block
   // is the *inner* one — so parsing resumed mid-at-rule and the next real rule
   // was lost or misparsed. This is the regression test for that.
-  const rules = parseCss(`@media (min-width: 700px) { .a { padding: 99px } }\n.b { padding: 4px }`);
+  //
+  // The at-rule used here is one that is still skipped, so what is being tested
+  // is the *scan* and not media support: an ignored block must consume exactly
+  // itself.
+  const rules = parseCss(`@font-face { src: url(x) }\n.b { padding: 4px }`);
   expect(rules.length).toBe(1);
   expect(rules[0]!.decls.get("padding")).toBe("4px");
+});
+
+test("a media block keeps its rules, each carrying the condition", () => {
+  const rules = parseCss(
+    `.a { padding: 1px }\n@media (min-width: 700px) { .a { padding: 99px } .b { color: red } }`,
+  );
+  expect(rules.length).toBe(3);
+
+  // The unconditional rule is untouched.
+  expect(rules[0]!.media).toBeUndefined();
+
+  // Both rules inside carry the same condition, resolved to px.
+  for (const r of rules.slice(1)) {
+    expect(r.media).toEqual([{ axis: "width", side: "min", px: 700 }]);
+  }
+});
+
+test("nested media blocks intersect rather than replace", () => {
+  const rules = parseCss(
+    `@media (min-width: 700px) { @media (max-width: 900px) { .a { color: red } } }`,
+  );
+  expect(rules.length).toBe(1);
+  // Outer first, then inner — a conjunction, which the compiler turns into two
+  // predicate bits that both have to be live.
+  expect(rules[0]!.media).toEqual([
+    { axis: "width", side: "min", px: 700 },
+    { axis: "width", side: "max", px: 900 },
+  ]);
+});
+
+test("a media query this engine cannot evaluate is skipped whole", () => {
+  // All-or-nothing on purpose. Understanding half of a conjunction and applying
+  // it would make the rules inside apply in a case they were written to exclude.
+  const rules = parseCss(
+    `@media (min-width: 700px) and (orientation: landscape) { .a { color: red } }\n.b { color: blue }`,
+  );
+  expect(rules.length).toBe(1);
+  expect(rules[0]!.decls.get("color")).toBe("blue");
+});
+
+test("media queries accept both the long form and range syntax", () => {
+  // Tailwind v4 emits the second: `@media (width >= 48rem)`.
+  const long = parseCss(`@media (min-width: 768px) { .a { color: red } }`);
+  const range = parseCss(`@media (width >= 48rem) { .a { color: red } }`);
+  expect(long[0]!.media).toEqual(range[0]!.media);
+  expect(range[0]!.media).toEqual([{ axis: "width", side: "min", px: 768 }]);
 });
 
 test("@layer is transparent and @theme declares on :root", () => {

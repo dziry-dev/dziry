@@ -16,6 +16,7 @@ import {
   Overflow,
   INITIAL_STYLE,
   INHERITED_FIELDS,
+  MediaKind,
   NodeKind,
   Predicate,
   STYLE_FIELDS,
@@ -33,6 +34,7 @@ import {
   parseCss,
   parseInlineStyle,
   substituteVars,
+  type MediaCond,
   type Pseudo,
   type Rule,
   type Selector,
@@ -103,10 +105,22 @@ type Candidate = { specificity: [number, number, number]; order: number; decls: 
  * hover declarations do not automatically beat base ones. Resolving hover as a
  * patch over the finished base style would get that backwards.
  */
-function collectDecls(rules: Rule[], path: Element[], states: Pseudo[]): Map<string, string> {
+function collectDecls(
+  rules: Rule[],
+  path: Element[],
+  states: Pseudo[],
+  media: MediaBits,
+  live = 0,
+): Map<string, string> {
   const candidates: Candidate[] = [];
 
   for (const rule of rules) {
+    // A conditional rule contributes nothing unless *every* condition it carries
+    // is live in this combination. `@media` has no effect on specificity — a rule
+    // inside one cascades exactly as it would outside — so this is a filter and
+    // not a weighting.
+    if (rule.media && !rule.media.every((c) => (live & media.bitFor(c)) !== 0)) continue;
+
     for (const sel of rule.selectors) {
       if (!states.includes(sel.pseudo)) continue;
       if (!matches(sel, path)) continue;
@@ -139,6 +153,69 @@ function collectDecls(rules: Rule[], path: Element[], states: Pseudo[]): Map<str
     }
   }
   return winning;
+}
+
+/**
+ * Assigns one predicate bit per distinct media condition.
+ *
+ * Bits start at `Predicate.FIRST_GLOBAL`, which the schema reserves for exactly
+ * this: everything below it is per-node input state, everything from it up is a
+ * condition the engine evaluates once a frame and intersects with every node's
+ * mask. Nothing here hardcodes a breakpoint — `md:` and
+ * `@media (min-width: 768px)` arrive as the same condition and get the same bit.
+ *
+ * Deduplicated by value, so a stylesheet that mentions `768px` in twenty places
+ * spends one bit on it. That matters: a mask is a `u32` and bits 8..31 are all
+ * there are, so 24 distinct thresholds is the ceiling. Overrunning it is an error
+ * rather than a silent wrap, because a wrapped bit would collide with another
+ * query and produce styling that is wrong only at certain window sizes.
+ */
+class MediaBits {
+  #bits = new Map<string, number>();
+  #order: MediaCond[] = [];
+
+  static key(c: MediaCond): string {
+    return `${c.axis}|${c.side}|${c.px}`;
+  }
+
+  /** Assigns on first sight; stable thereafter. */
+  bitFor(c: MediaCond): number {
+    const key = MediaBits.key(c);
+    const existing = this.#bits.get(key);
+    if (existing !== undefined) return existing;
+
+    const index = this.#order.length;
+    if (Predicate.FIRST_GLOBAL << index === 0 || index >= 24) {
+      throw new Error(
+        `too many distinct media conditions (${index + 1}); a predicate mask is a u32 ` +
+          `and bits 0-7 are input state, so 24 is the limit`,
+      );
+    }
+    const bit = Predicate.FIRST_GLOBAL << index;
+    this.#bits.set(key, bit);
+    this.#order.push(c);
+    return bit;
+  }
+
+  /** In bit order, which is assignment order — what the media table holds. */
+  rows(): Array<{ bit: number; cond: MediaCond }> {
+    return this.#order.map((cond, i) => ({ bit: Predicate.FIRST_GLOBAL << i, cond }));
+  }
+
+  get size(): number {
+    return this.#order.length;
+  }
+}
+
+/** The bits of every media condition on rules that match this node. */
+function mediaMaskFor(rules: Rule[], path: Element[], media: MediaBits): number {
+  let mask = 0;
+  for (const rule of rules) {
+    if (!rule.media) continue;
+    if (!rule.selectors.some((sel) => matches(sel, path))) continue;
+    for (const cond of rule.media) mask |= media.bitFor(cond);
+  }
+  return mask;
 }
 
 /** Whether any rule targeting this node uses the given pseudo-class. */
@@ -430,9 +507,14 @@ export type CompileResult = {
   handlers: BuiltHandler[];
   editables: BuiltEditable[];
   lists: BuiltList[];
+  /** One row per distinct media condition, in predicate-bit order. */
+  media: BuiltMedia[];
   /** Diagnostics worth surfacing but not worth failing over. */
   warnings: string[];
 };
+
+/** A media condition as the wire carries it: a bit, an axis+side, a threshold. */
+export type BuiltMedia = { bit: number; kind: number; value: number };
 
 export function compile(html: string, css: string): CompileResult {
   return compileTree(parseHtml(html), css);
@@ -445,6 +527,10 @@ export function compile(html: string, css: string): CompileResult {
  */
 export function compileTree(doc: Element, css: string): CompileResult {
   const rules = parseCss(css);
+
+  // Assigned as conditions are met during the walk, so bit order is first-use
+  // order and a sheet's unused breakpoints cost nothing.
+  const media = new MediaBits();
 
   // `body`, when present, *is* the root container — it receives the window rect,
   // so `body { background: ... }` fills the window as an author expects.
@@ -544,7 +630,7 @@ export function compileTree(doc: Element, css: string): CompileResult {
     const where = describe(path);
 
     const inherited = inheritFrom(parentStyle);
-    const base = withInline(collectDecls(rules, path, ["none"]), el);
+    const base = withInline(collectDecls(rules, path, ["none"], media), el);
     // Custom properties inherit, so the environment is the parent's with this
     // node's own laid over it — and it is built from the *cascaded* declarations,
     // so `--x` obeys specificity like everything else.
@@ -556,8 +642,11 @@ export function compileTree(doc: Element, css: string): CompileResult {
     // scratch, not as a patch over the base — see collectDecls.
     const styleId = styles.intern(style);
 
-    // Which predicates this node's styling actually reads.
-    let mask = 0;
+    // Which predicates this node's styling actually reads. Input state and media
+    // conditions share one mask deliberately: they are the same kind of thing to
+    // everything downstream, and a node styled by both `:hover` and a breakpoint
+    // gets the combination resolved for both rather than one of them.
+    let mask = mediaMaskFor(rules, path, media);
     for (const [bit, pseudo] of PREDICATE_PSEUDO) {
       if (hasPseudoRule(rules, path, pseudo)) mask |= bit;
     }
@@ -581,17 +670,26 @@ export function compileTree(doc: Element, css: string): CompileResult {
     for (let combo = 1; combo < 1 << bits.length; combo++) {
       const states: Pseudo[] = ["none"];
       let label = where;
+      // The live set for this combination, as the engine will present it: the
+      // actual predicate bits, not the compacted index.
+      let live = 0;
       for (let b = 0; b < bits.length; b++) {
         if ((combo & (1 << b)) === 0) continue;
-        const pseudo = PREDICATE_PSEUDO.find(([bit]) => bit === bits[b])![1];
-        states.push(pseudo);
-        label += `:${pseudo}`;
+        const bit = bits[b]!;
+        live |= bit;
+        const pseudo = PREDICATE_PSEUDO.find(([p]) => p === bit)?.[1];
+        if (pseudo) {
+          states.push(pseudo);
+          label += `:${pseudo}`;
+        } else {
+          label += `@${bit}`;
+        }
       }
 
       // Each combination re-derives its own environment: `:hover { --tone: … }`
       // is a legitimate way to theme a state, and reusing the base environment
       // here would resolve the hover cascade against the resting variables.
-      const stateDecls = withInline(collectDecls(rules, path, states), el);
+      const stateDecls = withInline(collectDecls(rules, path, states, media, live), el);
       const resolved = applyDecls(
         inherited,
         stateDecls,
@@ -844,6 +942,18 @@ export function compileTree(doc: Element, css: string): CompileResult {
     handlers,
     editables,
     lists,
+    media: media.rows().map(({ bit, cond }) => ({
+      bit,
+      kind:
+        cond.axis === "width"
+          ? cond.side === "min"
+            ? MediaKind.MIN_WIDTH
+            : MediaKind.MAX_WIDTH
+          : cond.side === "min"
+            ? MediaKind.MIN_HEIGHT
+            : MediaKind.MAX_HEIGHT,
+      value: cond.px,
+    })),
     warnings,
   };
 }
@@ -1005,6 +1115,12 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
   return {
     strings: result.strings,
     styles: styles as CompiledUi["styles"],
+    media: {
+      count: result.media.length,
+      bit: new Uint32Array(result.media.map((m) => m.bit)),
+      kind: new Uint8Array(result.media.map((m) => m.kind)),
+      value: new Float32Array(result.media.map((m) => m.value)),
+    },
     nodes: {
       count: result.nodes.length,
       kind: new Uint8Array(result.nodes.map((n) => n.kind)),
@@ -1257,7 +1373,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { HandlerBinding, ListTable, NodeTable, StyleTable, TextBinding, VariantTable } from "${source.typesFrom}/ir.ts";
+import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable } from "${source.typesFrom}/ir.ts";
 import type { EditableRef } from "${source.typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${source.typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${source.typesFrom}/runtime/patches.ts";
@@ -1347,6 +1463,20 @@ export const lists = {
 export const listBindings = [
 ${listBindingSource}
 ] satisfies ListBindingRef[];
+
+/**
+ * Media conditions, one row per distinct threshold, in predicate-bit order.
+ *
+ * The engine re-evaluates these against the surface between a resize and the
+ * relayout. Bun uploads them once and never looks at them again — routing a
+ * resize back through Bun would lag a frame and stall whenever Bun is busy.
+ */
+export const media = {
+  count: ${result.media.length},
+  bit: ${typedArray("Uint32Array", result.media.map((m) => m.bit))},
+  kind: ${typedArray("Uint8Array", result.media.map((m) => m.kind))},
+  value: ${typedArray("Float32Array", result.media.map((m) => m.value))},
+} satisfies MediaTable;
 
 export const root: number = ${root};
 `;

@@ -91,6 +91,8 @@ pub struct EngineConfig {
     pub style_capacity: u32,
     pub variant_capacity: u32,
     pub variant_slot_capacity: u32,
+    /// Rows in the media table — atomic conditions, not `@media` blocks.
+    pub media_capacity: u32,
     pub list_capacity: u32,
     pub string_capacity: u32,
     pub string_bytes: u32,
@@ -209,6 +211,7 @@ impl Engine {
             styles: config.style_capacity.max(1),
             variants: config.variant_capacity.max(1),
             variant_slots: config.variant_slot_capacity.max(1),
+            media: config.media_capacity.max(1),
             lists: config.list_capacity.max(1),
             strings: config.string_capacity.max(1),
             string_bytes: config.string_bytes.max(1),
@@ -368,12 +371,62 @@ impl Engine {
         Ok(())
     }
 
+    /// Which global predicates the current surface satisfies.
+    ///
+    /// Read straight from the media table each time rather than cached against a
+    /// size: the table is a handful of rows, and a cache keyed on the window would
+    /// have to be invalidated by an upload as well as by a resize.
+    fn evaluate_media(&self) -> u32 {
+        const MEDIA: usize = protocol::Table::Media as usize;
+        let bits = self.tables.u32s(MEDIA, protocol::media::BIT);
+        let kinds = self.tables.u8s(MEDIA, protocol::media::KIND);
+        let values = self.tables.f32s(MEDIA, protocol::media::VALUE);
+
+        let w = self.width as f32;
+        let h = self.height as f32;
+
+        let mut live = 0;
+        for i in 0..bits.len().min(kinds.len()).min(values.len()) {
+            let bit = bits[i];
+            // Spare rows are filled with bit 0, which no condition owns.
+            if bit == 0 {
+                continue;
+            }
+            let v = values[i];
+            // Inclusive on both sides, as CSS is: at exactly 768 both a
+            // `min-width: 768px` and a `max-width: 768px` query hold.
+            let holds = match kinds[i] {
+                protocol::media_kind::MIN_WIDTH => w >= v,
+                protocol::media_kind::MAX_WIDTH => w <= v,
+                protocol::media_kind::MIN_HEIGHT => h >= v,
+                protocol::media_kind::MAX_HEIGHT => h <= v,
+                _ => false,
+            };
+            if holds {
+                live |= bit;
+            }
+        }
+        live
+    }
+
     /// Lays out, publishes the bounds, and reconciles the state layout invalidates.
     ///
     /// One function because there are two callers — a tick and a live resize — and the
     /// second forgetting a step is not a hypothetical: the scroll clamp below was
     /// missing from both, and it took the window blank.
     fn relayout(&mut self) -> Result<(), EngineError> {
+        // Media queries are evaluated *here*, between the resize and the layout,
+        // which is the whole reason they are engine-side. Routing a resize out to
+        // Bun to re-apply styles would lag a frame and stall whenever Bun is busy.
+        //
+        // Both consumers are updated, and they are different: paint reads globals
+        // to pick a style per node, and layout has to be told because a breakpoint
+        // that changes `flex-direction` has to produce a different *layout*, not
+        // just different colours.
+        let globals = self.evaluate_media();
+        self.painter.set_globals(globals);
+        self.tree.set_globals(&self.tables, globals)?;
+
         self.tree.compute(
             &self.tables,
             &mut self.measurer,

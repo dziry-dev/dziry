@@ -98,6 +98,7 @@ export type Capacities = {
   styles: number;
   variants: number;
   variantSlots: number;
+  media: number;
   lists: number;
   strings: number;
   stringBytes: number;
@@ -133,6 +134,9 @@ export function capacitiesFor(ui: CompiledUi): Capacities {
     styles: Math.max(ui.styles.count, 1),
     variants: Math.max(ui.variants.count, 1),
     variantSlots: Math.max(ui.variants.slots.length, 1),
+    // Fixed by the compiler like the style table: a media condition is a build-time
+    // constant, and nothing at run time can mint another one.
+    media: Math.max(ui.media.count, 1),
     lists: Math.max(ui.lists.count, 1),
     strings: Math.ceil(ui.strings.length * STRING_HEADROOM) + 16,
     stringBytes: arenaBytes(bytes),
@@ -181,6 +185,7 @@ export class Uploader {
   uploadAll(): void {
     this.uploadStyles();
     this.uploadVariants();
+    this.uploadMedia();
     this.uploadLists();
     this.uploadNodes();
     this.uploadStrings(true);
@@ -276,11 +281,36 @@ export class Uploader {
     t.mask.set(variants.mask.subarray(0, count));
     t.runStart.set(variants.runStart.subarray(0, count));
 
-    // Spare rows must not answer a binary search for node 0.
-    t.node.fill(-1, count);
+    // Spare rows must not answer a binary search — and must not break it either.
+    //
+    // This filled with `-1`, which is wrong in a way that is currently invisible:
+    // the column is searched with `binary_search`, so it has to stay sorted
+    // ascending, and `[3, 7, -1, -1]` is not. A search for 7 then walks into the
+    // `-1` half and reports "absent", so a node that really is conditional
+    // silently wears its base style. It has never bitten because `capacitiesFor`
+    // asks for exactly `variants.count` rows, so there are no spare ones — but
+    // `grow` can raise the capacity without the count following, and then it
+    // would. `i32::MAX` sorts last and matches no node.
+    t.node.fill(0x7fffffff, count);
 
     const slots = this.#tables.variantSlots.style;
     slots.set(variants.slots.subarray(0, Math.min(variants.slots.length, slots.length)));
+  }
+
+  /**
+   * Media thresholds. Uploaded once — they are compile-time constants.
+   *
+   * Spare rows get bit 0, which no media condition ever owns (bits 0-2 are input
+   * state), so a row the compiler did not write can never switch a predicate on.
+   */
+  uploadMedia(): void {
+    const { media } = this.#ui;
+    const t = this.#tables.media;
+    const count = Math.min(media.count, t.bit.length);
+    t.bit.set(media.bit.subarray(0, count));
+    t.kind.set(media.kind.subarray(0, count));
+    t.value.set(media.value.subarray(0, count));
+    t.bit.fill(0, count);
   }
 
   uploadLists(): void {

@@ -17,6 +17,9 @@ use dziri_engine::tables::Tables;
 
 const NODES: usize = Table::Nodes as usize;
 const STYLES: usize = Table::Styles as usize;
+const VARIANTS: usize = Table::Variants as usize;
+const VARIANT_SLOTS: usize = Table::VariantSlots as usize;
+const MEDIA: usize = Table::Media as usize;
 
 fn config(nodes: u32, styles: u32) -> EngineConfig {
     EngineConfig {
@@ -27,6 +30,7 @@ fn config(nodes: u32, styles: u32) -> EngineConfig {
         style_capacity: styles,
         variant_capacity: 4,
         variant_slot_capacity: 8,
+        media_capacity: 1,
         list_capacity: 2,
         string_capacity: 8,
         string_bytes: 256,
@@ -1106,4 +1110,91 @@ fn a_document_taller_than_the_window_scrolls_the_page() {
 
     // And the layout is untouched by scrolling: only paint and hit-testing move.
     assert_eq!(bound(&engine, 3), [10.0, 170.0, 180.0, 80.0]);
+}
+
+/// A media query changes the *layout*, not only the paint.
+///
+/// This is the assertion the whole media-query design rests on. The variant
+/// machinery was paint-only before: a node declared a predicate mask, and only
+/// `Painter::style_for` ever resolved it. That was invisible while the predicates
+/// were `:hover`, `:active` and `:focus`, which almost always change colours —
+/// and would have made `@media` useless, because a breakpoint exists precisely to
+/// rearrange boxes.
+///
+/// The tree is a row of two fixed boxes. One media row says "at 500px and below",
+/// and the variant run gives the container `flex-direction: column` when that bit
+/// is live. Above the threshold the children sit side by side; below it they
+/// stack — and nothing in this test touches paint.
+#[test]
+fn a_media_query_relays_out_rather_than_only_repainting() {
+    let mut engine = Engine::new(&config(3, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        // Slot 0: the container as a row. Slot 1: the same, as a column.
+        // Slot 2: a fixed child box, so any change in position is the container's.
+        init_style(t, 0);
+        init_style(t, 1);
+        init_style(t, 2);
+        t.set_u8(STYLES, styles::FLEX_DIRECTION, 0, flex_direction::ROW);
+        t.set_u8(STYLES, styles::FLEX_DIRECTION, 1, flex_direction::COLUMN);
+        t.set_f32(STYLES, styles::WIDTH, 2, 40.0);
+        t.set_f32(STYLES, styles::HEIGHT, 2, 20.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 2);
+        leaf(t, 2, 2);
+        link(t, 0, &[1, 2]);
+
+        // The container reads one global predicate and owns a two-entry run:
+        // entry 0 is the row, entry 1 the column.
+        t.set_i32(VARIANTS, protocol::variants::NODE, 0, 0);
+        t.set_u32(
+            VARIANTS,
+            protocol::variants::MASK,
+            0,
+            protocol::predicate::FIRST_GLOBAL,
+        );
+        t.set_i32(VARIANTS, protocol::variants::RUN_START, 0, 0);
+        t.set_u16(VARIANT_SLOTS, protocol::variant_slots::STYLE, 0, 0);
+        t.set_u16(VARIANT_SLOTS, protocol::variant_slots::STYLE, 1, 1);
+        // Spare rows sort *last*, not first: the column is binary-searched, so
+        // filling it with -1 would leave it unsorted and the search for node 0
+        // would walk into the spares and report it absent.
+        for row in 1..4 {
+            t.set_i32(VARIANTS, protocol::variants::NODE, row, i32::MAX);
+        }
+
+        // `max-width: 500px` -> the bit above.
+        t.set_u32(
+            MEDIA,
+            protocol::media::BIT,
+            0,
+            protocol::predicate::FIRST_GLOBAL,
+        );
+        t.set_u8(
+            MEDIA,
+            protocol::media::KIND,
+            0,
+            protocol::media_kind::MAX_WIDTH,
+        );
+        t.set_f32(MEDIA, protocol::media::VALUE, 0, 500.0);
+    }
+
+    // 200x100, which is at or below 500 — the query holds, so: a column.
+    engine.tick().expect("tick");
+    let stacked = (bound(&engine, 1), bound(&engine, 2));
+    assert!(
+        stacked.1[1] > stacked.0[1],
+        "below the breakpoint the second child should be *under* the first: {stacked:?}"
+    );
+
+    // Past the threshold the query stops holding and the row comes back.
+    engine.resize(900, 400).expect("resize");
+    engine.tick().expect("tick");
+    let side_by_side = (bound(&engine, 1), bound(&engine, 2));
+    assert!(
+        side_by_side.1[0] > side_by_side.0[0],
+        "above the breakpoint the second child should be *beside* the first: {side_by_side:?}"
+    );
+    assert_eq!(side_by_side.1[1], side_by_side.0[1], "and on the same row");
 }
