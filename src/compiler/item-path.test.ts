@@ -16,9 +16,9 @@ import {
   ItemSpreadError,
   isRecorder,
   pathOf,
-  readPath,
   recorder,
 } from "./item-path.ts";
+import { readPath } from "../runtime/list-runtime.ts";
 
 test("a bare property read records a path", () => {
   const t = recorder() as Record<string, { title: unknown }>;
@@ -30,6 +30,10 @@ test("a bare property read records a path", () => {
 test("numeric keys record as numbers, so readPath indexes arrays", () => {
   const t = recorder() as unknown as Record<string, unknown[]>;
   expect(pathOf(t.tags![0])).toEqual(["tags", 0]);
+
+  // The reader is the runtime's — recording is build-time, reading happens every
+  // update — but the two only work if they agree, so the round trip is asserted
+  // here where the recording side is.
   expect(readPath({ tags: ["x", "y"] }, ["tags", 0])).toBe("x");
 });
 

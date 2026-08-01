@@ -102,6 +102,8 @@ Anything that trades robustness for capability stays a proposal.
 | `Href` union codegen | **done** — emitted per window into `routes.gen.ts` | M7 |
 | `useRoute` typing + path check | **done** — `src/compiler/route.ts` | M7 |
 | `useRouter().path` | **done** — the window's route signal, read-only | M7 |
+| `useRouter().path.value` renders | **done** — a marker the compiler binds; comparing it is a `tsc` error | M7 |
+| `useRouter().matches(path)` | **done** — prefix-aware cell, compiled to a `computed` in the artifact | M7 |
 | `<Window>` / `<Outlet>` | **done** — `src/compiler/window.ts`, spliced by `bun run window` | M7 |
 | one table set per window, inactive routes `hidden` | **done** — emitted `hidden` column, `routeChain` | M7 |
 | `navigate` / `back` | partial — `showRoute` in `src/window-host.ts`; no matcher, no history | M7 |
@@ -189,7 +191,26 @@ file path under `pages/`, recursively; `$segment` is a parameter.
 ```tsx
 const router = useRouter();
 <div>You are at {router.path}</div>
+<div>{`You are at ${router.path.value}`}</div>   // the same IR, byte for byte
 ```
+
+`.value` works because it does not return the route. There is no route at build time, so it
+returns a marker, and the compiler replaces the marker with a binding on the window's route
+signal — the literals around it survive, so interpolation compiles. Putting that marker anywhere
+the compiler cannot bind (a `className`, an `id`, an inline style) is a named build error rather
+than a class that matches nothing.
+
+What `.value` cannot do is be compared:
+
+```tsx
+router.path.value === "layout"   // ✗ tsc: RoutePath and "layout" have no overlap
+router.matches("layout")         // ✓ a cell, prefix-aware, compiled to style-table writes
+```
+
+`===` calls no user code, so there is no hook to rewrite it and no marker that survives it — the
+comparison would be `false` at build time and stay false, with the build printing success. The
+only defence is a type with no overlap, so `.value` is opaque. (A *branded* string is not enough:
+TypeScript treats `string & {…}` as comparable to a string literal.)
 
 Anything *derived* from the route — "is this tab active", "which section am I in" — is a
 `computed` in the window's own module, beside the signal it reads:

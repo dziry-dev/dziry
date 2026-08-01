@@ -12,7 +12,7 @@
  * than a silently dead binding.
  */
 import type { CompileResult } from "./compile.ts";
-import { routeMatchOf } from "./route.ts";
+import { routeMatchOf, routePathBehind } from "./route.ts";
 
 export type RefSource = {
   /** Import specifier the generated module should use, e.g. "./state.ts". */
@@ -142,7 +142,11 @@ export function resolveRefs(
     const derived = asRouteMatch(value);
     if (derived) return derived;
 
-    const ref = index.get(value);
+    // `router.path` is handed to pages wrapped, so that `.value` yields a marker
+    // the compiler can bind rather than the route the signal happened to start on.
+    // The wrapper is not the object the window exported, so it has to come off
+    // before the name lookup — otherwise every `{router.path}` is unresolvable.
+    const ref = index.get(routePathBehind(value) ?? value);
     if (!ref) {
       throw new RefError(
         `${what} is not a module-level export of a known state module.\n` +

@@ -11,6 +11,12 @@
  * The tabs show `useRouter()` doing the thing it exists for: the active one is a
  * conditional class driven by a `computed` over the route, so switching costs
  * style-table writes rather than a re-render of anything.
+ *
+ * The header reads `router.path.value` inside a template literal, which is the read
+ * an author writes without thinking about it. There is no route at build time, so
+ * `.value` hands back a marker and the compiler replaces it with a binding on the
+ * window's route signal — the surrounding literal survives, and the line updates on
+ * navigation. `{router.path}` on its own compiles to the same thing.
  */
 import { cn } from "../../../src/compiler/jsx-runtime.ts";
 import { Outlet } from "../../../src/compiler/window.ts";
@@ -27,7 +33,7 @@ export default function Products() {
       <div className="flex flex-col gap-1">
         <div className="heading text-lg font-semibold text-zinc-50">Products</div>
         <div className="muted text-xs text-zinc-400">
-          a layout route · its children nest by path prefix · currently at {router.path}
+          a layout route · its children nest by path prefix · {`currently at ${router.path.value}`}
         </div>
       </div>
 

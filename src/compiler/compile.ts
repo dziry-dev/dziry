@@ -30,6 +30,7 @@ import {
 import { parseHtml, type DynList, type Element, type Node, type TextPart } from "./html.ts";
 import { isItemSentinel, ItemExpressionError } from "./item-path.ts";
 import { isParamSentinel, ParamExpressionError } from "./route-args.ts";
+import { hasRouteSentinel, RouteValueLeakError } from "./route.ts";
 import { hasState, type VariantCompiled } from "./variant-compile.ts";
 import {
   compareCascade,
@@ -643,6 +644,7 @@ export function compileTree(
   const checkAuthored = (s: string): string => {
     if (isItemSentinel(s)) throw new ItemExpressionError(s);
     if (isParamSentinel(s)) throw new ParamExpressionError(s);
+    if (hasRouteSentinel(s)) throw new RouteValueLeakError(s);
     return s;
   };
 

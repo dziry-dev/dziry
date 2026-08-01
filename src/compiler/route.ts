@@ -25,6 +25,7 @@
  * from its own text. Shared components take the value as a prop: `<Title id={args.id} />`.
  */
 import { paramsOfPath, routeArgs } from "./route-args.ts";
+import { sentinel } from "./sentinel.ts";
 import { computed, type ReadonlySignal } from "../runtime/signal.ts";
 
 /**
@@ -119,8 +120,13 @@ export type Router = {
    *
    * A signal, so `{router.path}` is a text binding that follows navigation, and
    * anything derived from it is an ordinary `computed`.
+   *
+   * `RoutePath` rather than `string` so that `.value === "layout"` has no overlap
+   * and `tsc` refuses it. Declaring this `ReadonlySignal<string>` erased the brand
+   * at exactly this boundary and the comparison type-checked again — the failure
+   * being guarded against, reintroduced by the type that was supposed to guard it.
    */
-  path: ReadonlySignal<string>;
+  path: ReadonlySignal<RoutePath>;
 
   /**
    * True while the active route is `path`, or is nested under it.
@@ -160,6 +166,131 @@ export function routeMatchOf(
 }
 
 /**
+ * The real signal behind `router.path`, which is handed out wrapped.
+ *
+ * `resolve-refs` unwraps with this: the wrapper exists to refuse one thing at build
+ * time, and everything downstream needs the identity of the exported signal to find
+ * its name.
+ */
+const UNWRAP = Symbol.for("skia-proto.routePath");
+
+export function routePathBehind(value: unknown): ReadonlySignal<string> | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  return (value as Record<symbol, ReadonlySignal<string> | undefined>)[UNWRAP];
+}
+
+/**
+ * What `router.path.value` yields while compiling.
+ *
+ * Not the route — there is no route at build time — but a marker the compiler
+ * recognises, so `{router.path.value}` compiles to a binding on the route signal
+ * instead of freezing whatever the signal happened to be initialised with. Same
+ * device as the item and parameter recorders: make the read *visible* rather than
+ * letting it evaluate away.
+ *
+ * Un-internable: `internString` refuses it, so a marker that reaches the string
+ * table by some path this does not handle is a build error naming the cause rather
+ * than a constant nobody notices.
+ *
+ * The payload is always `"path"` — unlike an item read or a parameter, a route read
+ * has nothing to distinguish it, because a window has exactly one route. The
+ * wrapping still earns its place: it is what makes `split` able to separate
+ * interpolated literals from the read.
+ */
+const MARK = sentinel("route");
+
+/** True if `text` is, or contains, a stringified `router.path.value`. */
+export function hasRouteSentinel(text: string): boolean {
+  return MARK.has(text);
+}
+
+/**
+ * A string containing route markers, split into literal and route parts.
+ *
+ * `` `at ${router.path.value}` `` becomes `["at ", route]` — which is exactly the
+ * shape a dynamic text run already has, so interpolation works rather than being
+ * refused.
+ */
+export function splitRouteSentinel(text: string): Array<{ literal: string } | { route: true }> {
+  return MARK.split(text).map((part) => ("payload" in part ? { route: true } : part));
+}
+
+/**
+ * A route marker that reached the string table, which means it went somewhere the
+ * text path does not cover.
+ *
+ * Rendering `router.path.value` is handled; putting it in an *attribute* is not, and
+ * neither is anything that turns it into a value the compiler cannot re-derive. Both
+ * would otherwise intern as a NUL-ridden literal and render as garbage, so this is
+ * the backstop that makes the marker safe to hand out at all.
+ */
+export class RouteValueLeakError extends Error {
+  constructor(text: string) {
+    const around = splitRouteSentinel(text)
+      .map((part) => ("literal" in part ? part.literal : "${router.path.value}"))
+      .join("");
+    super(
+      `router.path.value was used where the compiler cannot bind it (\`${around}\`).\n` +
+        `  There is no route at build time, so \`.value\` yields a marker and the compiler\n` +
+        `  replaces it with a binding on the window's route signal. That works for rendered\n` +
+        `  text — {router.path.value}, or a template literal around it — and nowhere else\n` +
+        `  yet, because nothing else has a place to put a subscription.\n` +
+        `    to render:   {router.path}\n` +
+        `    to compare:  router.matches("products")`,
+    );
+    this.name = "RouteValueLeakError";
+  }
+}
+
+/**
+ * The route of the window being compiled, for the text path to bind against.
+ *
+ * One per window, so a marker needs no identity of its own: whichever window is
+ * being compiled owns every route read inside it.
+ */
+export function currentRoute(): ReadonlySignal<string> | null {
+  return currentRouteSignal;
+}
+
+/**
+ * The type `.value` reports, so the comparison is caught by `tsc`.
+ *
+ * `router.path === "layout"` is already a type error — a signal and a string have
+ * no overlap. `router.path.value === "layout"` was not: `string === string` type-
+ * checks, evaluates against the initial route, and freezes.
+ *
+ * A *branded* string — `string & { __brand }` — does not fix that, which is worth
+ * writing down because it is the obvious first answer and it silently fails: TS
+ * treats an intersection containing `string` as comparable to a string literal, so
+ * the comparison still type-checks. The type has to be genuinely opaque.
+ *
+ * At run time it is a string, and a marker one, so rendering and interpolation both
+ * work. What it will not do is pass for a `string` in a signature — which is the
+ * point, since every such position is somewhere the compiler cannot bind it.
+ */
+declare const ROUTE_PATH: unique symbol;
+export type RoutePath = { readonly [ROUTE_PATH]: "the window's active route" };
+
+/**
+ * `router.path`, with `.value` reporting a marker instead of the initial route.
+ *
+ * `===` cannot be intercepted in JavaScript — no proxy trap, and strict equality
+ * never calls user code — so a comparison cannot be *rewritten* at build time. What
+ * can be done is the two things that matter: make the render case compile to a
+ * binding, and make the comparison a type error. Neither needs the author to know
+ * this wrapper exists.
+ */
+function guardedPath(route: ReadonlySignal<string>): ReadonlySignal<RoutePath> {
+  return new Proxy(route, {
+    get(target, prop, receiver) {
+      if (prop === UNWRAP) return target;
+      if (prop === "value") return MARK.wrap("path");
+      return Reflect.get(target, prop, receiver);
+    },
+  }) as unknown as ReadonlySignal<RoutePath>;
+}
+
+/**
  * Read access to the window's current route.
  *
  * ```tsx
@@ -192,7 +323,7 @@ export function useRouter(): Router {
   const route = currentRouteSignal;
 
   return {
-    path: route,
+    path: guardedPath(route),
     matches(path: string) {
       // A real `computed`, so it is a signal to everything downstream — `cn`
       // records it as a toggle, `findToggles` finds it, the variant compiler

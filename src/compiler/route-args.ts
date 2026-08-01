@@ -11,8 +11,10 @@
  * a read, but a list item's read is a path into a row and a parameter's read is a
  * name bound by the matcher; giving them one brand would let the compiler mistake
  * one for the other in exactly the place where the difference decides where the
- * value comes from.
+ * value comes from. The marker *plumbing* is shared — `sentinel.ts` — and the kinds
+ * are not, which is the distinction that matters.
  */
+import { sentinel } from "./sentinel.ts";
 
 const PARAM = Symbol.for("skia-proto.routeParam");
 
@@ -35,15 +37,11 @@ export function paramsOfPath(path: string): string[] {
 /**
  * The marker a stringified parameter produces.
  *
- * NUL-free but un-internable for the same reason as the item marker: `internString`
- * refuses it, so computing with a parameter fails the build instead of freezing one
- * constant into the page.
+ * Un-internable for the same reason as the item marker: `internString` refuses it,
+ * so computing with a parameter fails the build instead of freezing one constant
+ * into the page.
  */
-const SENTINEL_MARK = " dziri:param ";
-
-function sentinel(name: string): string {
-  return `${SENTINEL_MARK}${name}${SENTINEL_MARK}`;
-}
+const MARK = sentinel("param");
 
 /** A single parameter read — `args.id`. */
 function param(name: string): Record<string | symbol, unknown> {
@@ -52,7 +50,7 @@ function param(name: string): Record<string | symbol, unknown> {
       if (prop === PARAM) return name;
 
       if (prop === Symbol.toPrimitive || prop === "toString" || prop === Symbol.toStringTag) {
-        return () => sentinel(name);
+        return () => MARK.wrap(name);
       }
 
       // Any other symbol is someone else's brand check — `isRecorder` reads its
@@ -64,11 +62,11 @@ function param(name: string): Record<string | symbol, unknown> {
       // A parameter is a string the matcher bound; it has no properties worth
       // recording, so `args.id.length` is a computation rather than a read and
       // the error is more useful than a nested recorder would be.
-      throw new ParamExpressionError(sentinel(name));
+      throw new ParamExpressionError(MARK.wrap(name));
     },
 
     ownKeys() {
-      throw new ParamExpressionError(sentinel(name));
+      throw new ParamExpressionError(MARK.wrap(name));
     },
   });
 }
@@ -124,7 +122,7 @@ export class UnknownParamError extends Error {
 
 /** True if `value` is text produced by stringifying a parameter recorder. */
 export function isParamSentinel(value: string): boolean {
-  return value.includes(SENTINEL_MARK);
+  return MARK.has(value);
 }
 
 export function isRouteParam(value: unknown): boolean {
@@ -172,7 +170,7 @@ export class ParamNotEmittedError extends Error {
  */
 export class ParamExpressionError extends Error {
   constructor(text: string) {
-    const name = text.split(SENTINEL_MARK)[1] ?? "<unknown>";
+    const name = MARK.payloadOf(text) ?? "<unknown>";
     super(
       `a route parameter was used in an expression, not read as a value (args.${name}).\n` +
         `  useRoute runs at build time, where no parameter has a value yet — it can record\n` +

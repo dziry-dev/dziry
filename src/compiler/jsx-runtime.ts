@@ -19,6 +19,13 @@ import {
 } from "../runtime/signal.ts";
 import { isRecorder, pathOf, recorder } from "./item-path.ts";
 import { isRouteParam, ParamNotEmittedError, paramNameOf } from "./route-args.ts";
+import {
+  currentRoute,
+  hasRouteSentinel,
+  RouteHookError,
+  RouteValueLeakError,
+  splitRouteSentinel,
+} from "./route.ts";
 import type { DynList, DynText, Element, Node, TextPart } from "./html.ts";
 
 export class ListError extends Error {}
@@ -186,6 +193,9 @@ function styleAttr(style: Props["style"], tag: string): string | null {
 
     const text =
       typeof value === "number" && !UNITLESS.has(key) ? `${value}px` : String(value);
+    // An inline style is resolved once at build time, so a route read in one is the
+    // frozen-value mistake wearing a different attribute.
+    if (hasRouteSentinel(text)) throw new RouteValueLeakError(text);
     parts.push(`${kebab(key)}: ${text}`);
   }
 
@@ -301,10 +311,39 @@ function classList(props: Props): {
       continue;
     }
 
+    // A route read here would become a class name nothing matches — styled by
+    // nothing, warned about by nothing. Caught at the attribute rather than left to
+    // `internString`, which only sees text.
+    if (hasRouteSentinel(String(value))) throw new RouteValueLeakError(String(value));
+
     for (const name of String(value).split(/\s+/)) if (name) classes.push(name);
   }
 
   return { classes, classWhen };
+}
+
+/**
+ * A marked string, as the parts of a dynamic text run.
+ *
+ * The route needs no identity of its own: a window has exactly one, and the marker
+ * can only have been produced inside the window currently being compiled. So the
+ * signal comes from the scope rather than from the marker, and the marker only has
+ * to say *where* in the string the read was.
+ */
+function routeParts(text: string): TextPart[] {
+  const route = currentRoute();
+  if (route === null) {
+    throw new RouteHookError(
+      `a route read reached the tree with no window being compiled.\n` +
+        `  \`router.path.value\` leaves a marker for the compiler to bind, and the binding is\n` +
+        `  the window's route signal — so the marker cannot outlive the window's scope. This\n` +
+        `  means a string produced inside one window was rendered by another.`,
+    );
+  }
+
+  return splitRouteSentinel(text).map((part) =>
+    "literal" in part ? part : { source: route as unknown },
+  );
 }
 
 /**
@@ -320,7 +359,22 @@ function flatten(child: Child, out: Node[]): void {
   }
 
   if (typeof child === "string" || typeof child === "number") {
-    out.push({ type: "text", value: String(child) });
+    const text = String(child);
+
+    // `{router.path.value}` — a string, but not one the author typed.
+    //
+    // `.value` is the read people write, and there is no route at build time to
+    // give them. Refusing it was the first answer and the wrong one: the read is
+    // correct, it is only *early*, so the compiler owes them a binding rather than
+    // an error. The marker is what survives the read, and splitting it recovers the
+    // interpolation around it — `` `at ${router.path.value}` `` is a literal and a
+    // binding, which is what a dynamic text run already is.
+    if (hasRouteSentinel(text)) {
+      out.push({ type: "dyntext", parts: routeParts(text) });
+      return;
+    }
+
+    out.push({ type: "text", value: text });
     return;
   }
 
@@ -408,7 +462,18 @@ function normalize(nodes: Node[]): Node[] {
       // `{bind("a")} of {bind("b")}` are meaningful.
       node.parts = node.parts
         .map((p) => ("literal" in p ? { literal: collapse(p.literal, false) } : p))
-        .filter((p) => !("literal" in p) || p.literal !== "");
+        .filter((p) => !("literal" in p) || p.literal !== "")
+        // Two literals can end up adjacent — JSX splitting `at {x}` around a marked
+        // string puts the surrounding text and the string's own prefix side by side.
+        // They are one run, so they are one part; leaving them split costs a string
+        // slot and makes the emitted binding read as though something separates them.
+        .reduce<TextPart[]>((acc, part) => {
+          const last = acc[acc.length - 1];
+          if (last && "literal" in last && "literal" in part) {
+            acc[acc.length - 1] = { literal: last.literal + part.literal };
+          } else acc.push(part);
+          return acc;
+        }, []);
       if (node.parts.length > 0) out.push(node);
       continue;
     }
@@ -455,6 +520,12 @@ export function jsx(
   const children: Node[] = [];
   flatten(props.children, children);
   const names = classList(props);
+
+  // Same reason as the class check: an id is a selector target, and one made of
+  // marker bytes matches nothing and reports nothing.
+  if (props.id !== undefined && hasRouteSentinel(props.id)) {
+    throw new RouteValueLeakError(props.id);
+  }
 
   // An editable with no children displays its own value, so `bindValue` alone is
   // enough to both show and edit — reusing the ordinary text-binding machinery.
