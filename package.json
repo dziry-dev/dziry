@@ -32,7 +32,8 @@
     "app": "bun run src/app.ts",
     "variants": "bun run src/variants.ts",
     "shot": "bun run src/compile.ts && bun run src/app.ts --screenshot engine-demo.png",
-    "bench": "bun run scripts/bench.ts"
+    "bench": "bun run scripts/bench.ts",
+    "runtime-surface": "bun run scripts/runtime-surface.ts"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",
