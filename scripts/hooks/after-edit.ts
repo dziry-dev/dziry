@@ -72,21 +72,30 @@ if (rel.length === 0 || rel.startsWith("..")) bail();
 
 type Rule = { when: RegExp; run: string[] };
 
+/**
+ * **`characterize` is deliberately absent, and it used to be here.**
+ *
+ * It compiles the sample app, so it fails on any *intermediate* state — and an
+ * agent partway through a refactor has a broken compiler by construction: edit one
+ * of three, the type does not exist yet. The first thing this hook caught in anger
+ * was exactly that, a half-written `var()` change referencing `EMPTY_VARS` a few
+ * lines above where it was about to be defined. `characterize` was right, the hook
+ * blocked, and the "bug" fixed itself a minute later when the edit was finished.
+ * Nothing was learned and a turn was interrupted.
+ *
+ * The rule it leaves behind: **a hook may only assert something that is wrong at
+ * rest and still wrong mid-edit.** Whole-program compile checks are not that; they
+ * belong at a resting point — end of turn, or CI.
+ *
+ * The two below survive it because their failures are actionable the instant they
+ * fire rather than a side effect of being halfway through. `protocol-guard` going
+ * red after a `schema.ts` edit *is* the message — it means `gen:protocol` has not
+ * run yet, which is a step you owe, not a state you are passing through.
+ */
 const RULES: Rule[] = [
   // The symptom this catches is Rust failing to find a constant that plainly
   // exists in schema.ts, which is otherwise a genuinely confusing hour.
   { when: /^src\/protocol\/schema\.ts$/, run: ["protocol-guard"] },
-  // STYLE_FIELDS lives here, and changing it changes every compiled module.
-  //
-  // `spec-audit` belongs on this line too and is deliberately not on it: it exits
-  // non-zero today on a known, already-written-up border divergence (`borderColor`
-  // initial: spec `currentcolor`, dziri 0). Wiring a tool whose baseline is red
-  // means the first edit anyone makes to ir.ts is blocked by something they did not
-  // do, and the hook gets switched off that afternoon. A tool becomes hookable the
-  // day it can distinguish a new failure from a known one -- which is the argument
-  // for the known-divergence ledger, not a reason to lower the bar here.
-  { when: /^src\/ir\.ts$/, run: ["characterize"] },
-  { when: /^src\/compiler\//, run: ["characterize"] },
   // doc-lint walks the whole tree including `.claude`, so any .md can rot.
   { when: /\.md$/, run: ["doc-lint"] },
 ];
