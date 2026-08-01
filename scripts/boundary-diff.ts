@@ -1,7 +1,7 @@
 /**
  * Checks the shared-memory tables before and across the FFI boundary.
  *
- *   bun run boundary-diff                 # validate app/ui.gen.ts
+ *   bun run boundary-diff                 # validate windows/main/ui.gen.ts
  *   bun run boundary-diff --live          # also start the engine and cross-check
  *   bun run boundary-diff path/to/ui.gen.ts
  *
@@ -28,7 +28,7 @@ import type { Engine as EngineHandle } from "../src/engine/host.ts";
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2);
 const LIVE = argv.includes("--live");
-const target = resolve(argv.find((a) => !a.startsWith("--")) ?? join(ROOT, "app", "ui.gen.ts"));
+const target = resolve(argv.find((a) => !a.startsWith("--")) ?? join(ROOT, "windows", "main", "ui.gen.ts"));
 
 if (!existsSync(target)) {
   console.log(`no such file: ${target}\n  compile first: bun run compile`);

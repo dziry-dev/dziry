@@ -32,17 +32,15 @@
     "compile": "bun run src/compile.ts",
     "routes": "bun run src/routes.ts",
     "window": "bun run src/compile-window.ts",
-    "window:run": "bun run src/window-host.ts",
-    "window:shot": "bun run src/compile-window.ts && bun run src/window-host.ts --screenshot window-demo.png",
-    "dev": "bun run src/compile.ts && bun run src/app.ts",
-    "app": "bun run src/app.ts",
+    "dev": "bun run src/compile-window.ts && bun run src/window-host.ts",
     "variants": "bun run src/variants.ts",
-    "shot": "bun run src/compile.ts && bun run src/app.ts --screenshot engine-demo.png",
+    "shot": "bun run src/compile-window.ts && bun run src/window-host.ts --screenshot engine-demo.png",
     "tw:css": "bunx @tailwindcss/cli -i demo-tailwind/in.css -o demo-tailwind/app.css --content demo-tailwind/index.html",
     "tw": "bun run tw:css && bun run src/compile.ts demo-tailwind/index.html demo-tailwind/app.css -o app/ui.gen.ts && bun run src/app.ts; bun run src/compile.ts",
     "tw:shot": "bun run tw:css && bun run src/compile.ts demo-tailwind/index.html demo-tailwind/app.css -o app/ui.gen.ts && bun run src/app.ts --screenshot demo-tailwind/shot.png --size 900x560; bun run src/compile.ts",
     "bench": "bun run scripts/bench.ts",
-    "runtime-surface": "bun run scripts/runtime-surface.ts"
+    "runtime-surface": "bun run scripts/runtime-surface.ts",
+    "run": "bun run src/window-host.ts"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

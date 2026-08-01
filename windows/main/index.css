@@ -435,3 +435,145 @@ body.light .del {
 .app.compact .stat {
     padding: 6px 10px;
 }
+
+/* ---- the window shell: chrome that stays put across navigation ------------
+   Class names here are prefixed `route-` where they would otherwise collide
+   with the demo's own `.card`, `.title` and `.body` above. Two stylesheets
+   merged into one window share a namespace, because the style table is global
+   and interned across every route — which is the decided design and was
+   measured: two pages of one design system shared 6 of 8 style rows. */
+
+.shell {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+    gap: 14px;
+}
+
+.nav {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: #202024;
+    border-radius: 10px;
+}
+
+.brand {
+    font-size: 15px;
+    font-weight: 600;
+    color: #fafafa;
+}
+
+.links {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+}
+
+.link {
+    padding: 5px 11px;
+    border-radius: 6px;
+    background: #27272a;
+    color: #a1a1aa;
+    font-size: 13px;
+}
+
+.link:hover {
+    background: #34343a;
+    color: #e4e4e7;
+}
+
+.page {
+    display: flex;
+    flex-direction: column;
+    flex-grow: 1;
+}
+
+/* ---- the routing pages, which are deliberately plain ---------------------- */
+
+.route-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 18px;
+    background: #202024;
+    border-radius: 10px;
+}
+
+.route-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #fafafa;
+}
+
+.route-body {
+    font-size: 14px;
+    color: #a1a1aa;
+}
+
+.route-panel {
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    background: #18181b;
+    border-radius: 8px;
+}
+
+.tabs {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+}
+
+.tab {
+    padding: 5px 10px;
+    border-radius: 5px;
+    background: #27272a;
+    color: #a1a1aa;
+    font-size: 13px;
+}
+
+/* ---- the shell in light mode ---------------------------------------------
+   `body.light X` outranks `.X` on specificity, so these work appended rather
+   than needing to sit beside the dark rules. */
+
+body.light .nav {
+    background: #f4f4f5;
+}
+
+body.light .brand {
+    color: #18181b;
+}
+
+body.light .link {
+    background: #e4e4e7;
+    color: #52525b;
+}
+
+body.light .link:hover {
+    background: #d4d4d8;
+    color: #18181b;
+}
+
+body.light .route-card {
+    background: #ffffff;
+}
+
+body.light .route-title {
+    color: #18181b;
+}
+
+body.light .route-body {
+    color: #52525b;
+}
+
+body.light .route-panel {
+    background: #f4f4f5;
+}
+
+body.light .tab {
+    background: #e4e4e7;
+    color: #52525b;
+}

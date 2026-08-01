@@ -1,5 +1,5 @@
 /**
- * The compiled app, through the engine, asserted on.
+ * The compiled window, through the engine, asserted on.
  *
  * These replace the nine hand-computed layout tests that retired with
  * `layout.ts`. They are deliberately *not* a port: the interesting surface has
@@ -8,8 +8,12 @@
  * the field mapping, into shared memory, and back out as bounds.
  *
  * Nodes are found by what they *are* — the node with four grid tracks, the ones
- * with `position: absolute` — rather than by id, so editing `app.tsx` renumbers
- * everything without breaking a single assertion.
+ * with `position: absolute` — rather than by id, so editing the page renumbers
+ * everything without breaking a single assertion. That held when the demo became
+ * a route inside a window and every node id shifted.
+ *
+ * The window's other five routes are in this tree too, resident and `hidden`, so
+ * they are excluded from layout exactly as they are at run time.
  */
 import { expect, test } from "bun:test";
 import { Align, Display, FlexWrap, Position } from "../protocol/generated.ts";
@@ -19,7 +23,7 @@ import { NUMBER_FIELDS, Uploader, capacitiesFor } from "./upload.ts";
 import { applyTextBindings } from "../runtime/bindings.ts";
 import { updateLists, type ListBindingRef } from "../runtime/list-runtime.ts";
 import { applyStylePatches, type StylePatchRef } from "../runtime/patches.ts";
-import * as generated from "../../app/ui.gen.ts";
+import * as generated from "../../windows/main/ui.gen.ts";
 
 const WIDTH = 1040;
 const HEIGHT = 560;

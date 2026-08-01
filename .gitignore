@@ -24,9 +24,15 @@ engine-demo.png
 engine-demo-light.png
 *.out.png
 
-# The generated IR is a build artifact of `bun run compile`. Tracked would mean
-# every style change shows up as a 18 KB diff of integer arrays.
-app/ui.gen.ts
+# The generated IR is a build artifact of `bun run window`. Tracked would mean
+# every style change shows up as a 22 KB diff of integer arrays.
+#
+# The characterization goldens under `characterize/golden/` are the deliberate
+# exception: freezing the compiler's output is the whole point of those, and a diff
+# there is the question they exist to ask.
+windows/*/ui.gen.ts
+windows/*.gen.ts
+demo-tailwind/ui.gen.ts
 
 .DS_Store
 Thumbs.db

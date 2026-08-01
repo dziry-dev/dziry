@@ -45,14 +45,12 @@ type Case = {
 };
 
 async function cases(): Promise<Case[]> {
-  const out: Case[] = [
-    // The real app is the highest-value case: grid, flex, a keyed list with
-    // per-row handlers, conditional classes, derived values, inline styles.
-    { name: "app", input: join(ROOT, "app", "app.tsx"), css: join(ROOT, "app", "app.css") },
-  ];
+  const out: Case[] = [];
 
-  // The demo window, if it is there: routes spliced by path prefix, the inactive
-  // ones hidden on the first frame.
+  // The real application, which is the highest-value case: grid, flex, a keyed
+  // list with per-row handlers, conditional classes, derived values, inline
+  // styles — and, since it became a window, routes spliced by path prefix with
+  // the inactive ones hidden on the first frame.
   if (existsSync(join(ROOT, "windows", "main", "index.tsx"))) {
     out.push({
       name: "window-main",

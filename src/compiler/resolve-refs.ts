@@ -91,9 +91,9 @@ export function resolveRefs(
     if (!ref) {
       throw new RefError(
         `${what} is not a module-level export of a known state module.\n` +
-          `  Signals and handlers must be declared as exports (e.g. in app/state.ts) so the\n` +
-          `  compiler can name them — a value created inside a component has nowhere to live,\n` +
-          `  because components are erased at build time.`,
+          `  Signals and handlers must be declared as exports — of the window's state.ts, its\n` +
+          `  entry, or the page itself — so the compiler can name them. A value created inside\n` +
+          `  a component has nowhere to live, because components are erased at build time.`,
       );
     }
     record(ref, what);

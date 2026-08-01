@@ -6,7 +6,7 @@
  * it to the export it came from. A signal created inside a component would have
  * nowhere to live, since components are erased at build time.
  */
-import { computed, signal } from "../src/runtime/signal.ts";
+import { computed, signal } from "../../src/runtime/signal.ts";
 
 export type Todo = { id: number; title: string; done: boolean };
 

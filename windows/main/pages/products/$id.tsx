@@ -18,8 +18,8 @@ export default function Product() {
   const { path } = useRoute("products/$id");
 
   return (
-    <div className="panel">
-      <div className="body">A parameter route. Its pattern is {path}, bound per navigation.</div>
+    <div className="route-panel">
+      <div className="route-body">A parameter route. Its pattern is {path}, bound per navigation.</div>
     </div>
   );
 }

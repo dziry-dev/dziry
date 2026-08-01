@@ -1,12 +1,17 @@
 /**
- * CLI for the compiler.
+ * CLI for the single-entry compiler: one file, one stylesheet, one artifact.
  *
- *   bun run compile                       # app/app.tsx (or app.html) + app/app.css
- *   bun run compile --dump                # also print the IR in readable form
- *   bun run compile app/app.html app/app.css -o out.ts
+ *   bun run compile page.tsx styles.css            # -> windows/main/ui.gen.ts
+ *   bun run compile page.html styles.css -o out.ts
+ *   bun run compile page.tsx styles.css --dump     # also print the IR
  *
  * Both authoring front-ends land on the same `Element` tree, so everything after
  * the parse is shared.
+ *
+ * The *application* is not compiled here — it is a window, which is many modules
+ * spliced into one tree; see `src/compile-window.ts`. This remains because a
+ * snippet is still worth compiling on its own, which is what every measurement
+ * harness in `scripts/` does.
  */
 import { join, relative, extname, resolve, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -30,17 +35,34 @@ const flags = new Set(argv.filter((a) => a.startsWith("--")));
 const positional = argv.filter((a) => !a.startsWith("--") && a !== "-o");
 
 const outIndex = argv.indexOf("-o");
+/** Beside the input by default, so compiling a snippet does not clobber a window. */
 const outPath =
-  outIndex !== -1 && argv[outIndex + 1] ? argv[outIndex + 1]! : join(ROOT, "app", "ui.gen.ts");
+  outIndex !== -1 && argv[outIndex + 1]
+    ? argv[outIndex + 1]!
+    : join(dirname(resolve(positional[0] ?? ROOT)), "ui.gen.ts");
 
-/** JSX is the default authoring form; HTML still works when it is what exists. */
-function defaultInput(): string {
-  const tsx = join(ROOT, "app", "app.tsx");
-  return existsSync(tsx) ? tsx : join(ROOT, "app", "app.html");
+/**
+ * There is no default input any more.
+ *
+ * This used to default to `app/app.tsx`, which was the application. The
+ * application is a window now — `windows/main/` — and windows are many modules
+ * spliced into one tree, which is a different driver. What is left here is the
+ * single-entry compiler: one file, one stylesheet, an artifact. The harnesses use
+ * it that way (`conformance`, `layout-diff`, `html-coverage`, `tailwind-coverage`,
+ * and `characterize`'s HTML case all pass explicit paths), and so does anyone
+ * compiling a snippet.
+ */
+if (positional.length === 0) {
+  console.error(
+    `  error: nothing to compile.\n` +
+      `  This is the single-entry compiler: bun run compile <input.tsx|.html> [styles.css]\n` +
+      `  The application is a window — use \`bun run window\`, or \`bun run dev\` to run it.`,
+  );
+  process.exit(1);
 }
 
-const inputPath = positional[0] ?? defaultInput();
-const cssPath = positional[1] ?? join(ROOT, "app", "app.css");
+const inputPath = positional[0]!;
+const cssPath = positional[1] ?? join(dirname(inputPath), "app.css");
 
 const rel = (p: string) => relative(ROOT, p).replace(/\\/g, "/");
 

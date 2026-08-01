@@ -8,8 +8,8 @@
  */
 export default function NewProduct() {
   return (
-    <div className="panel">
-      <div className="body">A static route, sorted before the parameter route beside it.</div>
+    <div className="route-panel">
+      <div className="route-body">A static route, sorted before the parameter route beside it.</div>
     </div>
   );
 }

@@ -6,7 +6,7 @@ description: Verify that `file.ext:LINE` citations in the Markdown docs still re
 # doc-lint
 
 This repo's docs are unusually citation-dense — 1,800+ references like `engine.rs:402`,
-`signal.ts:86,159`, `app.ts:115-118`. They rot silently, and a stale citation is worse than no
+`signal.ts:86,159`, `window-host.ts:90-93`. They rot silently, and a stale citation is worse than no
 citation: on 2026-07-31 a cited comment turned out to state the *opposite* of what the doc
 claimed, and an API design was built on it before anyone read the code.
 

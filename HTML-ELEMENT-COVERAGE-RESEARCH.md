@@ -191,7 +191,7 @@ Practical consequences, all verified from the tables above:
 - `<br>` is a childless box in a column — it happens to force a line break only because the
   default `direction` is `COLUMN` (`src/ir.ts:222`), which is accidental, not implemented.
 
-The only tag selector in the shipped sample stylesheet is `body` (`app/app.css:5`).
+The only tag selector in the shipped sample stylesheet is `body` (`windows/main/index.css:5`).
 
 ### 2.6 The CSS surface is 51 property names, and the missing ones matter here
 
@@ -235,7 +235,7 @@ expressed today, because the properties and the state selectors it needs do not 
   the one editable is broken today, not just IME.
 
 The sample app's own "text field" is not an `<input>` — it is
-`<div className="field" bindValue={draft} />` (`app/app.tsx:117`).
+`<div className="field" bindValue={draft} />` (`windows/main/pages/index.tsx:116`).
 
 ### 2.8 What the project's own docs already decided
 
@@ -980,7 +980,7 @@ spelling will eventually work.
 | `native-src/dziri-engine/src/paint.rs:214-301`, `:314-368` | the whole renderer; hit-testing |
 | `native-src/dziri-engine/src/protocol.rs:215-217`, `:287-291`, `:295-306` | flags, predicates, event kinds |
 | `native-src/dziri-engine/src/window.rs:72-82` | `SDL_StartTextInput` never called |
-| `app/app.tsx:117`, `app/app.css:5`, `app/app.html` | the sample's "text field" is a `div`; the only tag selector is `body` |
+| `windows/main/pages/index.tsx:116`, `windows/main/index.css:5` | the sample's "text field" is a `div`; the only tag selector is `body` |
 | `ARCHITECTURE-REVIEW.md:70`, `:95-118` (§3), `:120-131` (§4) | fix-order authority; contains no element-coverage item |
 | `ROADMAP.md:213-214`, `:218-220`, `:237-238`, `:314-317`, `:354`, `:364-378`, `:388-394`, `:411-418`, `:437-447`, `:461-464`, `:466-478` | non-goals, Tailwind denominator, "not started", attribute selectors, A2/A3/A4/A5, B1, B4, semantics table, C2 tiers |
 | `NOTES.md:561-566`, `:846-849`, `:861-864` | "no accessibility", P3 input, P6 widgets |

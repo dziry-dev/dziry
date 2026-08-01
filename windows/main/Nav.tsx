@@ -14,6 +14,7 @@ export function Nav() {
       <div className="brand">dziri</div>
       <div className="links">
         <div className="link">Home</div>
+        <div className="link">Routing</div>
         <div className="link">Products</div>
         <div className="link">About</div>
       </div>

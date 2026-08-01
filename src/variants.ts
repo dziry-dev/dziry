@@ -1,7 +1,7 @@
 /**
  * Compares dynamic-styling strategies on a real page.
  *
- *   bun run variants                    # app/app.tsx + app/app.css
+ *   bun run variants                    # the main window's home route
  *   bun run variants some/other.tsx some/other.css
  *
  * Reports IR size for each strategy, which toggles can skip relayout, where
@@ -26,8 +26,12 @@ const argv = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 // `app/todo.tsx` was the default and has not existed for some time, so the tool
 // could not be run at all without arguments — it failed on the CSS read, one line
 // later, which read like a missing stylesheet rather than a missing default.
-const inputPath = argv[0] ?? join(ROOT, "app", "app.tsx");
-const cssPath = argv[1] ?? join(ROOT, "app", "app.css");
+//
+// The default is a *page* rather than the window, because this tool compiles a
+// single tree and a window is many. The home route is where the toggles are, which
+// is what it measures.
+const inputPath = argv[0] ?? join(ROOT, "windows", "main", "pages", "index.tsx");
+const cssPath = argv[1] ?? join(ROOT, "windows", "main", "index.css");
 const rel = (p: string) => relative(ROOT, p).replace(/\\/g, "/");
 
 const css = await Bun.file(cssPath).text();
