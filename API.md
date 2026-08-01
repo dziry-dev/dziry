@@ -10,11 +10,25 @@ Claude's output from a brainstorm session, not agreed design. Do not treat them 
 
 ### Decided (by Med)
 
-- **Routing.** Identity is the path from project root. `<a href="about.tsx">` / `navigate("app.tsx")`;
-  bare = root-relative, `./` `../` = relative to the referring file; `.tsx` `.jsx` `.html`.
-  Bare name resolves at the project root; not found → not-found. Filenames are **not** globally
-  unique — the path already is. No screens/regions folder; file location does not determine the
-  route. Nesting is `<Outlet dir="…">`.
+- **Routing.** *Supersedes the 2026-07-31 version of this bullet, which had file-path-as-module
+  identity (`href="about.tsx"`), `args={{}}`, literal-string-only hrefs and a non-recursive
+  `<Outlet dir>`. All four are withdrawn.*
+  - **A window is `windows/<name>/index.tsx`** returning `<Window>`. The folder name is the
+    window's id. There is no flat form and no `id` override.
+  - **Its routes are `windows/<name>/pages/**`**, recursively. The route path *is* the file path
+    under `pages/`; `$segment` is a parameter. `.tsx`, `.html` and (later) `.mdx` all become
+    routes. There is no `route()` declaration function — file location determines the route,
+    which reverses the previous bullet deliberately.
+  - **Links are concrete paths**, as on the web: `<a href="products/1">` and
+    `` href={`products/${id}`} ``. Not pattern + args.
+  - **Params arrive as props, typed from a generated per-route module** — not from a repeated
+    path string. See Routing below.
+  - **History is the previous route only**, per window. `back()` returns to it.
+  - **One route is resident at a time.** Navigation swaps the page's nodes and text; the style
+    table stays global and interned.
+- **Route matching is the only routing logic in the engine.** The compiler emits the route table;
+  Rust matches a concrete path against it to bind params, next to the media-query evaluator.
+  Everything else — which routes exist, what each takes, whether a link is dead — is compile-time.
 - **Styling.** dziri ships a **full UA stylesheet**, unconditionally — same as a browser. Tailwind
   is not the only supported way to write CSS; plain CSS is first-class. A Tailwind user gets a
   reset because Preflight is author CSS that undoes the UA sheet, exactly as in a browser. No
@@ -59,7 +73,9 @@ Anything that trades robustness for capability stays a proposal.
 - **Sequencing is a dependency, not a preference.** Pooled templates need M6 (disposal scopes)
   underneath and M10 (virtualization) to bound the pool to viewport size.
 
-> Last brainstorm: 2026-07-31 (routing, data fetching, `source`, UA CSS, trees).
+> Last brainstorm: 2026-08-01 (routing rewritten — windows, file-path routes, generated param
+> props, concrete-path links, per-route text residency). Supersedes 2026-07-31's routing.
+> Earlier: 2026-07-31 (routing, data fetching, `source`, UA CSS, trees).
 > Rationale lives in `framework-design.md` and `data-layer-design.md`. This file is the surface.
 
 ---
@@ -81,7 +97,8 @@ Anything that trades robustness for capability stays a proposal.
 | `token()` (context) | planned | — |
 | `onFrame(dt)` | planned | — |
 | `<Overlay>` | planned | M11 |
-| `navigate` / `href` / `<Outlet>` / `defineScreen` | planned | M7 |
+| `<Window>` / `navigate` / `back` / `href` / `<Outlet>` | planned — surface settled, see Routing | M7 |
+| `defineScreen` | planned — `args` moved to generated props; only `data` remains | M8 |
 | `defineQuery` / `defineMutation` | planned | — |
 | default stylesheet | planned | — |
 
@@ -118,41 +135,104 @@ export const configOnDisk = source<Config>(
 
 ## Routing
 
-Identity is the **path from project root**. Bare = root-relative; `./` `../` = relative to the
-referring file. Extension required (`.tsx` `.jsx` `.html`), literal strings only.
-
-```tsx
-<a href="about.tsx" />
-<a href="projects/detail.tsx" args={{ id }} />
-<a href="./sibling.tsx" />
-
-navigate("about.tsx")
-navigate("projects/detail.tsx", { id })
+```
+windows/
+  main/
+    index.tsx                 the window
+    pages/
+      index.tsx               → "/"
+      about.tsx               → "about"
+      products.tsx            → "products"        (a layout — it renders <Outlet/>)
+      products/
+        new.tsx               → "products/new"
+        $id.tsx               → "products/$id"
+      docs/
+        get-started.mdx       → "docs/get-started"
 ```
 
 ```tsx
-<Outlet dir="pages" fallback={<Spinner />} error={<Crash />} notFound={<NotFound />} grace={100} />
-```
-
-Outlet owns the boundaries. `dir` glob is non-recursive. Nesting = a child `<Outlet>`.
-Deep-link paths compose from the Outlet chain. No `regions/`, no filename grammar,
-no `layout.tsx` / `loading.tsx` / `error.tsx`, no `+screen.ts`.
-
-```tsx
-// pages/project.tsx
-const { args, data } = defineScreen({
-  load: ({ id }: { id: string }) => projectById(id),   // Args + data both inferred from here
-});
-
-export default function Project() {
-  return <h1>{data.name}</h1>;
+// windows/main/index.tsx
+export default function Main() {
+  return (
+    <Window title="dziri">
+      <Outlet />
+    </Window>
+  );
 }
 ```
 
-Ancestor loads run in parallel — args come from the navigation struct, so no waterfall unless
-one query feeds another's args (build warning).
+`windows/*/index.tsx` is a window; `windows/*/pages/**` are its routes. The route path is the
+file path under `pages/`, recursively; `$segment` is a parameter.
 
-`<a href args>` doubles as the prefetch table: hover → `load` into the query cache.
+**Params are props, typed from a generated module.** No path string is repeated anywhere.
+
+```tsx
+// windows/main/pages/products/$id.tsx
+import type { PageProps } from "@routes/products/$id";
+
+export default function Product({ args }: PageProps) {   // args: { id: string }
+  return <h1>{args.id}</h1>;
+}
+```
+
+A page with no parameters imports nothing. Renaming `$id.tsx` regenerates the tree, breaks the
+import, and TypeScript points at the rename — drift is a compile error, not silent wrongness.
+
+**Links are concrete paths.**
+
+```tsx
+<a href="products/new">New</a>
+<a href={`products/${p.id}`}>{p.name}</a>
+
+navigate("docs/get-started");
+back();                                  // the previous route; there is no deeper stack
+```
+
+Checked against a generated union, so a typo is a type error:
+
+```ts
+// routes.gen.ts
+export type Href = "/" | "about" | "products" | "products/new" | `products/${string}`
+                 | "docs/get-started";
+```
+
+A fully dynamic href (`href={computed}`) stays a build error: nothing can be verified. A static
+prefix with interpolated params is fine — the compiler reads the literal's static parts and
+matches them against the route table.
+
+> `${string}` also accepts `products/a/b/c`, since `string` spans slashes. The editor allows it;
+> the compiler rejects it. TypeScript catches typos, the compiler catches shape.
+
+**Nesting is by path prefix.** A page that renders `<Outlet/>` is a layout, and anything whose
+path extends it renders inside. No directory convention, no layout declaration.
+
+---
+
+### Proposed, not decided
+
+Everything above is Decided. These are open:
+
+- `<Window>` props carrying window config — `title`, `width`, `height`, `minWidth`, `minHeight`.
+  All compile-time constants except `title`, which needs a binding for document windows.
+- `openWindow("main", "products/2")`, and windows as *kinds* rather than instances — two document
+  windows of the same folder, each with its own route and history.
+- Precedence when a static path and a parameter path both match: **static wins**, so
+  `products/new` beats `products/$id`. Two routes of the same shape (`$id` vs `$slug`) are a
+  build error.
+- `<Outlet fallback error notFound grace>` — boundaries, from the previous draft, unrevisited.
+- `defineScreen({ load })`, parallel ancestor loads, and hover-prefetch — deferred to the data
+  layer. `args` no longer comes from here; only `data` would.
+- Sharing one `pages/` tree between two windows. Additive later via an explicit `from`.
+
+### Prerequisites
+
+- **Multi-window needs one SDL event pump.** `Window::new` creates an `EventPump` per engine and
+  SDL's queue is process-global, so two windows would fight over events. One pump dispatching by
+  window id is an engine refactor, independent of everything above.
+- **Text unloading needs a split string arena** — a shell region written once, a page region
+  swapped per navigation, both sized to the largest route. Node blocks rebase on load the way list
+  arenas already do. Styles are unaffected: measured, two pages in one design system shared 6 of
+  8 style rows, so global interning already holds close to the minimum.
 
 ---
 
