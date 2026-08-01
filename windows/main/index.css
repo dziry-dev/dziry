@@ -678,6 +678,10 @@ body.light .muted {
   padding-top: 2px;
   padding-bottom: 2px;
 }
+.tab.active {
+  background: #0284c7;
+  color: #f0f9ff;
+}
 @property --tw-border-style {
   syntax: "*";
   inherits: false;

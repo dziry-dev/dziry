@@ -16,9 +16,24 @@
  * and a way to pass an argument to a compiled handler. Until then the repetition is
  * visible and honest rather than hidden behind something that does not work yet.
  */
-import { signal } from "../../src/runtime/signal.ts";
+import { computed, signal } from "../../src/runtime/signal.ts";
 
 export const route = signal("/");
+
+/**
+ * Derived route state, declared here rather than produced by a hook.
+ *
+ * `useRouter()` gives a page the current path; anything computed *from* it lives
+ * beside the route, because that is the only place it can. A `computed()` created
+ * inside a component has nowhere to live once components are erased — the generated
+ * module imports every signal by name, and an anonymous one has no name. Declaring
+ * them makes them exports, which is what makes them compilable.
+ *
+ * Each of these drives a conditional class, so an active tab costs a handful of
+ * style-table writes when the route changes and nothing at all per frame.
+ */
+export const onNewProduct = computed(() => route.value === "products/new");
+export const onProductDetail = computed(() => route.value === "products/$id");
 
 /** The previous route, for `back()`. History is one entry deep, by decision. */
 let previous = "/";
@@ -36,6 +51,8 @@ export const goTypography = () => go("typography");
 export const goColors = () => go("colors");
 export const goBorders = () => go("borders");
 export const goFeatures = () => go("features");
-export const goProducts = () => go("products");
+export const goProducts = () => go("products/new");
+export const goNewProduct = () => go("products/new");
+export const goProductDetail = () => go("products/$id");
 
 export const back = () => go(previous);

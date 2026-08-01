@@ -25,6 +25,7 @@
  * from its own text. Shared components take the value as a prop: `<Title id={args.id} />`.
  */
 import { paramsOfPath, routeArgs } from "./route-args.ts";
+import type { ReadonlySignal } from "../runtime/signal.ts";
 
 /**
  * The parameter names in a route path.
@@ -91,6 +92,68 @@ export class RouteHookError extends Error {
     super(message);
     this.name = "RouteHookError";
   }
+}
+
+/**
+ * The window's route signal, set by the driver around the pages it expands.
+ *
+ * Separate from `currentPage` because it has a different lifetime: the page cursor
+ * moves per file, this holds for the whole window.
+ */
+let currentRouteSignal: ReadonlySignal<string> | null = null;
+
+/** Scopes a window's compilation, so `useRouter` inside its pages finds its route. */
+export function withWindowRoute<T>(route: ReadonlySignal<string> | null, run: () => T): T {
+  const previous = currentRouteSignal;
+  currentRouteSignal = route;
+  try {
+    return run();
+  } finally {
+    currentRouteSignal = previous;
+  }
+}
+
+export type Router = {
+  /**
+   * The active route path.
+   *
+   * A signal, so `{router.path}` is a text binding that follows navigation, and
+   * anything derived from it is an ordinary `computed`.
+   */
+  path: ReadonlySignal<string>;
+};
+
+/**
+ * Read access to the window's current route.
+ *
+ * ```tsx
+ * const router = useRouter();
+ * <div>You are at {router.path}</div>
+ * ```
+ *
+ * Read access only, and deliberately. Anything *derived* — "is this tab active",
+ * "which section am I in" — belongs in the window's own module as a `computed`,
+ * for the same reason the route signal itself does: it is per-window state, and a
+ * framework that owned it would own one copy for every window at once.
+ *
+ * It is also the constraint the compiler imposes rather than a style preference. A
+ * `computed()` created inside a component has nowhere to live once components are
+ * erased, so a hook that manufactured one per call could not be resolved to a name
+ * the generated module can import. Declaring it beside the route makes it a real
+ * export, which is what makes it compilable.
+ */
+export function useRouter(): Router {
+  if (currentRouteSignal === null) {
+    throw new RouteHookError(
+      `useRouter() needs the window to declare its route.\n` +
+        `  A route belongs to a window, not to the framework — two windows on different\n` +
+        `  routes is the normal case — so the window passes its own signal in:\n` +
+        `    <Window route={route}>   // route = signal("/") in the window's own module\n` +
+        `  Without it there is no current route to read.`,
+    );
+  }
+
+  return { path: currentRouteSignal };
 }
 
 export function useRoute<const P extends string>(path: P): Route<P> {

@@ -9,7 +9,15 @@
  * frozen into the page.
  */
 import { expect, test } from "bun:test";
-import { RouteHookError, useRoute, withPage, type Args } from "./route.ts";
+import {
+  RouteHookError,
+  useRoute,
+  useRouter,
+  withPage,
+  withWindowRoute,
+  type Args,
+} from "./route.ts";
+import { signal } from "../runtime/signal.ts";
 import {
   isParamSentinel,
   isRouteParam,
@@ -99,6 +107,45 @@ test("useRoute with no page being compiled says so, rather than guessing", () =>
   expect(run).toThrow(RouteHookError);
   expect(run).toThrow(/no page was being compiled/);
   expect(run).toThrow(/module scope/);
+});
+
+// ---------------------------------------------------------------------------
+// useRouter
+// ---------------------------------------------------------------------------
+
+test("useRouter hands back the window's own route signal, by identity", () => {
+  const route = signal("/");
+
+  withWindowRoute(route, () => {
+    // The same object, not a copy or a wrapper: it has to be, or the compiler
+    // could not resolve it to the export name the artifact imports.
+    expect(useRouter().path).toBe(route);
+  });
+});
+
+test("useRouter outside a window says the window has to declare its route", () => {
+  const run = () => useRouter();
+  expect(run).toThrow(RouteHookError);
+  expect(run).toThrow(/needs the window to declare its route/);
+  expect(run).toThrow(/<Window route=/);
+});
+
+test("the window scope and the page scope are independent", () => {
+  const route = signal("/");
+
+  // A page can read the route without being a parameter route, and a parameter
+  // route can read both. They are set by different things for different spans:
+  // the route is the window's, the page cursor moves per file.
+  withWindowRoute(route, () => {
+    expect(useRouter().path).toBe(route);
+    withPage(PRODUCT, () => {
+      expect(useRoute("products/$id").path).toBe("products/$id");
+      expect(useRouter().path).toBe(route);
+    });
+  });
+
+  // And each unwinds on its own.
+  expect(() => useRouter()).toThrow(RouteHookError);
 });
 
 test("withPage refuses an async callback instead of scoping nothing", () => {

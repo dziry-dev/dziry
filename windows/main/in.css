@@ -67,3 +67,11 @@ body.light .muted {
     padding-top: 2px;
     padding-bottom: 2px;
 }
+
+/* The active tab. A conditional class again — `computed(() => route.value === …)`
+   in the window's own module drives it, so switching route writes a few style-table
+   entries and costs nothing per frame. Paint-only: colours, no geometry. */
+.tab.active {
+    background: #0284c7;
+    color: #f0f9ff;
+}

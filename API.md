@@ -101,6 +101,7 @@ Anything that trades robustness for capability stays a proposal.
 | route table from `windows/*/pages/**` | **done** — `src/compiler/routes.ts`, `bun run routes` | M7 |
 | `Href` union codegen | **done** — emitted per window into `routes.gen.ts` | M7 |
 | `useRoute` typing + path check | **done** — `src/compiler/route.ts` | M7 |
+| `useRouter().path` | **done** — the window's route signal, read-only | M7 |
 | `<Window>` / `<Outlet>` | **done** — `src/compiler/window.ts`, spliced by `bun run window` | M7 |
 | one table set per window, inactive routes `hidden` | **done** — emitted `hidden` column, `routeChain` | M7 |
 | `navigate` / `back` | partial — `showRoute` in `src/window-host.ts`; no matcher, no history | M7 |
@@ -182,6 +183,26 @@ export default function Main() {
 
 `windows/*/index.tsx` is a window; `windows/*/pages/**` are its routes. The route path is the
 file path under `pages/`, recursively; `$segment` is a parameter.
+
+**Reading the active route** is `useRouter()`, and it is read-only:
+
+```tsx
+const router = useRouter();
+<div>You are at {router.path}</div>
+```
+
+Anything *derived* from the route — "is this tab active", "which section am I in" — is a
+`computed` in the window's own module, beside the signal it reads:
+
+```ts
+export const onNewProduct = computed(() => route.value === "products/new");
+<button className={cn("tab", { active: onNewProduct })}>New</button>
+```
+
+Not a style preference: a `computed()` created inside a component has nowhere to live once
+components are erased, so a hook that manufactured one per call could not be resolved to a name
+the generated module imports. It is also where per-window state belongs, for the same reason the
+route signal is passed to `<Window>` rather than owned by the framework.
 
 **Params come from a typed hook.**
 

@@ -25,7 +25,7 @@ import { buildRefIndex, resolveRefs, RefError, type RefSource } from "./compiler
 import { compileVariants, findToggles, type VariantCompiled } from "./compiler/variant-compile.ts";
 import { toDocument } from "./compiler/jsx-runtime.ts";
 import { RouteError, scanWindows, type WindowDef } from "./compiler/routes.ts";
-import { withPage } from "./compiler/route.ts";
+import { withPage, withWindowRoute } from "./compiler/route.ts";
 import { configOf, routeSignalOf, WindowError } from "./compiler/window.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./compiler/window-tree.ts";
 import { setCompiling } from "./runtime/signal.ts";
@@ -182,10 +182,14 @@ async function compileWindow(window: WindowDef): Promise<Compiled> {
     for (const route of window.routes) {
       const file = join(projectDir, route.file);
       const component = await defaultComponent(file, "page");
-      // The scope that makes `useRoute("products/$id")` verifiable: inside it, the
-      // hook knows the file it is in and refuses a string that disagrees. The
-      // import already happened, so nothing awaits inside the scope.
-      const value = withPage({ path: route.path, file: route.file }, component);
+      // Two scopes, with different lifetimes. `withPage` is the cursor that makes
+      // `useRoute("products/$id")` verifiable — inside it the hook knows the file it
+      // is in and refuses a string that disagrees. `withWindowRoute` is the window's
+      // own route signal, which `useRouter()` reads and which is the same for every
+      // page here. The import already happened, so nothing awaits inside either.
+      const value = withWindowRoute(routeSignalOf(shell) ?? null, () =>
+        withPage({ path: route.path, file: route.file }, component),
+      );
       pages.push({
         path: route.path,
         file: route.file,

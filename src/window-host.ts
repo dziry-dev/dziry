@@ -196,6 +196,19 @@ function requestedRoute(): number {
 
 let active = requestedRoute();
 
+/**
+ * `--route` writes the window's route signal, not just the `hidden` column.
+ *
+ * Otherwise the two disagree: the frame shows `products/new` while `useRouter()`
+ * still reads `/`, so anything derived from the route — an active tab, a breadcrumb
+ * — is wrong in exactly the screenshot taken to check it. Written before the
+ * subscription is registered, so this costs nothing and no navigation is dispatched
+ * for a route that is already showing.
+ */
+if (generated.routeSignal) {
+  (generated.routeSignal as Signal<string>).value = routeNodes[active]!.path;
+}
+
 // --- state, before the engine exists -----------------------------------------
 //
 // Bindings, patches and lists all mutate the IR in place, and lists can grow the
