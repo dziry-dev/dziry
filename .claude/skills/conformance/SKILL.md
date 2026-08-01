@@ -60,3 +60,21 @@ sheet, so there is nothing for sheet ordering to affect. Questions about *sheet 
 
 Shares the CDP client in `scripts/cdp.ts` with the probe runner: installed Chrome or Edge, headless,
 no download, throwaway profile cleaned up on exit.
+
+## Known divergences
+
+`KNOWN` maps a declaration — the string exactly as it appears in `CORPUS` — to the reason dziri
+differs from Chrome on purpose. A matched case prints `KNOWN` with its reason and does not count as
+a disagreement.
+
+**Empty today, and that is the honest state:** all 23 cases agree. It exists so the first real
+divergence has somewhere to go that is not deleting the case, which is what otherwise happens to a
+corpus with no way to say "expected".
+
+Two rules, shared with `html-coverage` and `layout-diff`:
+
+- **The decision must already be written down elsewhere, and the entry cites it.** This records
+  decisions; it does not make them. A tool that can turn its own red run green is worthless.
+- **An entry that stops matching fails the run.** If the declaration starts agreeing with Chrome,
+  the entry is stale and says so. That is the property a comment cannot have — `layout-diff`'s
+  box-sizing note stayed true-looking for hours after `d56611d` made it false.

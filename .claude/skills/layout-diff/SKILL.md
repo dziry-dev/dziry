@@ -113,6 +113,28 @@ failure, so the four wrapping rows will read as failures until wrapping lands, a
 divergence that silently starts passing looks like noise reduction rather than news. If the corpus
 grows past the point where the whole output can be read at once, add it.
 
+## Known divergences
+
+`KNOWN` maps a scenario name to the reason it differs from Chrome on purpose. A matched scenario
+prints `KNOWN` with its reason and does not count as a disagreement.
+
+**Empty today, and deliberately.** The one scenario that differs is `wrap-unbreakable`, and that is
+a bug — dziri splits a token with no break opportunity across two lines where Chrome keeps it on
+one and lets it overflow. Putting a bug here would be using the mechanism to make a red run green,
+which is the exact failure it is shaped against.
+
+Two rules, shared with `html-coverage` and `conformance`:
+
+- **The decision must already be written down elsewhere, and the entry cites it.** This records
+  decisions; it does not make them.
+- **An entry that stops matching fails the run** (skipped under `--only`, where a filtered corpus
+  would make a live entry look unused).
+
+This tool is the reason the mechanism exists. Box-sizing *was* a deliberate divergence, written in
+three sentences at the top of `layout-diff.ts`. `d56611d` fixed it, and the comment went on
+asserting it for hours. A comment cannot notice it has stopped being true; an entry fails the next
+run.
+
 ## Related
 
 `conformance` covers computed values, `golden` covers pixels, `html-coverage` covers per-element
