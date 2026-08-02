@@ -242,6 +242,44 @@ here would be worse than naming the gap.*
 
 ---
 
+## Transform and animation
+
+`transform` is stored **decomposed** — `translateX/Y` (px and percentage kept apart), `rotate`,
+`scaleX/Y`, `skewX/Y`, plus a `transform-origin` pair — and never as a matrix. That is a
+measurement, not a preference: `rotate(0deg)` and `rotate(360deg)` have identical matrices, so
+interpolating six floats between them cannot move, where Chromium is at 180° halfway. Decomposed
+scalars keep the winding; a matrix throws it away. `probes/transition-sampling.html`, recorded in
+BROWSER-FACTS.md.
+
+The cost is that decomposed storage holds exactly one order — translate, rotate, skew, scale — so a
+list written in another order is **refused with an error** rather than quietly reordered. That is
+not pedantry: `rotate(90deg) translateX(100px)` puts the box 100px *below* where the reverse puts
+it, measured. Tailwind and the individual `translate`/`rotate`/`scale` properties are always in
+canonical order, so this only bites hand-written lists.
+
+| API | Status | Milestone |
+|---|---|---|
+| `opacity` | **compiler done** — a style field; nothing paints it yet | A1 |
+| `transform` — `translate*` `rotate` `scale*` `skew*` | **compiler done** — decomposed into `STYLE_FIELDS`, protocol v11 | A1 |
+| `translate` / `rotate` / `scale` as their own properties | **compiler done** — they compose in that fixed order regardless of source order, measured | A1 |
+| `transform-origin` | **compiler done** — px and percentage per axis; the `50% 50%` default is a percentage, so the *engine* resolves it | A1 |
+| painting the transform | planned — `paint.rs` must concat the matrix and skip the viewport cull inside a transformed subtree | A1 |
+| hit-testing a transformed node | planned — a parent's transform moves a child's rect, measured, so this needs the inverse | A1 |
+| `transform: matrix()`, any 3D function | **refused by name** — a matrix would have to be decomposed back, and the decomposition is lossy for exactly the cases transitions care about | — |
+| `transition-*` | planned — the endpoints are already two rows of the style table the compiler resolved; what is left is the clock | B3 |
+| `@keyframes`, `animate()` timeline | planned — transitions first; see ROADMAP B3 | B3 |
+| `prefers-reduced-motion` | planned — **disables** animation rather than slowing it | B3 |
+
+Worth stating because it shapes B3: dziri already resolves *both endpoints of a transition at
+compile time*. A node with `:hover` carries a predicate mask and a run of fully-resolved style
+slots — base and hover, both interned. A transition is interpolation between two rows the compiler
+already computed, so what stays at runtime is the clock and the current `t`, and nothing else.
+
+Transform is also a coverage lever rather than only an animation prerequisite: it moved Tailwind
+from 41.2% to 43.0% on its own, and `property: translate` left the blocker list entirely.
+
+---
+
 ## Routing
 
 ```

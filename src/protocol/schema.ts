@@ -201,6 +201,39 @@ const STYLES: Table = {
     { name: "accentColor", type: "u32", affects: "paint" },
     { name: "caretColor", type: "u32", affects: "paint" },
     { name: "appearance", type: "u8", affects: "paint", doc: "0 none, 1 auto" },
+    // `opacity` and `transform`, and every one of them is `paint` — measured,
+    // not assumed. A transformed box does not move its parent's height or its
+    // own siblings, so Taffy never needs to hear about a change here.
+    { name: "opacity", type: "f32", affects: "paint", doc: "0..1, initial 1" },
+    // The transform arrives **decomposed**, never as a matrix, and the engine
+    // composes it in one fixed order: translate, rotate, skew, scale.
+    //
+    // Not a matrix because a matrix cannot be transitioned. `rotate(0deg)` and
+    // `rotate(360deg)` have identical matrices, so interpolating the six floats
+    // between them cannot move — where Chromium is at 180° halfway. Storing the
+    // angle keeps the winding, which is the whole difference. See BROWSER-FACTS.md.
+    //
+    // Percentages travel unresolved because they are relative to the node's own
+    // border box, which is layout's answer and not the compiler's. Two fields per
+    // axis rather than one, since CSS permits `calc(10px + 50%)` and Tailwind
+    // ships both spellings.
+    { name: "translateX", type: "f32", affects: "paint" },
+    { name: "translateY", type: "f32", affects: "paint" },
+    { name: "translatePercentX", type: "f32", affects: "paint", doc: "fraction of own border-box width" },
+    { name: "translatePercentY", type: "f32", affects: "paint", doc: "fraction of own border-box height" },
+    // Degrees, and deliberately not wrapped to one turn — see above.
+    { name: "rotate", type: "f32", affects: "paint", doc: "degrees, unnormalised" },
+    { name: "scaleX", type: "f32", affects: "paint", doc: "initial 1" },
+    { name: "scaleY", type: "f32", affects: "paint", doc: "initial 1" },
+    { name: "skewX", type: "f32", affects: "paint", doc: "degrees" },
+    { name: "skewY", type: "f32", affects: "paint", doc: "degrees" },
+    // `transform-origin`. The initial value is `50% 50%`, so the percentage pair
+    // is the one that carries the default and a node that never mentions the
+    // property still needs its laid-out size to find its own centre.
+    { name: "transformOriginPercentX", type: "f32", affects: "paint", doc: "initial 0.5" },
+    { name: "transformOriginPercentY", type: "f32", affects: "paint", doc: "initial 0.5" },
+    { name: "transformOriginX", type: "f32", affects: "paint", doc: "px, added to the percentage" },
+    { name: "transformOriginY", type: "f32", affects: "paint", doc: "px, added to the percentage" },
   ],
 };
 
@@ -577,8 +610,13 @@ export const ENUMS: EnumDef[] = [
  * where it expects 8. `dziri_protocol_version` takes no arguments, so it is the one
  * call that is safe to make against a binary of unknown vintage — which is why the
  * ABI's own version lives here.
+ *
+ * v11 adds `opacity` and the fourteen decomposed transform fields. A real table
+ * change, so the hash moves on its own this time — but the version is bumped for
+ * the ordinary reason as well: the styles table grew, and an old binary reading
+ * the new one would find every field past `appearance` at the wrong offset.
  */
-export const PROTOCOL_VERSION = 10;
+export const PROTOCOL_VERSION = 11;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

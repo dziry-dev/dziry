@@ -784,3 +784,251 @@ test("a nested block inside a rule body is skipped, not misread", () => {
   // The nested block contributed nothing — it needs predicates that do not exist.
   expect(rules[0]!.decls.has("max-width")).toBe(false);
 });
+
+// ---------------------------------------------------------------------------
+// transform
+//
+// The interesting assertions here are against *measured* matrices rather than
+// against whatever the code happens to do. `probes/transform-composition.html`
+// read the exact matrix Chromium 151 computes for each of these lists; the
+// numbers below are those readings, and `composed` rebuilds them from the
+// decomposed fields the compiler stores. A wrong composition order still
+// produces a plausible-looking matrix, so this is the assertion that catches it.
+// ---------------------------------------------------------------------------
+
+/** CSS `matrix(a,b,c,d,e,f)`. */
+type Mat = [number, number, number, number, number, number];
+
+/** `p` then `q`, as CSS composes a list: the matrix product `P × Q`. */
+function mul(p: Mat, q: Mat): Mat {
+  const [pa, pb, pc, pd, pe, pf] = p;
+  const [qa, qb, qc, qd, qe, qf] = q;
+  return [
+    pa * qa + pc * qb,
+    pb * qa + pd * qb,
+    pa * qc + pc * qd,
+    pb * qc + pd * qd,
+    pa * qe + pc * qf + pe,
+    pb * qe + pd * qf + pf,
+  ];
+}
+
+const rad = (deg: number) => (deg * Math.PI) / 180;
+
+/**
+ * The decomposed fields composed back into one matrix, in the single order
+ * dziri stores: translate, rotate, skewX, skewY, scale. The engine has to do
+ * this same composition at paint time.
+ */
+function composed(f: Record<string, number>): Mat {
+  const g = (k: string, dflt: number) => (f[k] === undefined ? dflt : f[k]!);
+  let m: Mat = [1, 0, 0, 1, g("translateX", 0), g("translateY", 0)];
+  const r = rad(g("rotate", 0));
+  m = mul(m, [Math.cos(r), Math.sin(r), -Math.sin(r), Math.cos(r), 0, 0]);
+  m = mul(m, [1, 0, Math.tan(rad(g("skewX", 0))), 1, 0, 0]);
+  m = mul(m, [1, Math.tan(rad(g("skewY", 0))), 0, 1, 0, 0]);
+  m = mul(m, [g("scaleX", 1), 0, 0, g("scaleY", 1), 0, 0]);
+  return m;
+}
+
+function expectMatrix(actual: Mat, want: Mat): void {
+  for (let i = 0; i < 6; i++) expect(actual[i]!).toBeCloseTo(want[i]!, 4);
+}
+
+test("the decomposed fields compose to the matrix Chromium computes", () => {
+  // Every `want` here was read off Chromium 151 with getComputedStyle.
+  expectMatrix(composed(expand("transform", "translate(10px,20px) rotate(30deg) scale(2,3)")), [
+    1.73205, 1, -1.5, 2.59808, 10, 20,
+  ]);
+  expectMatrix(
+    composed(
+      expand("transform", "translate(10px,20px) rotate(30deg) skewX(10deg) skewY(5deg) scale(2,3)"),
+    ),
+    [1.67128, 1.16696, -1.04189, 2.86257, 10, 20],
+  );
+  expectMatrix(composed(expand("transform", "skewX(10deg) skewY(5deg)")), [
+    1.01543, 0.0874887, 0.176327, 1, 0, 0,
+  ]);
+  expectMatrix(composed(expand("transform", "rotate(45deg)")), [
+    0.707107, 0.707107, -0.707107, 0.707107, 0, 0,
+  ]);
+  // An eighth of a turn is the same matrix as 45 degrees, measured.
+  expectMatrix(composed(expand("transform", "rotate(0.125turn)")), [
+    0.707107, 0.707107, -0.707107, 0.707107, 0, 0,
+  ]);
+  expectMatrix(composed(expand("transform", "scale(2,3)")), [2, 0, 0, 3, 0, 0]);
+  // No transform at all is the identity, which is what makes scale's initial 1
+  // rather than 0 load-bearing.
+  expectMatrix(composed({}), [1, 0, 0, 1, 0, 0]);
+});
+
+test("the individual properties compose the same as the equivalent list", () => {
+  // Measured: `translate:10px 20px; rotate:30deg; scale:2 3` lands on the same
+  // rect as the one-line form. The cascade applies each property once into one
+  // patch, so that equivalence has to hold field by field here.
+  const separate: Record<string, number> = {};
+  expandDeclaration("translate", "10px 20px", separate as never);
+  expandDeclaration("rotate", "30deg", separate as never);
+  expandDeclaration("scale", "2 3", separate as never);
+
+  expectMatrix(
+    composed(separate),
+    composed(expand("transform", "translate(10px,20px) rotate(30deg) scale(2,3)")),
+  );
+});
+
+test("the source order of the individual properties does not matter", () => {
+  // Measured: the scrambled declaration order produces an identical rect,
+  // because the composition order is the property's and not the stylesheet's.
+  const scrambled: Record<string, number> = {};
+  expandDeclaration("scale", "2 3", scrambled as never);
+  expandDeclaration("rotate", "30deg", scrambled as never);
+  expandDeclaration("translate", "10px 20px", scrambled as never);
+
+  expectMatrix(composed(scrambled), [1.73205, 1, -1.5, 2.59808, 10, 20]);
+});
+
+test("angles take all four CSS units, and a bare one only at zero", () => {
+  expect(expand("rotate", "45deg").rotate).toBeCloseTo(45, 6);
+  expect(expand("rotate", "0.125turn").rotate).toBeCloseTo(45, 6);
+  expect(expand("rotate", "50grad").rotate).toBeCloseTo(45, 6);
+  expect(expand("rotate", "0.7853981634rad").rotate).toBeCloseTo(45, 6);
+  expect(expand("rotate", "0").rotate).toBe(0);
+  // Not a lenient 45 degrees — an invalid declaration a browser drops.
+  expect(() => expand("rotate", "45")).toThrow(/needs a unit/);
+});
+
+test("a percentage translate is kept apart from a px one", () => {
+  // It cannot be folded: the percentage is of the node's own border box, which
+  // is layout's answer and not the compiler's. Both halves travel.
+  expect(expand("transform", "translateX(50%)")).toEqual({
+    translateX: 0,
+    translateY: 0,
+    translatePctX: 0.5,
+    translatePctY: 0,
+  });
+  expect(expand("transform", "translate(10px, 25%)")).toEqual({
+    translateX: 10,
+    translateY: 0,
+    translatePctX: 0,
+    translatePctY: 0.25,
+  });
+});
+
+test("one argument means different things to translate, skew and scale", () => {
+  // `translate` and `skew` leave the other axis alone; `scale` copies to both.
+  expect(expand("transform", "translate(10px)").translateY).toBe(0);
+  expect(expand("transform", "skew(10deg)").skewY).toBeUndefined();
+  expect(expand("transform", "scale(2)")).toEqual({ scaleX: 2, scaleY: 2 });
+  expect(expand("transform", "scale(2,3)")).toEqual({ scaleX: 2, scaleY: 3 });
+});
+
+test("repeated functions of the same rank accumulate", () => {
+  // Two translations add and two scales multiply however they are nested, so
+  // these stay inside the one canonical order rather than breaking it.
+  expect(expand("transform", "translateX(10px) translateY(20px) translateX(5px)")).toEqual({
+    translateX: 15,
+    translateY: 20,
+    translatePctX: 0,
+    translatePctY: 0,
+  });
+  expect(expand("transform", "scale(2) scaleX(3)")).toEqual({ scaleX: 6, scaleY: 2 });
+  expect(expand("transform", "rotate(45deg) rotate(45deg)").rotate).toBeCloseTo(90, 6);
+});
+
+test("a transform list out of canonical order is refused, not reordered", () => {
+  // Measured: `rotate(90deg) translateX(100px)` puts the box 100px *below* where
+  // the reverse puts it, so silently reordering would render something the
+  // author cannot get a browser to show them.
+  expect(() => expand("transform", "rotate(45deg) translateX(10px)")).toThrow(
+    /not in an order dziri can store/,
+  );
+  expect(() => expand("transform", "scale(2) rotate(45deg)")).toThrow(/order/i);
+  // Same rank either way round, so this one is fine.
+  expect(() => expand("transform", "translateX(10px) translateY(5px)")).not.toThrow();
+});
+
+test("transform functions dziri cannot store are refused by name", () => {
+  expect(() => expand("transform", "matrix(1,0,0,1,10,20)")).toThrow(/matrix\(\) is not supported/);
+  expect(() => expand("transform", "translate3d(1px,2px,3px)")).toThrow(/3D/);
+  expect(() => expand("transform", "rotateZ(45deg)")).toThrow(/use that/);
+  expect(() => expand("transform", "wobble(3px)")).toThrow(/unknown function/);
+  expect(() => expand("transform", "translateX 10px")).toThrow(/not a function call/);
+});
+
+test("transform: none and the individual nones contribute nothing", () => {
+  expect(expand("transform", "none")).toEqual({});
+  expect(expand("translate", "none")).toEqual({});
+  expect(expand("rotate", "none")).toEqual({});
+  expect(expand("scale", "none")).toEqual({});
+});
+
+test("transform-origin defaults to the centre and resolves keywords", () => {
+  const origin = (v: string) => expand("transform-origin", v);
+
+  // Measured on a 100x50 box: unset reads back `50px 25px`, which is 50% 50%.
+  expect(origin("50% 50%")).toEqual({
+    originPxX: 0,
+    originPxY: 0,
+    originPctX: 0.5,
+    originPctY: 0.5,
+  });
+  expect(origin("0 0")).toEqual({ originPxX: 0, originPxY: 0, originPctX: 0, originPctY: 0 });
+  expect(origin("25% 75%")).toEqual({
+    originPxX: 0,
+    originPxY: 0,
+    originPctX: 0.25,
+    originPctY: 0.75,
+  });
+  expect(origin("10px 20px")).toEqual({
+    originPxX: 10,
+    originPxY: 20,
+    originPctX: 0,
+    originPctY: 0,
+  });
+
+  // Both keywords, so either order names the same point — measured, `top left`
+  // and `left top` both compute to `0px 0px`.
+  expect(origin("top left")).toEqual(origin("left top"));
+  expect(origin("left top")).toEqual({ originPxX: 0, originPxY: 0, originPctX: 0, originPctY: 0 });
+  expect(origin("bottom right")).toEqual({
+    originPxX: 0,
+    originPxY: 0,
+    originPctX: 1,
+    originPctY: 1,
+  });
+  expect(origin("center")).toEqual({
+    originPxX: 0,
+    originPxY: 0,
+    originPctX: 0.5,
+    originPctY: 0.5,
+  });
+
+  // One value sets X and centres Y — unless it names the Y axis, where it reads
+  // as `center top` and X stays centred.
+  expect(origin("left")).toEqual({ originPxX: 0, originPxY: 0, originPctX: 0, originPctY: 0.5 });
+  expect(origin("top")).toEqual({ originPxX: 0, originPxY: 0, originPctX: 0.5, originPctY: 0 });
+});
+
+test("transform-origin refuses what CSS refuses", () => {
+  // The swapped form needs *both* components to be keywords, so a Y keyword
+  // cannot sit in the X slot beside a length.
+  expect(() => expand("transform-origin", "top 10px")).toThrow(
+    /names the Y axis but sits in the X/,
+  );
+  expect(() => expand("transform-origin", "10px left")).toThrow(
+    /names the X axis but sits in the Y/,
+  );
+  expect(() => expand("transform-origin", "left right")).toThrow(/names the X axis twice/);
+  // The third value is a Z origin, and dziri is 2D.
+  expect(() => expand("transform-origin", "50% 50% 5px")).toThrow(/2D/);
+});
+
+test("opacity clamps rather than refusing, and takes a percentage", () => {
+  expect(expand("opacity", "0.5")).toEqual({ opacity: 0.5 });
+  expect(expand("opacity", "50%")).toEqual({ opacity: 0.5 });
+  // Legal CSS, and it means fully opaque.
+  expect(expand("opacity", "1.5")).toEqual({ opacity: 1 });
+  expect(expand("opacity", "-1")).toEqual({ opacity: 0 });
+  expect(() => expand("opacity", "opaque")).toThrow(/bad opacity/);
+});

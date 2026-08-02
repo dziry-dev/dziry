@@ -79,6 +79,17 @@ const PROPERTY: Record<string, string> = {
   accentColor: "accent-color",
   caretColor: "caret-color",
   appearance: "appearance",
+  opacity: "opacity",
+  // The decomposed transform. Only the fields that correspond to a whole CSS
+  // property are mapped; `skewX`, the percentage halves and the px origin have
+  // no 1:1 property and are listed as unmapped, like `radTL`.
+  translateX: "translate",
+  translateY: "translate",
+  rotate: "rotate",
+  scaleX: "scale",
+  scaleY: "scale",
+  originPctX: "transform-origin",
+  originPctY: "transform-origin",
 };
 
 /**
@@ -103,6 +114,16 @@ const DELIBERATE: Record<string, string> = {
   borderWidth:
     "spec `medium` (3px); dziri 0 — with no `border-style` field, style is always `none`, " +
     "and a none-border computes to width 0. Revisit if border-style lands.",
+  // The transform is stored decomposed, so its initial `none` has to be spelled
+  // as whatever each component's *identity* is — and for a scale that is 1, not
+  // 0. A literal reading of the spec value here would mean every untransformed
+  // node collapsed to a point.
+  scaleX: "spec `none`; dziri 1 — decomposed storage, and the identity scale is 1 (ir.ts)",
+  scaleY: "spec `none`; dziri 1 — same",
+  // Likewise the origin: the spec's initial is the percentage pair `50% 50%`,
+  // which this stores as the fraction 0.5 per axis.
+  originPctX: "spec `50% 50%`; dziri 0.5 — stored as a fraction, and per axis",
+  originPctY: "spec `50% 50%`; dziri 0.5 — same",
 };
 
 /**

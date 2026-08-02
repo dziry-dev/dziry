@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 10;
+pub const PROTOCOL_VERSION: u32 = 11;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,13 +15,13 @@ pub const PROTOCOL_VERSION: u32 = 10;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0xf826f5b5;
+pub const SCHEMA_HASH: u32 = 0x2fdea2e8;
 
 pub const TABLE_COUNT: usize = 8;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
-pub const MAX_FIELD_COUNT: usize = 58;
+pub const MAX_FIELD_COUNT: usize = 72;
 pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "nodes",
     "styles",
@@ -188,11 +188,26 @@ pub mod styles {
     pub const ACCENT_COLOR: usize = 55;
     pub const CARET_COLOR: usize = 56;
     pub const APPEARANCE: usize = 57;
+    pub const OPACITY: usize = 58;
+    pub const TRANSLATE_X: usize = 59;
+    pub const TRANSLATE_Y: usize = 60;
+    pub const TRANSLATE_PERCENT_X: usize = 61;
+    pub const TRANSLATE_PERCENT_Y: usize = 62;
+    pub const ROTATE: usize = 63;
+    pub const SCALE_X: usize = 64;
+    pub const SCALE_Y: usize = 65;
+    pub const SKEW_X: usize = 66;
+    pub const SKEW_Y: usize = 67;
+    pub const TRANSFORM_ORIGIN_PERCENT_X: usize = 68;
+    pub const TRANSFORM_ORIGIN_PERCENT_Y: usize = 69;
+    pub const TRANSFORM_ORIGIN_X: usize = 70;
+    pub const TRANSFORM_ORIGIN_Y: usize = 71;
 
-    pub const FIELD_COUNT: usize = 58;
+    pub const FIELD_COUNT: usize = 72;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [
         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2,
-        2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1,
+        2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1, 4, 4,
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
     ];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
         "bg",
@@ -253,6 +268,20 @@ pub mod styles {
         "accentColor",
         "caretColor",
         "appearance",
+        "opacity",
+        "translateX",
+        "translateY",
+        "translatePercentX",
+        "translatePercentY",
+        "rotate",
+        "scaleX",
+        "scaleY",
+        "skewX",
+        "skewY",
+        "transformOriginPercentX",
+        "transformOriginPercentY",
+        "transformOriginX",
+        "transformOriginY",
     ];
 
     /// Whether a change to this field can move a box.
@@ -266,6 +295,8 @@ pub mod styles {
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, false, false, false, false, false, false,
+        false, false, false, false, false, false, false, false, false, false, false, false, false,
+        false,
     ];
 }
 

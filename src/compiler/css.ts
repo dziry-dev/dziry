@@ -1532,6 +1532,333 @@ export function parseLength(raw: string): number {
   }
 }
 
+/**
+ * An angle in degrees.
+ *
+ * CSS has four units and this keeps all four, because the conversions are exact
+ * and the alternative is refusing `0.125turn` — which is how a stylesheet says
+ * "an eighth of a turn" without writing 45 and hoping. Measured: Chromium folds
+ * `rotate(0.125turn)` to the same matrix as `rotate(45deg)`.
+ *
+ * A unit is **required**, as CSS requires it, with unitless `0` the one exception
+ * the grammar allows. `rotate(45)` is not a slightly-informal 45 degrees; it is an
+ * invalid declaration that a browser drops, and accepting it here would render
+ * something no browser renders.
+ */
+export function parseAngle(raw: string): number {
+  const v = raw.trim().toLowerCase();
+  const m = v.match(/^(-?[\d.]+(?:e[-+]?\d+)?)(deg|rad|grad|turn)?$/);
+  if (!m) throw new CssError(`bad angle "${raw}"`);
+
+  const n = Number(m[1]);
+  if (!Number.isFinite(n)) throw new CssError(`bad angle "${raw}"`);
+
+  switch (m[2]) {
+    case "deg":
+      return n;
+    case "turn":
+      return n * 360;
+    case "grad":
+      return n * 0.9;
+    case "rad":
+      return (n * 180) / Math.PI;
+    case undefined:
+      if (n === 0) return 0;
+      throw new CssError(
+        `angle "${raw}" needs a unit — deg, rad, grad or turn. Only 0 may be bare, ` +
+          `and a browser drops the declaration rather than assuming degrees.`,
+      );
+    default:
+      throw new CssError(`bad angle unit in "${raw}"`);
+  }
+}
+
+/**
+ * A `<length-percentage>` split into the two halves dziri stores separately.
+ *
+ * They cannot be one number: a percentage here is relative to the node's own
+ * border box, which layout computes and the compiler does not know. So the px
+ * part is folded now and the fraction travels to the engine to be resolved
+ * against the laid-out size. See BROWSER-FACTS.md.
+ */
+function lengthPercent(raw: string): { px: number; pct: number } {
+  const v = raw.trim().toLowerCase();
+
+  if (v.endsWith("%")) {
+    const n = Number(v.slice(0, -1));
+    if (!Number.isFinite(n)) throw new CssError(`bad percentage "${raw}"`);
+    return { px: 0, pct: n / 100 };
+  }
+
+  // `calc()` mixing the two would need the px and the fraction kept apart all the
+  // way through the fold, and `foldCalc` returns one number. Refused by name,
+  // because the message it would otherwise give — "percentage lengths are not
+  // supported" — describes a different limitation than the real one.
+  if (v.includes("calc(") && v.includes("%")) {
+    throw new CssError(
+      `"${raw}" mixes a length and a percentage in one calc(), which dziri cannot ` +
+        `fold: the percentage resolves against the laid-out box and the length does not. ` +
+        `Write the two parts as separate transform functions instead.`,
+    );
+  }
+
+  return { px: parseLength(v), pct: 0 };
+}
+
+type Patch = Partial<Record<StyleField, number>>;
+type LengthPct = { px: number; pct: number };
+
+/** Adds one translation to whatever is already accumulated. */
+function addTranslate(out: Patch, x: LengthPct, y: LengthPct): void {
+  out.translateX = (out.translateX ?? 0) + x.px;
+  out.translateY = (out.translateY ?? 0) + y.px;
+  out.translatePctX = (out.translatePctX ?? 0) + x.pct;
+  out.translatePctY = (out.translatePctY ?? 0) + y.pct;
+}
+
+/** A scale factor: a bare number, or a percentage of it. */
+function scaleNumber(raw: string): number {
+  const v = raw.trim();
+  const n = v.endsWith("%") ? Number(v.slice(0, -1)) / 100 : Number(v);
+  if (!Number.isFinite(n)) throw new CssError(`bad scale factor "${raw}"`);
+  return n;
+}
+
+/**
+ * Where each transform function sits in the one order decomposed storage can
+ * hold: translate, then rotate, then skew, then scale.
+ *
+ * A list that runs backwards through this is a different matrix — measured, and
+ * not marginally: `rotate(90deg) translateX(100px)` puts the box 100px *below*
+ * where `translateX(100px) rotate(90deg)` puts it. So it is refused rather than
+ * reordered. Equal ranks are fine and compose, since two translations add and
+ * two scales multiply however they are nested.
+ */
+const TRANSFORM_RANK: Record<string, number> = {
+  translate: 0,
+  translatex: 0,
+  translatey: 0,
+  rotate: 1,
+  skew: 2,
+  skewx: 2,
+  skewy: 2,
+  scale: 3,
+  scalex: 3,
+  scaley: 3,
+};
+
+/** Transform functions dziri refuses by name, and why each one. */
+const TRANSFORM_REFUSED: Record<string, string> = {
+  matrix:
+    "a matrix would have to be decomposed back into components to be stored, and " +
+    "the decomposition is lossy for exactly the cases transitions care about",
+  matrix3d: "3D, and dziri is 2D",
+  translate3d: "3D, and dziri is 2D",
+  translatez: "3D, and dziri is 2D",
+  scale3d: "3D, and dziri is 2D",
+  scalez: "3D, and dziri is 2D",
+  rotate3d: "3D, and dziri is 2D",
+  rotatex: "3D, and dziri is 2D",
+  rotatey: "3D, and dziri is 2D",
+  rotatez: "a Z rotation is `rotate()` in 2D — use that",
+  perspective: "3D, and dziri is 2D",
+};
+
+/**
+ * One `transform` list, accumulated into the decomposed slots.
+ *
+ * The list is walked left to right and each function's rank must not go
+ * backwards; see `TRANSFORM_RANK` for why that is a refusal rather than a
+ * reordering.
+ */
+function applyTransformList(value: string, out: Patch): void {
+  let rank = -1;
+
+  for (const fn of splitTopLevel(value)) {
+    const m = fn.match(/^([a-zA-Z0-9]+)\((.*)\)$/s);
+    if (!m) {
+      throw new CssError(
+        `transform: "${fn}" is not a function call. The list is space-separated ` +
+          `functions, as in "translateX(10px) rotate(45deg)".`,
+      );
+    }
+
+    const name = m[1]!.toLowerCase();
+    const args = splitTopLevelCommas(m[2]!).map((a) => a.trim()).filter((a) => a !== "");
+
+    const why = TRANSFORM_REFUSED[name];
+    if (why !== undefined) throw new CssError(`transform: ${name}() is not supported — ${why}.`);
+
+    const r = TRANSFORM_RANK[name];
+    if (r === undefined) throw new CssError(`transform: unknown function "${name}()"`);
+
+    if (r < rank) {
+      throw new CssError(
+        `transform: "${value}" is not in an order dziri can store. Functions must run ` +
+          `translate, rotate, skew, scale — "${name}()" comes after something that ` +
+          `sorts later.\n` +
+          `  This is a refusal rather than a reorder because the two are genuinely ` +
+          `different matrices: rotate-then-translate moves the box along the *rotated* ` +
+          `axis. Write the functions in canonical order, or pre-compose them yourself.`,
+      );
+    }
+    rank = r;
+
+    const need = (n: number) => {
+      if (args.length < 1 || args.length > n) {
+        throw new CssError(`transform: ${name}() takes 1 to ${n} arguments, got ${args.length}`);
+      }
+    };
+
+    switch (name) {
+      case "translate": {
+        need(2);
+        const x = lengthPercent(args[0]!);
+        const y = args[1] === undefined ? { px: 0, pct: 0 } : lengthPercent(args[1]);
+        addTranslate(out, x, y);
+        break;
+      }
+      case "translatex":
+        need(1);
+        addTranslate(out, lengthPercent(args[0]!), { px: 0, pct: 0 });
+        break;
+      case "translatey":
+        need(1);
+        addTranslate(out, { px: 0, pct: 0 }, lengthPercent(args[0]!));
+        break;
+
+      case "rotate":
+        need(1);
+        out.rotate = (out.rotate ?? 0) + parseAngle(args[0]!);
+        break;
+
+      case "skew": {
+        need(2);
+        out.skewX = (out.skewX ?? 0) + parseAngle(args[0]!);
+        // One argument means no Y skew at all, which is not the same as copying X.
+        if (args[1] !== undefined) out.skewY = (out.skewY ?? 0) + parseAngle(args[1]);
+        break;
+      }
+      case "skewx":
+        need(1);
+        out.skewX = (out.skewX ?? 0) + parseAngle(args[0]!);
+        break;
+      case "skewy":
+        need(1);
+        out.skewY = (out.skewY ?? 0) + parseAngle(args[0]!);
+        break;
+
+      case "scale": {
+        need(2);
+        const sx = scaleNumber(args[0]!);
+        // Unlike translate and skew, one argument scales *both* axes.
+        const sy = args[1] === undefined ? sx : scaleNumber(args[1]);
+        out.scaleX = (out.scaleX ?? 1) * sx;
+        out.scaleY = (out.scaleY ?? 1) * sy;
+        break;
+      }
+      case "scalex":
+        need(1);
+        out.scaleX = (out.scaleX ?? 1) * scaleNumber(args[0]!);
+        break;
+      case "scaley":
+        need(1);
+        out.scaleY = (out.scaleY ?? 1) * scaleNumber(args[0]!);
+        break;
+    }
+  }
+}
+
+/** `transform-origin` keywords, as the fraction of the box each names. */
+const ORIGIN_KEYWORD: Record<string, number> = { left: 0, top: 0, center: 0.5, right: 1, bottom: 1 };
+/** Which axis a keyword is allowed to name — `center` is either. */
+const ORIGIN_AXIS: Record<string, "x" | "y" | "both"> = {
+  left: "x",
+  right: "x",
+  top: "y",
+  bottom: "y",
+  center: "both",
+};
+
+/**
+ * `transform-origin`, which is a small grammar with one real trap: the two
+ * keyword forms may be written in **either** order, so `top left` and `left top`
+ * are the same point, while two *lengths* are always x then y.
+ */
+function applyTransformOrigin(value: string, out: Patch): void {
+  const parts = splitTopLevel(value);
+  if (parts.length < 1 || parts.length > 3) {
+    throw new CssError(`transform-origin takes 1 to 3 values, got "${value}"`);
+  }
+  if (parts.length === 3) {
+    throw new CssError(
+      `transform-origin: "${value}" — the third value is a Z origin and dziri is 2D.`,
+    );
+  }
+
+  const CENTRE: LengthPct = { px: 0, pct: 0.5 };
+  const axisOf = (s: string) => ORIGIN_AXIS[s.trim().toLowerCase()];
+  const fracOf = (s: string): LengthPct => ({ px: 0, pct: ORIGIN_KEYWORD[s.trim().toLowerCase()]! });
+
+  let x: LengthPct;
+  let y: LengthPct;
+
+  if (parts.length === 1) {
+    const only = parts[0]!;
+    const axis = axisOf(only);
+    // A single value sets X and centres the other axis — except when the keyword
+    // names the Y axis, where `transform-origin: top` means `center top`.
+    if (axis === "y") {
+      x = CENTRE;
+      y = fracOf(only);
+    } else {
+      x = axis === undefined ? lengthPercent(only) : fracOf(only);
+      y = CENTRE;
+    }
+  } else {
+    const [a, b] = [parts[0]!, parts[1]!];
+    const ka = axisOf(a);
+    const kb = axisOf(b);
+
+    if (ka !== undefined && kb !== undefined) {
+      // Both keywords, and only then may they be written in either order —
+      // `top left` is the same point as `left top`. Measured: both compute to
+      // `0px 0px`.
+      if (ka !== "both" && kb !== "both" && ka === kb) {
+        throw new CssError(`transform-origin: "${value}" names the ${ka.toUpperCase()} axis twice`);
+      }
+      // The one that names an axis claims it; `center` takes whatever is left.
+      const xWord = ka === "x" ? a : kb === "x" ? b : ka === "both" ? a : b;
+      const yWord = ka === "y" ? a : kb === "y" ? b : ka === "both" ? b : a;
+      x = fracOf(xWord);
+      y = fracOf(yWord);
+    } else {
+      // Anything else is positional: first is X, second is Y. A Y-only keyword in
+      // the X slot is invalid CSS rather than a swap, because the reordered form
+      // requires *both* components to be keywords.
+      if (ka === "y") {
+        throw new CssError(
+          `transform-origin: "${value}" — "${a.trim()}" names the Y axis but sits in the ` +
+            `X position. The two may only be swapped when both are keywords.`,
+        );
+      }
+      if (kb === "x") {
+        throw new CssError(
+          `transform-origin: "${value}" — "${b.trim()}" names the X axis but sits in the ` +
+            `Y position. The two may only be swapped when both are keywords.`,
+        );
+      }
+      x = ka === undefined ? lengthPercent(a) : fracOf(a);
+      y = kb === undefined ? lengthPercent(b) : fracOf(b);
+    }
+  }
+
+  out.originPxX = x.px;
+  out.originPxY = y.px;
+  out.originPctX = x.pct;
+  out.originPctY = y.pct;
+}
+
 /** Splits a 1-to-4-value box shorthand into [top, right, bottom, left]. */
 /**
  * One `overflow` keyword, for either axis.
@@ -2231,6 +2558,92 @@ export function expandDeclaration(
           `effects on input types and on a select's picker, and dziri has neither yet).`,
       );
     }
+
+    // Opacity, and the one transform-adjacent property that is just a number.
+    // Clamped rather than refused out of range: CSS says `opacity` clamps to
+    // 0..1, and `opacity: 1.5` is a legal declaration meaning fully opaque.
+    case "opacity": {
+      const v = value.trim();
+      // A percentage is legal here and means what it says — `opacity: 50%`.
+      const n = v.endsWith("%") ? Number(v.slice(0, -1)) / 100 : Number(v);
+      if (!Number.isFinite(n)) throw new CssError(`bad opacity "${value}"`);
+      out.opacity = Math.min(1, Math.max(0, n));
+      return;
+    }
+
+    // The three individual transform properties, then the `transform` list.
+    //
+    // All four **accumulate** into the same decomposed slots rather than
+    // overwriting, because CSS composes them: measured, the order is `translate`,
+    // `rotate`, `scale`, then `transform`, and it is that order regardless of
+    // which was written first in the stylesheet. Accumulation is safe here
+    // because the caller applies each property exactly once per element — the
+    // cascade has already picked one winning declaration per property, and the
+    // patch object it accumulates into starts empty.
+    //
+    // Composition is by the operation each component takes: translations and
+    // angles add, scales multiply.
+    case "translate": {
+      // `translate: none` is the initial value and contributes nothing.
+      if (value.trim().toLowerCase() === "none") return;
+      const parts = splitTopLevel(value);
+      if (parts.length < 1 || parts.length > 3) {
+        throw new CssError(`translate takes 1 to 3 values, got "${value}"`);
+      }
+      if (parts.length === 3) {
+        throw new CssError(
+          `translate: "${value}" — the third value is a Z translation, and dziri ` +
+            `has no 3D transforms. Drop it.`,
+        );
+      }
+      const x = lengthPercent(parts[0]!);
+      // One value means the Y translation is zero, not the same as X.
+      const y = parts[1] === undefined ? { px: 0, pct: 0 } : lengthPercent(parts[1]);
+      addTranslate(out, x, y);
+      return;
+    }
+
+    case "rotate": {
+      const v = value.trim().toLowerCase();
+      if (v === "none") return;
+      // The axis forms — `rotate: x 45deg`, `rotate: 1 0 0 45deg` — are 3D.
+      if (splitTopLevel(v).length > 1) {
+        throw new CssError(
+          `rotate: "${value}" — the axis forms are 3D rotations and dziri is 2D. ` +
+            `Only a bare angle is supported.`,
+        );
+      }
+      out.rotate = (out.rotate ?? 0) + parseAngle(v);
+      return;
+    }
+
+    case "scale": {
+      const v = value.trim().toLowerCase();
+      if (v === "none") return;
+      const parts = splitTopLevel(v);
+      if (parts.length > 2) {
+        throw new CssError(
+          `scale: "${value}" — a third value is a Z scale and dziri is 2D.`,
+        );
+      }
+      const sx = scaleNumber(parts[0]!);
+      // One value scales both axes, unlike `translate` where it means "and zero".
+      const sy = parts[1] === undefined ? sx : scaleNumber(parts[1]);
+      out.scaleX = (out.scaleX ?? 1) * sx;
+      out.scaleY = (out.scaleY ?? 1) * sy;
+      return;
+    }
+
+    case "transform":
+      if (value.trim().toLowerCase() === "none") return;
+      applyTransformList(value, out);
+      return;
+
+    // `transform-origin` replaces rather than accumulates — it is one property
+    // with one value, and nothing else writes these slots.
+    case "transform-origin":
+      applyTransformOrigin(value, out);
+      return;
 
     // Handled by the caller, like `display`, and for a stronger reason: its value
     // is a *string*, and every style field is a number. It never reaches the style

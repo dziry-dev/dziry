@@ -11,7 +11,11 @@
  * arbitrarily would move focus to a different logical row, so a slot keeps its
  * key across updates where it can.
  */
-import { findRow, type CompiledUi } from "../ir.ts";
+// Split deliberately: `findRow` comes from its own module so this import stays
+// value-free of `ir.ts`, whose style tables the runtime does not need. The type
+// import below is erased.
+import { findRow } from "../find-row.ts";
+import type { CompiledUi } from "../ir.ts";
 import type { ItemPath } from "../compiler/item-path.ts";
 import { Dirty } from "./bindings.ts";
 import { batch, type ReadonlySignal } from "./signal.ts";

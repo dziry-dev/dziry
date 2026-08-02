@@ -92,6 +92,20 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
   ["accentColor", "accentColor"],
   ["caretColor", "caretColor"],
   ["appearance", "appearance"],
+  ["opacity", "opacity"],
+  ["translateX", "translateX"],
+  ["translateY", "translateY"],
+  ["translatePercentX", "translatePctX"],
+  ["translatePercentY", "translatePctY"],
+  ["rotate", "rotate"],
+  ["scaleX", "scaleX"],
+  ["scaleY", "scaleY"],
+  ["skewX", "skewX"],
+  ["skewY", "skewY"],
+  ["transformOriginPercentX", "originPctX"],
+  ["transformOriginPercentY", "originPctY"],
+  ["transformOriginX", "originPxX"],
+  ["transformOriginY", "originPxY"],
 ];
 
 /** How much room to leave beyond what the IR needs right now. */

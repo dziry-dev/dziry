@@ -217,6 +217,45 @@ export const STYLE_FIELDS = [
   ["accentColor", "Uint32Array", true, false],
   ["caretColor", "Uint32Array", true, false],
   ["appearance", "Uint8Array", false, false],
+  // Transform, stored **decomposed** — never as a matrix. Measured, not assumed:
+  // `rotate(0deg)` and `rotate(360deg)` have identical matrices, so a
+  // componentwise matrix lerp cannot animate between them, yet Chromium is at
+  // 180° halfway. `rotate(0) -> rotate(720deg)` is at 180° a quarter of the way
+  // through, so the angle is not normalised to one turn either. Decomposed
+  // scalars reproduce both; six matrix floats cannot. See BROWSER-FACTS.md.
+  //
+  // It is also already the shape of the `translate`/`rotate`/`scale` properties
+  // and of what Tailwind emits, and the two agree: `translate:10px 20px;
+  // rotate:30deg; scale:2 3` lands on the same rect as the equivalent one-line
+  // `transform`. The cost is that one canonical order — translate, rotate, skew,
+  // scale — is all this can hold, so a list written in another order is refused
+  // by the parser rather than quietly reordered.
+  //
+  // All paint-only, and that is measured too rather than assumed: parent height
+  // and sibling position are untouched by translate, scale and rotate alike.
+  ["opacity", "Float32Array", false, false],
+  // Two fields per axis because CSS allows both and Tailwind uses both:
+  // `translate-x-4` is px and `-translate-x-1/2` is a percentage of the node's
+  // *own* border box — which layout knows and the compiler does not, so the
+  // percentage cannot be folded here and travels to the engine unresolved.
+  ["translateX", "Float32Array", false, false],
+  ["translateY", "Float32Array", false, false],
+  ["translatePctX", "Float32Array", false, false],
+  ["translatePctY", "Float32Array", false, false],
+  // Degrees, deliberately *not* wrapped to 0..360: the winding is meaningful, and
+  // normalising here would silently turn a full spin into a no-op.
+  ["rotate", "Float32Array", false, false],
+  ["scaleX", "Float32Array", false, false],
+  ["scaleY", "Float32Array", false, false],
+  ["skewX", "Float32Array", false, false],
+  ["skewY", "Float32Array", false, false],
+  // `transform-origin`, same px/percentage split and for the same reason. The
+  // initial value is a percentage — `50% 50%` — so unlike every other field here
+  // the *default* is the one that needs the laid-out box.
+  ["originPctX", "Float32Array", false, false],
+  ["originPctY", "Float32Array", false, false],
+  ["originPxX", "Float32Array", false, false],
+  ["originPxY", "Float32Array", false, false],
 ] as const;
 
 export type StyleField = (typeof STYLE_FIELDS)[number][0];
@@ -309,6 +348,27 @@ export const INITIAL_STYLE: ComputedStyle = {
   // something the UA stylesheet asks for on the elements that are controls,
   // rather than something every element gets.
   appearance: Appearance.NONE,
+  opacity: 1,
+  // `transform: none` decomposed. Note which identity each field takes: 0 for the
+  // additive ones and **1 for the scales**, so an untransformed node composes to
+  // the identity matrix rather than collapsing to a point.
+  translateX: 0,
+  translateY: 0,
+  translatePctX: 0,
+  translatePctY: 0,
+  rotate: 0,
+  scaleX: 1,
+  scaleY: 1,
+  skewX: 0,
+  skewY: 0,
+  // `transform-origin: 50% 50%`, and it is a *percentage* default — measured, and
+  // the reason the engine rather than the compiler resolves it. A node that never
+  // mentions the property still needs its own laid-out width to know where its
+  // centre is.
+  originPctX: 0.5,
+  originPctY: 0.5,
+  originPxX: 0,
+  originPxY: 0,
 };
 
 /** Shape of the generated module, so the runtime can type its import. */
@@ -370,23 +430,11 @@ export function emptyVariantTable(): VariantTable {
 }
 
 /**
- * Index of `value` in a sorted array, or -1.
- *
- * Used for the state and interactive tables, both of which are consulted only for
- * the handful of nodes involved in the current interaction.
+ * Re-exported, not defined here: a value import from this module drags the whole
+ * of it into the bundle, and the runtime wants `findRow` without wanting
+ * `STYLE_FIELDS`. See `find-row.ts` for what that cost.
  */
-export function findRow(sorted: Int32Array, value: number): number {
-  let lo = 0;
-  let hi = sorted.length - 1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    const v = sorted[mid]!;
-    if (v === value) return mid;
-    if (v < value) lo = mid + 1;
-    else hi = mid - 1;
-  }
-  return -1;
-}
+export { findRow } from "./find-row.ts";
 
 /**
  * Dynamic lists, the one place node count is a runtime value.

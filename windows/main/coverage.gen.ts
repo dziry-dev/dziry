@@ -9,7 +9,7 @@
 
 export const COVERAGE = {
   /** `bun run tailwind-coverage` — classes from the installed tailwindcss that compile. */
-  tailwind: { pct: "41.2%", have: 9605, total: 23286 },
+  tailwind: { pct: "43.0%", have: 10007, total: 23286 },
 
   /**
    * `bun run css-coverage` — against the curated corpus in css-coverage/in-scope.txt,
@@ -17,7 +17,7 @@ export const COVERAGE = {
    * minus the non-goals" is ~376 properties including ones a UI framework will
    * never want, and a percentage against that would mislead.
    */
-  css: { pct: "56.3%", have: 71, total: 126, supported: 99 },
+  css: { pct: "61.1%", have: 77, total: 126, supported: 105 },
 
   /**
    * `bun run html-coverage` — elements whose default rendering already matches

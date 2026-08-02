@@ -74,6 +74,20 @@ export const styles = {
   accentColor: new Uint32Array([0,4278355143,4278355143,4278355143,4278355143,4278355143,4278355143,0,0]),
   caretColor: new Uint32Array(9),
   appearance: new Uint8Array(9),
+  opacity: new Float32Array(9).fill(1),
+  translateX: new Float32Array(9),
+  translateY: new Float32Array(9),
+  translatePctX: new Float32Array(9),
+  translatePctY: new Float32Array(9),
+  rotate: new Float32Array(9),
+  scaleX: new Float32Array(9).fill(1),
+  scaleY: new Float32Array(9).fill(1),
+  skewX: new Float32Array(9),
+  skewY: new Float32Array(9),
+  originPctX: new Float32Array(9).fill(0.5),
+  originPctY: new Float32Array(9).fill(0.5),
+  originPxX: new Float32Array(9),
+  originPxY: new Float32Array(9),
 } satisfies StyleTable;
 
 export const nodes = {

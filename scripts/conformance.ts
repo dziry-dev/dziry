@@ -154,6 +154,31 @@ const CORPUS: Check[] = [
     kind: "keyword",
     keywords: ["none", "auto", "base-select"],
   },
+
+  // Opacity and the transform.
+  //
+  // `transform` itself is deliberately absent: Chrome computes it to a
+  // `matrix(a,b,c,d,e,f)`, which is six numbers against dziri's ten decomposed
+  // fields, and this harness compares one field to one property. That comparison
+  // is worth having and it exists — `css.test.ts` composes the decomposed fields
+  // back into a matrix and asserts against the exact matrices Chromium 151
+  // produced, recorded in BROWSER-FACTS.md.
+  //
+  // What *does* fit here is the individual properties, which Chrome computes as
+  // plain scalars. They cover the same fields from the live browser, so the two
+  // together check both the storage and the composition.
+  { decl: "opacity: 0.4", field: "opacity", prop: "opacity", kind: "number" },
+  // `parseFloat` takes the leading number, so "45deg" reads as 45 and the
+  // two-value forms below assert their first component.
+  { decl: "rotate: 45deg", field: "rotate", prop: "rotate", kind: "number" },
+  { decl: "scale: 2", field: "scaleX", prop: "scale", kind: "number" },
+  { decl: "translate: 10px 20px", field: "translateX", prop: "translate", kind: "px" },
+  {
+    decl: "transform-origin: 10px 20px",
+    field: "originPxX",
+    prop: "transform-origin",
+    kind: "px",
+  },
 ];
 
 const page = (decl: string) =>
