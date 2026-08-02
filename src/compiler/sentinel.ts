@@ -1,24 +1,26 @@
 /**
  * Un-internable markers, for values that must not evaluate away.
  *
- * Three parts of the compiler hand out objects that stand for something no build
- * can know — a list row, a route parameter, the active route — and all three face
- * the same hazard: JavaScript will happily stringify one. `` `${t.title}` `` used to
- * produce `"[item.title]"`, which interned as an ordinary literal and rendered
- * frozen into every row while the build printed a success line. A plausible-looking
- * wrong answer is the worst outcome available, so a stringified recorder produces a
- * marker instead, and `internString` refuses markers.
+ * Two parts of the compiler hand out objects that stand for something no build can
+ * know — a list row and a route parameter — and both face the same hazard:
+ * JavaScript will happily stringify one. `` `${t.title}` `` used to produce
+ * `"[item.title]"`, which interned as an ordinary literal and rendered frozen into
+ * every row while the build printed a success line. A plausible-looking wrong answer
+ * is the worst outcome available, so a stringified recorder produces a marker
+ * instead, and `internString` refuses markers.
  *
  * This is that mechanism, once. It was written three times before anyone noticed —
  * the marks were byte-identical in shape and the predicates differed only in which
- * constant they closed over.
+ * constant they closed over. The third, `sentinel("route")`, is gone: it existed to
+ * make `router.path.value` compile to a binding, which the reactive rewrite now does
+ * for every signal. Sharing the plumbing is what made that deletion a one-line
+ * change instead of an archaeology exercise.
  *
  * **The kinds stay distinct**, which is the part worth keeping. A list item's read
- * is a path into a row; a parameter's is a name the matcher binds; the route's is a
- * signal to subscribe to. They arrive at the same functions and mean different
- * things, so one shared brand would let the compiler mistake one for another
- * exactly where the difference decides where the value comes from. Sharing the
- * plumbing is not sharing the identity.
+ * is a path into a row; a parameter's is a name the matcher binds. They arrive at
+ * the same functions and mean different things, so one shared brand would let the
+ * compiler mistake one for another exactly where the difference decides where the
+ * value comes from. Sharing the plumbing is not sharing the identity.
  */
 
 export type Sentinel = {

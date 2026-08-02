@@ -21,7 +21,7 @@
  */
 import { computed, setCompiling, signal } from "../src/runtime/signal.ts";
 import { jsx, type Child } from "../src/compiler/jsx-runtime.ts";
-import { useRouter, withWindowRoute, routePathBehind } from "../src/compiler/route.ts";
+import { useRouter, withWindowRoute } from "../src/compiler/route.ts";
 import { buildRefIndex, resolveRefs } from "../src/compiler/resolve-refs.ts";
 import type { CompileResult } from "../src/compiler/compile.ts";
 import type { DynText, Element, Node, TextPart } from "../src/compiler/html.ts";
@@ -203,7 +203,7 @@ const partText = (p: TextPart): string => {
   // Identity is what resolves to an import name. `router.path` arrives wrapped, so
   // unwrap for display — otherwise the row shows the marker its `.value` returns
   // and reads as though the route were bound to a literal.
-  const source = (routePathBehind(p.source) ?? p.source) as { value?: unknown } | null;
+  const source = p.source as { value?: unknown } | null;
   const named = Object.entries(EXPORTS).find(([, v]) => v === source)?.[0];
   return named ? `signal ${named}` : `signal<${JSON.stringify(source?.value)}>`;
 };

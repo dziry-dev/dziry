@@ -16,15 +16,9 @@ import {
   withPage,
   withWindowRoute,
   routeMatchOf,
-  routePathBehind,
-  hasRouteSentinel,
-  splitRouteSentinel,
-  RouteValueLeakError,
   type Args,
 } from "./route.ts";
 import { isSignal, signal } from "../runtime/signal.ts";
-import { jsx } from "./jsx-runtime.ts";
-import type { DynText, Element } from "./html.ts";
 import {
   isParamSentinel,
   isRouteParam,
@@ -124,10 +118,13 @@ test("useRouter hands back the window's own route signal, by identity", () => {
   const route = signal("/");
 
   withWindowRoute(route, () => {
-    // Wrapped, so that `.value` yields a marker rather than the initial route — but
-    // the wrapper has to lead back to the exported signal, or `resolve-refs` could
-    // not resolve it to the export name the artifact imports.
-    expect(routePathBehind(useRouter().path)).toBe(route);
+    // The same object, not a wrapper. It has to be, or `resolve-refs` could not
+    // resolve it to the export name the artifact imports.
+    //
+    // It *was* a Proxy, so that `.value` could yield a marker the compiler bound and
+    // a comparison could be refused by an opaque type. The reactive rewrite does both
+    // for every signal now, so the route is an ordinary one again.
+    expect(useRouter().path).toBe(route);
   });
 });
 
@@ -154,126 +151,18 @@ test("matches() is a live cell, not a comparison the compiler evaluated away", (
   });
 });
 
-test("router.path.value yields a marker, not the route it happened to start on", () => {
-  const route = signal("/");
 
-  withWindowRoute(route, () => {
-    const router = useRouter();
-
-    // The read is right and only early: there is no route while compiling. So it
-    // gives back something the compiler can replace rather than the initial value,
-    // which would freeze `/` into the page and compile clean.
-    // Opaque to `tsc` on purpose — `RoutePath` is not a `string`, so it cannot be
-    // compared to one. It *is* one at run time, which is what this asserts.
-    const read = router.path.value as unknown as string;
-    expect(hasRouteSentinel(read)).toBe(true);
-    expect(read).not.toBe("/");
-
-    // And nothing an author could type is mistaken for one.
-    expect(hasRouteSentinel("/")).toBe(false);
-    expect(hasRouteSentinel("products/$id")).toBe(false);
-
-    // The comparison the marker cannot save, refused by `bun run check` instead.
-    // `===` calls no user code, so there is no build-time hook to rewrite it — the
-    // only defence is a type with no overlap. A *branded* string does not give one:
-    // TS treats `string & {…}` as comparable to a string literal, so the first
-    // version of this passed and the nav stayed dark. `RoutePath` is opaque.
-    // @ts-expect-error — RoutePath and "layout" have no overlap.
-    expect(router.path.value === "layout").toBe(false);
-    // @ts-expect-error — and neither do the signal and a string.
-    expect(router.path === "layout").toBe(false);
-  });
-});
-
-test("interpolation around the read survives, so a template literal compiles", () => {
-  const route = signal("/");
-
-  withWindowRoute(route, () => {
-    const router = useRouter();
-
-    // `` `at ${router.path.value}` `` has to reach the compiler as a literal and a
-    // binding — the shape a dynamic text run already has — or the surrounding text
-    // would be lost and only the route would render.
-    expect(splitRouteSentinel(`at ${router.path.value}`)).toEqual([
-      { literal: "at " },
-      { route: true },
-    ]);
-
-    expect(splitRouteSentinel(`${router.path.value} — dziri`)).toEqual([
-      { route: true },
-      { literal: " — dziri" },
-    ]);
-
-    // A bare read is one part, with no empty literals on either side.
-    expect(splitRouteSentinel(`${router.path.value}`)).toEqual([{ route: true }]);
-  });
-});
-
-test("a rendered .value compiles to a binding on the window's route signal", () => {
-  const route = signal("/");
-
-  withWindowRoute(route, () => {
-    const router = useRouter();
-    // What the author wrote: `<div>at {router.path.value}</div>`.
-    const node = jsx("div", { children: ["at ", router.path.value] }) as Element;
-
-    // Not text. If this were `{ type: "text" }` the page would render whatever the
-    // route was initialised with, for ever, and the build would say nothing — the
-    // failure this whole mechanism exists to make impossible.
-    const [child] = node.children;
-    expect(child?.type).toBe("dyntext");
-    expect((child as DynText).parts).toEqual([{ literal: "at " }, { source: route }]);
-  });
-});
-
-test("a .value the compiler cannot bind is named, not silently dropped", () => {
+test("the route passes the brand check, so {router.path} is a binding", () => {
   const route = signal("/");
 
   withWindowRoute(route, () => {
     const { path } = useRouter();
 
-    // Rendered text is the only placement with somewhere to put a subscription.
-    // The others each fail *quietly* if left alone: a class nothing matches, an id
-    // nothing selects, an inline style resolved once. That is the shape of failure
-    // the marker exists to prevent, so every one of them is a named error.
-    const div = (props: object) => () => jsx("div", { ...props, children: "x" });
-
-    expect(div({ className: path.value })).toThrow(RouteValueLeakError);
-    expect(div({ className: `tab-${path.value}` })).toThrow(RouteValueLeakError);
-    expect(div({ id: path.value })).toThrow(RouteValueLeakError);
-    expect(div({ style: { color: path.value } })).toThrow(RouteValueLeakError);
-
-    // And the message shows the read in place, so the line is findable.
-    expect(div({ id: path.value })).toThrow(/\$\{router\.path\.value\}/);
-    expect(div({ id: path.value })).toThrow(/router\.matches\("products"\)/);
-  });
-});
-
-test("the binding is the signal itself, so resolve-refs can name it", () => {
-  const route = signal("/");
-
-  withWindowRoute(route, () => {
-    const node = jsx("div", { children: useRouter().path.value }) as Element;
-    const parts = (node.children[0] as DynText).parts;
-
-    // By identity, and the *unwrapped* signal: the artifact imports the export the
-    // window declared, and the guard proxy is not that object.
-    expect((parts[0] as { source: unknown }).source).toBe(route);
-  });
-});
-
-test("the guarded path is still the signal everything downstream needs", () => {
-  const route = signal("/");
-
-  withWindowRoute(route, () => {
-    const { path } = useRouter();
-
-    // It has to pass `isSignal`, or `{router.path}` would not be recognised as a
-    // binding and would render as an object.
+    // Without this, `{router.path}` would not be recognised as a binding and would
+    // render as an object — which is exactly what a wrapper that broke `isSignal`
+    // would cause.
     expect(isSignal(path)).toBe(true);
-    // And it has to lead back to the exported signal, or `resolve-refs` could not
-    // find the name the artifact imports.
-    expect(routePathBehind(path)).toBe(route);
+    expect(path).toBe(route);
   });
 });
 
@@ -328,10 +217,10 @@ test("the window scope and the page scope are independent", () => {
   // route can read both. They are set by different things for different spans:
   // the route is the window's, the page cursor moves per file.
   withWindowRoute(route, () => {
-    expect(routePathBehind(useRouter().path)).toBe(route);
+    expect(useRouter().path).toBe(route);
     withPage(PRODUCT, () => {
       expect(useRoute("products/$id").path).toBe("products/$id");
-      expect(routePathBehind(useRouter().path)).toBe(route);
+      expect(useRouter().path).toBe(route);
     });
   });
 

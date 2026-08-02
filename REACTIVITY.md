@@ -25,8 +25,8 @@ window host, and `bun test`. `DZIRI_REACTIVE=0` turns it off.
 
 The `reactivity` route in the demo renders every form, and the golden holds it.
 
-**Still to do:** §5.3 (delete the route's private marker), §5.4 (`Source`), §5.5 (`args.id`),
-and removing `.value` from the public type — `Ops` still carries it for framework code.
+**Still to do:** §5.4 (`Source`), §5.5 (`args.id`), and removing `.value` from the public type —
+`Ops` still carries it for framework code, which is not rewritten.
 
 **Known limit, refused loudly:** an expression compiled into a cell reaches `ui.gen.ts` as
 *text*, so it can only name module exports. `` {`at ${router.path}`} `` is a build error
@@ -189,7 +189,7 @@ here.
 | 2 | **item recorder** | `item-path.ts` | **stays** — `{t.title}` in `.map` |
 | 3 | **param recorder** | `route-args.ts` | stays; §5.5 makes it emit |
 | 4 | **array proxy** | `compileTimeArray`, `signal.ts:235` | **stays** — §2 depends on it |
-| 5 | **route proxy** | `guardedPath`, `route.ts:253` | **deletes** |
+| 5 | **route proxy** | `guardedPath` — **deleted, §5.3** | done |
 | 6 | **sentinels** ×3 | `sentinel.ts` | route kind deletes; item/param stay |
 | 7 | **derived-cell memo** | `routeMatches`, `route.ts:159` | **deletes** — §5.4 |
 
@@ -275,12 +275,19 @@ line rather than a frozen value:
 **Deleting a property is the backstop.** That is what makes the plugin safe to trust: if it fails
 to rewrite something, the build fails loudly instead of rendering a stale number.
 
-### 5.3 — the route stops being special
+### 5.3 — the route stops being special ✅ done
 
 `guardedPath`, `UNWRAP`, `RoutePath`, `RouteValueLeakError`, `hasRouteSentinel`,
-`splitRouteSentinel`, `sentinel("route")` all delete. `router.path` becomes an ordinary signal.
-`router.matches(p)` becomes `computed(() => router.path.startsWith(p))` written by the author, or
-stays as sugar — decide when §5.4 lands.
+`splitRouteSentinel`, `routePathBehind`, `currentRoute`, `routeParts` and
+`sentinel("route")` are gone. `router.path` is the window's signal, by identity —
+`useRouter().path === route` again.
+
+Roughly 120 lines of compiler, plus the marker guards in `classList`, `styleAttr`, `jsx` and
+`checkAuthored`. Every one of them existed to make one read compile and one comparison a type
+error, which the rewrite does for every signal. `golden` and `characterize` both reported no
+change, which is the evidence that nothing was load-bearing.
+
+`router.matches(p)` stays: it is prefix-aware, which `p === route` is not.
 
 ### 5.4 — unify on `Source`
 

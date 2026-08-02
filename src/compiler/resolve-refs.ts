@@ -12,7 +12,7 @@
  * than a silently dead binding.
  */
 import type { CompileResult } from "./compile.ts";
-import { routeMatchOf, routePathBehind } from "./route.ts";
+import { routeMatchOf } from "./route.ts";
 import { inlineSourceOf, depsOf } from "./reactive-runtime.ts";
 
 export type RefSource = {
@@ -160,7 +160,7 @@ export function resolveRefs(
     const named: [unknown, ResolvedRef][] = [];
 
     for (const dep of deps) {
-      const ref = index.get(routePathBehind(dep) ?? dep);
+      const ref = index.get(dep);
       if (ref) named.push([dep, ref]);
       if (!ref) {
         throw new RefError(
@@ -214,7 +214,7 @@ export function resolveRefs(
     // the compiler can bind rather than the route the signal happened to start on.
     // The wrapper is not the object the window exported, so it has to come off
     // before the name lookup — otherwise every `{router.path}` is unresolvable.
-    const ref = index.get(routePathBehind(value) ?? value);
+    const ref = index.get(value);
     if (!ref) {
       throw new RefError(
         `${what} is not a module-level export of a known state module.\n` +
