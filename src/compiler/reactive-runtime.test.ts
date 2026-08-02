@@ -12,6 +12,7 @@
  */
 import { expect, test } from "bun:test";
 import { bump, doubled, drop, isBig, isThree, langCount, langs, parity, reset, shout, tick } from "../../windows/main/reactivity.ts";
+import { local, LocalStateError } from "./reactive-runtime.ts";
 
 /** Reads go through `.value` here — this file is framework code, not rewritten. */
 const read = <T,>(cell: { value: T }): T => cell.value;
@@ -85,6 +86,69 @@ test("`.set` takes a value or a function of the previous one", () => {
 
   reset();
   expect(read(tick)).toBe(3);
+});
+
+/**
+ * Component-local state, driven through the compiled artifact.
+ *
+ * The only reference kind that does not survive the file boundary by being imported:
+ * `const locals = [signal(0)]` is *declared* in `ui.gen.ts`, and the inline handlers
+ * are functions it contains rather than names it imports. So the round trip is the
+ * only thing that proves it — the transform and the emitter can each look right while
+ * disagreeing about which slot is which.
+ */
+test("a component-local signal round-trips through the artifact", async () => {
+  const ui = (await import("../../windows/main/ui.gen.ts")) as unknown as {
+    textBindings: { node: number; parts: { signal?: { value: number } }[] }[];
+    handlers: { node: number; fn: () => void }[];
+  };
+
+  // Found by shape rather than by node id, which moves whenever the page does. An
+  // inline handler is a function the artifact *contains*, so its own source names the
+  // local it writes — nothing else in the module looks like that.
+  const inline = ui.handlers.filter((h) => /\blocal_\d+\b/.test(h.fn.toString()));
+  expect(inline).toHaveLength(2);
+
+  const plus = inline.find((h) => h.fn.toString().includes("+"))!;
+  const minus = inline.find((h) => h.fn.toString().includes("-"))!;
+
+  /** Every signal any binding holds, so a change can be located rather than assumed. */
+  const cells = ui.textBindings
+    .flatMap((b) => b.parts)
+    .map((p) => p.signal)
+    .filter((s): s is { value: number } => s !== undefined);
+
+  const snapshot = () => cells.map((c) => c.value);
+  const before = snapshot();
+
+  plus.fn();
+  const after = snapshot();
+
+  // Exactly one bound cell moved, and by one — which is the round trip: the handler
+  // the artifact declared writes the signal the artifact declared, and a *binding*
+  // reads it. Any of those three disagreeing shows up here as zero changes.
+  const moved = before.map((v, i) => v !== after[i]).filter(Boolean);
+  expect(moved).toHaveLength(1);
+
+  const which = before.findIndex((v, i) => v !== after[i]);
+  expect(after[which]).toBe(before[which]! + 1);
+
+  minus.fn();
+  expect(snapshot()[which]).toBe(before[which]);
+});
+
+test("a local whose initial value cannot be written down is refused", () => {
+  // The artifact re-creates it as `signal(<initial>)`, so the initial has to survive
+  // being written down. Refusing beats emitting a module that cannot express it.
+  expect(() => local(new Map(), "cache")).toThrow(LocalStateError);
+  expect(() => local(new Map(), "cache")).toThrow(/cannot be written down/);
+  expect(() => local(() => 1, "fn")).toThrow(LocalStateError);
+
+  // JSON-shaped initials are all fine.
+  expect(() => local(0, "n")).not.toThrow();
+  expect(() => local("", "s")).not.toThrow();
+  expect(() => local([1, 2], "xs")).not.toThrow();
+  expect(() => local({ a: 1, b: [true, null] }, "o")).not.toThrow();
 });
 
 test("a derived over an array follows a write to the array", () => {

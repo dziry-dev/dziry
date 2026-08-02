@@ -30,6 +30,7 @@ import {
 import { parseHtml, type DynList, type Element, type Node, type TextPart } from "./html.ts";
 import { isItemSentinel, ItemExpressionError } from "./item-path.ts";
 import { isParamSentinel, ParamExpressionError } from "./route-args.ts";
+import { allLocals } from "./reactive-runtime.ts";
 import { hasState, type VariantCompiled } from "./variant-compile.ts";
 import {
   compareCascade,
@@ -1357,17 +1358,28 @@ export function emit(
   // signals it reads. Named imports here rather than the namespace the transform
   // uses in authored files: this module is generated, so nothing can collide with
   // them.
-  const inlineText = result.textBindings
-    .flatMap((b) => b.parts)
-    .map((p) => ("export" in p ? p.export : ""))
-    .join("\n");
+  const locals = allLocals();
+
+  /**
+   * Everything the artifact will contain *as source* rather than as a name.
+   *
+   * Scanned rather than tracked with flags, because the strings are produced in four
+   * places — text bindings, handlers, patches, the locals registry — and a flag set in
+   * three of them is an import missing from the fourth.
+   */
+  const emitted = [
+    ...result.textBindings.flatMap((b) => b.parts).map((p) => ("export" in p ? p.export : "")),
+    ...result.handlers.map((h) => h.name),
+    ...locals.map((l) => `signal(${JSON.stringify(l.initial)})`),
+  ].join("\n");
 
   const needsComputed =
-    (variants?.patches ?? []).some((p) => p.exportExpression) || inlineText.includes("computed(");
+    (variants?.patches ?? []).some((p) => p.exportExpression) || emitted.includes("computed(");
   const runtimeNames = [
     ...(needsComputed ? ["computed"] : []),
-    ...(/\$\(/.test(inlineText) ? ["$"] : []),
-    ...(/\$m\(/.test(inlineText) ? ["$m"] : []),
+    ...(locals.length > 0 ? ["signal"] : []),
+    ...(/\$\(/.test(emitted) ? ["$"] : []),
+    ...(/\$m\(/.test(emitted) ? ["$m"] : []),
   ];
 
   const importLines = [
@@ -1404,15 +1416,26 @@ export function emit(
     return name;
   };
 
+  /**
+   * A resolved reference, which is a name *or* a piece of source the compiler wrote.
+   *
+   * Three things now have no export name to import and reach the artifact as source
+   * instead: a `router.matches()` cell, an expression the reactive rewrite wrapped,
+   * and component-local state with its inline handlers. Each is recognised by the
+   * shape `resolve-refs` produced rather than by a flag threaded through four types.
+   *
+   * `identifier` still guards everything else, which is the check that stops an
+   * unresolved reference becoming `{ fn:  }` on disk beside a success line.
+   */
+  const EMITTED = [/^computed\(\(\) => /, /^local_\d+$/, /^\(/];
+
+  const resolved = (text: string, what: string): string =>
+    EMITTED.some((shape) => shape.test(text)) ? text : identifier(text, what);
+
   const partSource = (part: TextPart): string => {
     if ("literal" in part) return `{ literal: ${JSON.stringify(part.literal)} }`;
     if ("export" in part) {
-      // A cell with no export name is written as the expression it was built from —
-      // `{count * 2}` from the reactive rewrite, the same device `router.matches()`
-      // uses for patches. `identifier` still guards the ordinary case, which is what
-      // catches an unresolved reference before it becomes an unparseable artifact.
-      const isExpression = part.export.startsWith("computed(() => ");
-      return `{ signal: ${isExpression ? part.export : identifier(part.export, "a text binding")} }`;
+      return `{ signal: ${resolved(part.export, "a text binding")} }`;
     }
     if ("item" in part) return `{ path: ${JSON.stringify(part.item)} }`;
     throw new Error("unresolved text binding — resolveRefs was not run");
@@ -1425,8 +1448,34 @@ export function emit(
     )
     .join("\n");
 
+  /**
+   * Component-local signals, re-created here.
+   *
+   * The one kind of reference that does not survive the file boundary by being
+   * imported. A signal declared inside a component has no export to import, so the
+   * artifact declares it — which is why the initial value has to be writable down, and
+   * why `local()` refuses one that is not.
+   *
+   * Not exported: nothing outside this module has a name for these, and exporting them
+   * would put them in the runtime surface for no reason.
+   */
+  const localsSource =
+    locals.length === 0
+      ? ""
+      : `/** Component-local state. Declared here because it has no name to import. */\n` +
+        locals
+          .map(
+            (l, i) =>
+              `const local_${i} = signal(${JSON.stringify(l.initial)});   // ${l.name}`,
+          )
+          .join("\n") +
+        `\n\n`;
+
   const handlerSource = result.handlers
-    .map((h) => `  { node: ${h.node}, fn: ${identifier(h.name, `the handler on node ${h.node}`)} },`)
+    .map(
+      (h) =>
+        `  { node: ${h.node}, fn: ${resolved(h.name, `the handler on node ${h.node}`)} },`,
+    )
     .join("\n");
 
   const listBindingSource = result.lists
@@ -1535,7 +1584,7 @@ export const variants = {
 /** Nodes that can receive input, sorted. Emitted, never inferred. */
 export const interactive = ${typedArray("Int32Array", interactive)};
 
-/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
+${localsSource}/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [
 ${textBindingSource}
 ] satisfies TextBinding[];

@@ -291,6 +291,12 @@ export function transformReactive(
   const shorthand: Node[] = [];
   /** `router.path` — a member whose result is itself a signal. */
   const unwraps: Node[] = [];
+  /** `const count = signal(0)` inside a component — needs a name the artifact can hold. */
+  const componentLocals: { call: Node; name: string }[] = [];
+  /** `onClick={() => …}` — an arrow with no export name. */
+  const inlineHandlers: Node[] = [];
+  /** Function bodies, so "declared inside a component" is decidable by containment. */
+  const functions: [number, number][] = [];
   const frozen: [number, number][] = [];
   const seen = new Set<number>();
 
@@ -305,6 +311,14 @@ export function transformReactive(
 
     frozen.push(...frozenRangesOf(node));
 
+    if (
+      node.type === "FunctionDeclaration" ||
+      node.type === "FunctionExpression" ||
+      node.type === "ArrowFunctionExpression"
+    ) {
+      functions.push([node.start, node.end]);
+    }
+
     // JSX: a brace either becomes a `computed` or is left completely alone.
     //
     // No middle ground, and that is the point. `{router.path}`, `{todos.map(…)}` and
@@ -314,7 +328,19 @@ export function transformReactive(
     // guarantee legible: what the transform did not wrap, it did not touch.
     if (node.type === "JSXExpressionContainer") {
       const inner = node.expression as Node | undefined;
-      if (!inner || !isWrappable(inner)) return false;
+      if (!inner) return false;
+
+      // `onClick={() => count.set(count + 1)}` — not wrapped, but walked into, which
+      // is a third case the two-way split missed. A handler body is ordinary code and
+      // its reads have to unwrap; skipping the subtree left `count + 1` adding to a
+      // signal object. It also has no export name, so it is recorded for the emitter
+      // the same way an inline expression is.
+      if (inner.type === "ArrowFunctionExpression") {
+        inlineHandlers.push(inner);
+        return true;
+      }
+
+      if (!isWrappable(inner)) return false;
       wraps.push(inner);
       return true;
     }
@@ -378,6 +404,41 @@ export function transformReactive(
     // property read on something that was never a signal.
     if (!members.some((m) => m.start === (node.object as Node | undefined)?.start)) return true;
     unwraps.push(node);
+    return true;
+  });
+
+  /**
+   * Component-local state, and the handlers that write it.
+   *
+   * A third pass, because both need `functions` complete: "inside a component" is
+   * decided by containment, and a pre-order walk has not seen the enclosing function
+   * when it reaches a node near the top of the file.
+   */
+  const insideFunction = (node: Node): boolean =>
+    functions.some(([start, end]) => node.start > start && node.end <= end);
+
+  walk(parsed.program as unknown as Node, (v) => {
+    const { node, parent, field } = v;
+    if (isTypeNode(node.type)) return false;
+
+    // `const count = signal(0)` in a component body. Rewritten to `local(0, "count")`,
+    // which registers it so the emitter can declare it in the artifact — see
+    // `reactive-runtime.ts`. At module scope it is already nameable and left alone.
+    if (
+      node.type === "CallExpression" &&
+      (node.callee as Node | undefined)?.type === "Identifier" &&
+      ((node.callee as Node).name as string) === "signal" &&
+      insideFunction(node) &&
+      parent?.type === "VariableDeclarator" &&
+      field === "init"
+    ) {
+      const id = parent.id as Node | undefined;
+      if (id?.type === "Identifier") {
+        componentLocals.push({ call: node, name: id.name as string });
+        return true;
+      }
+    }
+
     return true;
   });
 
@@ -447,6 +508,23 @@ export function transformReactive(
   // argument is how it gets there.
   for (const node of wraps) {
     out.appendLeft(node.start, `${NS}.inline(() => `);
+    out.appendRight(node.end, `, ${JSON.stringify(rendered(node.start, node.end))})`);
+    touched = true;
+  }
+
+  // `signal(0)` -> `local(0, "count")`. Only the callee is replaced, so the arguments
+  // keep whatever they were and are evaluated in their own scope.
+  for (const { call, name } of componentLocals) {
+    const callee = call.callee as Node;
+    out.overwrite(callee.start, callee.end, `${NS}.local`);
+    out.appendLeft(call.end - 1, `, ${JSON.stringify(name)}`);
+    touched = true;
+  }
+
+  // `() => …` -> `handler(() => …, "…")`, carrying its source so the artifact can
+  // contain the function rather than a name for it.
+  for (const node of inlineHandlers) {
+    out.appendLeft(node.start, `${NS}.handler(`);
     out.appendRight(node.end, `, ${JSON.stringify(rendered(node.start, node.end))})`);
     touched = true;
   }

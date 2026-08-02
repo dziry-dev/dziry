@@ -289,6 +289,52 @@ change, which is the evidence that nothing was load-bearing.
 
 `router.matches(p)` stays: it is prefix-aware, which `p === route` is not.
 
+### 5.6 — component-local state
+
+```tsx
+function Counter() {
+  const count = signal(0);              // ← today: build error
+  return (
+    <div>
+      {count}
+      <button onClick={() => count.set(count + 1)}>+</button>
+    </div>
+  );
+}
+```
+
+**There is no render and no unmount**, which is worth saying before anything else, because it
+is what makes this tractable rather than what makes it hard. A component body runs *once*, at
+build time, and is then erased. So a `signal()` inside one is created exactly once — which is
+the semantics `useState` is trying to approximate, arrived at for free. What is missing is not
+a lifecycle. It is a **name**: `ui.gen.ts` holds `{ signal: count }`, and `resolve-refs` finds
+that name by matching identity against module exports. A signal born in a function has no
+export to match.
+
+So the compiler declares it instead. `local(initial, name)` registers the signal at build time
+and the emitter writes the registry into the artifact:
+
+```ts
+// ui.gen.ts
+const locals = [signal(0)];
+export const textBindings = [{ node: 12, slot: 3, parts: [{ signal: locals[0] }] }];
+export const handlers = [{ node: 14, fn: () => locals[0].set($(locals[0]) + 1) }];
+```
+
+An inline arrow handler reaches the artifact the same way an inline *expression* already does —
+as text, with each local substituted for its registry slot. That reuses `inline()`'s machinery
+rather than adding a second one.
+
+**Why a registry rather than hoisting.** Hoisting `const count = signal(0)` to module scope is
+the obvious move and it needs scope analysis to be safe: the initialiser might close over a
+parameter, references have to be renamed, and a nested shadow would be renamed wrongly — every
+one of those failing *silently*. A registry needs none of it. The transform only rewrites the
+call; the compiler does the naming from identity, which it already does for everything else.
+
+**The limit.** A local's initial value has to be emittable, because the artifact re-creates it:
+`signal(0)`, `signal("")`, `signal([])` are fine, `signal(new Map())` is not, and that is a
+named error rather than a broken artifact.
+
 ### 5.4 — unify on `Source`
 
 ```ts

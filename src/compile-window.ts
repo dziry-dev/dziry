@@ -30,6 +30,7 @@ import { configOf, routeSignalOf, WindowError } from "./compiler/window.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./compiler/window-tree.ts";
 import { setCompiling, signal } from "./runtime/signal.ts";
 import { installReactivePlugin, reactiveEnabled } from "./compiler/reactive-plugin.ts";
+import { resetLocals } from "./compiler/reactive-runtime.ts";
 import type { Element, Node } from "./compiler/html.ts";
 import { routeChain, type RouteNodes } from "./ir.ts";
 
@@ -130,6 +131,10 @@ async function compileWindow(window: WindowDef): Promise<Compiled> {
   // Modules are imported and called with `compiling` set, so `.value` on an
   // array signal yields the recording proxy and `defineQuery`/`source`/`effect`
   // stay inert. Same contract as the single-entry driver, over more files.
+  // Per window, because the registry is emitted: two windows sharing it would put the
+  // first one's locals in the second one's module.
+  resetLocals();
+
   setCompiling(true);
   let shell: Element;
   let pages: PageTree[];

@@ -59,6 +59,33 @@ function LangRow({ badge, name, kind }: Props & { badge: string; name: string; k
   );
 }
 
+/**
+ * State that belongs to one component, declared where it is used.
+ *
+ * `signal(0)` here has no export name, and `ui.gen.ts` can only hold names — so the
+ * compiler registers it and declares `const locals = [signal(0)]` in the artifact.
+ * The inline arrow reaches the same module as source, with `n` substituted for its
+ * registry slot. Neither needs a state module, and neither can be reused: this
+ * component's state is its own.
+ */
+function LocalCounter() {
+  const n = signal(0);
+
+  return (
+    <div className="flex flex-row items-center gap-3">
+      <div className={cn(CODE, "w-64")}>const n = signal(0)</div>
+      <div className="w-8 text-sm font-semibold text-zinc-100">{n}</div>
+      <button className={BTN} onClick={() => n.set(n - 1)}>
+        −
+      </button>
+      <button className={BTN} onClick={() => n.set(n + 1)}>
+        +
+      </button>
+      <div className="text-xs text-zinc-500">no state module · declared in the component</div>
+    </div>
+  );
+}
+
 export default function Reactivity() {
   return (
     <div className="flex flex-col gap-5">
@@ -191,6 +218,21 @@ export default function Reactivity() {
             key: (l: Lang) => l.id,
           })}
         </div>
+      </div>
+
+      {/* Local state: `signal()` inside the component, with an inline handler.
+          Neither has an export name, so the artifact declares the signal in a
+          registry and contains the handler as source. There is no render and no
+          unmount here — the body runs once at build time — so "created once" comes
+          for free and the only missing piece was a name. */}
+      <div className={CARD}>
+        <div className="heading text-base font-semibold text-zinc-100">
+          Component-local state
+        </div>
+        <div className="muted text-xs text-zinc-400">
+          const n = signal(0) — declared in the component, not in a state module
+        </div>
+        <LocalCounter />
       </div>
 
       <div className={CARD}>

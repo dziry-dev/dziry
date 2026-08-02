@@ -13,7 +13,13 @@
  */
 import type { CompileResult } from "./compile.ts";
 import { routeMatchOf } from "./route.ts";
-import { inlineSourceOf, depsOf } from "./reactive-runtime.ts";
+import {
+  allLocals,
+  depsOf,
+  handlerSourceOf,
+  inlineSourceOf,
+  localSlotOf,
+} from "./reactive-runtime.ts";
 
 export type RefSource = {
   /** Import specifier the generated module should use, e.g. "./state.ts". */
@@ -203,7 +209,67 @@ export function resolveRefs(
     };
   };
 
+  /**
+   * A component-local signal, which the artifact declares rather than imports.
+   *
+   * `locals[3]` is not a name, so `record` is deliberately not called — there is no
+   * import to add. That is the one thing distinguishing this from every other
+   * reference: everything else survives the file boundary by being imported, and this
+   * one survives by being *re-created* on the other side.
+   */
+  const asLocal = (value: unknown): ResolvedRef | null => {
+    const slot = localSlotOf(value);
+    if (slot === undefined) return null;
+    return { specifier: "", name: localName(slot), expression: localName(slot) };
+  };
+
+  /**
+   * `onClick={() => count.set(count + 1)}` — an arrow the artifact contains as text.
+   *
+   * Locals are substituted for their registry slots, by the name each was declared
+   * with. Textual, and bounded: `local()` recorded the name, so the substitution is a
+   * word-boundary replace of an identifier the transform itself chose to record.
+   */
+  const asHandlerSource = (value: unknown): ResolvedRef | null => {
+    const text = handlerSourceOf(value);
+    if (text === undefined) return null;
+
+    let out = text;
+
+    // The unwrap helpers are removed rather than kept, because a local's type is known
+    // here in a way it is not in authored code: `local_0` *is* a signal, so
+    // `local_0.set(…)` and `local_0.value` are both better than routing through `$m`
+    // and `$` — which return `unknown`, so the emitted module would not type-check.
+    for (const [slot, entry] of allLocals().entries()) {
+      const name = localName(slot);
+      const id = escape(entry.name);
+      out = out
+        .replace(new RegExp(`__dzr\\.\\$m\\(${id}, "(set|subscribe)"\\)`, "g"), name)
+        .replace(new RegExp(`__dzr\\.\\$m\\(${id}, "(\\w+)"\\)`, "g"), `${name}.value`)
+        .replace(new RegExp(`__dzr\\.\\$\\(${id}\\)`, "g"), `${name}.value`)
+        .replace(new RegExp(`\\b${id}\\b`, "g"), name);
+    }
+
+    // Whatever remains has to stand on its own in the artifact. `$` and `$m` do — they
+    // are runtime exports the module already imports — but an identifier that named
+    // something inside the component does not, and there is no dependency list to
+    // check it against the way an inline expression has.
+    out = out.replaceAll("__dzr.", "");
+    return { specifier: "", name: out, expression: out };
+  };
+
+  /** The name the artifact declares a local under. */
+  const localName = (slot: number): string => `local_${slot}`;
+
+  const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
   const lookup = (value: unknown, what: string): ResolvedRef => {
+    const asLocalRef = asLocal(value);
+    if (asLocalRef) return asLocalRef;
+
+    const asHandler = asHandlerSource(value);
+    if (asHandler) return asHandler;
+
     const inline = asInline(value);
     if (inline) return inline;
 

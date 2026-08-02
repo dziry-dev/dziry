@@ -202,6 +202,60 @@ test("a wrapped brace still has its reads rewritten inside", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Component-local state
+// ---------------------------------------------------------------------------
+
+/**
+ * `signal()` in a component body becomes `local()`, which registers it.
+ *
+ * There is no render and no unmount here — a component body runs once, at build time
+ * — so the signal is created once for free. What it lacks is a *name*, since
+ * `ui.gen.ts` holds `{ signal: count }` and `resolve-refs` matches identity against
+ * module exports. Registering it lets the emitter declare it instead.
+ */
+test("a signal declared in a component is registered under its own name", () => {
+  expect(run("function C() { const count = signal(0); return count }")).toBe(
+    'function C() { const count = __dzr.local(0, "count"); return __dzr.$(count) }',
+  );
+});
+
+test("a signal at module scope is already nameable and left alone", () => {
+  const source = "const count = signal(0);\nexport { count };";
+  expect(run(source)).toBe(source);
+});
+
+/**
+ * An inline arrow handler, which local state needs to be worth having.
+ *
+ * A component-local signal nothing can write to is not state, and a handler written
+ * in the markup has no export name either — so it reaches the artifact as source, the
+ * same way an inline expression does.
+ */
+test("an inline handler is recorded with its source, and its reads unwrap", () => {
+  const out = run("const el = <button onClick={() => count.set(count + 1)} />");
+  expect(out).toContain('__dzr.handler(() => __dzr.$m(count, "set").set(__dzr.$(count) + 1),');
+  expect(out).toContain(JSON.stringify('() => __dzr.$m(count, "set").set(__dzr.$(count) + 1)'));
+});
+
+test("a named handler is untouched, because identity already resolves it", () => {
+  const source = "const el = <button onClick={increment} />";
+  expect(run(source)).toBe(source);
+});
+
+/**
+ * The bug this shape exposed: a handler body was being skipped entirely.
+ *
+ * A JSX brace was all-or-nothing — wrapped, or left alone — and an arrow is neither.
+ * Skipping its subtree left `count + 1` adding to a signal object.
+ */
+test("a handler body is walked, not skipped like an identity brace", () => {
+  // `other` is a call callee and stays; `count` is a read and unwraps.
+  expect(run("const el = <button onClick={() => other(count > 3)} />")).toContain(
+    "() => other(__dzr.$(count) > 3)",
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Mechanics
 // ---------------------------------------------------------------------------
 
