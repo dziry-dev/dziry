@@ -151,6 +151,14 @@ transition-duration
 transition-timing-function
 transition-delay
 
+# ── generated content ────────────────────────────────────────────────────────
+# In scope on its own merits, not because it is now supported: Tailwind ships
+# `content-['…']` and `content-none`, and HTML-ELEMENT-COVERAGE-RESEARCH.md lists
+# `content` among the ten properties a UA stylesheet needs. It was missing from
+# this file, so `css-coverage` was reporting it as "supported but outside the
+# corpus" — which is the tool saying the denominator is wrong, not the code.
+content
+
 # ── interactivity ────────────────────────────────────────────────────────────
 cursor
 pointer-events

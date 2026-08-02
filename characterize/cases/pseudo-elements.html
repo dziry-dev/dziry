@@ -1,0 +1,14 @@
+<!-- Generated boxes: the mechanism that replaces a UA shadow tree.
+
+     `.check` is what a UA control stylesheet looks like once `input[type=checkbox]`
+     is a real selector — a box plus a tick, the tick present in every state and
+     revealed by colour. Nothing here is drawn by the engine.
+
+     `.quote` is the ordinary case: both boxes around real content, so their
+     position in the child chain is frozen rather than assumed. -->
+<body>
+  <div class="check"></div>
+  <div class="check on"></div>
+  <q class="quote">mid</q>
+  <div class="bare"></div>
+</body>

@@ -179,6 +179,129 @@ test(":checked and :disabled are predicates like any other", () => {
   expect(styles.bg[both]!).toBe(0xffcccccc);
 });
 
+test("::before and ::after emit real nodes, in document order", () => {
+  // The substitution for a shadow tree. A generated box is an ordinary emitted
+  // node, so it lays out in Taffy and paints in the normal pass — which is what a
+  // synthesised paint-time rect would not do, and what a shadow tree would have
+  // needed a whole parallel mechanism for.
+  const html = `<body><div class="q">mid</div></body>`;
+  const css = `
+    .q::before { content: "«" }
+    .q::after  { content: "»" }
+  `;
+
+  const ui = toCompiledUi(compile(html, css));
+  const div = 1;
+  const kids: number[] = [];
+  for (let n = ui.nodes.firstChild[div]!; n !== -1; n = ui.nodes.nextSibling[n]!) kids.push(n);
+  expect(kids.length).toBe(3);
+
+  const textOf = (n: number) => ui.strings[ui.nodes.text[n]!];
+  expect(textOf(kids[0]!)).toBe("«");
+  expect(textOf(kids[1]!)).toBe("mid");
+  expect(textOf(kids[2]!)).toBe("»");
+
+  // Flagged, so the engine resolves their predicates against the originating
+  // element rather than themselves.
+  expect([...ui.generated]).toEqual([kids[0]!, kids[2]!]);
+});
+
+test("a pseudo-element with no content renders nothing", () => {
+  // CSS is explicit: absent, `normal` or `none` content means the box is not
+  // rendered at all. A rule that exists only for its other declarations is the
+  // ordinary case, not an error.
+  const ui = toCompiledUi(
+    compile(`<body><div class="a"></div></body>`, `.a::before { color: #ff0000 }`),
+  );
+  expect(ui.nodes.firstChild[1]).toBe(-1);
+  expect([...ui.generated]).toEqual([]);
+
+  const none = toCompiledUi(
+    compile(`<body><div class="a"></div></body>`, `.a::before { content: none; color: #ff0000 }`),
+  );
+  expect(none.nodes.firstChild[1]).toBe(-1);
+});
+
+test("a generated box gets its own variant run from the element's state", () => {
+  // `.btn:hover::before` is the shape a UA control stylesheet is written in, and
+  // it only works because a pseudo-element goes through the same mask/run
+  // resolution the element does rather than a lesser second path.
+  const html = `<body><div class="btn"></div></body>`;
+  const css = `
+    .btn::before          { content: "\\2713"; color: transparent }
+    .btn:checked::before  { color: #ffffff }
+  `;
+
+  const ui = toCompiledUi(compile(html, css));
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const box = ui.nodes.firstChild[1]!;
+  expect(ui.strings[ui.nodes.text[box]!]).toBe("✓");
+
+  const row = [...ui.variants.node].indexOf(box);
+  expect(row).toBeGreaterThanOrEqual(0);
+  const mask = ui.variants.mask[row]!;
+  expect(mask).toBe(Predicate.CHECKED);
+
+  const start = ui.variants.runStart[row]!;
+  expect(styles.fg[ui.variants.slots[start]!]!).toBe(0x00000000);
+  expect(styles.fg[ui.variants.slots[start + compactBits(Predicate.CHECKED, mask)]!]!).toBe(
+    0xffffffff,
+  );
+});
+
+test("a generated box is never interactive, however many states it styles", () => {
+  // Found by the characterize corpus, and the failure is counter-intuitive: the
+  // box carries a hover variant, so the "has a state style" rule made it
+  // interactive — and `hit_test` returns the innermost interactive node, so the
+  // pointer over a checkbox's tick would make the *tick* hovered and leave the
+  // checkbox un-hovered. `.check:hover` would stop applying precisely when the
+  // pointer was over the middle of the control.
+  const html = `<body><div class="check"></div></body>`;
+  const css = `
+    .check:hover         { border-color: #0284c7 }
+    .check::before        { content: "\\2713" }
+    .check:hover::before  { color: #a1a1aa }
+  `;
+
+  const ui = toCompiledUi(compile(html, css));
+  const box = ui.nodes.firstChild[1]!;
+
+  expect([...ui.generated]).toEqual([box]);
+  expect([...ui.interactive]).toEqual([1]);
+  expect([...ui.interactive]).not.toContain(box);
+});
+
+test("content may not depend on a state, and says so", () => {
+  // The silent-failure case this refuses: reading only the resting cascade would
+  // compile a tick that never appears, which reads as a stylesheet bug rather
+  // than a missing feature. Text is one string slot; a variant run carries style
+  // ids only.
+  expect(() =>
+    compile(
+      `<body><div class="c"></div></body>`,
+      `.c::before { content: "" } .c:checked::before { content: "x" }`,
+    ),
+  ).toThrow(/content` cannot depend on `:checked`/);
+});
+
+test("a pseudo-element rule does not style its originating element", () => {
+  // Separate cascades. `p::before { color }` colouring the `<p>` would be the
+  // most obvious possible bug and the easiest to introduce, since both resolve
+  // through the same collectDecls.
+  const ui = toCompiledUi(
+    compile(
+      `<body><p class="p">x</p></body>`,
+      `.p { color: #111111 } .p::before { content: "!"; color: #ff0000 }`,
+    ),
+  );
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  expect(styles.fg[ui.nodes.style[1]!]!).toBe(0xff111111);
+
+  // And the box inherits the element's colour only where it says nothing itself.
+  const box = ui.nodes.firstChild[1]!;
+  expect(styles.fg[ui.nodes.style[box]!]!).toBe(0xffff0000);
+});
+
 test("hover and focus still merge when a conditional class is present", () => {
   // The gap this closes. `compileVariants` re-interns every style over the
   // vector of its values across variants, so with a toggle in the document the

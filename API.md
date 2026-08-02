@@ -164,6 +164,18 @@ Native-*looking* and native-*behaving*, drawn by us in Skia. Not OS widgets — 
 an `HWND` and Taffy cannot lay one out, so child windows would contradict the thesis rather than
 merely cost more. Sequencing and the full reasoning live in ROADMAP under A3 and C2.
 
+**A control's internals are ordinary nodes, and there is no shadow DOM.** Every part is styleable
+with plain CSS — Tailwind is one way to write it, not the surface itself. This is not a dziri
+invention: the customizable-`<select>` model MDN documents *is* light-DOM children —
+`<select><button><selectedcontent></selectedcontent></button><option>…</option></select>` — with
+`appearance: base-select` as the opt-in and `::picker(select)` defined as "all descendants except
+the first `<button>`", which is a structural grouping a compiler computes. So there is nothing to
+pierce: no `::part`, no `::-webkit-*`, no `:host` (which dziri parses and matches nothing, by
+design). A generated box — `::before` today, `::picker-icon` later — is a real emitted node, so it
+lays out in Taffy, paints in the ordinary pass, and has a hit region, none of which a shadow tree or
+a paint-time rect would give. Its per-node predicates come from its originating element, so
+`.check:hover::before` means what it says.
+
 The authoring surface is deliberately not a new concept. A control's state is a `state()` value, and
 its styling is the variant machinery that already backs `:hover`:
 
@@ -202,6 +214,8 @@ A3's, and it is why the rows below still say planned even though the compiler is
 | `<Checkbox>` `<Switch>` `<Radio>` `<Toggle>` `<Tabs>` | planned | C2 · Tier 1a (needs A3) |
 | `:checked` / `:disabled` variants | **compiler done** — predicate bits in `schema.ts`, `PREDICATE_PSEUDO` in `compile.ts`; not yet driven by the engine | A3 |
 | `:indeterminate` | planned — same shape and cost, held back until a control can be in that state | A3 |
+| `::before` / `::after` + `content` | **done** — generated boxes are real emitted nodes; this is what replaces a UA shadow tree | A1 |
+| `::picker(select)` `::picker-icon` `::checkmark` `::placeholder` `::marker` | planned — same machinery as `::before`, refused by name until the controls exist | C2 |
 | `accent-color` `caret-color` `appearance` | **done** — `STYLE_FIELDS`, checked in `conformance` and `spec-audit` | A1 |
 | `resize`, `field-sizing: content` | **non-goal** — see ROADMAP C2; in `css-coverage`'s `OUT_OF_SCOPE_NAMES` | — |
 | `<Input>` | planned | C2 · Tier 1b (needs A5) |
@@ -565,6 +579,8 @@ pool.bind(inst, row);
 Structure, style slots, binding shapes and handler sites stay compiled. Only instantiation and
 linking are runtime — a generalization of what list arenas already do from "N siblings" to
 "a tree of instances." `shapeHash` still covers the template; pooled regions are outside it.
+(`shapeHash` does not exist — see the note under Cross-cutting rules. This design assumed the
+construction pass, so whatever replaces that check inherits this requirement.)
 
 **Capacity is pre-sized at the viewport bound and never grows during scroll.** ROADMAP records
 that a full Taffy rebuild is "reserved for the first tick and a **capacity change**" — so pool
@@ -630,10 +646,26 @@ handles and writes* are the bug.
 
 | Class | Caught by |
 |---|---|
-| non-deterministic (`Date.now`, random, env) | `shapeHash` divergence → hard abort. Already covered. |
+| non-deterministic (`Date.now`, random, env) | **nothing today.** See below — the mechanism this row used to name no longer exists |
 | build-time reads | nothing needed — this is a feature |
 | persistent handles (timer, socket, watcher) | **planned:** active-handle diff per import |
 | writes (fs, network, db) | framework wrappers only; **planned:** global stubs |
+
+**On that first row.** It read "`shapeHash` divergence → hard abort. Already covered" until
+2026-08-02, and it was wrong in both columns. `shapeHash` was never implemented — `git log -S`
+over `src/` and `native-src/` finds nothing — and it belongs to the **construction pass** in
+framework-design.md: a second evaluation of the components at startup, harvesting signals by
+*ordinal*, aborting when the shape diverges from the build.
+
+That design did not ship. What shipped is `src/compiler/resolve-refs.ts`, which harvests signals
+by **identity, mapped to an export name** — which is why signals must be module-level exports.
+So there is no second shape to compare against, and `shapeHash` is not merely unbuilt: it guards
+a mechanism this architecture does not have. ROADMAP carries no construction pass either.
+
+A replacement has to be a different mechanism — most plausibly throwing stubs for `Date.now`,
+`Math.random` and `process.env` in the compile process, alongside the handle diff below. Until
+one exists, a `Date.now()` at module scope silently bakes the build timestamp into the app and
+nothing reports it.
 
 Planned diagnostics, one mechanism two phases:
 ```ts

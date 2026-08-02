@@ -141,6 +141,7 @@ function start(
     nodes: generated.nodes,
     variants: generated.variants,
     interactive: generated.interactive,
+    generated: generated.generated,
     textBindings: generated.textBindings,
     handlers: generated.handlers,
     lists: generated.lists,

@@ -116,6 +116,7 @@ export async function run(registry: WindowRegistry, options: RunOptions = {}): P
     nodes: generated.nodes,
     variants: generated.variants,
     interactive: generated.interactive,
+    generated: generated.generated,
     textBindings: generated.textBindings,
     handlers: generated.handlers,
     lists: generated.lists,

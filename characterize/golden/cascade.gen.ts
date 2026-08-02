@@ -106,6 +106,9 @@ export const variants = {
 /** Nodes that can receive input, sorted. Emitted, never inferred. */
 export const interactive = new Int32Array([]);
 
+/** `::before` / `::after` boxes, sorted. Their predicates come from the parent. */
+export const generated = new Int32Array([]);
+
 /** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [
 

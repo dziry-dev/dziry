@@ -17,6 +17,7 @@ import {
   ELEM_SIZE,
   ELEM_VIEW,
   ENUMS,
+  NodeFlags,
   PROTOCOL_VERSION,
   TABLES,
   type EnumDef,
@@ -24,6 +25,25 @@ import {
 } from "../src/protocol/schema.ts";
 
 const ROOT = join(import.meta.dir, "..");
+
+/**
+ * Node flag bits, rendered for each side from `schema.ts`'s one definition.
+ *
+ * These used to be written out by hand in this file, twice — once as TypeScript
+ * and once as Rust — while `schema.ts` also declared them, so the "single source
+ * of truth" had three copies and only the schema's was authoritative on paper.
+ * Adding `GENERATED` is what surfaced it: the flag existed in the schema, the
+ * generator kept emitting the old pair, and nothing failed. A disagreement here
+ * is the same silent class as a wrong offset — the engine would test a bit
+ * neither side agreed on — and `SCHEMA_HASH` does not cover flags.
+ */
+const flagsTs = Object.entries(NodeFlags)
+  .map(([name, bit]) => `  ${name}: 1 << ${Math.log2(bit)},`)
+  .join("\n");
+
+const flagsRust = Object.entries(NodeFlags)
+  .map(([name, bit]) => `    pub const ${name}: u8 = 1 << ${Math.log2(bit)};`)
+  .join("\n");
 
 /**
  * A structural fingerprint of the tables: every table name, field name and
@@ -232,8 +252,7 @@ ${tables}
 
 /// Node flag bits.
 pub mod flags {
-    pub const INTERACTIVE: u8 = 1 << 0;
-    pub const MEASURABLE: u8 = 1 << 1;
+${flagsRust}
 }
 
 ${enums}
@@ -331,8 +350,7 @@ ${views}
 };
 
 export const NodeFlags = {
-  INTERACTIVE: 1 << 0,
-  MEASURABLE: 1 << 1,
+${flagsTs}
 } as const;
 
 ${ENUMS.map(tsEnum).join("\n\n")}

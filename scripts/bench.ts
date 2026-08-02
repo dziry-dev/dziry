@@ -93,6 +93,7 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     nodes: m.nodes,
     variants: m.variants,
     interactive: m.interactive,
+    generated: m.generated,
     textBindings: m.textBindings,
     handlers: m.handlers,
     lists: m.lists,

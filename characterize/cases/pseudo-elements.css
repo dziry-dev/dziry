@@ -1,0 +1,30 @@
+body { background: #09090b; color: #e4e4e7; font-size: 14px; padding: 12px; gap: 8px }
+
+/* A checkbox, drawn entirely by CSS. `appearance: none` is the author saying
+   "stop drawing the platform control"; the tick is a generated box. */
+.check {
+  appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 3px;
+  border-color: #71717a;
+  background: #ffffff;
+  accent-color: #0284c7;
+}
+.check::before { content: "\2713"; color: transparent; font-size: 12px }
+
+/* `.on` stands in for `:checked` until the engine can set that bit. Both are
+   ordinary predicates to everything downstream, which is the point. */
+.check.on { background: #0284c7; border-color: #0284c7 }
+.check.on::before { color: #ffffff }
+
+/* Hover on the *originating element* reaching the generated box — the case that
+   needs `NodeFlags.GENERATED`, since a generated box is never hit-tested. */
+.check:hover { border-color: #0284c7 }
+.check:hover::before { color: #a1a1aa }
+
+/* Both boxes around real content, to freeze child order. */
+.quote::before { content: "\201C" ; color: #71717a }
+.quote::after  { content: "\201D" ; color: #71717a }
+
+/* A rule with no `content`: renders nothing, and must intern no style. */
+.bare::before { color: #ff0000 }

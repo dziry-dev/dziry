@@ -295,6 +295,7 @@ async function dziriWalk(dir: string, s: Scenario, i: number): Promise<Row[]> {
     nodes: m.nodes,
     variants: m.variants,
     interactive: m.interactive,
+    generated: m.generated,
     textBindings: m.textBindings,
     handlers: m.handlers,
     lists: m.lists,

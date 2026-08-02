@@ -112,6 +112,9 @@ export const variants = {
 /** Nodes that can receive input, sorted. Emitted, never inferred. */
 export const interactive = new Int32Array([9,10,11,12,13,14,15,16,17,146,148,150,161,162,185,186,189,193,195,199,201,205,207,211,213,217,219,223,225,229,231,235,271,272,324,338,339,359,360,361,459,460,528,529]);
 
+/** `::before` / `::after` boxes, sorted. Their predicates come from the parent. */
+export const generated = new Int32Array([]);
+
 /** Component-local state. Declared here because it has no name to import. */
 const local_0 = signal(0);   // n
 

@@ -14,8 +14,10 @@ import {
   expandDeclaration,
   formatCssError,
   parseColor,
+  parseContent,
   parseCss,
   parseLength,
+  parseSelector,
 } from "./css.ts";
 
 /** Parses and returns the rendered diagnostic, or `null` if it parsed. */
@@ -394,6 +396,53 @@ test("appearance folds <compat-auto> to auto and keeps base-select distinct", ()
   // system nor a picker to apply them to. Refusing beats accepting-and-ignoring.
   expect(() => expand("appearance", "textfield")).toThrow(CssError);
   expect(() => expand("appearance", "menulist-button")).toThrow(CssError);
+});
+
+test("content takes strings, none and normal, and refuses the rest", () => {
+  expect(parseContent(`"x"`)).toBe("x");
+  // A hex escape, which is how a stylesheet writes a glyph without depending on
+  // the file's encoding. The optional trailing space is part of the escape.
+  expect(parseContent(`"\\2713"`)).toBe("✓");
+  expect(parseContent(`"\\2713 ok"`)).toBe("✓ok");
+  expect(parseContent(`'\\201C'`)).toBe("\u201C");
+  expect(parseContent(`"\\"q\\""`)).toBe(`"q"`);
+  // A content-list of strings concatenates.
+  expect(parseContent(`"a" "b"`)).toBe("ab");
+
+  // Not an error case: CSS says the pseudo-element is simply not rendered.
+  expect(parseContent("none")).toBeNull();
+  expect(parseContent("normal")).toBeNull();
+
+  // Each of these is a *different feature* — counters need tree state, attr()
+  // needs attributes in the IR, images need A5 — so rendering nothing for them
+  // would look like a stylesheet bug rather than a missing feature.
+  expect(() => parseContent("counter(item)")).toThrow(CssError);
+  expect(() => parseContent("attr(data-x)")).toThrow(CssError);
+  expect(() => parseContent('url("i.png")')).toThrow(CssError);
+  expect(() => parseContent('"unterminated')).toThrow(CssError);
+});
+
+test("::before and ::after parse, and the rest are refused by name", () => {
+  const one = parseSelector("div.btn:hover::before");
+  expect(one.element).toBe("before");
+  expect(one.pseudo).toBe("hover");
+  // A pseudo-element counts in the type column, a pseudo-class in the class one.
+  expect(one.specificity).toEqual([0, 2, 2]);
+
+  // CSS2's single-colon spelling is the same thing — MDN: "Browsers also accept
+  // single-colon notation". Refusing it would reject valid stylesheets to make a
+  // point about a notation change from Selectors Level 3.
+  expect(parseSelector("p:after").element).toBe("after");
+
+  // Named rather than lumped into "unsupported syntax", because these are the
+  // ones a form-control stylesheet will reach for next.
+  expect(() => parseSelector("select::picker-icon")).toThrow(/unsupported pseudo-element/);
+  expect(() => parseSelector("input::placeholder")).toThrow(/unsupported pseudo-element/);
+
+  // Only on the subject, only one, and a pseudo-class may not follow it.
+  expect(() => parseSelector("div::before span")).toThrow(CssError);
+  expect(() => parseSelector("div::before::after")).toThrow(CssError);
+  expect(() => parseSelector("div::before:hover")).toThrow(CssError);
 });
 
 /**

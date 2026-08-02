@@ -240,7 +240,7 @@ export class Uploader {
    * same work twice with less information.
    */
   uploadNodes(): void {
-    const { nodes, interactive } = this.#ui;
+    const { nodes, interactive, generated } = this.#ui;
     const t = this.#tables.nodes;
     const count = Math.min(nodes.count, t.kind.length);
 
@@ -267,6 +267,7 @@ export class Uploader {
     for (let i = 0; i < count; i++) {
       let flags = 0;
       if (findRow(interactive, i) >= 0) flags |= NodeFlags.INTERACTIVE;
+      if (findRow(generated, i) >= 0) flags |= NodeFlags.GENERATED;
       // Anything with text needs measuring; that is exactly what the old measure
       // pass did, for TEXT nodes and for button labels alike.
       if (nodes.text[i]! >= 0) flags |= NodeFlags.MEASURABLE;

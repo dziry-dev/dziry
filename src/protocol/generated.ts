@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 9;
+export const PROTOCOL_VERSION = 10;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 9;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x2f2f42ad;
+export const SCHEMA_HASH = 0xf826f5b5;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -71,7 +71,7 @@ export const F = {
     nextSibling: 5,
     list: 6, // Index into the list table, or -1
     hidden: 7, // Non-zero excludes the subtree entirely
-    flags: 8, // Bit 0 interactive, bit 1 measurable text
+    flags: 8, // Bit 0 interactive, bit 1 measurable text, bit 2 generated (predicates come from parent)
   },
   /** Resolved style values. Patches write field values in place. */
   styles: {
@@ -308,6 +308,7 @@ export type SharedTables = {
 export const NodeFlags = {
   INTERACTIVE: 1 << 0,
   MEASURABLE: 1 << 1,
+  GENERATED: 1 << 2,
 } as const;
 
 /** What a node is. `nodes.kind`. */

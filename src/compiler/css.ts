@@ -70,13 +70,42 @@ const COMPAT_AUTO = new Set([
   "button",
 ]);
 
+/**
+ * Pseudo-elements, which generate a box rather than select an existing one.
+ *
+ * This is the mechanism dziri uses *instead of* a shadow tree. Servo draws every
+ * form control with zero lines of widget paint code by building its internals out
+ * of UA CSS and pseudo-elements; a checkbox's tick is `content: "✓"` on a
+ * generated box, not Skia geometry. Here the generated box is an ordinary emitted
+ * node, so it lays out in Taffy, paints in the normal pass, and has a hit region
+ * — none of which a shadow tree or a synthesised paint-time rect would give.
+ *
+ * `::before` and `::after` first because they are the general case. The
+ * control-specific ones (`::picker(select)`, `::picker-icon`, `::checkmark`,
+ * `::placeholder`, `::marker`) are the same machinery with a different trigger,
+ * and land once there are controls to hang them on.
+ */
+export type PseudoElement = "before" | "after";
+
+const SUPPORTED_PSEUDO_ELEMENT = new Set<string>(["before", "after"]);
+
 export type Compound = { tag: string | null; id: string | null; classes: string[] };
 
 export type Selector = {
   /** Left-to-right; the last entry is the subject of the selector. */
   compounds: Compound[];
   pseudo: Pseudo;
-  /** [ids, classes+pseudos, types] */
+  /**
+   * The pseudo-element this rule styles, or `null` for the element itself.
+   *
+   * A separate axis from `pseudo`, not a wider version of it, because the two
+   * compose: `.btn:hover::before` styles a generated box *while its originating
+   * element is hovered*. Folding them into one field would make that unsayable,
+   * which is the same mistake the old named-role triple made about `:hover` and
+   * `:focus`.
+   */
+  element: PseudoElement | null;
+  /** [ids, classes+pseudo-classes, types+pseudo-elements] */
   specificity: [number, number, number];
   /**
    * `:root` — matches only the element at the top of the tree.
@@ -583,7 +612,7 @@ export function parseSelector(src: string, at = -1): Selector {
   // `:root` on its own, which is the only form of it that means anything here.
   // Specificity is a pseudo-class's (0,1,0), as the spec says.
   if (src.trim() === ":root") {
-    return { compounds: [], pseudo: "none", specificity: [0, 1, 0], root: true };
+    return { compounds: [], pseudo: "none", element: null, specificity: [0, 1, 0], root: true };
   }
 
   // `:host` matches the shadow host from inside a shadow tree. dziri has no
@@ -592,11 +621,12 @@ export function parseSelector(src: string, at = -1): Selector {
   // `:root, :host` for its theme block, and refusing half of a selector list
   // would throw away the `:root` half with it.
   if (src.trim() === ":host") {
-    return { compounds: [], pseudo: "none", specificity: [0, 1, 0], never: true };
+    return { compounds: [], pseudo: "none", element: null, specificity: [0, 1, 0], never: true };
   }
 
   const compounds: Compound[] = [];
   let pseudo: Pseudo = "none";
+  let element: PseudoElement | null = null;
   const spec: [number, number, number] = [0, 0, 0];
 
   const parts = src.split(/\s+/).filter(Boolean);
@@ -615,7 +645,12 @@ export function parseSelector(src: string, at = -1): Selector {
     // Without this the token scan stopped at the backslash, the coverage check
     // below rejected the whole selector, and every responsive, hover or dark
     // variant in a Tailwind sheet failed to parse.
-    const tokens = part.match(/[#.:]?(?:\\.|[A-Za-z0-9_-])+/g);
+    // `::` is its own alternative rather than a third member of the character
+    // class, because a class matches one character: `::before` would tokenize as
+    // a bare `:` that matches nothing followed by `:before`, the join would not
+    // cover the input, and the whole selector would be refused as unsupported
+    // syntax. Which is exactly what happened before pseudo-elements existed here.
+    const tokens = part.match(/(?:::|[#.:])?(?:\\.|[A-Za-z0-9_-])+/g);
     if (!tokens) throw new CssError(`could not parse compound selector "${part}"`, partAt);
 
     // The tokens must *cover* the input, not merely be found in it.
@@ -633,8 +668,9 @@ export function parseSelector(src: string, at = -1): Selector {
     if (tokens.join("") !== part) {
       throw new CssError(
         `unsupported selector syntax in "${part}".\n` +
-          `  Supported: type, .class, #id, the descendant combinator, and ` +
-          `:hover/:active/:focus/:checked/:disabled on the subject.\n` +
+          `  Supported: type, .class, #id, the descendant combinator, ` +
+          `:hover/:active/:focus/:checked/:disabled and ::before/::after ` +
+          `on the subject.\n` +
           `  Not yet supported: attribute selectors, child (>) and sibling (+ ~) ` +
           `combinators, and *.`,
         partAt,
@@ -651,7 +687,39 @@ export function parseSelector(src: string, at = -1): Selector {
         compound.classes.push(unescapeIdent(token.slice(1)));
         spec[1]++;
       } else if (token.startsWith(":")) {
-        const name = token.slice(1).toLowerCase();
+        // `::before` and the CSS2 spelling `:before` are the same thing — MDN:
+        // "Browsers also accept single-colon notation". Distinguishing them would
+        // refuse valid stylesheets to make a point about a notation change from
+        // Selectors Level 3.
+        const doubled = token.startsWith("::");
+        const name = token.slice(doubled ? 2 : 1).toLowerCase();
+
+        if (doubled || SUPPORTED_PSEUDO_ELEMENT.has(name)) {
+          if (!SUPPORTED_PSEUDO_ELEMENT.has(name)) {
+            throw new CssError(
+              `unsupported pseudo-element "::${name}".\n` +
+                `  Supported: ::before, ::after.\n` +
+                `  The control-specific ones (::picker(select), ::picker-icon, ` +
+                `::checkmark, ::placeholder, ::marker) are the same machinery and ` +
+                `land with the controls they belong to.`,
+              partAt,
+            );
+          }
+          if (p !== parts.length - 1) {
+            throw new CssError(
+              `"::${name}" is only supported on the subject of a selector`,
+              partAt,
+            );
+          }
+          if (element !== null) {
+            throw new CssError(`a selector may carry only one pseudo-element`, partAt);
+          }
+          element = name as PseudoElement;
+          // A pseudo-element counts in the type column, not the class column.
+          spec[2]++;
+          continue;
+        }
+
         if (!SUPPORTED_PSEUDO.has(name)) {
           // `:focus-within` is deliberately absent: it propagates to ancestors,
           // which is the descendant-selector problem again.
@@ -660,6 +728,17 @@ export function parseSelector(src: string, at = -1): Selector {
         if (p !== parts.length - 1) {
           throw new CssError(
             `":${name}" is only supported on the subject of a selector`,
+            partAt,
+          );
+        }
+        // CSS orders a compound as `…:pseudo-class::pseudo-element`, and only a
+        // short allowlist may follow the pseudo-element. None of that list is
+        // supported yet, so anything after it is refused rather than silently
+        // reordered into something that happens to work.
+        if (element !== null) {
+          throw new CssError(
+            `":${name}" must come before "::${element}" — a pseudo-class after a ` +
+              `pseudo-element selects the generated box, which dziri does not support yet`,
             partAt,
           );
         }
@@ -674,7 +753,7 @@ export function parseSelector(src: string, at = -1): Selector {
     compounds.push(compound);
   }
 
-  return { compounds, pseudo, specificity: spec };
+  return { compounds, pseudo, element, specificity: spec };
 }
 
 /** CSS cascade order: specificity, then source order. */
@@ -1902,12 +1981,92 @@ export function expandDeclaration(
       );
     }
 
+    // Handled by the caller, like `display`, and for a stronger reason: its value
+    // is a *string*, and every style field is a number. It never reaches the style
+    // table at all — the compiler turns it into an emitted TEXT node.
+    case "content":
+      return;
+
     case "display":
       return; // handled by the caller
 
     default:
       warnOnce(`ignoring unsupported property "${prop}"`);
   }
+}
+
+/**
+ * `content`, reduced to the text a generated box should hold, or `null` for
+ * "no box".
+ *
+ * `null` is not an error case: CSS says a `::before` whose `content` is absent,
+ * invalid, `normal` or `none` **is not rendered at all** — it behaves as
+ * `display: none`. So this returning `null` is the ordinary way a pseudo-element
+ * rule that exists for its other declarations produces nothing.
+ *
+ * The supported grammar is a sequence of strings, which is the whole of
+ * `<content-list>` that a UA control stylesheet needs: `content: "✓"` is a
+ * checkmark and `content: "«" "\A0"` is a quote and a space. Everything else in
+ * the real grammar — `counter()`, `attr()`, `url()`, images, and the `/ <string>`
+ * alt-text arm — is refused rather than dropped, because each is a *different
+ * feature* (counters need tree state, `attr()` needs attributes in the IR, images
+ * need A5) and silently rendering nothing for them would look like a bug in the
+ * stylesheet.
+ */
+export function parseContent(raw: string): string | null {
+  const value = raw.trim();
+  const keyword = value.toLowerCase();
+  if (keyword === "none" || keyword === "normal") return null;
+
+  let out = "";
+  let i = 0;
+  while (i < value.length) {
+    if (/\s/.test(value[i]!)) {
+      i++;
+      continue;
+    }
+    const quote = value[i];
+    if (quote !== '"' && quote !== "'") {
+      throw new CssError(
+        `content: "${value}" — only strings, none and normal are supported. ` +
+          `counter(), attr(), url(), images and the "/ alt-text" arm each need a ` +
+          `feature dziri does not have, so they are refused rather than dropped.`,
+      );
+    }
+
+    i++;
+    let text = "";
+    let closed = false;
+    while (i < value.length) {
+      const ch = value[i]!;
+      if (ch === "\\") {
+        // A CSS escape is either a hex code point (1-6 digits, one optional
+        // trailing space that is part of the escape and not content) or a single
+        // escaped character. `content: "\201C"` is how a stylesheet writes a
+        // curly quote without relying on the file's encoding.
+        const hex = /^\\([0-9a-fA-F]{1,6})[ ]?/.exec(value.slice(i));
+        if (hex) {
+          text += String.fromCodePoint(parseInt(hex[1]!, 16));
+          i += hex[0]!.length;
+          continue;
+        }
+        text += value[i + 1] ?? "";
+        i += 2;
+        continue;
+      }
+      if (ch === quote) {
+        closed = true;
+        i++;
+        break;
+      }
+      text += ch;
+      i++;
+    }
+    if (!closed) throw new CssError(`content: unterminated string in "${value}"`);
+    out += text;
+  }
+
+  return out;
 }
 
 /**

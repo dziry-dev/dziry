@@ -159,6 +159,7 @@ if (LIVE) {
       nodes: ui.nodes,
       variants: ui.variants,
       interactive: ui.interactive,
+      generated: ui.generated,
       textBindings: ui.textBindings,
       handlers: ui.handlers,
       lists: ui.lists,

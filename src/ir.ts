@@ -484,6 +484,16 @@ export type CompiledUi = {
    * with no `:hover` rule.
    */
   interactive: Int32Array;
+  /**
+   * Sorted node ids that are `::before` / `::after` boxes.
+   *
+   * Emitted rather than inferred for the same reason `interactive` is: the fact
+   * is known at compile time and unrecoverable at run time. The engine uses it to
+   * resolve a generated box's hover/active/focus/checked against its *parent* —
+   * `.btn:hover::before` is about the button, and the box is never the node the
+   * hit test returns.
+   */
+  generated: Int32Array;
   lists: ListTable;
   media: MediaTable;
   root: number;
