@@ -1,0 +1,119 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>transition-sampling</title>
+<style>
+  body{font:12px ui-monospace,monospace;padding:16px}
+  #out{white-space:pre;line-height:1.5}
+  .box{width:100px;height:50px;background:#ccc}
+</style>
+<h3>What value does Chromium show partway through a transition, and what are the easing curves?</h3>
+<script type="module">
+  import { log, mount, report } from "./_harness.js";
+
+  /**
+   * The value of `prop` exactly `t` of the way through a → b.
+   *
+   * A *paused* animation with an explicit currentTime, not a live transition:
+   * sampling a running transition races the compositor and gives a different
+   * answer every run, which is not a measurement.
+   */
+  const at = (prop, a, b, t, easing = "linear") => {
+    mount(`<div class="box" id="b"></div>`);
+    const el = document.getElementById("b");
+    const anim = el.animate([{ [prop]: a }, { [prop]: b }], {
+      duration: 1000,
+      easing,
+      fill: "both",
+    });
+    anim.pause();
+    anim.currentTime = t * 1000;
+    const v = getComputedStyle(el).getPropertyValue(prop);
+    anim.cancel();
+    return v;
+  };
+
+  const row = (label, prop, a, b, ts = [0, 0.25, 0.5, 1]) => {
+    log("  " + label);
+    for (const t of ts) log("      t=" + String(t).padEnd(5) + " " + at(prop, a, b, t));
+  };
+
+  log("=== matching function lists: does it interpolate the functions or the matrix? ===");
+  row("rotate(0) -> rotate(180deg)   [matrix lerp would collapse to a scale]",
+      "transform", "rotate(0deg)", "rotate(180deg)");
+  row("rotate(0) -> rotate(360deg)   [matrix lerp would not move at all]",
+      "transform", "rotate(0deg)", "rotate(360deg)");
+  row("rotate(0) -> rotate(720deg)   [does it keep winding past one turn?]",
+      "transform", "rotate(0deg)", "rotate(720deg)", [0, 0.25, 0.5]);
+  row("scale(1) -> scale(3)",
+      "transform", "scale(1)", "scale(3)");
+  row("translateX(0) -> translateX(100px)",
+      "transform", "translateX(0px)", "translateX(100px)");
+
+  log("");
+  log("=== mismatched lists: different lengths and different function types ===");
+  row("translateX(0) -> translateX(100px) rotate(90deg)   [b is longer]",
+      "transform", "translateX(0px)", "translateX(100px) rotate(90deg)");
+  row("translateX(100px) -> rotate(90deg)                 [wholly different]",
+      "transform", "translateX(100px)", "rotate(90deg)");
+  row("scale(1) -> translateX(100px)                      [wholly different]",
+      "transform", "scale(1)", "translateX(100px)");
+
+  log("");
+  log("=== to and from `none` ===");
+  row("none -> scale(3)          [none should act as the identity for scale]",
+      "transform", "none", "scale(3)");
+  row("none -> translateX(100px)",
+      "transform", "none", "translateX(100px)");
+  row("none -> rotate(90deg)",
+      "transform", "none", "rotate(90deg)");
+
+  log("");
+  log("=== percentage translate mid-flight (box is 100x50) ===");
+  row("translateX(0) -> translateX(100%)",
+      "transform", "translateX(0%)", "translateX(100%)");
+  row("translateX(20px) -> translateX(100%)   [mixed px and %]",
+      "transform", "translateX(20px)", "translateX(100%)");
+
+  log("");
+  log("=== opacity, the other half of a fade ===");
+  row("0 -> 1", "opacity", "0", "1", [0, 0.25, 0.5, 0.75, 1]);
+
+  log("");
+  log("=== what do the easing keywords compute to? ===");
+  for (const e of ["ease", "linear", "ease-in", "ease-out", "ease-in-out", "step-start", "step-end"]) {
+    mount(`<div class="box" id="b" style="transition-timing-function:${e}"></div>`);
+    log("  " + e.padEnd(14) + " -> " + getComputedStyle(document.getElementById("b")).transitionTimingFunction);
+  }
+
+  log("");
+  log("=== and what progress do those curves actually produce? (opacity 0 -> 1) ===");
+  for (const e of ["linear", "ease", "ease-in", "ease-out", "ease-in-out",
+                   "cubic-bezier(0.4, 0, 0.2, 1)", "steps(4, end)", "steps(4, start)"]) {
+    const samples = [0.1, 0.25, 0.5, 0.75, 0.9]
+      .map((t) => t + ":" + Number(at("opacity", "0", "1", t, e)).toFixed(4))
+      .join("  ");
+    log("  " + e.padEnd(28) + " " + samples);
+  }
+
+  log("");
+  log("=== transition shorthand: what are the defaults? ===");
+  for (const decl of [
+    "transition:opacity 1s",
+    "transition:opacity 1s 2s",
+    "transition:1s opacity",
+    "transition:all 1s",
+    "transition:opacity 1s ease-in-out 0.5s",
+  ]) {
+    mount(`<div class="box" id="b" style="${decl}"></div>`);
+    const s = getComputedStyle(document.getElementById("b"));
+    log(
+      "  " + decl.padEnd(36) +
+      " prop=" + s.transitionProperty.padEnd(8) +
+      " dur=" + s.transitionDuration.padEnd(6) +
+      " delay=" + s.transitionDelay.padEnd(6) +
+      " fn=" + s.transitionTimingFunction,
+    );
+  }
+
+  report();
+</script>

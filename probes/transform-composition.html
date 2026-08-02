@@ -1,0 +1,206 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>transform-composition</title>
+<style>
+  body{font:12px ui-monospace,monospace;padding:16px}
+  #out{white-space:pre;line-height:1.5}
+  /* The stage must not inherit anything that moves a box, or every rect below lies. */
+  #stage{position:relative}
+  .box{width:100px;height:50px;background:#ccc}
+</style>
+<h3>How does Chromium compose a transform list, where is its origin, and does it touch layout?</h3>
+<script type="module">
+  import { log, mount, frame, report } from "./_harness.js";
+
+  const cs = (el, prop) => getComputedStyle(el).getPropertyValue(prop);
+  /** The four corners a matrix actually put on screen, rounded to kill float noise. */
+  const rect = (el) => {
+    const r = el.getBoundingClientRect();
+    return `x=${r.x.toFixed(1)} y=${r.y.toFixed(1)} w=${r.width.toFixed(1)} h=${r.height.toFixed(1)}`;
+  };
+
+  /** One case: a single .box with `decl` applied, measured against a clean stage. */
+  const box = (decl) => {
+    mount(`<div id="stage"><div class="box" id="b" style="${decl}"></div></div>`);
+    return document.getElementById("b");
+  };
+
+  log("=== computed value: what form does getComputedStyle return? ===");
+  for (const decl of [
+    "",
+    "transform:none",
+    "transform:translateX(10px)",
+    "transform:translate(10px,20px)",
+    "transform:translateX(50%)",
+    "transform:rotate(45deg)",
+    "transform:rotate(0.125turn)",
+    "transform:scale(2)",
+    "transform:scale(2,3)",
+    "transform:skewX(10deg)",
+    "transform:translateX(10px) rotate(45deg)",
+    "transform:rotate(45deg) translateX(10px)",
+    "transform:translateZ(5px)",
+    "transform:matrix(1,0,0,1,10,20)",
+  ]) {
+    const b = box(decl);
+    log("  " + (decl || "(unset)").padEnd(38) + " -> " + cs(b, "transform"));
+  }
+
+  log("");
+  log("=== composition order: same two functions, both orders, where does the box land? ===");
+  log("  (100x50 box at the stage origin; compare x/y/w/h)");
+  for (const decl of [
+    "transform:translateX(100px) rotate(90deg)",
+    "transform:rotate(90deg) translateX(100px)",
+  ]) {
+    const b = box(decl);
+    log("  " + decl.padEnd(46) + " " + rect(b));
+  }
+
+  log("");
+  log("=== transform-origin: default, and what a percentage resolves to ===");
+  for (const decl of [
+    "",
+    "transform-origin:50% 50%",
+    "transform-origin:0 0",
+    "transform-origin:top left",
+    "transform-origin:center",
+    "transform-origin:25% 75%",
+    "transform-origin:10px 20px",
+    "transform-origin:50% 50% 5px",
+  ]) {
+    const b = box(decl);
+    log("  " + (decl || "(unset)").padEnd(30) + " -> " + cs(b, "transform-origin"));
+  }
+  log("  box is 100x50, so a px pair tells us which axis is which");
+
+  log("");
+  log("=== origin actually applied: rotate(90deg) about three different origins ===");
+  for (const o of ["50% 50%", "0 0", "100% 100%"]) {
+    const b = box(`transform:rotate(90deg);transform-origin:${o}`);
+    log("  origin " + o.padEnd(12) + " " + rect(b));
+  }
+
+  log("");
+  log("=== percentage translate: against what box? (element is 100x50) ===");
+  for (const decl of [
+    "transform:translateX(50%)",
+    "transform:translateY(50%)",
+    "transform:translate(100%,100%)",
+  ]) {
+    const b = box(decl);
+    log("  " + decl.padEnd(34) + " " + rect(b));
+  }
+
+  log("");
+  log("=== individual properties: translate / rotate / scale, and how they meet transform ===");
+  for (const decl of [
+    "translate:10px 20px",
+    "rotate:45deg",
+    "scale:2",
+    "scale:2 3",
+    "translate:10px 20px;rotate:45deg;scale:2",
+    // Declared in a deliberately scrambled source order: if the result matches the
+    // line above, the order is the property's, not the stylesheet's.
+    "scale:2;rotate:45deg;translate:10px 20px",
+    "translate:10px 0;transform:translateX(10px)",
+  ]) {
+    const b = box(decl);
+    log(
+      "  " + decl.padEnd(44) +
+      " translate=" + cs(b, "translate").padEnd(12) +
+      " rotate=" + cs(b, "rotate").padEnd(8) +
+      " scale=" + cs(b, "scale").padEnd(6) +
+      " " + rect(b),
+    );
+  }
+  log("  note: getComputedStyle().transform does NOT fold the individual properties in;");
+  log("  the rect is the only witness to the composed result.");
+
+  log("");
+  log("=== where does `transform` sit in that order? T·R·S·transform, or transform first? ===");
+  log("  (non-commuting pairs, so the two orders land in different places)");
+  for (const decl of [
+    "translate:100px 0;transform:rotate(90deg)",
+    "rotate:90deg;transform:translateX(100px)",
+    // The controls: the same two matrices written as one list, both ways round.
+    "transform:translateX(100px) rotate(90deg)",
+    "transform:rotate(90deg) translateX(100px)",
+  ]) {
+    const b = box(decl);
+    log("  " + decl.padEnd(46) + " " + rect(b));
+  }
+
+  log("");
+  log("=== the canonical order, as exact matrices to assert against in a unit test ===");
+  log("  (dziri stores decomposed components and composes in one fixed order; these are the targets)");
+  for (const decl of [
+    "transform:translate(10px,20px) rotate(30deg) skewX(10deg) skewY(5deg) scale(2,3)",
+    "transform:translate(10px,20px) rotate(30deg) scale(2,3)",
+    "translate:10px 20px;rotate:30deg;scale:2 3",
+    "transform:skewX(10deg) skewY(5deg)",
+    "transform:skewY(5deg) skewX(10deg)",
+  ]) {
+    const b = box(decl);
+    log("  " + decl);
+    log("      " + cs(b, "transform").padEnd(52) + rect(b));
+  }
+  log("  the individual properties compute `transform: none` — their rect is the only witness,");
+  log("  so the two middle lines above must agree on the rect for the canonical order to hold.");
+
+  log("");
+  log("=== does transform affect layout? parent height and next sibling position ===");
+  for (const decl of ["", "transform:translateY(200px)", "transform:scale(3)", "transform:rotate(45deg)"]) {
+    mount(
+      `<div id="stage">` +
+        `<div class="box" id="b" style="${decl}"></div>` +
+        `<div class="box" id="sib"></div>` +
+      `</div>`,
+    );
+    await frame();
+    const stage = document.getElementById("stage");
+    const sib = document.getElementById("sib");
+    log(
+      "  " + (decl || "(unset)").padEnd(30) +
+      " stageH=" + stage.getBoundingClientRect().height.toFixed(1).padEnd(7) +
+      " sibling " + rect(sib),
+    );
+  }
+
+  log("");
+  log("=== does a transform on the parent move the child's reported rect? ===");
+  for (const decl of ["", "transform:translateX(50px) scale(2)"]) {
+    mount(
+      `<div id="stage"><div class="box" id="b" style="${decl}">` +
+        `<span id="kid" style="display:inline-block;width:10px;height:10px"></span>` +
+      `</div></div>`,
+    );
+    await frame();
+    log("  parent " + (decl || "(unset)").padEnd(34) + " child " + rect(document.getElementById("kid")));
+  }
+
+  log("");
+  log("=== transform on inline / non-transformable boxes: computed value vs actual effect ===");
+  log("  (spec says transform does not apply to non-replaced inline boxes — does the rect move?)");
+  for (const [what, style] of [
+    ["inline span", ``],
+    ["inline-block", `display:inline-block;width:20px;`],
+    ["block", `display:block;width:20px;`],
+  ]) {
+    // Measured against itself untransformed, because each display type starts
+    // somewhere different and only the delta answers the question.
+    mount(`<div id="stage"><span id="b" style="${style}">x</span></div>`);
+    await frame();
+    const before = document.getElementById("b").getBoundingClientRect().x;
+    mount(`<div id="stage"><span id="b" style="${style}transform:translateX(30px)">x</span></div>`);
+    await frame();
+    const b = document.getElementById("b");
+    log(
+      "  " + what.padEnd(14) +
+      " computed=" + cs(b, "transform").padEnd(26) +
+      " moved by " + (b.getBoundingClientRect().x - before).toFixed(1) + "px",
+    );
+  }
+
+  report();
+</script>

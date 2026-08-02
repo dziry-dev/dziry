@@ -325,3 +325,91 @@ which is why the two columns differ for the rejected values and agree for the ke
 grouping a compiler can compute, which is why compile-time expansion is a fit and `::part`,
 `::-webkit-*` and shadow piercing are not needed. What it does need that dziri lacks is the popover
 and anchor-positioning the picker relies on — the overlay layer, ROADMAP B1.
+
+## How a transform composes, and how a transition samples it
+
+**Measured 2026-08-02 · Chromium 151 (via Edge 151) · `probes/transform-composition.html` and
+`probes/transition-sampling.html`, each run twice with identical output.** Transitions were sampled
+from a *paused* `element.animate()` with an explicit `currentTime` rather than from a live
+transition, because sampling a running transition races the compositor and is not reproducible.
+
+### Composition
+
+| Question | Measured |
+|---|---|
+| Computed value of `transform` | always `matrix(a,b,c,d,e,f)` — never the source list. `translateZ` promotes it to `matrix3d` |
+| Percentages in the computed value | **resolved** — `translateX(50%)` on a 100px box computes `matrix(1,0,0,1,50,0)` |
+| List order | `A B` = matrix product `A × B`; the **rightmost function applies to the point first** |
+| Default `transform-origin` | `50% 50%`, computed as resolved px — `50px 25px` on a 100×50 box |
+| Percentage `transform-origin` | resolved against the element's own **border box** |
+| Percentage `translate()` | also the element's own border box: `translateX(50%)` moves a 100px box 50px |
+| `translate` / `rotate` / `scale` properties | compose in that fixed order **regardless of source order**, then `transform` last: the full chain is `T · R · S · transform` |
+| Their computed `transform` | `none` — the individual properties do **not** fold into it. Only the rect witnesses the composed result |
+| Effect on layout | **none.** Parent height and sibling position are untouched by translate, scale and rotate alike |
+| Effect on a child's rect | **yes** — a parent's transform scales and moves the child's reported rect |
+| Non-replaced inline box | computed value is the matrix, but the box **does not move** (0.0px). `inline-block` and `block` move |
+
+The load-bearing equivalence for dziri's representation: `translate:10px 20px; rotate:30deg;
+scale:2 3` and `transform:translate(10px,20px) rotate(30deg) scale(2,3)` produce the **same rect**
+to 0.1px (`x=-40.1 y=-0.9 w=248.2 h=229.9`). Exact matrices to assert against:
+
+```
+translate(10px,20px) rotate(30deg) scale(2,3)                    matrix(1.73205, 1, -1.5, 2.59808, 10, 20)
+translate(10px,20px) rotate(30deg) skewX(10deg) skewY(5deg) scale(2,3)
+                                                                 matrix(1.67128, 1.16696, -1.04189, 2.86257, 10, 20)
+skewX(10deg) skewY(5deg)                                         matrix(1.01543, 0.0874887, 0.176327, 1, 0, 0)
+skewY(5deg) skewX(10deg)                                         matrix(1, 0.0874887, 0.176327, 1.01543, 0, 0)
+```
+
+### Interpolation — this one refutes the obvious design
+
+**A transform is not interpolated as a matrix.** `rotate(0deg) → rotate(360deg)` has *identical*
+endpoint matrices, so a componentwise matrix lerp would not move at all. It measures 180° at
+t=0.5. `rotate(0deg) → rotate(720deg)` measures 180° at t=0.25 and keeps winding.
+
+| Endpoints | t=0.5 | Means |
+|---|---|---|
+| `rotate(0)` → `rotate(360deg)` | `matrix(-1,0,0,-1,0,0)` = 180° | interpolates the **angle**, not the matrix |
+| `rotate(0)` → `rotate(720deg)` | 180° at t=0.25 | the angle is **not normalised** to one turn |
+| `translateX(100px)` → `rotate(90deg)` | `matrix(0.707,0.707,-0.707,0.707,50,0)` | mismatched lists **decompose**, then lerp the components — a naive matrix lerp would give `0.5` not `0.707` |
+| `none` → `rotate(90deg)` | 45° | `none` is the **per-function neutral**, identical to `rotate(0deg) → rotate(90deg)` |
+| `translateX(20px)` → `translateX(100%)` | 60px on a 100px box | percentages resolve, then lerp; mixes with px |
+
+**Bearing on dziri.** Store the transform **decomposed** — `translateX/Y`, `rotate`, `scaleX/Y`,
+`skewX/Y` as separate scalars with an unnormalised rotation — not as a 6-float matrix. Decomposed
+storage reproduces every row above; matrix storage fails the first two outright. It is also what
+the `translate`/`rotate`/`scale` properties already are, and what Tailwind emits.
+
+The cost is that a decomposed store can only express one canonical order, so a hand-written
+`transform: rotate(45deg) translateX(10px)` — measured above as genuinely different from
+`translateX(10px) rotate(45deg)` — cannot be represented. Refuse it rather than silently
+reordering, the way `appearance: base` and non-string `content` are refused.
+
+Two consequences for *where* the work happens: percentage `translate` and the default
+`transform-origin` both resolve against the element's own border box, so **neither can be folded at
+compile time** — the engine resolves them against the laid-out box. And since a parent's transform
+moves a child's rect, hit-testing has to apply the inverse.
+
+### Easing
+
+Keywords do **not** normalise to `cubic-bezier()` in the computed value — `ease` reads back as
+`ease`. The two step keywords do: `step-start` → `steps(1, start)`, `step-end` → `steps(1)`.
+
+Measured progress for `opacity: 0 → 1`, which is the curve itself:
+
+| easing | t=0.1 | t=0.25 | t=0.5 | t=0.75 | t=0.9 |
+|---|---|---|---|---|---|
+| `linear` | 0.1000 | 0.2500 | 0.5000 | 0.7500 | 0.9000 |
+| `ease` | 0.0948 | 0.4085 | 0.8024 | 0.9605 | 0.9943 |
+| `ease-in` | 0.0170 | 0.0935 | 0.3154 | 0.6219 | 0.8394 |
+| `ease-out` | 0.1606 | 0.3781 | 0.6846 | 0.9065 | 0.9830 |
+| `ease-in-out` | 0.0197 | 0.1292 | 0.5000 | 0.8708 | 0.9803 |
+| `cubic-bezier(0.4,0,0.2,1)` | 0.0259 | 0.2366 | 0.7756 | 0.9594 | 0.9944 |
+| `steps(4, end)` | 0.0000 | 0.2500 | 0.5000 | 0.7500 | 0.7500 |
+| `steps(4, start)` | 0.2500 | 0.5000 | 0.7500 | 1.0000 | 1.0000 |
+
+`ease-out` is `ease-in` mirrored (0.1606 = 1 − 0.8394) and `ease-in-out` is exactly 0.5 at the
+midpoint, which is the cheap check that an implementation's curve is the right one.
+
+`transition` shorthand defaults, confirmed: timing function `ease`, delay `0s`, property `all`. In
+`transition: opacity 1s 2s` the **first** time is the duration and the second the delay.
