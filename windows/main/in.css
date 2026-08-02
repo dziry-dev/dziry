@@ -77,3 +77,180 @@ body.light .muted {
     background: #0284c7;
     color: #f0f9ff;
 }
+
+/* ---------------------------------------------------------------------------
+ * Form controls, in plain CSS, against the real elements.
+ *
+ * Authored here rather than as Tailwind utilities on purpose: the claim being
+ * demonstrated is that a control's parts are reachable with ordinary CSS, so
+ * writing them as utilities would demonstrate something else. Tailwind's own
+ * `before:`/`after:` variants work too, and the page shows both.
+ *
+ * `input[type=checkbox]` is the whole reason attribute selectors had to exist:
+ * twenty-two input types share one tag, so without them a stylesheet cannot say
+ * which control it is describing.
+ *
+ * Nothing below is drawn by the engine. Each tick, dot and arrow is a `::before`
+ * box that the compiler emits as an ordinary node.
+ *
+ * `[checked]` and `[disabled]` are the *authored attributes*, not the live
+ * `:checked` / `:disabled` states. Those compile to predicate bits and nothing
+ * sets them yet (A3), so a static attribute is the honest stand-in: it drives the
+ * identical style-table machinery, one cascade earlier.
+ * ------------------------------------------------------------------------- */
+
+input[type="checkbox"],
+input[type="radio"] {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border-width: 2px;
+    border-color: #52525b;
+    background: #18181b;
+    justify-content: center;
+    align-items: center;
+    accent-color: #0284c7;
+}
+
+input[type="checkbox"] { border-radius: 4px; }
+input[type="radio"]    { border-radius: 9px; }
+
+input[type="checkbox"]::before {
+    content: "\2713";
+    color: transparent;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+input[type="radio"]::before {
+    content: "\25CF";
+    color: transparent;
+    font-size: 11px;
+}
+
+input[type="checkbox"][checked] {
+    background: #0284c7;
+    border-color: #0284c7;
+}
+
+input[type="checkbox"][checked]::before { color: #f0f9ff; }
+
+input[type="radio"][checked]          { border-color: #0284c7; }
+input[type="radio"][checked]::before  { color: #38bdf8; }
+
+/* Hover on the element reaching its generated box. This is the case that needs
+   the engine to resolve a generated box's predicates against its parent — the
+   box is never hit-tested, so without that the rule silently never applies. */
+input[type="checkbox"]:hover,
+input[type="radio"]:hover { border-color: #38bdf8; }
+
+input[type="checkbox"]:hover::before { color: #52525b; }
+input[type="checkbox"][checked]:hover::before { color: #ffffff; }
+
+/* Disabled, by authored attribute. */
+input[disabled] {
+    background: #27272a;
+    border-color: #3f3f46;
+}
+
+input[type="checkbox"][disabled]::before,
+input[type="radio"][disabled]::before { color: #52525b; }
+
+/* A text field. `caret-color` compiles and is not painted — there is no caret. */
+input[type="text"] {
+    appearance: none;
+    caret-color: #38bdf8;
+    accent-color: #0284c7;
+    background: #18181b;
+    border-width: 1px;
+    border-color: #3f3f46;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 13px;
+    color: #e4e4e7;
+    width: 260px;
+}
+
+input[type="text"]:hover { border-color: #52525b; }
+input[type="text"][disabled] { color: #52525b; }
+
+/* A select, closed. The structure is MDN's customizable-select model: ordinary
+   children, a `<button>` holding `<selectedcontent>`, then the options. */
+select {
+    appearance: none;
+    background: #18181b;
+    border-width: 1px;
+    border-color: #3f3f46;
+    border-radius: 6px;
+    flex-direction: row;
+    align-items: center;
+}
+
+select:hover { border-color: #52525b; }
+
+select button {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    gap: 10px;
+    background: #00000000;
+    font-size: 13px;
+    color: #e4e4e7;
+    width: 220px;
+}
+
+/* The arrow. `::picker-icon` is what CSS calls this once a picker exists; until
+   then it is an ordinary generated box on the button, which is the same node
+   either way. */
+select button::after {
+    content: "\25BE";
+    color: #a1a1aa;
+    font-size: 11px;
+}
+
+select[disabled] { background: #27272a; }
+select[disabled] button { color: #52525b; }
+
+/* Quotes — `::before` and `::after` around real content, so their position in
+   the child chain is visible rather than asserted.
+
+   `flex-direction: row` because dziri has no inline layout: a generated box is a
+   flex item like any other child, so the default column direction stacks the
+   quote marks above and below the text instead of around it. Worth seeing on the
+   page rather than hidden — it is the one place a generated box does not behave
+   the way the CSS it came from implies. */
+.pull-quote {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 4px;
+}
+
+.pull-quote::before {
+    content: "\201C";
+    color: #52525b;
+    font-size: 20px;
+}
+
+.pull-quote::after {
+    content: "\201D";
+    color: #52525b;
+    font-size: 20px;
+}
+
+/* Attribute operators, each styling a box on its own. */
+.probe {
+    border-width: 1px;
+    border-color: #3f3f46;
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+    color: #71717a;
+}
+
+[data-tone="warn"]      { border-color: #f59e0b; color: #fbbf24; }
+[data-tags~="beta"]     { border-color: #10b981; color: #34d399; }
+[data-lang|="en"]       { border-color: #0ea5e9; color: #38bdf8; }
+[data-file$=".pdf"]     { border-color: #ef4444; color: #f87171; }
+[data-file^="draft"]    { border-color: #8b5cf6; color: #a78bfa; }
+[data-note*="x"]        { border-color: #ec4899; color: #f472b6; }

@@ -56,4 +56,29 @@ h3 { font-weight: 700; font-size: 18.72px; margin-block-start: 18.72px;   margin
 h4 { font-weight: 700;                     margin-block-start: 21.28px;   margin-block-end: 21.28px }
 h5 { font-weight: 700; font-size: 13.28px; margin-block-start: 22.1776px; margin-block-end: 22.1776px }
 h6 { font-weight: 700; font-size: 10.72px; margin-block-start: 24.9776px; margin-block-end: 24.9776px }
+
+/* Form controls — structure, not appearance.
+
+   ua-structure.ts gives a select the button and selectedcontent that a browser
+   would build in a shadow tree. These rules are the other half of that: the parts
+   a browser hides, hidden. Without them a select renders its options stacked
+   underneath the closed control, which is not a styling choice anyone would make
+   — it is the widget leaking its internals.
+
+   The options are hidden rather than positioned because the picker is a popover
+   with anchor positioning in the spec, and dziri has no overlay layer yet
+   (ROADMAP B1). Hiding them renders the *closed* control correctly, which is most
+   of what a form looks like; showing them in flow renders nothing correctly.
+   Revisit every line here when the overlay lands.
+
+   Appearance — borders, radii, the tick on a checkbox — is deliberately absent.
+   That is a decision about how dziri's controls look, it belongs in a theme
+   rather than in the sheet that makes elements behave like themselves, and
+   html-coverage has nothing to say about it. */
+select option, select optgroup { display: none }
+
+/* Chrome's sheet gives the picker's button no border of its own; the border
+   belongs to the select. Stated so an author styling select does not get a
+   doubled edge they never asked for. */
+select button { border-width: 0 }
 `;

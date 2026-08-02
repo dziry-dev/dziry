@@ -13,7 +13,14 @@ import { expect, test } from "bun:test";
 import { compile, compileTree, dump, emit, toCompiledUi } from "./compile.ts";
 import { compileVariants, findToggles } from "./variant-compile.ts";
 import { parseHtml } from "./html.ts";
-import { compactBits, INITIAL_STYLE, Predicate, UNSET, type StyleField } from "../ir.ts";
+import {
+  compactBits,
+  Display,
+  INITIAL_STYLE,
+  Predicate,
+  UNSET,
+  type StyleField,
+} from "../ir.ts";
 
 /** The computed value of one field on the node matching `tag`. */
 function styleOf(html: string, css: string, field: StyleField, tag = "div"): number {
@@ -284,6 +291,118 @@ test("content may not depend on a state, and says so", () => {
   ).toThrow(/content` cannot depend on `:checked`/);
 });
 
+test("attribute selectors tell one input type from another", () => {
+  // The reason they had to exist: twenty-two `input` types share one tag, so
+  // without this a UA stylesheet cannot say which control it is describing.
+  const html = `<body><input type="checkbox"><input type="radio"><input type="text" placeholder="p"></body>`;
+  const css = `
+    input                      { border-width: 1px }
+    input[type="checkbox"]     { border-radius: 4px }
+    input[type="radio"]        { border-radius: 9px }
+    input[placeholder]         { color: #ff0000 }
+  `;
+
+  const ui = toCompiledUi(compile(html, css));
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const at = (n: number, f: StyleField) => styles[f][ui.nodes.style[n]!]!;
+
+  // All three get the tag rule; only their own type rule applies.
+  for (const n of [1, 2, 3]) expect(at(n, "borderWidth")).toBe(1);
+  expect(at(1, "radTL")).toBe(4);
+  expect(at(2, "radTL")).toBe(9);
+  expect(at(3, "radTL")).toBe(0);
+
+  // Presence, not value.
+  expect(at(3, "fg")).toBe(0xffff0000);
+  expect(at(1, "fg")).not.toBe(0xffff0000);
+});
+
+test("every attribute operator, against the spec's semantics", () => {
+  const html =
+    `<body>` +
+    `<div data-t="alpha beta"></div>` +
+    `<div data-t="en-GB"></div>` +
+    `<div data-t="report.pdf"></div>` +
+    `</body>`;
+  const css = `
+    [data-t~="beta"]      { width: 1px }
+    [data-t|="en"]        { height: 2px }
+    [data-t$=".pdf"]      { min-width: 3px }
+    [data-t^="report"]    { max-width: 4px }
+    [data-t*="port"]      { flex-grow: 5 }
+    [data-t="alpha beta"] { flex-shrink: 6 }
+    [data-t]              { gap: 7px }
+  `;
+
+  const ui = toCompiledUi(compile(html, css));
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const at = (n: number, f: StyleField) => styles[f][ui.nodes.style[n]!]!;
+
+  // `~=` matches a whole word, not a substring — the easy one to get wrong.
+  // Unmatched is `auto`, which is NaN, not zero.
+  expect(at(1, "width")).toBe(1);
+  expect(at(3, "width")).toBeNaN();
+
+  // `|=` matches the value or the value plus a hyphen, which is what makes
+  // `[lang|=en]` match `en-GB`.
+  expect(at(2, "height")).toBe(2);
+  expect(at(1, "height")).toBeNaN();
+
+  expect(at(3, "minW")).toBe(3);
+  expect(at(3, "maxW")).toBe(4);
+  expect(at(3, "grow")).toBe(5);
+  expect(at(1, "shrink")).toBe(6);
+
+  // Presence matches all three.
+  for (const n of [1, 2, 3]) expect(at(n, "gapRow")).toBe(7);
+});
+
+test("a select gets its closed button and selected text from the compiler", () => {
+  // The user-visible claim: an author writes a select and its options, and the
+  // parts a browser would build in a shadow tree are built here as real nodes.
+  const ui = toCompiledUi(
+    compile(
+      `<body><select><option>Free</option><option selected>Pro</option></select></body>`,
+      "",
+    ),
+  );
+
+  // select > [button, option, option]; button > selectedcontent > "Pro".
+  const select = 1;
+  const kids: number[] = [];
+  for (let n = ui.nodes.firstChild[select]!; n !== -1; n = ui.nodes.nextSibling[n]!) kids.push(n);
+  expect(kids.length).toBe(3);
+
+  const button = kids[0]!;
+  const selectedContent = ui.nodes.firstChild[button]!;
+  const label = ui.nodes.firstChild[selectedContent]!;
+  expect(ui.strings[ui.nodes.text[label]!]).toBe("Pro");
+
+  // The options are still there and the UA sheet hides them — the picker is an
+  // overlay problem, not a structural one.
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  for (const option of kids.slice(1)) {
+    expect(styles.display[ui.nodes.style[option]!]!).toBe(Display.NONE);
+  }
+});
+
+test("an authored select button is left alone", () => {
+  // The spec's opt-in form for customizing the internals. Overwriting it would
+  // make `appearance: base-select` pointless.
+  const ui = toCompiledUi(
+    compile(
+      `<body><select><button><selectedcontent>Mine</selectedcontent></button><option>Other</option></select></body>`,
+      "",
+    ),
+  );
+  const kids: number[] = [];
+  for (let n = ui.nodes.firstChild[1]!; n !== -1; n = ui.nodes.nextSibling[n]!) kids.push(n);
+  expect(kids.length).toBe(2);
+
+  const label = ui.nodes.firstChild[ui.nodes.firstChild[kids[0]!]!]!;
+  expect(ui.strings[ui.nodes.text[label]!]).toBe("Mine");
+});
+
 test("a pseudo-element rule does not style its originating element", () => {
   // Separate cascades. `p::before { color }` colouring the `<p>` would be the
   // most obvious possible bug and the easiest to introduce, since both resolve
@@ -369,7 +488,11 @@ test("an unsupported selector is refused, not silently rewritten", () => {
   // Each of these used to parse into a *different, plausible* selector, because
   // the token scanner searched the string instead of covering it.
   const cases: Array<[string, string]> = [
-    [`input[type="text"] { width: 1px }`, "attribute selector became the type selector `text`"],
+    // `input[type="text"]` was the first entry here and is now supported — the
+    // whole reason attribute selectors were built. Its replacement keeps the
+    // *shape* of the original bug: a bracketed construct the scanner must not
+    // quietly drop the way it once dropped `[type="text"]` down to `text`.
+    [`input[type="text"i] extra] { width: 1px }`, "malformed attribute selector was swallowed"],
     [`div > span { width: 1px }`, "child combinator became a descendant one"],
     [`div + span { width: 1px }`, "sibling combinator became a descendant one"],
     [`* { width: 1px }`, "universal selector matched nothing"],

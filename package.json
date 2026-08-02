@@ -45,6 +45,7 @@
     "golden": "bun run scripts/golden.ts",
     "conformance": "bun run scripts/conformance.ts",
     "spec-audit": "bun run scripts/spec-audit.ts",
+    "coverage:snapshot": "bun run scripts/coverage-snapshot.ts",
     "css-coverage": "bun run scripts/css-coverage.ts",
     "html-coverage": "bun run scripts/html-coverage.ts",
     "tailwind-coverage": "bun run scripts/tailwind-coverage.ts",

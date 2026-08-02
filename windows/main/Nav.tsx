@@ -18,6 +18,7 @@ import { cn, useRouter } from "dziri";
 import {
   goBorders,
   goColors,
+  goControls,
   goFeatures,
   goLayout,
   goOverview,
@@ -61,6 +62,9 @@ export function Nav() {
         </button>
         <button className={cn(LINK, { active: router.matches("borders") })} onClick={goBorders}>
           Borders
+        </button>
+        <button className={cn(LINK, { active: router.matches("controls") })} onClick={goControls}>
+          Controls
         </button>
         <button className={cn(LINK, { active: router.matches("features") })} onClick={goFeatures}>
           Features

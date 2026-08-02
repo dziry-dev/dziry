@@ -216,6 +216,10 @@ A3's, and it is why the rows below still say planned even though the compiler is
 | `:indeterminate` | planned — same shape and cost, held back until a control can be in that state | A3 |
 | `::before` / `::after` + `content` | **done** — generated boxes are real emitted nodes; this is what replaces a UA shadow tree | A1 |
 | `::picker(select)` `::picker-icon` `::checkmark` `::placeholder` `::marker` | planned — same machinery as `::before`, refused by name until the controls exist | C2 |
+| attribute selectors — `[a]` `=` `~=` `|=` `^=` `$=` `*=`, `i` flag | **done** — `input[type=checkbox]` is how a UA sheet names one control among twenty-two | A1 |
+| `<input>` `<select>` `<option>` `<textarea>` `<label>` … as real tags | **done** — they compile to ordinary boxes; being a tag is not being a widget | C2 |
+| `<select>` closed, with UA-supplied `<button>` + `<selectedcontent>` | **done** — `ua-structure.ts`; the parts a browser builds in a shadow tree, built as nodes | C2 |
+| `<select>` picker (open state) | planned — a popover with anchor positioning; needs the overlay layer | B1 |
 | `accent-color` `caret-color` `appearance` | **done** — `STYLE_FIELDS`, checked in `conformance` and `spec-audit` | A1 |
 | `resize`, `field-sizing: content` | **non-goal** — see ROADMAP C2; in `css-coverage`'s `OUT_OF_SCOPE_NAMES` | — |
 | `<Input>` | planned | C2 · Tier 1b (needs A5) |

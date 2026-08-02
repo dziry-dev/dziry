@@ -53,6 +53,21 @@ export type Element = {
    * with no node to attach it to at build time, and is a compile error.
    */
   style: string | null;
+  /**
+   * Attributes an attribute selector can test, lower-cased by name.
+   *
+   * Kept rather than discarded because `input[type=checkbox]` is how a UA
+   * stylesheet distinguishes one control from another — twenty-two `input` types
+   * are one tag and twelve render archetypes, and the tag alone cannot tell them
+   * apart. Values stay as authored; matching lower-cases where the selector says
+   * to, not here, because `[value="Yes"]` is case-sensitive in HTML.
+   *
+   * `id`, `class` and `style` are *also* here even though each has its own field.
+   * They are real attributes and `[class~="x"]` is a legal selector; having two
+   * spellings of the same fact is better than an attribute selector that silently
+   * cannot see the three most common attributes.
+   */
+  attrs: ReadonlyMap<string, string>;
 };
 
 export type Text = { type: "text"; value: string };
@@ -126,6 +141,7 @@ export function parseHtml(src: string): Element {
     classWhen: null,
     bindValue: null,
     style: null,
+    attrs: new Map(),
   };
   const stack: Element[] = [root];
   let i = 0;
@@ -195,6 +211,7 @@ export function parseHtml(src: string): Element {
       classWhen: null,
       bindValue: null,
       style: attrs.get("style") ?? null,
+      attrs,
     };
 
     top().children.push(el);

@@ -43,6 +43,8 @@ import {
   substituteVars,
   type OriginValue,
   type MediaCond,
+  type AttrSel,
+  type Compound,
   type Pseudo,
   type PseudoElement,
   type Rule,
@@ -50,6 +52,7 @@ import {
   type VarEnv,
 } from "./css.ts";
 import { UA_SHEET } from "./ua-sheet.ts";
+import { uaChildren } from "./ua-structure.ts";
 
 /** The environment at the root, before any `--*` declaration has been seen. */
 const EMPTY_VARS: VarEnv = new Map<string, string>();
@@ -58,13 +61,51 @@ const EMPTY_VARS: VarEnv = new Map<string, string>();
 // Selector matching
 // ---------------------------------------------------------------------------
 
-function matchCompound(el: Element, c: { tag: string | null; id: string | null; classes: string[] }): boolean {
+function matchCompound(el: Element, c: Compound): boolean {
   if (c.tag !== null && c.tag !== el.tag) return false;
   if (c.id !== null && c.id !== el.id) return false;
   for (const cls of c.classes) {
     if (!el.classes.includes(cls)) return false;
   }
+  for (const a of c.attrs ?? []) {
+    if (!matchAttr(el, a)) return false;
+  }
   return true;
+}
+
+/**
+ * One `[attr op value]` test against an element's attributes.
+ *
+ * The operators are the spec's, and the two easy ones to get subtly wrong are
+ * handled explicitly: `~=` splits on whitespace so it matches a *word* and not a
+ * substring, and `|=` matches the value or the value followed by a hyphen, which
+ * is what makes `[lang|=en]` match `en-GB`. An empty selector value never
+ * matches for the substring operators, per the spec, rather than matching
+ * everything — which is the direction that would silently over-apply a rule.
+ */
+function matchAttr(el: Element, a: AttrSel): boolean {
+  const raw = el.attrs.get(a.name);
+  if (raw === undefined) return false;
+  if (a.op === "exists") return true;
+
+  // HTML attribute values are case-sensitive unless the selector asks otherwise.
+  const have = a.ci ? raw.toLowerCase() : raw;
+  const want = a.ci ? a.value.toLowerCase() : a.value;
+
+  switch (a.op) {
+    case "=":
+      return have === want;
+    case "~=":
+      return want !== "" && !/\s/.test(want) && have.split(/\s+/).includes(want);
+    case "|=":
+      return have === want || have.startsWith(want + "-");
+    case "^=":
+      return want !== "" && have.startsWith(want);
+    case "$=":
+      return want !== "" && have.endsWith(want);
+    case "*=":
+      return want !== "" && have.includes(want);
+  }
 }
 
 /**
@@ -893,9 +934,40 @@ export function compileTree(
     // wasted entry per no-content rule, in a `u16`-indexed table — cheap to avoid,
     // and the kind of slow leak that is invisible until the table is full.
     //
-    const base = collectDecls(rules, path, ["none"], media, 0, element);
-    const raw = base.get("content");
-    if (raw === undefined) return -1;
+    /**
+     * The text this box would hold with `states` active, or `null` for no box.
+     *
+     * Resolved all the way to the final string rather than compared as source,
+     * because Tailwind puts a variable in between: `before:content-['x']` emits
+     * `--tw-content: 'x'; content: var(--tw-content)`, so *every* rule's `content`
+     * is the identical text `var(--tw-content)` and comparing declarations would
+     * see agreement where the values differ.
+     *
+     * The environment is the box's own — `::before { --tick: "✓"; content:
+     * var(--tick) }` is legitimate, and resolving against the originating
+     * element's vars would miss it.
+     */
+    const contentFor = (states: Pseudo[]): string | null => {
+      const decls = collectDecls(rules, path, states, media, 0, element);
+      const raw = decls.get("content");
+      if (raw === undefined) return null;
+
+      const substituted = raw.includes("var(")
+        ? substituteVars(raw, extendVarEnv(parentVars, decls))
+        : raw;
+      // CSS drops a declaration whose `var()` cannot resolve, and an absent
+      // `content` means no box — so the two arrive at the same answer.
+      if (substituted === null) return null;
+
+      try {
+        return parseContent(substituted);
+      } catch (e) {
+        throw new Error(`${where}::${element}: ${(e as Error).message}`);
+      }
+    };
+
+    const text = contentFor(["none"]);
+    if (text === null) return -1;
 
     // `content` must not vary by state, and this refuses rather than picks.
     //
@@ -911,14 +983,12 @@ export function compileTree(
     // style property, which is the more common spelling anyway.
     for (const [, pseudo] of PREDICATE_PSEUDO) {
       if (!hasPseudoRule(rules, path, pseudo, element)) continue;
-      const stateContent = collectDecls(rules, path, ["none", pseudo], media, 0, element).get(
-        "content",
-      );
-      if (stateContent !== raw) {
+      const stateText = contentFor(["none", pseudo]);
+      if (stateText !== text) {
         throw new Error(
           `${where}::${element}: \`content\` cannot depend on \`:${pseudo}\` yet — ` +
-            `it resolves to ${JSON.stringify(raw)} at rest and ` +
-            `${JSON.stringify(stateContent ?? "(unset)")} when :${pseudo}.\n` +
+            `it resolves to ${JSON.stringify(text)} at rest and ` +
+            `${JSON.stringify(stateText ?? "(no box)")} when :${pseudo}.\n` +
             `  A node's text is one string slot and a variant run carries style ids, so ` +
             `per-state text needs a protocol change rather than a compiler one.\n` +
             `  Keep \`content\` the same in both and toggle a style property instead — ` +
@@ -927,22 +997,6 @@ export function compileTree(
         );
       }
     }
-
-    // The box's own environment, not the element's: `::before { --tick: "✓";
-    // content: var(--tick) }` is a legitimate way to write one, and resolving
-    // against the originating element's vars would miss the box's own.
-    const substituted = raw.includes("var(")
-      ? substituteVars(raw, extendVarEnv(parentVars, base))
-      : raw;
-    if (substituted === null) return -1;
-
-    let text: string | null;
-    try {
-      text = parseContent(substituted);
-    } catch (e) {
-      throw new Error(`${where}::${element}: ${(e as Error).message}`);
-    }
-    if (text === null) return -1;
 
     const inherited = inheritFrom(ownStyle);
     const r = resolveVariants(path, el, inherited, parentVars, where, element);
@@ -1011,7 +1065,7 @@ export function compileTree(
     // button while `::before` was a child node, and the two have no way to sit
     // beside each other. Rare enough to be worth the extra node rather than a
     // second layout path.
-    const kids = el.children;
+    const kids = uaChildren(el);
     const onlyText =
       kids.length === 1 && kids[0]!.type === "text" ? (kids[0] as { value: string }).value : null;
 

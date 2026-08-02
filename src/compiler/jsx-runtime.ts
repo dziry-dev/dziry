@@ -107,11 +107,40 @@ export type Props = {
   // from a linter this repo has never configured.
   onClick?: ((item: any, index: number) => void) | (() => void) | string;
   /**
-   * Accepted and ignored. There are no form widgets yet, so `<input>` compiles to
-   * an empty box — these exist so markup written against HTML habits typechecks.
+   * Form attributes, kept rather than ignored: a selector can test them.
+   *
+   * `type` is the important one — twenty-two `input` types are one tag, so
+   * `input[type=checkbox]` is the only way a stylesheet can distinguish a
+   * checkbox from a text field. These no longer merely "typecheck"; they reach
+   * the IR and the cascade reads them.
+   *
+   * They still do not make a control *behave*. `checked` and `disabled` here are
+   * the static, authored attributes, which is what a selector matches; the live
+   * `:checked` state is a predicate bit that nothing sets yet (A3).
    */
   type?: string;
   name?: string;
+  /**
+   * `value` is deliberately absent.
+   *
+   * Adding it broke two demo pages instantly, and the way it broke them is the
+   * argument: a component written `Props & { value: unknown }` intersects to
+   * `string & unknown`, so every component that takes a prop called `value` —
+   * which is most of them — would have to start writing `Omit<Props, "value">`.
+   * A framework type that claims the commonest prop name in the language is
+   * hostile, and dziri already spells an input's value `bindValue`. An authored
+   * `value=` attribute still reaches the IR from HTML, so `[value="x"]` selectors
+   * work; it is only the JSX prop that is withheld.
+   */
+  placeholder?: string;
+  checked?: boolean;
+  disabled?: boolean;
+  readOnly?: boolean;
+  required?: boolean;
+  multiple?: boolean;
+  selected?: boolean;
+  /** `<label for=…>`; spelled `htmlFor` because `for` is a reserved word. */
+  htmlFor?: string;
   /**
    * A string signal this element edits. Focus it by clicking, then typing appends
    * and Backspace deletes. Its value is displayed automatically when the element
@@ -151,6 +180,9 @@ export type StyleObject = Record<string, string | number | null | undefined>;
  * Everything else gets `px`, which is what makes `padding: 8` mean what it
  * looks like.
  */
+/** Shared, because a fragment and the root have no attributes and never gain any. */
+const EMPTY_ATTRS: ReadonlyMap<string, string> = new Map();
+
 const UNITLESS = new Set([
   "fontWeight",
   "flexGrow",
@@ -445,7 +477,7 @@ export function jsx(
   if (typeof type === "function") {
     const result = (type as Component)(props);
     if (result === null) {
-      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, classWhen: null, bindValue: null, style: null };
+      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, classWhen: null, bindValue: null, style: null, attrs: EMPTY_ATTRS };
     }
     if (Array.isArray(result)) {
       return {
@@ -458,6 +490,7 @@ export function jsx(
         classWhen: null,
         bindValue: null,
         style: null,
+        attrs: EMPTY_ATTRS,
       };
     }
     return result;
@@ -483,7 +516,33 @@ export function jsx(
     classWhen: names.classWhen,
     bindValue: props.bindValue ?? null,
     style: styleAttr(props.style, type),
+    attrs: attrsOf(props, names.classes),
   };
+}
+
+/**
+ * The props an attribute selector can see.
+ *
+ * Only strings and `true`, and the filter is the point rather than laziness: a
+ * selector matches against text, so a signal or a handler in this map would be
+ * a value no selector could ever compare against. A boolean attribute becomes
+ * the empty string, which is what HTML says `<input disabled>` means and what
+ * makes `[disabled]` a presence test rather than a value test.
+ *
+ * `class` and `id` are re-added from the parsed forms so `[class~="x"]` sees the
+ * same list the cascade does — `className` may have been a `cn()` call, and the
+ * raw prop would be an object.
+ */
+function attrsOf(props: Props, classes: string[]): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  for (const [key, value] of Object.entries(props)) {
+    if (key === "children" || key === "className" || key === "class" || key === "style") continue;
+    if (typeof value === "string") out.set(kebab(key).toLowerCase(), value);
+    else if (value === true) out.set(kebab(key).toLowerCase(), "");
+  }
+  if (classes.length) out.set("class", classes.join(" "));
+  if (typeof props.id === "string") out.set("id", props.id);
+  return out;
 }
 
 /** Bun calls `jsxs` when there are multiple static children; same behaviour here. */
@@ -503,6 +562,7 @@ export function toDocument(exported: Node | Node[]): Element {
     classWhen: null,
     bindValue: null,
     style: null,
+    attrs: EMPTY_ATTRS,
   };
 }
 
@@ -510,7 +570,39 @@ export function toDocument(exported: Node | Node[]): Element {
  * Tags the compiler understands. Enumerated rather than open-ended so a typo like
  * `<dvi>` is a type error instead of an unstyled node.
  */
-type Tag = "body" | "div" | "span" | "p" | "label" | "button" | "input";
+/**
+ * Intrinsic tags the compiler accepts.
+ *
+ * The form elements are here so a stylesheet can *name* them —
+ * `input[type=checkbox]` is how a UA sheet says which control it is describing,
+ * and there was no way to write that when `<input>` was the only one and
+ * attributes were discarded. They still compile to ordinary boxes: nothing about
+ * being in this list makes an element behave like a control. What gives a
+ * checkbox its tick is CSS on a generated box, and what will give it its
+ * checked-ness is A3.
+ *
+ * `select` is deliberately included even though its picker cannot open yet. The
+ * closed control — the button and the selected option's text — is most of what a
+ * form looks like, and the picker needs the overlay layer (ROADMAP B1). Rendering
+ * the closed state correctly is better than rendering nothing, and it is what
+ * Blitz does not do: it stubs `<select>` with `option { display: none }`.
+ */
+type Tag =
+  | "body"
+  | "div"
+  | "span"
+  | "p"
+  | "label"
+  | "button"
+  | "input"
+  | "select"
+  | "selectedcontent"
+  | "option"
+  | "optgroup"
+  | "textarea"
+  | "fieldset"
+  | "legend"
+  | "form";
 
 export declare namespace JSX {
   type Element = Node;

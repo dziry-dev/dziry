@@ -89,7 +89,37 @@ export type PseudoElement = "before" | "after";
 
 const SUPPORTED_PSEUDO_ELEMENT = new Set<string>(["before", "after"]);
 
-export type Compound = { tag: string | null; id: string | null; classes: string[] };
+/**
+ * One `[attr]` / `[attr op "value"]` test.
+ *
+ * The full Selectors Level 4 operator set, because it is small and leaving any
+ * of it out means a stylesheet that silently selects nothing. `i` is the
+ * ASCII-case-insensitive flag; HTML attribute *values* are case-sensitive by
+ * default, which is why it has to be asked for.
+ */
+export type AttrOp = "exists" | "=" | "~=" | "|=" | "^=" | "$=" | "*=";
+
+export type AttrSel = {
+  name: string;
+  op: AttrOp;
+  value: string;
+  /** The `i` flag: `[type="CHECKBOX" i]`. */
+  ci?: true;
+};
+
+export type Compound = {
+  tag: string | null;
+  id: string | null;
+  classes: string[];
+  /**
+   * Attribute tests on this compound.
+   *
+   * The reason form controls need them: twenty-two `input` types are one tag, so
+   * `input[type=checkbox]` is the only way a UA stylesheet can say which control
+   * it is describing. Until this existed, `input` meant all of them at once.
+   */
+  attrs?: AttrSel[];
+};
 
 export type Selector = {
   /** Left-to-right; the last entry is the subject of the selector. */
@@ -603,9 +633,204 @@ function unescapeIdent(s: string): string {
   return s.includes("\\") ? s.replace(/\\(.)/g, "$1") : s;
 }
 
+/**
+ * The selector with every `[…]` test blanked out, for scans that must not see
+ * inside one — the combinator check being the only caller today. Escapes and
+ * quotes are respected so `.content-\[x\]` and `[title="a]b"]` both survive.
+ */
+function withoutAttrs(src: string): string {
+  let out = "";
+  let depth = 0;
+  let quote: string | null = null;
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    if (quote) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "\\") {
+      if (depth === 0) out += ch + (src[i + 1] ?? "");
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "[") {
+      depth++;
+      continue;
+    }
+    if (ch === "]") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === 0) out += ch;
+  }
+  return out;
+}
+
+/**
+ * Splits a complex selector into compounds on descendant whitespace.
+ *
+ * `src.split(/\s+/)` was right until attribute selectors existed and is wrong
+ * now: `[title="a b"]` and `[type = checkbox]` both contain spaces that are not
+ * combinators, and splitting on them turns one compound into two that match
+ * nothing. So whitespace only separates when it is outside brackets and outside
+ * a string — the same reason `splitTopLevel` exists for parenthesised values.
+ */
+function splitCompounds(src: string): string[] {
+  const out: string[] = [];
+  let current = "";
+  let depth = 0;
+  let quote: string | null = null;
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+
+    if (quote) {
+      current += ch;
+      if (ch === "\\") {
+        current += src[i + 1] ?? "";
+        i++;
+      } else if (ch === quote) quote = null;
+      continue;
+    }
+
+    // A backslash escape makes the next character a literal ident character,
+    // bracket or not. Tailwind writes `content-['x']` as the class
+    // `.content-\[\'x\'\]`, so without this every arbitrary-value utility looks
+    // like an unterminated attribute selector.
+    if (ch === "\\") {
+      current += ch + (src[i + 1] ?? "");
+      i++;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === "[") depth++;
+    if (ch === "]") depth = Math.max(0, depth - 1);
+
+    if (depth === 0 && /\s/.test(ch)) {
+      if (current) out.push(current);
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+
+  if (current) out.push(current);
+  return out;
+}
+
+/**
+ * Pulls every `[…]` test out of one compound, returning the rest for tokenizing.
+ *
+ * Scanned rather than matched with a regex, because a value may contain a `]`:
+ * `[title="a]b"]` is one test, and `/\[[^\]]*\]/` would cut it in half and leave
+ * a stray `b"]` that the coverage check would then blame on the author.
+ */
+function extractAttrs(part: string, at: number): { rest: string; attrs: AttrSel[] } {
+  const attrs: AttrSel[] = [];
+  let rest = "";
+
+  for (let i = 0; i < part.length; i++) {
+    // An escaped bracket is an ident character, not the start of a test. Tailwind
+    // writes `content-['x']` as `.content-\[\'x\'\]`, so without this every
+    // arbitrary-value utility reads as an unterminated attribute selector.
+    if (part[i] === "\\") {
+      rest += part[i]! + (part[i + 1] ?? "");
+      i++;
+      continue;
+    }
+    if (part[i] !== "[") {
+      rest += part[i];
+      continue;
+    }
+
+    let body = "";
+    let quote: string | null = null;
+    let closed = false;
+    i++;
+    for (; i < part.length; i++) {
+      const ch = part[i]!;
+      if (quote) {
+        body += ch;
+        if (ch === "\\") {
+          body += part[i + 1] ?? "";
+          i++;
+        } else if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        body += ch;
+        continue;
+      }
+      if (ch === "]") {
+        closed = true;
+        break;
+      }
+      body += ch;
+    }
+    if (!closed) throw new CssError(`unterminated attribute selector in "${part}"`, at);
+    attrs.push(parseAttrSel(body, part, at));
+  }
+
+  return { rest, attrs };
+}
+
+/** `type=checkbox`, `class~="a"`, `data-x`, `title="A" i` — the inside of one `[…]`. */
+function parseAttrSel(body: string, part: string, at: number): AttrSel {
+  const m = /^\s*([-\w\\]+)\s*(?:([~|^$*]?=)\s*(.*?)\s*)?$/s.exec(body);
+  if (!m) throw new CssError(`could not parse attribute selector "[${body}]"`, at);
+
+  const name = unescapeIdent(m[1]!).toLowerCase();
+  if (m[2] === undefined) return { name, op: "exists", value: "" };
+
+  let raw = m[3] ?? "";
+  let ci: true | undefined;
+  // The `i` / `s` flag sits after the value. `s` is the default in HTML for
+  // attribute values, so it parses and does nothing rather than being refused.
+  const flag = /\s+([is])$/i.exec(raw);
+  if (flag) {
+    if (flag[1]!.toLowerCase() === "i") ci = true;
+    raw = raw.slice(0, flag.index);
+  }
+
+  let value = raw.trim();
+  if (
+    value.length >= 2 &&
+    (value[0] === '"' || value[0] === "'") &&
+    value[value.length - 1] === value[0]
+  ) {
+    value = value.slice(1, -1).replace(/\\(.)/g, "$1");
+  }
+
+  if (value === "") {
+    // `[attr=""]` is valid and matches an empty value; `[attr=]` is not. The
+    // difference is whether quotes were there, and it is worth keeping because
+    // `[type=]` is far more likely a typo than an intent.
+    if (!/=\s*(""|'')\s*[is]?\s*$/i.test(body)) {
+      throw new CssError(`attribute selector "[${body}]" in "${part}" has no value`, at);
+    }
+  }
+
+  return ci ? { name, op: m[2] as AttrOp, value, ci } : { name, op: m[2] as AttrOp, value };
+}
+
 export function parseSelector(src: string, at = -1): Selector {
   if (!src) throw new CssError("empty selector", at);
-  if (/[>+~]/.test(src)) {
+  // Combinators are looked for *outside* attribute tests. `[data-tags~="beta"]`
+  // contains a `~` that is an operator, not a sibling combinator, and testing the
+  // raw string refused the selector outright.
+  if (/[>+~]/.test(withoutAttrs(src))) {
     throw new CssError(`only the descendant combinator is supported, got "${src}"`, at);
   }
 
@@ -629,13 +854,31 @@ export function parseSelector(src: string, at = -1): Selector {
   let element: PseudoElement | null = null;
   const spec: [number, number, number] = [0, 0, 0];
 
-  const parts = src.split(/\s+/).filter(Boolean);
+  const parts = splitCompounds(src);
   for (let p = 0; p < parts.length; p++) {
-    const part = parts[p]!;
+    const whole = parts[p]!;
     // Where this compound starts in the source, so the caret lands on the
     // offending compound rather than on the whole selector.
-    const partAt = at < 0 ? -1 : at + src.indexOf(part);
+    const partAt = at < 0 ? -1 : at + src.indexOf(whole);
     const compound: Compound = { tag: null, id: null, classes: [] };
+
+    // Attribute tests come out first, and the rest is tokenized as before.
+    //
+    // They have to: `[` and `]` are not ident characters, so leaving them in
+    // would fail the coverage check below and refuse the whole selector — which
+    // is exactly what `input[type=checkbox]` used to do.
+    const { rest: part, attrs } = extractAttrs(whole, partAt);
+    if (attrs.length) {
+      compound.attrs = attrs;
+      // An attribute selector weighs the same as a class, per the spec.
+      spec[1] += attrs.length;
+    }
+    // `[type=checkbox]` on its own is a whole compound; there is nothing left to
+    // tokenize and that is legal CSS, not a parse failure.
+    if (part === "") {
+      compounds.push(compound);
+      continue;
+    }
 
     // Split on the punctuation while keeping it: "div.a#b:hover" -> tokens.
     //
@@ -650,7 +893,15 @@ export function parseSelector(src: string, at = -1): Selector {
     // a bare `:` that matches nothing followed by `:before`, the join would not
     // cover the input, and the whole selector would be refused as unsupported
     // syntax. Which is exactly what happened before pseudo-elements existed here.
-    const tokens = part.match(/(?:::|[#.:])?(?:\\.|[A-Za-z0-9_-])+/g);
+    //
+    // `[^\x00-\x7f]` because a CSS identifier may contain any code point from
+    // U+0080 up, unescaped — CSS Syntax calls them "non-ASCII ident code points".
+    // Found by real Tailwind output: `before:content-['a_·_b']` puts a raw U+00B7
+    // in the class name, the scanner stopped at it, the coverage check below saw
+    // an uncovered input and refused the whole selector. Every arbitrary value
+    // containing a non-ASCII character would have done the same. Combinators and
+    // the rest of selector syntax are all ASCII, so widening this masks nothing.
+    const tokens = part.match(/(?:::|[#.:])?(?:\\.|[A-Za-z0-9_-]|[^\x00-\x7f])+/g);
     if (!tokens) throw new CssError(`could not parse compound selector "${part}"`, partAt);
 
     // The tokens must *cover* the input, not merely be found in it.

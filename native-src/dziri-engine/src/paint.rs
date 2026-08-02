@@ -15,7 +15,7 @@
 use skia_safe::textlayout::TextAlign;
 use skia_safe::{Canvas, Color, Paint, PaintStyle, Point, RRect, Rect};
 
-use crate::protocol::{self, node_kind, predicate};
+use crate::protocol::{self, display, node_kind, predicate};
 use crate::tables::Tables;
 use crate::text::Measurer;
 
@@ -23,6 +23,19 @@ const NODES: usize = protocol::Table::Nodes as usize;
 const STYLES: usize = protocol::Table::Styles as usize;
 const VARIANTS: usize = protocol::Table::Variants as usize;
 const VARIANT_SLOTS: usize = protocol::Table::VariantSlots as usize;
+
+/// The `display` of one resolved style slot.
+///
+/// Defaults to `FLEX` for an out-of-range slot rather than `NONE`, so a bad index
+/// keeps drawing. Failing open matters here: the alternative is a blank window
+/// with nothing to blame.
+fn display_of(tables: &Tables, slot: usize) -> u8 {
+    tables
+        .u8s(STYLES, protocol::styles::DISPLAY)
+        .get(slot)
+        .copied()
+        .unwrap_or(display::FLEX)
+}
 
 /// How thick a scrollbar thumb is, in CSS pixels.
 ///
@@ -600,6 +613,21 @@ impl Painter {
             };
 
             if node >= count || hidden.get(node).copied().unwrap_or(0) != 0 {
+                continue;
+            }
+
+            // `display: none` takes the subtree out of paint, exactly as `hidden`
+            // does. Layout already agrees — `style_of` gives Taffy `Display::None`,
+            // and Taffy neither sizes the node nor lays out its children.
+            //
+            // Which is what made the omission visible rather than harmless: a node
+            // Taffy never laid out keeps all-zero bounds, so a hidden subtree
+            // painted its text at the container's origin. A `<select>`'s options
+            // drew on top of its own closed button.
+            //
+            // Resolved, not base: `display` can differ per predicate, and reading
+            // the live slot is the whole point of the variant machinery.
+            if display_of(tables, self.style_for(tables, node, state)) == display::NONE {
                 continue;
             }
 

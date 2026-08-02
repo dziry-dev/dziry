@@ -32,11 +32,16 @@ function diagnose(src: string): string | null {
 }
 
 test("an unsupported selector is reported at its own line and column", () => {
-  const out = diagnose(".ok { color: red }\n\ninput[type=text] { color: red }\n");
+  // This used to use `input[type=text]`, which is now supported — attribute
+  // selectors were built so a UA stylesheet could name one control among the
+  // twenty-two that share the `input` tag. A pseudo-element dziri does not have
+  // is the current example, and a better one: it is refused *by name*, so the
+  // diagnostic says which feature is missing rather than "syntax".
+  const out = diagnose(".ok { color: red }\n\nselect::picker-icon { color: red }\n");
   expect(out).toContain("sheet.css:3:1");
-  expect(out).toContain("unsupported selector syntax");
+  expect(out).toContain("unsupported pseudo-element");
   // The offending source line, and a caret under it.
-  expect(out).toContain("input[type=text] { color: red }");
+  expect(out).toContain("select::picker-icon { color: red }");
   expect(out).toContain("^");
 });
 

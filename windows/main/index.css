@@ -39,6 +39,7 @@
   --color-violet-500: oklch(60.6% 0.25 292.717);
   --color-violet-900: oklch(38% 0.189 293.745);
   --color-purple-500: oklch(62.7% 0.265 303.9);
+  --color-fuchsia-400: oklch(74% 0.238 322.16);
   --color-fuchsia-500: oklch(66.7% 0.295 322.15);
   --color-pink-500: oklch(65.6% 0.241 354.308);
   --color-rose-50: oklch(96.9% 0.015 12.422);
@@ -241,6 +242,9 @@
 }
 .flex-wrap {
   flex-wrap: wrap;
+}
+.items-baseline {
+  align-items: baseline;
 }
 .items-center {
   align-items: center;
@@ -641,6 +645,30 @@
 .text-zinc-500 {
   color: var(--color-zinc-500);
 }
+.shadow {
+  --tw-shadow: 0 1px 3px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 1px 2px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
+  box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+}
+.before\:text-sky-400::before {
+  content: var(--tw-content);
+  color: var(--color-sky-400);
+}
+.before\:content-\[\'hover_me_-_\'\]::before {
+  --tw-content: 'hover me - ';
+  content: var(--tw-content);
+}
+.before\:content-\[\'→_\'\]::before {
+  --tw-content: '→ ';
+  content: var(--tw-content);
+}
+.after\:text-emerald-400::after {
+  content: var(--tw-content);
+  color: var(--color-emerald-400);
+}
+.after\:content-\[\'_←\'\]::after {
+  --tw-content: ' ←';
+  content: var(--tw-content);
+}
 @media (hover: hover) {
   .hover\:bg-emerald-500:hover {
     background-color: var(--color-emerald-500);
@@ -653,6 +681,10 @@
   }
   .hover\:bg-zinc-700:hover {
     background-color: var(--color-zinc-700);
+  }
+  .hover\:before\:text-fuchsia-400:hover::before {
+    content: var(--tw-content);
+    color: var(--color-fuchsia-400);
   }
 }
 @media (width >= 48rem) {
@@ -691,6 +723,163 @@ body.light .muted {
   background: #0284c7;
   color: #f0f9ff;
 }
+input[type="checkbox"], input[type="radio"] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border-width: 2px;
+  border-color: #52525b;
+  background: #18181b;
+  justify-content: center;
+  align-items: center;
+  accent-color: #0284c7;
+}
+input[type="checkbox"] {
+  border-radius: 4px;
+}
+input[type="radio"] {
+  border-radius: 9px;
+}
+input[type="checkbox"]::before {
+  content: "\2713";
+  color: transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+input[type="radio"]::before {
+  content: "\25CF";
+  color: transparent;
+  font-size: 11px;
+}
+input[type="checkbox"][checked] {
+  background: #0284c7;
+  border-color: #0284c7;
+}
+input[type="checkbox"][checked]::before {
+  color: #f0f9ff;
+}
+input[type="radio"][checked] {
+  border-color: #0284c7;
+}
+input[type="radio"][checked]::before {
+  color: #38bdf8;
+}
+input[type="checkbox"]:hover, input[type="radio"]:hover {
+  border-color: #38bdf8;
+}
+input[type="checkbox"]:hover::before {
+  color: #52525b;
+}
+input[type="checkbox"][checked]:hover::before {
+  color: #ffffff;
+}
+input[disabled] {
+  background: #27272a;
+  border-color: #3f3f46;
+}
+input[type="checkbox"][disabled]::before, input[type="radio"][disabled]::before {
+  color: #52525b;
+}
+input[type="text"] {
+  appearance: none;
+  caret-color: #38bdf8;
+  accent-color: #0284c7;
+  background: #18181b;
+  border-width: 1px;
+  border-color: #3f3f46;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: #e4e4e7;
+  width: 260px;
+}
+input[type="text"]:hover {
+  border-color: #52525b;
+}
+input[type="text"][disabled] {
+  color: #52525b;
+}
+select {
+  appearance: none;
+  background: #18181b;
+  border-width: 1px;
+  border-color: #3f3f46;
+  border-radius: 6px;
+  flex-direction: row;
+  align-items: center;
+}
+select:hover {
+  border-color: #52525b;
+}
+select button {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  padding: 7px 10px;
+  gap: 10px;
+  background: #00000000;
+  font-size: 13px;
+  color: #e4e4e7;
+  width: 220px;
+}
+select button::after {
+  content: "\25BE";
+  color: #a1a1aa;
+  font-size: 11px;
+}
+select[disabled] {
+  background: #27272a;
+}
+select[disabled] button {
+  color: #52525b;
+}
+.pull-quote {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 4px;
+}
+.pull-quote::before {
+  content: "\201C";
+  color: #52525b;
+  font-size: 20px;
+}
+.pull-quote::after {
+  content: "\201D";
+  color: #52525b;
+  font-size: 20px;
+}
+.probe {
+  border-width: 1px;
+  border-color: #3f3f46;
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: #71717a;
+}
+[data-tone="warn"] {
+  border-color: #f59e0b;
+  color: #fbbf24;
+}
+[data-tags~="beta"] {
+  border-color: #10b981;
+  color: #34d399;
+}
+[data-lang|="en"] {
+  border-color: #0ea5e9;
+  color: #38bdf8;
+}
+[data-file$=".pdf"] {
+  border-color: #ef4444;
+  color: #f87171;
+}
+[data-file^="draft"] {
+  border-color: #8b5cf6;
+  color: #a78bfa;
+}
+[data-note*="x"] {
+  border-color: #ec4899;
+  color: #f472b6;
+}
 @property --tw-rotate-x {
   syntax: "*";
   inherits: false;
@@ -720,6 +909,76 @@ body.light .muted {
   syntax: "*";
   inherits: false;
 }
+@property --tw-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@property --tw-shadow-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-shadow-alpha {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+@property --tw-inset-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@property --tw-inset-shadow-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-inset-shadow-alpha {
+  syntax: "<percentage>";
+  inherits: false;
+  initial-value: 100%;
+}
+@property --tw-ring-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-ring-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@property --tw-inset-ring-color {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-inset-ring-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@property --tw-ring-inset {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-ring-offset-width {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --tw-ring-offset-color {
+  syntax: "*";
+  inherits: false;
+  initial-value: #fff;
+}
+@property --tw-ring-offset-shadow {
+  syntax: "*";
+  inherits: false;
+  initial-value: 0 0 #0000;
+}
+@property --tw-content {
+  syntax: "*";
+  initial-value: "";
+  inherits: false;
+}
 @layer properties {
   @supports ((-webkit-hyphens: none) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color:rgb(from red r g b)))) {
     *, ::before, ::after, ::backdrop {
@@ -730,6 +989,21 @@ body.light .muted {
       --tw-skew-y: initial;
       --tw-border-style: solid;
       --tw-font-weight: initial;
+      --tw-shadow: 0 0 #0000;
+      --tw-shadow-color: initial;
+      --tw-shadow-alpha: 100%;
+      --tw-inset-shadow: 0 0 #0000;
+      --tw-inset-shadow-color: initial;
+      --tw-inset-shadow-alpha: 100%;
+      --tw-ring-color: initial;
+      --tw-ring-shadow: 0 0 #0000;
+      --tw-inset-ring-color: initial;
+      --tw-inset-ring-shadow: 0 0 #0000;
+      --tw-ring-inset: initial;
+      --tw-ring-offset-width: 0px;
+      --tw-ring-offset-color: #fff;
+      --tw-ring-offset-shadow: 0 0 #0000;
+      --tw-content: "";
     }
   }
 }
