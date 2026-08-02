@@ -448,6 +448,16 @@ winit-versus-SDL3 choice reversible.
 - Skip hidden subtrees; autofocus.
 - Tab order over spatial navigation: it is the desktop convention and what Radix implements.
 
+**A3 alone unblocks most of forms.** Tier 1a below — Checkbox, Radio, Switch, Toggle, Tabs — needs
+nothing from A5: no text buffer, no IME, no clipboard. Only `Input` waits for A5. The engine already
+has the parts A3 builds on: `state.focused`, `KeyDown` routed to the focused node, `FocusChanged`,
+`hit_test` and `set_input_state` (`engine.rs`). What is missing is tab walking, `:focus-visible` as
+a bit distinct from `:focus`, and Enter/Space through the click dispatch.
+
+**Probe before writing Rust.** Focus and blur ordering, and what `:focus-visible` actually resolves
+to, are exactly the semantics `/browser-oracle` exists for — nobody should assert them from memory.
+Run the probes, record the answers in BROWSER-FACTS.md, then implement against that.
+
 ### A4 · Scrolling
 - Scroll model, wheel and trackpad, scrollbars, `overflow` semantics, clipping to the container.
 - **Nested scroll containers** — a scrollable list inside a scrollable panel is where layout
@@ -524,6 +534,18 @@ Still to do: **held-button auto-repeat** on a track click (one click, one page t
 - **Single-line text input**, moved forward from B4: selection, IME, clipboard (text only for v1).
   You cannot build a login form without it, and IME must be validated in A0 anyway. *Rich* editing
   — multi-line, undo, word navigation — stays deferred indefinitely.
+  - **This is the one part of forms that fails the compile-time gate**, and it fails at question 3:
+    the set of strings a user can type is unbounded, so there are no variants to emit. The *value*
+    is already covered by the ledger's "current state values", but **caret index and selection range
+    are a new NOTES.md ledger entry** — engine-internal editing state the app never declares,
+    unbounded, and dependent on where the user clicked or arrowed. Add the entry when this lands,
+    and justify it in the same terms as the ones already there.
+  - **Caret blink is an engine-side timer, not a JS one.** Visible/not is two states and the phase
+    derives from the clock, so it flips one bit and invalidates the caret rect only. Same shape as
+    transitions, which interpolate in Rust precisely so nothing runs in JS at frame rate — and it is
+    what makes the caret survive a long JS computation, the worry recorded under `pump_input` below.
+  - `bindValue` already exists in partial form — append and backspace, via the `editables` table
+    (`compile.ts:802`). A5 is what turns it into a real input rather than a demo.
 - **Font discovery, not just font loading.** System fonts per platform (Segoe UI, San Francisco,
   Noto), a fallback chain, and an emoji font. Text without emoji fallback looks broken.
 
@@ -601,12 +623,36 @@ this is clean with attribution. Call it *shadcn-compatible*, not shadcn.
 
 - **Tier 0** — Button, Badge, Card, Separator, Alert, Label, Skeleton, static Table. No primitives;
   ships after A1.
-- **Tier 1** — Input, Checkbox, Radio, Switch, Tabs, Toggle. Needs A3 and A5's text input.
+- **Tier 1a** — Checkbox, Radio, Switch, Toggle, Tabs. **Needs A3 only.** These carry no text, so
+  the earlier "Tier 1 needs A3 and A5" over-coupled them to the text buffer; five of the six ship a
+  milestone earlier than that implied.
+- **Tier 1b** — Input. Needs A5's text input.
 - **Tier 2 — cut from v1.** Dropdown, Select, Combobox, Popover, Tooltip, Dialog, Sheet, Command
   each need layering, positioning and animation: three subsystems for visual polish. **A desktop app
   with working forms and no dropdowns is shippable; one with a broken Dialog is not.** These are
   where every framework discovers years of edge cases, and cutting them is the single largest
   reduction in single-maintainer risk available.
+
+**"Native" form controls means Skia-drawn, not OS widgets.** Decided, because the alternative
+contradicts the thesis rather than merely costing more: Tailwind cannot style an `HWND`, Taffy cannot
+lay one out, child windows break the single-surface zero-copy model, and `appearance` and
+`accent-color` only exist *because* the UA draws the control. Native-looking and native-behaving,
+drawn by us.
+
+Which makes most of Tier 1a cheap. `:checked`, `:disabled` and `:indeterminate` are enumerable
+booleans, so they pass the compile-time gate at question 3 exactly like `:hover` — a second style id
+and an int write, with **no new ledger entry**, because a checkbox's checked-ness is a `state()`
+value and "current state values" is already on the list. The real work is that variant slots are a
+fixed `base/hover/active/focus` quad (`variants.ts:370-384`), so new roles widen a structure that
+crosses the protocol boundary: `variants.ts`, `compile.ts`, `ir.ts` and `schema.ts` together, plus
+`protocol-guard`.
+
+Two of the five form-control CSS properties are **non-goals**, and saying so keeps them out of the
+backlog: `resize` needs drag handles on a textarea and multi-line editing is deferred indefinitely,
+so it could never do anything; `field-sizing: content` makes layout depend on the runtime string,
+which is a larger ask than the other four combined. `accent-color`, `caret-color` and `appearance`
+are ordinary compile-time fields. (Both non-goals still need adding to `css-coverage`'s
+`OUT_OF_SCOPE_NAMES` so the two tools agree.)
 
 **On "shadcn-importable":** an `add` command that downloads the original and transforms it is
 appealing but would be a **React-to-ours source transpiler** — `forwardRef`, `useState`,
@@ -888,9 +934,10 @@ P0 MSVC ────► A0 engine ──► A1 Tailwind ──► Tier 0 preview
              skia-safe +     harness first    components
              Taffy,
              schema-gen      A2 Text ─────┐
-             shared memory   A3 Input ────┼──► Tier 1  (forms actually work)
-             + IME proof     A4 Scrolling ┤
-                             A5 Img/icons/│
+             shared memory   A3 Input ────┴──► Tier 1a (checkbox/radio/switch/
+             + IME proof                        toggle/tabs — no text needed)
+                             A4 Scrolling ┐
+                             A5 Img/icons/├──► Tier 1b (Input — needs the buffer)
                                 text input┘
                                           │
                             D1 CLI + CSS hot reload ──► D2 Packaging ──► D3 Measure ──► v1

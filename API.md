@@ -91,6 +91,7 @@ Anything that trades robustness for capability stays a proposal.
 | inline `style=` (string + object) | **done** | — |
 | `ref()` | partial — `resolve-refs.ts` | C3 |
 | `bindValue` | partial — append + backspace only | M12 |
+| form controls — `<Checkbox>` `<Switch>` `<Radio>` `<Toggle>` `<Tabs>` `<Input>` | planned — see **Form controls** below | C2 |
 | `effect` `untrack` `peek` cleanup, disposal scopes | planned | M6 |
 | `Show` | planned | M3 |
 | `source` | planned | M8 |
@@ -154,6 +155,55 @@ export const configOnDisk = source<Config>(
   readConfigSync(),
 );
 ```
+
+---
+
+## Form controls
+
+Native-*looking* and native-*behaving*, drawn by us in Skia. Not OS widgets — Tailwind cannot style
+an `HWND` and Taffy cannot lay one out, so child windows would contradict the thesis rather than
+merely cost more. Sequencing and the full reasoning live in ROADMAP under A3 and C2.
+
+The authoring surface is deliberately not a new concept. A control's state is a `state()` value, and
+its styling is the variant machinery that already backs `:hover`:
+
+```tsx
+const done  = state(false);
+const draft = state("");
+
+<Checkbox checked={done} />                     {/* :checked is a variant, not a computation */}
+<Switch checked={done} disabled={locked} />
+<Radio name="plan" value="pro" checked={plan} />
+
+<Input bindValue={draft} onSubmit={save} />     {/* onChange fires on commit, onInput per keystroke */}
+```
+
+Why this costs almost nothing for everything except `Input`: `:checked`, `:disabled` and
+`:indeterminate` are enumerable booleans, so they pass the compile-time gate at question 3 — a second
+style id and an int write. **No new ledger entry**, because checked-ness is a `state()` value and
+"current state values" is already irreducibly runtime.
+
+`Input` is the exception and the only part that fails the gate. It fails at question 3 because the set
+of strings a user can type is unbounded, so there are no variants to emit. Its **caret index and
+selection range become a new NOTES.md ledger entry** when A5 lands. The caret blink is an engine-side
+timer flipping one bit, never JS at frame rate.
+
+`bindValue` exists in partial form today — append and backspace only, through the `editables` table
+(`src/compiler/compile.ts:802`).
+
+| API | Status | Milestone |
+|---|---|---|
+| `<Checkbox>` `<Switch>` `<Radio>` `<Toggle>` `<Tabs>` | planned | C2 · Tier 1a (needs A3) |
+| `:checked` / `:disabled` / `:indeterminate` variants | planned — widens the `base/hover/active/focus` quad in `variants.ts` | A3 |
+| `accent-color` `caret-color` `appearance` | planned — ordinary compile-time `STYLE_FIELDS` | A1 |
+| `resize`, `field-sizing: content` | **non-goal** — see ROADMAP C2 | — |
+| `<Input>` | planned | C2 · Tier 1b (needs A5) |
+| `onSubmit` on `bindValue`; `onChange` vs `onInput` | planned | A3 |
+| caret, selection, IME, clipboard | planned — new ledger entry | A5 |
+
+*The Milestone column above uses ROADMAP's phase labels. The table under Status uses `M`-numbers,
+and the two vocabularies have no mapping anywhere in the repo — worth reconciling, but inventing one
+here would be worse than naming the gap.*
 
 ---
 
