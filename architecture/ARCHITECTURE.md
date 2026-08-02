@@ -43,8 +43,10 @@ The authoring surface is ordinary JSX and ordinary CSS. State is a signal create
 
 There are two front-ends — JSX and HTML — and they land on the same `Element` tree, so everything after the parse is shared. JSX is the default; the HTML path is what existed first.
 
+A stylesheet arrives the way a bundler would deliver one: a module imports it, and the cascade follows the module graph's order. Tailwind, if the sheet asks for it, is the project's own dependency and runs during the compile — nothing is generated onto disk, so there is no built copy to go stale. An `.html` document, having no import statement, keeps `<style>`.
 
-`windows/main/index.tsx`, `windows/main/in.css`, `windows/main/state.ts`, `src/compiler/html.ts`
+
+`windows/main/index.tsx`, `windows/main/app.css`, `src/compiler/stylesheet.ts`, `src/compiler/css-imports.ts`, `windows/main/state.ts`, `src/compiler/html.ts`
 
 
 #### Evaluate, don't render
@@ -214,12 +216,12 @@ A signal changing closes the loop: it mutates the IR in place, and the next uplo
 
 ## The shared-memory boundary
 
-Protocol version 8. Struct-of-arrays: every field is its own contiguous span.
+Protocol version 10. Struct-of-arrays: every field is its own contiguous span.
 
 | Table | Fields | Bytes/elem | Sized by | Written by | Read by |
 | --- | --- | --- | --- | --- | --- |
 | `nodes` | 9 | 23 | nodes | compiler, then list relinking and `hidden` | engine |
-| `styles` | 55 | 168 | styles | compiler, then variant patches | engine, every frame |
+| `styles` | 58 | 177 | styles | compiler, then variant patches | engine, every frame |
 | `variants` | 3 | 12 | own | compiler | engine painter |
 | `variantSlots` | 1 | 2 | own | compiler | engine painter |
 | `media` | 3 | 9 | own | compiler | engine, re-evaluated from the surface size each frame |
@@ -308,5 +310,4 @@ Never invalidating a node id is exactly right. The wrapper node broke grid, the 
 - `API.md` — The authoring API as planned, with status per surface.
 - `NOTES.md` — Working notes and measurements.
 - `BROWSER-FACTS.md` — Browser behaviour that was measured rather than remembered.
-- `framework-design.md` — The long-form design argument.
 - `data-layer-design.md` — The data layer, designed but not built.

@@ -31,7 +31,6 @@ import { compileProject, describe, ENTRY_FILE, WORKER_FILE } from "../compiler/b
 import { libraryName } from "../engine/host.ts";
 import { PACKAGE } from "../compiler/compile.ts";
 import { reactivePlugin, reactiveEnabled } from "../compiler/reactive-plugin.ts";
-import { buildStylesheets } from "./tailwind.ts";
 
 export type BuildOptions = {
   projectDir: string;
@@ -39,8 +38,6 @@ export type BuildOptions = {
   outDir?: string;
   /** Executable name without the extension. Defaults to the project directory's name. */
   name?: string;
-  /** Skip the Tailwind step. */
-  noCss?: boolean;
   /** Keep the scratch entry, for looking at what was generated. */
   keepScratch?: boolean;
   /** Windows: leave the executable a console app, so it can print. */
@@ -173,12 +170,6 @@ async function hideConsole(exe: string): Promise<void> {
 export async function buildApp(options: BuildOptions): Promise<BuildResult> {
   const started = performance.now();
   const projectDir = resolve(options.projectDir);
-
-  if (!options.noCss) {
-    for (const css of await buildStylesheets(projectDir)) {
-      console.log(`  css   ${css.from} -> ${css.to}`);
-    }
-  }
 
   for (const one of await compileProject({ projectDir })) {
     console.log(describe(one, projectDir));

@@ -13,11 +13,14 @@
  * snippet is still worth compiling on its own, which is what every measurement
  * harness in `scripts/` does.
  */
-import { join, relative, extname, resolve, dirname } from "node:path";
+import { join, relative, extname, resolve, dirname, isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
-import { compile, compileTree, emit, dump } from "./compiler/compile.ts";
-import { CssError, formatCssError } from "./compiler/css.ts";
+import { compileTree, emit, dump } from "./compiler/compile.ts";
+import { CssError } from "./compiler/css.ts";
+import { installCssGraph, stylesheetsFor } from "./compiler/css-imports.ts";
+import { loadStylesheet, SheetMap, type CssSource } from "./compiler/stylesheet.ts";
+import { extractStyleElements } from "./compiler/style-element.ts";
 import { buildRefIndex, resolveRefs, type RefSource } from "./compiler/resolve-refs.ts";
 import {
   compileVariants,
@@ -26,7 +29,7 @@ import {
 } from "./compiler/variant-compile.ts";
 import { toDocument } from "./compiler/jsx-runtime.ts";
 import { setCompiling } from "./runtime/signal.ts";
-import type { Element, Node } from "./compiler/html.ts";
+import { parseHtml, type Element, type Node } from "./compiler/html.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2);
@@ -62,12 +65,36 @@ if (positional.length === 0) {
 }
 
 const inputPath = positional[0]!;
-const cssPath = positional[1] ?? join(dirname(inputPath), "app.css");
+/** Named explicitly, or the conventional sibling — which is allowed not to exist. */
+const explicitCss = positional[1];
+const cssPath = explicitCss ?? join(dirname(inputPath), "app.css");
 
 const rel = (p: string) => relative(ROOT, p).replace(/\\/g, "/");
 
-const css = await Bun.file(cssPath).text();
 const isJsx = [".tsx", ".jsx"].includes(extname(inputPath).toLowerCase());
+
+/**
+ * The named stylesheet, loaded the way a window's would be.
+ *
+ * Through `loadStylesheet`, so this driver and the window compiler agree about
+ * what a stylesheet is — a sheet that uses Tailwind compiles here too, and
+ * `@import` resolves rather than being silently skipped.
+ *
+ * A defaulted `app.css` that does not exist is not an error. It was one until
+ * stylesheets became importable, and the failure it produced named the CSS read
+ * rather than the missing convention.
+ */
+const named: CssSource[] =
+  explicitCss !== undefined || existsSync(cssPath)
+    ? [await loadStylesheet(resolve(cssPath), ROOT)]
+    : [];
+
+// Before the input module is imported: the recorder cannot see an edge that
+// resolved before it existed.
+installCssGraph();
+
+/** Set once the full sheet is assembled; until then there is nothing to map into. */
+let sheet: SheetMap | null = null;
 
 /**
  * Turns a stylesheet error into the author's problem rather than ours.
@@ -82,7 +109,11 @@ function reportCssErrors<T>(run: () => T): T {
     return run();
   } catch (e) {
     if (e instanceof CssError) {
-      console.error(formatCssError(e, css, rel(cssPath)));
+      console.error(
+        sheet === null
+          ? `  error: ${e.message}`
+          : sheet.formatError(e, (p) => (isAbsolute(p) ? rel(p) : p)),
+      );
       process.exit(1);
     }
     throw e;
@@ -115,6 +146,16 @@ if (isJsx) {
     throw new Error(`${rel(inputPath)} has no default export`);
   }
   const doc: Element = toDocument(mod.default);
+
+  // Stylesheets the module imported come first, then the one named on the command
+  // line — the explicit argument is the more specific instruction, so it wins ties.
+  const imported: CssSource[] = [];
+  for (const path of stylesheetsFor([resolve(inputPath)])) {
+    imported.push(await loadStylesheet(path, ROOT));
+  }
+  sheet = new SheetMap([...imported, ...named]);
+  const css = sheet.text;
+
   result = reportCssErrors(() => compileTree(doc, css));
 
   // Conditional classes: compile one extra variant per toggle and diff, so each
@@ -160,16 +201,47 @@ if (isJsx) {
   ({ imports } = resolveRefs(result, buildRefIndex(sources), variants));
 } else {
   const html = await Bun.file(inputPath).text();
-  result = reportCssErrors(() => compile(html, css));
+  const doc = parseHtml(html);
+
+  /**
+   * `<style>` is how an `.html` document carries its own CSS.
+   *
+   * It exists for this front-end and not for JSX, which has `import`. A document
+   * has no import statement at all, so without it a single self-contained file
+   * cannot be styled — and self-contained is the whole reason the HTML path is
+   * still here, since every probe and characterization case is one file.
+   *
+   * Last in the sheet: the rules written inside the document beat the stylesheet
+   * handed to the command, the same way a browser resolves two sources by order.
+   */
+  const blocks = extractStyleElements(doc).map((block) => ({
+    path: `${rel(inputPath)} ${block.label}`,
+    text: block.text,
+  }));
+
+  sheet = new SheetMap([...named, ...blocks]);
+  result = reportCssErrors(() => compileTree(doc, sheet!.text));
 }
 
 const elapsed = performance.now() - started;
+
+/**
+ * What actually went into the cascade, for the artifact header and the summary.
+ *
+ * Not `cssPath`: that is the file the *convention* would name, and it is allowed
+ * not to exist now that a module can import its own stylesheets. Reporting it
+ * regardless is how the header came to cite an `app.css` that was never read.
+ */
+const sheetNames =
+  sheet && sheet.paths.length > 0
+    ? sheet.paths.map((p) => (isAbsolute(p) ? rel(p) : p)).join(" + ")
+    : "no stylesheet";
 
 for (const w of result.warnings) console.warn(`  warn: ${w}`);
 
 const source = emit(
   result,
-  { html: rel(inputPath), css: rel(cssPath) },
+  { html: rel(inputPath), css: sheetNames },
   imports,
   variants,
 );
@@ -194,7 +266,7 @@ const patchNote = variants
   : "";
 
 console.log(
-  `compiled ${rel(inputPath)} + ${rel(cssPath)} -> ${rel(outPath)}\n` +
+  `compiled ${rel(inputPath)} + ${sheetNames} -> ${rel(outPath)}\n` +
     `  ${result.nodes.length} nodes, ${styleNote}, ${result.strings.length} strings` +
     patchNote +
     `\n  ${bytes} bytes of IR, ${elapsed.toFixed(1)}ms`,

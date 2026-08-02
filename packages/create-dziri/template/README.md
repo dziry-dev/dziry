@@ -14,10 +14,10 @@ bun run check    # tsc
 
 ```
 windows/
+  env.d.ts       types for `import "./app.css"` — keep it
   main/
     index.tsx      the window — chrome that stays put, with an <Outlet/>
-    index.css      generated from in.css by Tailwind; not source
-    in.css         the Tailwind entry
+    app.css        the stylesheet, imported by index.tsx
     state.ts       signals and handlers, as module-level exports
     router.ts      the window's route signal and its navigation helpers
     pages/         one file per route, by path

@@ -274,7 +274,7 @@ a segfault?
 
 - Compiler diagnostics with **source locations pointing at the author's TSX**, never generated code.
   **Stylesheets: done.** `CssError` carries a byte offset and the CLI renders
-  `windows/main/index.css:415:1`, the offending line and a caret — `stripComments` blanks comments in place
+  `former windows/main/index.css line 415:1`, the offending line and a caret — `stripComments` blanks comments in place
   rather than deleting them, so the offsets survive.
   **TSX: blocked, not deferred.** The only channel is `jsxDEV`'s `_source`, and Bun emits a literal
   `undefined` there (measured, 1.3.14) — so the "one field and one argument" estimate is void until

@@ -18,11 +18,13 @@
  * decided design and was measured: two pages of one design system shared 6 of 8
  * style rows.
  */
-import { join, relative, dirname } from "node:path";
+import { join, relative, dirname, isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { existsSync, readdirSync } from "node:fs";
 import { compileTree, emit, dump, PACKAGE, type EmittedRouting } from "./compile.ts";
-import { CssError, formatCssError } from "./css.ts";
+import { CssError } from "./css.ts";
+import { installCssGraph, stylesheetsFor } from "./css-imports.ts";
+import { loadStylesheet, SheetMap, StylesheetError, type CssSource } from "./stylesheet.ts";
 import { buildRefIndex, resolveRefs, RefError, type RefSource } from "./resolve-refs.ts";
 import { compileVariants, findToggles, type VariantCompiled } from "./variant-compile.ts";
 import { toDocument } from "./jsx-runtime.ts";
@@ -144,8 +146,6 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
   const rel = (p: string) => relative(projectDir, p).replaceAll("\\", "/");
 
   const dir = join(projectDir, dirname(window.entry));
-  const cssPath = join(dir, "index.css");
-  const css = existsSync(cssPath) ? await Bun.file(cssPath).text() : "";
 
   // Modules are imported and called with `compiling` set, so `.value` on an
   // array signal yields the recording proxy and `defineQuery`/`source`/`effect`
@@ -158,6 +158,8 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
   let shell: Element;
   let pages: PageTree[];
   const sources: RefSource[] = [];
+  /** Page modules, in route order — the other roots of the window's import graph. */
+  const pageFiles: string[] = [];
 
   /** Where the generated module will sit, so import specifiers are relative to it. */
   const outPath = options.outOverride ?? join(dir, "ui.gen.ts");
@@ -233,6 +235,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     pages = [];
     for (const route of window.routes) {
       const file = join(projectDir, route.file);
+      pageFiles.push(file);
       const component = await defaultComponent(file, "page", rel);
       // Two scopes, with different lifetimes. `withPage` is the cursor that makes
       // `useRoute("products/$id")` verifiable — inside it the hook knows the file it
@@ -261,19 +264,56 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
 
   const nodeOf = new Map<Element, number>();
   const doc = toDocument(root);
-  const result = compileTree(doc, css, { nodeOf });
 
+  /**
+   * The window's CSS, assembled from the two sources that produce a stylesheet.
+   *
+   * The roots are the entry and the pages — *not* the folder modules imported
+   * above for the reference index. Those are already reachable from the entry as
+   * ordinary imports, and walking from the entry is what gets them in the order the
+   * author's own `import` statements put them in. Seeding the walk with them
+   * instead would order the cascade by a readdir.
+   *
+   * There is no `<style>` case here: a window is authored in JSX, and JSX refuses
+   * the tag. `<style>` is the `.html` front-end's way in, handled in `compile.ts`.
+   */
+  const sheets: CssSource[] = [];
+  for (const path of stylesheetsFor([join(projectDir, window.entry), ...pageFiles])) {
+    sheets.push(await loadStylesheet(path, projectDir));
+  }
+
+  const sheet = new SheetMap(sheets);
+  const css = sheet.text;
+
+  /**
+   * A parse failure is turned into an author-facing message here, where the map
+   * from concatenated offset back to source file still exists.
+   *
+   * It used to be recovered in `formatBuildError` by walking the project for a
+   * file named `index.css`, which worked only while a window could have exactly
+   * one stylesheet and it was always that one. With the sheet assembled from
+   * imports there is nothing to guess from — and nothing to guess, since the map
+   * is right here.
+   */
+  let result: ReturnType<typeof compileTree>;
   let variants: VariantCompiled | undefined;
-  const toggles = findToggles(doc);
-  if (toggles.length > 0) {
-    variants = compileVariants(doc, css, result, toggles);
-    if (variants.warnings.length > 0) {
-      throw new BuildError(
-        variants.warnings.map((w) => `  error: ${w}`).join("\n") +
-          `\n\n${variants.warnings.length} conditional-class conflict(s) in ${window.id}. Two toggles\n` +
-          `writing the same style field of the same slot cannot both be correct.`,
-      );
-    }
+  const label = (p: string) => (isAbsolute(p) ? rel(p) : p);
+
+  try {
+    result = compileTree(doc, css, { nodeOf });
+    const toggles = findToggles(doc);
+    if (toggles.length > 0) variants = compileVariants(doc, css, result, toggles);
+  } catch (e) {
+    if (e instanceof CssError) throw new BuildError(sheet.formatError(e, label));
+    throw e;
+  }
+
+  if (variants && variants.warnings.length > 0) {
+    throw new BuildError(
+      variants.warnings.map((w) => `  error: ${w}`).join("\n") +
+        `\n\n${variants.warnings.length} conditional-class conflict(s) in ${window.id}. Two toggles\n` +
+        `writing the same style field of the same slot cannot both be correct.`,
+    );
   }
 
   const index = buildRefIndex(sources);
@@ -334,7 +374,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     result,
     {
       html: rel(join(projectDir, window.entry)),
-      css: existsSync(cssPath) ? rel(cssPath) : "no stylesheet",
+      css: sheet.paths.length > 0 ? sheet.paths.map(label).join(", ") : "no stylesheet",
     },
     imports,
     variants,
@@ -475,6 +515,9 @@ export async function compileProject(options: CompileOptions): Promise<Compiled[
   // — and the failure would look like the rewrite not working rather than not
   // running.
   installReactivePlugin();
+  // Same reason, and the stakes are the same: an edge resolved before the recorder
+  // exists is a stylesheet missing from the cascade rather than an error.
+  installCssGraph();
 
   const { projectDir } = options;
   let windows = scanWindows(projectDir);
@@ -518,17 +561,13 @@ export async function compileProject(options: CompileOptions): Promise<Compiled[
 export async function formatBuildError(e: unknown, projectDir: string): Promise<string | null> {
   const rel = (p: string) => relative(projectDir, p).replaceAll("\\", "/");
 
-  if (e instanceof CssError) {
-    // The offset is into a stylesheet, and only the scan knows which one. Every
-    // window has at most one, so finding the file it parsed is a directory walk.
-    for (const window of scanWindows(projectDir)) {
-      const cssPath = join(projectDir, dirname(window.entry), "index.css");
-      if (existsSync(cssPath)) {
-        return formatCssError(e, await Bun.file(cssPath).text(), rel(cssPath));
-      }
-    }
-    return `  error: ${e.message}`;
-  }
+  if (e instanceof StylesheetError) return `  error: ${e.message}`;
+
+  // A CssError normally arrives already rendered, as a BuildError: `compileWindow`
+  // catches it while it still holds the map from concatenated offset back to source
+  // file. This is the fallback for one thrown outside that scope, where the offset
+  // refers to a string nobody can name.
+  if (e instanceof CssError) return `  error: ${e.message}`;
 
   if (
     e instanceof BuildError ||

@@ -496,6 +496,31 @@ export function jsx(
     return result;
   }
 
+  /**
+   * `<style>` belongs to the HTML front-end, not to JSX.
+   *
+   * Refused rather than supported, because in JSX it would be a tag that looks
+   * dynamic and scoped while being neither. It sits inside a component, so it reads
+   * as though it can hold a signal, be rendered conditionally, or apply to the
+   * subtree around it — and none of those are true: the cascade is resolved once at
+   * build time, the rules are global, and a component rendered twice cannot
+   * sensibly contribute its stylesheet twice.
+   *
+   * A JSX module already has the honest mechanism, which is the same one the rest of
+   * the ecosystem uses. An `.html` document has no imports at all, which is why it
+   * keeps `<style>`.
+   */
+  if (type.toLowerCase() === "style") {
+    throw new Error(
+      `<style> is not supported in JSX — import the stylesheet instead.\n` +
+        `    import "./app.css";\n` +
+        `  Imports are ordered by the module graph, so the cascade follows the same\n` +
+        `  order a bundler would give it. In JSX a <style> tag would look scoped and\n` +
+        `  dynamic while being neither.\n` +
+        `  (\`.html\` documents keep <style>, having no import statement to use.)`,
+    );
+  }
+
   const children: Node[] = [];
   flatten(props.children, children);
   const names = classList(props);

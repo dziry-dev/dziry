@@ -6,6 +6,8 @@
       "name": "skia-proto",
       "devDependencies": {
         "@tailwindcss/cli": "^4.3.3",
+        "@tailwindcss/node": "4.3.3",
+        "@tailwindcss/oxide": "4.3.3",
         "@types/bun": "latest",
         "@types/react": "^19.2.18",
         "@types/react-dom": "^19.2.4",

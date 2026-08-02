@@ -46,8 +46,8 @@ my-app/
   windows/
     main/
       index.tsx      # the window
-      in.css         # Tailwind entry
-      index.css      # generated; an input to the build
+      app.css        # the stylesheet, imported by index.tsx
+    env.d.ts         # types for `import "./app.css"` — keep it
       Nav.tsx
       router.ts      # the route signal and navigation handlers
       state.ts       # signals and handlers, exported by name

@@ -30,7 +30,11 @@ Claude's output from a brainstorm session, not agreed design. Do not treat them 
 - **Route matching is the only routing logic in the engine.** The compiler emits the route table;
   Rust matches a concrete path against it to bind params, next to the media-query evaluator.
   Everything else — which routes exist, what each takes, whether a link is dead — is compile-time.
-- **Styling.** dziri ships a **full UA stylesheet**, unconditionally — same as a browser. Tailwind
+- **Styling.** A stylesheet is reached by importing it from a module — `import "./app.css"` — and
+  several imports cascade in module-graph order, as a bundler would order them. Tailwind is an
+  ordinary project dependency: if a sheet asks for it, the project's own copy runs during the
+  compile, and nothing is generated onto disk. dziri ships a **full UA stylesheet**, unconditionally
+  — same as a browser. Tailwind
   is not the only supported way to write CSS; plain CSS is first-class. A Tailwind user gets a
   reset because Preflight is author CSS that undoes the UA sheet, exactly as in a browser. No
   template switch, no opt-in/opt-out sheets.
@@ -77,7 +81,10 @@ Anything that trades robustness for capability stays a proposal.
 > Last brainstorm: 2026-08-01 (routing rewritten — windows, file-path routes, `useRoute` params,
 > concrete-path links, per-route text residency). Supersedes 2026-07-31's routing.
 > Earlier: 2026-07-31 (routing, data fetching, `source`, UA CSS, trees).
-> Rationale lives in `framework-design.md` and `data-layer-design.md`. This file is the surface.
+> Rationale lives in `data-layer-design.md`. This file is the surface.
+> (`framework-design.md` was pre-A0 research and was deleted on 2026-08-02 — too much had
+> changed for it to be read safely. It is at `12b3903^` if a rejected alternative needs
+> looking up.)
 
 ---
 
@@ -113,6 +120,9 @@ Anything that trades robustness for capability stays a proposal.
 | `href` checked against the route table | planned — needs `<a>` as a tag the compiler accepts | M7 |
 | `defineScreen` | planned — `args` moved to `useRoute`; only `data` remains | M8 |
 | `defineQuery` / `defineMutation` | planned | — |
+| `import "./app.css"` from a window module | **done** — module-graph order, `src/compiler/css-imports.ts` | — |
+| Tailwind as an ordinary project dependency | **done** — the project's `tailwindcss`, run in-process, `src/compiler/stylesheet.ts` | — |
+| `<style>` in an `.html` document | **done** — raw text, extracted before the cascade; refused in JSX | — |
 | default stylesheet | planned | — |
 
 ---
@@ -216,7 +226,7 @@ A3's, and it is why the rows below still say planned even though the compiler is
 | `:indeterminate` | planned — same shape and cost, held back until a control can be in that state | A3 |
 | `::before` / `::after` + `content` | **done** — generated boxes are real emitted nodes; this is what replaces a UA shadow tree | A1 |
 | `::picker(select)` `::picker-icon` `::checkmark` `::placeholder` `::marker` | planned — same machinery as `::before`, refused by name until the controls exist | C2 |
-| attribute selectors — `[a]` `=` `~=` `|=` `^=` `$=` `*=`, `i` flag | **done** — `input[type=checkbox]` is how a UA sheet names one control among twenty-two | A1 |
+| attribute selectors — `[a]` `=` `~=` `\|=` `^=` `$=` `*=`, `i` flag | **done** — `input[type=checkbox]` is how a UA sheet names one control among twenty-two | A1 |
 | `<input>` `<select>` `<option>` `<textarea>` `<label>` … as real tags | **done** — they compile to ordinary boxes; being a tag is not being a widget | C2 |
 | `<select>` closed, with UA-supplied `<button>` + `<selectedcontent>` | **done** — `ua-structure.ts`; the parts a browser builds in a shadow tree, built as nodes | C2 |
 | `<select>` picker (open state) | planned — a popover with anchor positioning; needs the overlay layer | B1 |

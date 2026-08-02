@@ -15,7 +15,8 @@ this window is that the coverage number has something to point at.
 
 ## What makes it honest
 
-Every class here goes through the real `@tailwindcss/cli`. If a utility does not
+Every class here goes through real Tailwind — the project's own copy, run by the
+compiler when `index.tsx` imports `app.css`. If a utility does not
 compile, `bun run window` prints a warning naming the property, so a page that
 renders is a page whose utilities work. Utilities that do **not** work are left off
 rather than shown broken: a demo that renders a utility wrongly is worse than one
@@ -24,7 +25,7 @@ that omits it.
 `bun run tailwind-coverage` is the measurement; this is the exhibit. They should
 agree, and if they ever disagree the exhibit is wrong.
 
-## Why `in.css` is not just `@import "tailwindcss"`
+## Why `app.css` is not just `@import "tailwindcss"`
 
 - **No preflight.** Tailwind's reset is a user-agent stylesheet written in selectors
   dziri does not have — `:host`, `*`, `::before`, `[hidden]`. It is optional by

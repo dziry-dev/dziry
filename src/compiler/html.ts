@@ -200,6 +200,33 @@ export function parseHtml(src: string): Element {
 
     if (TRANSPARENT_TAGS.has(tag)) continue;
 
+    // `<style>` holds CSS, and CSS is not markup. Scanning it for tags would let
+    // `content: "<"` open an element and `&amp;` decode to something the cascade
+    // then cannot parse, so the body is taken verbatim up to the closing tag —
+    // the same raw-text rule a browser applies here.
+    if (tag === "style" && !selfClosing) {
+      const close = src.toLowerCase().indexOf("</style", i);
+      if (close === -1) throw new HtmlError("unclosed <style>");
+      const gtAfter = src.indexOf(">", close);
+      if (gtAfter === -1) throw new HtmlError("unclosed </style>");
+
+      const el: Element = {
+        type: "element",
+        tag: "style",
+        id: null,
+        classes: [],
+        children: [{ type: "text", value: src.slice(i, close) }],
+        onClick: null,
+        classWhen: null,
+        bindValue: null,
+        style: null,
+        attrs: parseAttributes(attrSrc),
+      };
+      top().children.push(el);
+      i = gtAfter + 1;
+      continue;
+    }
+
     const attrs = parseAttributes(attrSrc);
     const el: Element = {
       type: "element",

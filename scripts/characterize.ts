@@ -55,7 +55,9 @@ async function cases(): Promise<Case[]> {
     out.push({
       name: "window-main",
       input: join(ROOT, "windows", "main", "index.tsx"),
-      css: join(ROOT, "windows", "main", "index.css"),
+      // Unused for this case — `command` drives it, and the window compiler now
+      // finds its stylesheets by walking the window's own imports.
+      css: join(ROOT, "windows", "main", "app.css"),
       command: (tmp) => ["bun", "run", "src/compile-window.ts", "main", "-o", tmp],
     });
   }

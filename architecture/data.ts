@@ -148,10 +148,17 @@ export const STAGES: Stage[] = [
       "There are two front-ends — JSX and HTML — and they land on the same `Element` tree, so " +
         "everything after the parse is shared. JSX is the default; the HTML path is what " +
         "existed first.",
+      "A stylesheet arrives the way a bundler would deliver one: a module imports it, and the " +
+        "cascade follows the module graph's order. Tailwind, if the sheet asks for it, is the " +
+        "project's own dependency and runs during the compile — nothing is generated onto disk, " +
+        "so there is no built copy to go stale. An `.html` document, having no import statement, " +
+        "keeps `<style>`.",
     ],
     files: [
       "windows/main/index.tsx",
-      "windows/main/in.css",
+      "windows/main/app.css",
+      "src/compiler/stylesheet.ts",
+      "src/compiler/css-imports.ts",
       "windows/main/state.ts",
       "src/compiler/html.ts",
     ],
@@ -693,6 +700,5 @@ export const DOCS: { path: string; what: string }[] = [
   { path: "API.md", what: "The authoring API as planned, with status per surface." },
   { path: "NOTES.md", what: "Working notes and measurements." },
   { path: "BROWSER-FACTS.md", what: "Browser behaviour that was measured rather than remembered." },
-  { path: "framework-design.md", what: "The long-form design argument." },
   { path: "data-layer-design.md", what: "The data layer, designed but not built." },
 ];

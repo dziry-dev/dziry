@@ -26,13 +26,16 @@ dziri compile main         # just this one
 dziri compile --dump       # ...and print the IR
 ```
 
-Runs the real Tailwind CLI over each window's `in.css`, then compiles each window —
-shell plus every route — into one tree, resolves the cascade, and emits the artifact.
+Compiles each window — shell plus every route — into one tree, resolves the cascade,
+and emits the artifact.
+
+A window's stylesheets are the ones its modules `import`, in the order the module
+graph evaluates them, exactly as a bundler would order them. If a stylesheet uses
+Tailwind, the project's own Tailwind runs over it during the compile; nothing is
+written to disk, so there is no generated stylesheet that can go stale.
 
 Styles intern across every route in a window. That is the decided design and it was
 measured: two pages of one design system shared six of eight style rows.
-
-`--no-css` skips the stylesheet step.
 
 ## dev
 
@@ -77,7 +80,6 @@ packaged app is a *packaging* bug, not a different code path.
 | `--console` | off | Windows: keep the console window, to see output. |
 | `--no-minify` | off | Leave the bundled JavaScript readable. |
 | `--keep-scratch` | off | Leave the generated wrapper entry in place. |
-| `--no-css` | off | Skip the Tailwind step. |
 
 ### The engine is embedded and unpacked
 

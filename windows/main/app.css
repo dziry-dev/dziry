@@ -1,6 +1,7 @@
 /*
- * Tailwind input for the app. `bun run tw:css` turns this into `index.css`, which is
- * what dziri's compiler actually reads.
+ * The app's stylesheet. `windows/main/index.tsx` imports it, and the compiler runs
+ * the project's own Tailwind over it during the build — nothing is written to disk,
+ * so there is no generated copy that can fall out of date with this one.
  *
  * Theme + utilities only, no preflight. Tailwind's reset is a user-agent
  * stylesheet written in selectors dziri does not have — `:host`, `*`, `::before`,

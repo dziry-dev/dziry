@@ -25,7 +25,6 @@ import {
 } from "../compiler/build.ts";
 import { PACKAGE } from "../compiler/compile.ts";
 import { buildApp } from "./build.ts";
-import { buildStylesheets } from "./tailwind.ts";
 
 const HELP = `dziri — compiled UI on a native engine
 
@@ -35,7 +34,6 @@ usage
   dziri build [options]         package the app as one executable
 
 options
-  --no-css                      skip the Tailwind step (a window's in.css -> index.css)
   --dump                        compile: also print the IR
   --out <dir>                   build: where the executable goes (default: dist)
   --name <name>                 build: the executable's name (default: the folder's)
@@ -63,7 +61,6 @@ const argv = process.argv.slice(2);
 const TAKES_VALUE = new Set(["--out", "--name"]);
 /** CLI flags that stand alone. */
 const STANDALONE = new Set([
-  "--no-css",
   "--dump",
   "--keep-scratch",
   "--single",
@@ -148,12 +145,6 @@ if (!existsSync(join(projectDir, "windows"))) {
 
 /** Compile, reporting an author-facing error rather than a stack trace. */
 async function compile(only?: string): Promise<void> {
-  if (!flags.has("--no-css")) {
-    for (const css of await buildStylesheets(projectDir)) {
-      console.log(`  css   ${css.from} -> ${css.to}`);
-    }
-  }
-
   try {
     for (const one of await compileProject({ projectDir, only, dump: flags.has("--dump") })) {
       console.log(describe(one, projectDir));
@@ -207,7 +198,6 @@ switch (command) {
         projectDir,
         outDir: valueOf("--out"),
         name: valueOf("--name"),
-        noCss: flags.has("--no-css"),
         keepScratch: flags.has("--keep-scratch"),
         console: flags.has("--console"),
         noMinify: flags.has("--no-minify"),

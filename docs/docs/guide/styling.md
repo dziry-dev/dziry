@@ -6,14 +6,34 @@ sidebar_position: 5
 # Styling
 
 Real CSS, resolved at build time. Tailwind v4 is the intended way to write it, and
-the pipeline runs the actual Tailwind CLI — not a reimplementation.
+the pipeline runs the actual Tailwind — not a reimplementation.
 
 ## How it works
 
-`bun run tw:css` runs `@tailwindcss/cli` over your source and produces an ordinary
-stylesheet. dziri's compiler then resolves that stylesheet against your tree:
-selectors match, specificity sorts, inheritance applies, shorthands expand, units
-convert.
+A stylesheet reaches the compiler by being imported, the same way it would in any
+web project:
+
+```tsx
+// windows/main/index.tsx
+import "./app.css";
+```
+
+Several imports are fine; they cascade in the order the module graph evaluates them,
+so a sheet imported later wins ties. An inline `style={{ … }}` still beats both, as
+it does in a browser.
+
+If a stylesheet uses Tailwind, the compiler runs **your** Tailwind over it during the
+build — `tailwindcss` is your project's dependency, so `@import "tailwindcss"`
+resolves against your `node_modules` and your version is the one that runs. Nothing
+is generated onto disk, so there is no built copy to rebuild or to go stale.
+
+```css
+/* windows/main/app.css */
+@import "tailwindcss";
+```
+
+dziri's compiler then resolves the result against your tree: selectors match,
+specificity sorts, inheritance applies, shorthands expand, units convert.
 
 What comes out is a style table of integers and floats. The engine never sees a
 selector.

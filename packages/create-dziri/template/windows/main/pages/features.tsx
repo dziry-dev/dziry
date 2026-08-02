@@ -10,7 +10,7 @@
  *
  * Styled with Tailwind except where the point *is* authored CSS — the `compact` and
  * `light` classes are conditional classes compiled to style-table patches, and those
- * rules live in `in.css` beside the Tailwind imports.
+ * rules live in `app.css` beside the Tailwind imports.
  *
  * `.map` on a plain array runs at build time and leaves nothing behind. `view.map`
  * is the exception: it compiles to a template plus an arena, because its length is

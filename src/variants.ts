@@ -20,6 +20,7 @@ import {
 } from "./compiler/variants.ts";
 import { compileTree } from "./compiler/compile.ts";
 import { findToggles, verifyCompose } from "./compiler/variant-compile.ts";
+import { loadStylesheet } from "./compiler/stylesheet.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2).filter((a) => !a.startsWith("--"));
@@ -32,10 +33,13 @@ const argv = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 // single tree and a window is many. The home route is where the toggles are, which
 // is what it measures.
 const inputPath = argv[0] ?? join(ROOT, "windows", "main", "pages", "index.tsx");
-const cssPath = argv[1] ?? join(ROOT, "windows", "main", "index.css");
+const cssPath = argv[1] ?? join(ROOT, "windows", "main", "app.css");
 const rel = (p: string) => relative(ROOT, p).replace(/\\/g, "/");
 
-const css = await Bun.file(cssPath).text();
+// Through the loader rather than read raw, so a sheet that uses Tailwind measures
+// the utilities it actually generates. Reading the file would have measured
+// `@import "tailwindcss"` and three hand-written rules.
+const { text: css } = await loadStylesheet(resolve(cssPath), ROOT);
 
 let doc: Element;
 let toggles: ToggleSpec[];

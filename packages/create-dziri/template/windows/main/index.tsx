@@ -3,9 +3,11 @@
  * framework's own features and the routing demo.
  *
  * Every class on these pages is real Tailwind v4 output, resolved at build time into
- * a style table — `bun run tw:css` runs the actual CLI, and a utility that does not
- * compile makes the build say so. The pages are the coverage claim made concrete:
- * `bun run tailwind-coverage` reports a percentage, and this shows what is behind it.
+ * a style table. `import "./app.css"` is what pulls it in: the compiler runs the
+ * project's own Tailwind over that file during the build, so a utility that does not
+ * compile makes the build say so, and there is no generated stylesheet on disk to go
+ * stale. The pages are the coverage claim made concrete — `bun run tailwind-coverage`
+ * reports a percentage, and this shows what is behind it.
  *
  * `route` is what makes the nav work. It is passed in rather than imported from the
  * framework because a route belongs to a window, and two windows on different routes
@@ -15,6 +17,7 @@
  * `<Window>` *is* the body. `cn` keeps the signal visible to the compiler, which
  * turns the class into style-table writes rather than something the runtime resolves.
  */
+import "./app.css";
 import { cn, Outlet, Window } from "dziri";
 import { Nav } from "./Nav.tsx";
 import { route } from "./router.ts";
