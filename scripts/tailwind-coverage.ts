@@ -94,22 +94,40 @@ async function compileAll(classes: string[]): Promise<string> {
  * `@media` and `@supports`, and a flat regex either misses those or swallows
  * whole layers as one "rule".
  */
-function rulesByClass(css: string): Map<string, { props: Set<string>; values: string }> {
+function rulesByClass(css: string, known: Set<string>): Map<string, { props: Set<string>; values: string }> {
   const out = new Map<string, { props: Set<string>; values: string }>();
-  let depth = 0;
   let selStart = 0;
   const stack: string[] = [];
+
+  /** `.p-4`, `.p-0\.5`, `.w-1\/2`, `.hover\:bg-blue-500:hover` */
+  const classesIn = (selector: string): string[] => {
+    const names: string[] = [];
+    for (const m of selector.matchAll(/\.((?:[\w-]|\\.)+)/g)) names.push(m[1]!.replace(/\\(.)/g, "$1"));
+    return names;
+  };
 
   for (let i = 0; i < css.length; i++) {
     const c = css[i];
     if (c === "{") {
-      stack.push(css.slice(selStart, i).trim());
-      depth++;
+      // Only the tail is the selector. v4 nests `@supports` *inside* a rule, and
+      // puts declarations before it:
+      //
+      //   .shadow-red-500 {
+      //     --tw-shadow-color: color-mix(in oklab, oklch(63.7% 0.237 25.331) …);
+      //     @supports (color: color-mix(in lab, red, red)) {   <-- here
+      //
+      // Slicing from the last brace swept that declaration into the "selector",
+      // and `\.[\w-]+` then read `63.7%` as the classes `.7`, `.237`, `.331`.
+      // That produced 349 phantom entries in the corpus and was how `color-mix()`
+      // appeared to unblock 333 classes that do not exist. Cut at the last `;` or
+      // `}` so a selector is only ever a selector.
+      const raw = css.slice(selStart, i);
+      const cut = Math.max(raw.lastIndexOf(";"), raw.lastIndexOf("}"));
+      stack.push(raw.slice(cut + 1).trim());
       selStart = i + 1;
     } else if (c === "}") {
       const body = css.slice(selStart, i);
       const selector = stack.pop() ?? "";
-      depth--;
       selStart = i + 1;
       if (body.includes("{")) continue; // a container, not a declaration block
 
@@ -122,9 +140,18 @@ function rulesByClass(css: string): Map<string, { props: Set<string>; values: st
       }
       if (!props.size) continue;
 
-      // `.p-4`, `.p-0\.5`, `.w-1\/2`, `.hover\:bg-blue-500:hover`
-      for (const m of selector.matchAll(/\.((?:[\w-]|\\.)+)/g)) {
-        const name = m[1]!.replace(/\\(.)/g, "$1");
+      // A nested block's own selector often names no class — `.divide-y` wraps
+      // `:where(& > :not(:last-child))`, and `@supports` wraps nothing at all —
+      // so attribute to the nearest enclosing selector that does. Without this
+      // those declarations were dropped and the class looked free of blockers.
+      let names = classesIn(selector);
+      for (let s = stack.length - 1; !names.length && s >= 0; s--) names = classesIn(stack[s]!);
+
+      for (const name of names) {
+        // `known` is the authority on what a class is: it comes from Tailwind's
+        // own `getClassList()`. Anything else is a scrape artifact, and counting
+        // it inflates both the numerator and the denominator.
+        if (!known.has(name)) continue;
         const entry = out.get(name) ?? { props: new Set<string>(), values: "" };
         for (const p of props) entry.props.add(p);
         entry.values += body;
@@ -193,7 +220,13 @@ const classes = await tailwindClasses();
 console.log(`tailwind-coverage  ${classes.length} classes from the installed tailwindcss\n`);
 
 const css = await compileAll(classes);
-const rules = rulesByClass(css);
+const rules = rulesByClass(css, new Set(classes));
+
+// Not every enumerable class emits a rule on its own — some only produce one in a
+// variant or container context. They are outside the denominator because there is
+// nothing for dziri to succeed or fail at, but the count is printed rather than
+// dropped silently: a denominator that quietly excludes classes reads as coverage.
+const noRule = classes.filter((c) => !rules.has(c)).length;
 
 const allProps = new Set<string>();
 for (const { props } of rules.values()) for (const p of props) if (!p.startsWith("--")) allProps.add(p);
@@ -223,8 +256,9 @@ for (const why of blockers.values()) for (const w of why) impact.set(w, (impact.
 const propsHave = [...allProps].filter((p) => supported.has(p)).length;
 console.log(`  properties   ${propsHave}/${allProps.size} supported (${((propsHave / allProps.size) * 100).toFixed(1)}%)`);
 console.log(
-  `  classes      ${clean}/${rules.size} work today (${((clean / rules.size) * 100).toFixed(1)}%)\n`,
+  `  classes      ${clean}/${rules.size} work today (${((clean / rules.size) * 100).toFixed(1)}%)`,
 );
+console.log(`               ${noRule} of ${classes.length} emit no rule alone and are not counted\n`);
 
 console.log("  blockers, ranked by classes unblocked:");
 for (const [why, n] of [...impact].sort((a, b) => b[1] - a[1]).slice(0, 18)) {

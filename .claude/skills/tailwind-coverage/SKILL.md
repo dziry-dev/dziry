@@ -36,6 +36,24 @@ Two things that look like corpus sources and are not:
 - **Agent knowledge.** v4 renamed things (`shadow` → `shadow-sm`, `outline-none` →
   `outline-hidden`), and recall cannot distinguish "I remember this" from "this is plausible".
 
+**`getClassList()` is the authority on what a class is, and `rulesByClass` now enforces it.** Three
+bugs lived in the gap between the class list and the scraped stylesheet, all fixed 2026-08-02:
+
+- v4 nests `@supports` *inside* a rule, with declarations before it. Slicing the selector from the
+  last brace swept those declarations in, and `\.[\w-]+` then read `oklch(63.7% 0.237 25.331)` as the
+  classes `.7`, `.237`, `.331` — **349 phantom entries**, and the reason `color-mix()` looked like
+  +333. The selector is now cut at the last `;` or `}`.
+- A nested block's own selector often names no class — `.divide-y` wraps
+  `:where(& > :not(:last-child))` — so its declarations were dropped and the class looked clean.
+  Attribution now walks up to the nearest class-bearing ancestor selector. That recovered **872
+  classes** previously missing from the denominator entirely.
+- Keys are intersected against `getClassList()`, so a scrape artifact cannot enter the corpus again.
+
+The denominator is now the full 23,286 with nothing silently excluded, and the count of classes that
+emit no rule alone is printed rather than dropped. Correcting all three *raised* the honest figure
+(the recovered classes outnumbered the phantoms), which is a reminder that a broken measurement is
+not conservatively wrong — it is just wrong.
+
 ## Ranked by classes unblocked
 
 Most of the 23k classes fail for the same handful of reasons, so a per-property list would be a
@@ -46,11 +64,12 @@ Current, 2026-08-02, tailwindcss 4.3.3:
 
 ```
   properties   93/273 supported (34.1%)
-  classes      8495/22763 work today (37.3%)
+  classes      9019/23286 work today (38.7%)
+               0 of 23286 emit no rule alone and are not counted
 
      6268  property: mask-composite
      6265  property: mask-image
-     1163  calc() over percentages / viewport units
+     1162  calc() over percentages / viewport units
       580  percentage length
       444  property: translate
       292  property: fill / stroke / accent-color
@@ -71,11 +90,11 @@ worthless. `mask-composite` ranks first at 6,268 and unblocks **four** classes, 
 everything it blocks is also blocked by `mask-image`:
 
 ```
-  +   4  ->   8499/22763 (37.3%)  after property: mask-composite
-  +5887  ->  14386/22763 (63.2%)  after property: mask-image
-  + 651  ->  15037/22763 (66.1%)  after calc() over percentages / viewport units
-  + 469  ->  15506/22763 (68.1%)  after percentage length
-  + 444  ->  15950/22763 (70.1%)  after property: translate
+  +   4  ->   9023/23286 (38.7%)  after property: mask-composite
+  +5887  ->  14910/23286 (64.0%)  after property: mask-image
+  + 650  ->  15560/23286 (66.8%)  after calc() over percentages / viewport units
+  + 469  ->  16029/23286 (68.8%)  after percentage length
+  + 444  ->  16473/23286 (70.7%)  after property: translate
 ```
 
 `--what-if` walks the ranked list cumulatively and reports the classes left with *no* blockers,
@@ -92,7 +111,11 @@ ceiling, and it is why the early number looked hopeless.
 `var()` and foldable `calc()` have since landed: the compiler resolves custom properties through
 the cascade and folds `calc()` to a number, which is most of the distance from 2.1% to 36.3%.
 
-`color-mix()` went the same way on 2026-08-02, for +333 classes. Only one form is implemented —
+`color-mix()` went the same way on 2026-08-02, though it moved **no real classes** — the +333 it
+appeared to unblock were all scrape artifacts, which is what exposed the corpus bug described under
+*The corpus is Tailwind's, not ours*. It is still the right implementation: opacity modifiers like
+`bg-red-500/50` need it, and `getClassList()` simply does not enumerate modifiers, so the corpus
+cannot show the win. Only one form is implemented —
 against a `transparent` operand, which is how v4 spells every opacity modifier, so `bg-red-500/50`
 is `color-mix(in oklab, … 50%, transparent)`. That form folds exactly and needs no colour-space
 conversion: CSS interpolates premultiplied, a zero-alpha operand contributes nothing but its weight,

@@ -47,8 +47,8 @@ several blockers, so those counts overlap and the top entry is often nearly wort
   6268  property: mask-composite     <- ranked #1
   6265  property: mask-image
 
-  +   4  ->  8499/22763 (37.3%)  after property: mask-composite   <- what it actually unblocks
-  +5887  ->  14386/22763 (63.2%)  after property: mask-image
+  +   4  ->  9023/23286 (38.7%)  after property: mask-composite   <- what it actually unblocks
+  +5887  ->  14910/23286 (64.0%)  after property: mask-image
 ```
 
 `mask-composite` ranks first and unblocks **four** classes, because almost every class it blocks is
@@ -99,7 +99,7 @@ Rules:
 
 ## Masks are a scope call, not a backlog item
 
-`mask-image` is the single largest item on the list at 5,887 classes — 37.3% to 63.2% in one
+`mask-image` is the single largest item on the list at 5,887 classes — 38.7% to 64.0% in one
 feature. It is also ~6,000 classes of a subsystem that may be out of scope, and
 `css-coverage`'s `OUT_OF_SCOPE_GROUPS` does **not** currently list CSS Masking either way.
 
@@ -165,7 +165,15 @@ call" from "needs paint work first".
 |---|---|
 | baseline (2026-08-02, tailwindcss 4.3.3) | 8253/22763 (36.3%) — overstated, see below |
 | fix the stick (2026-08-02) | 8162/22763 (35.9%) — added the `percentage length` blocker; no properties implemented |
-| `color-mix()` against transparent (2026-08-02) | 8162 → **8495/22763 (37.3%)**, +333 |
+| `color-mix()` against transparent (2026-08-02) | 8162 → 8495 (37.3%) as measured, **+0 real classes** — see below |
+| fix the corpus (2026-08-02) | **9019/23286 (38.7%)** — phantoms removed, 872 lost classes recovered, denominator now whole |
+
+Every figure above the last line was measured with a broken corpus. Three passes in, the loop's
+entire net contribution to *coverage* is zero: pass 1 corrected the stick, pass 2's `color-mix()` was
+real work that the corpus could not show (opacity modifiers are not enumerated by `getClassList()`),
+and the corpus fix moved the number only by measuring correctly. What the loop actually produced was
+three measurement bugs found and fixed, which is worth more than 333 classes would have been — but it
+is not what the History column is for, so it is spelled out rather than left to look like progress.
 
 Pass one raised no coverage on purpose. The first thing it found was that the baseline was wrong:
 `VALUE_FEATURES` had no entry for a bare percentage, so every class Tailwind emits as a plain `%`
