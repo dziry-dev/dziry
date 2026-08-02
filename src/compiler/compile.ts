@@ -1352,13 +1352,29 @@ export function emit(
 
   // Signals and handlers are imported by name, so the emitted bindings hold the
   // real objects rather than keys to look up.
-  // A patch emitted as an expression builds its own cell, so the artifact needs
-  // `computed` — an existing runtime export, so this adds no runtime surface.
-  const needsComputed = (variants?.patches ?? []).some((p) => p.exportExpression);
+  // A patch or binding emitted as an expression builds its own cell, so the artifact
+  // needs `computed` — an existing runtime export, so this adds no runtime surface.
+  //
+  // A binding from the reactive rewrite also contains `$` / `$m`, which unwrap the
+  // signals it reads. Named imports here rather than the namespace the transform
+  // uses in authored files: this module is generated, so nothing can collide with
+  // them.
+  const inlineText = result.textBindings
+    .flatMap((b) => b.parts)
+    .map((p) => ("export" in p ? p.export : ""))
+    .join("\n");
+
+  const needsComputed =
+    (variants?.patches ?? []).some((p) => p.exportExpression) || inlineText.includes("computed(");
+  const runtimeNames = [
+    ...(needsComputed ? ["computed"] : []),
+    ...(/\$\(/.test(inlineText) ? ["$"] : []),
+    ...(/\$m\(/.test(inlineText) ? ["$m"] : []),
+  ];
 
   const importLines = [
-    ...(needsComputed
-      ? [`import { computed } from "${source.typesFrom}/runtime/signal.ts";`]
+    ...(runtimeNames.length > 0
+      ? [`import { ${runtimeNames.sort().join(", ")} } from "${source.typesFrom}/runtime/signal.ts";`]
       : []),
     ...[...imports].map(
       ([specifier, names]) =>
@@ -1392,7 +1408,14 @@ export function emit(
 
   const partSource = (part: TextPart): string => {
     if ("literal" in part) return `{ literal: ${JSON.stringify(part.literal)} }`;
-    if ("export" in part) return `{ signal: ${identifier(part.export, "a text binding")} }`;
+    if ("export" in part) {
+      // A cell with no export name is written as the expression it was built from —
+      // `{count * 2}` from the reactive rewrite, the same device `router.matches()`
+      // uses for patches. `identifier` still guards the ordinary case, which is what
+      // catches an unresolved reference before it becomes an unparseable artifact.
+      const isExpression = part.export.startsWith("computed(() => ");
+      return `{ signal: ${isExpression ? part.export : identifier(part.export, "a text binding")} }`;
+    }
     if ("item" in part) return `{ path: ${JSON.stringify(part.item)} }`;
     throw new Error("unresolved text binding — resolveRefs was not run");
   };

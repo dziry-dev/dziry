@@ -29,8 +29,14 @@ import { withPage, withWindowRoute } from "./compiler/route.ts";
 import { configOf, routeSignalOf, WindowError } from "./compiler/window.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./compiler/window-tree.ts";
 import { setCompiling, signal } from "./runtime/signal.ts";
+import { installReactivePlugin, reactiveEnabled } from "./compiler/reactive-plugin.ts";
 import type { Element, Node } from "./compiler/html.ts";
 import { routeChain, type RouteNodes } from "./ir.ts";
+
+// Before anything imports a window module. Bun caches a module once it is loaded, so
+// a plugin registered after the first `import()` would silently miss that file — and
+// the failure would look like the rewrite not working rather than not running.
+installReactivePlugin();
 
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2);
@@ -410,7 +416,10 @@ for (const window of windows) {
     `compiled window ${compiled.window.id} -> ${rel(compiled.outPath)}\n` +
       `  ${compiled.routeCount} route(s), ${compiled.hiddenCount} hidden on the first frame\n` +
       `  ${compiled.nodeCount} nodes, ${compiled.styleCount} styles, ` +
-      `${compiled.bytes} bytes of IR, ${compiled.elapsed.toFixed(1)}ms`,
+      `${compiled.bytes} bytes of IR, ${compiled.elapsed.toFixed(1)}ms` +
+      // Said out loud, because a rewrite that silently did not run looks exactly
+      // like a rewrite that ran and did nothing.
+      (reactiveEnabled() ? "\n  reactive rewrite ON (DZIRI_REACTIVE=1)" : ""),
   );
 }
 

@@ -223,7 +223,36 @@ export function isSignal(value: unknown): value is ReadonlySignal<unknown> {
  * a signal is one predicate.
  */
 export function $<T>(value: T): T extends ReadonlySignal<infer V> ? V : T {
-  return (isSignal(value) ? value.value : value) as never;
+  if (isSignal(value)) {
+    collecting?.add(value);
+    return value.value as never;
+  }
+  return value as never;
+}
+
+/**
+ * Which signals a rewritten expression read, for the compiler to name.
+ *
+ * `computed` already tracks dependencies, but only well enough to *invalidate* — a
+ * signal adds the listener to its own subscribers and never reports itself, so there
+ * is no list to read back. The compiler needs the list: an inline expression goes
+ * into the artifact as text, and every signal in that text needs an import.
+ *
+ * `$` is the one door every rewritten read goes through, so it is the only place
+ * that has to know. Null outside a collection, which is every case but this one.
+ */
+let collecting: Set<ReadonlySignal<unknown>> | null = null;
+
+export function collectReads(run: () => void): Set<ReadonlySignal<unknown>> {
+  const found = new Set<ReadonlySignal<unknown>>();
+  const outer = collecting;
+  collecting = found;
+  try {
+    run();
+  } finally {
+    collecting = outer;
+  }
+  return found;
 }
 
 /**
@@ -245,11 +274,22 @@ export function $<T>(value: T): T extends ReadonlySignal<infer V> ? V : T {
  * given a key and behaves as `Array.prototype.map` otherwise. Routing `map` through
  * the signal would take that decision away from the one place that has the context
  * to make it.
+ *
+ * `value` is in the set so that the rewrite is safe to run against code that has not
+ * migrated. `todos.value` must keep meaning the signal's value, not a `.value`
+ * property on the unwrapped array — which is `undefined`, silently. It stops being
+ * reachable when `.value` is removed from the type, and costs nothing until then.
  */
-const SIGNAL_MEMBERS = new Set(["set", "subscribe"]);
+const SIGNAL_MEMBERS = new Set(["set", "subscribe", "value", "peek"]);
 
 export function $m<T>(value: T, key: string): unknown {
-  return isSignal(value) && SIGNAL_MEMBERS.has(key) ? value : $(value);
+  if (isSignal(value) && SIGNAL_MEMBERS.has(key)) {
+    // Handed back whole, so the read happens at `.value` rather than here — but the
+    // dependency is this signal either way, and the collector only sees `$`.
+    collecting?.add(value);
+    return value;
+  }
+  return $(value);
 }
 
 // ---------------------------------------------------------------------------

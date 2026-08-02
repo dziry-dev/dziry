@@ -176,6 +176,53 @@ function isParamPosition(v: Visit): boolean {
   return v.field === "params";
 }
 
+/**
+ * Subtrees in which no identifier is a read, however deeply it is nested.
+ *
+ * The parent-field table cannot express these, because the disqualifying node is an
+ * *ancestor* rather than the parent. `todos.value = […]` reaches `todos` through
+ * `MemberExpression:object`, which looks exactly like the read in `[...todos.value]`
+ * two characters later — the difference is that one of them is under an assignment's
+ * left-hand side. Found by running the rewrite over `state.ts`, where it produced
+ * `$m(todos, "value").value = […]`: an assignment to a property of the unwrapped
+ * array, which parses, runs, and updates nothing.
+ *
+ * Recorded as byte ranges during the same pre-order walk. A parent is always visited
+ * before its children, so a range is in place before anything inside it is judged.
+ */
+function frozenRangesOf(node: Node): [number, number][] {
+  const out: [number, number][] = [];
+  const add = (child: unknown) => {
+    if (isNode(child)) out.push([child.start, child.end]);
+  };
+
+  switch (node.type) {
+    // `x = 1`, `obj.x = 1`, `[a, b] = pair`
+    case "AssignmentExpression":
+      add(node.left);
+      break;
+    // `x++`
+    case "UpdateExpression":
+      add(node.argument);
+      break;
+    // `const { a, b } = obj` — every name bound, at any depth
+    case "VariableDeclarator":
+      add(node.id);
+      break;
+    // `catch (e)`
+    case "CatchClause":
+      add(node.param);
+      break;
+    // Parameters, including destructured and defaulted ones.
+    case "FunctionDeclaration":
+    case "FunctionExpression":
+    case "ArrowFunctionExpression":
+      for (const p of (node.params as unknown[]) ?? []) add(p);
+      break;
+  }
+  return out;
+}
+
 function isRead(v: Visit): boolean {
   if (v.parent === null) return false;
   if (isParamPosition(v)) return false;
@@ -200,11 +247,30 @@ function isTypeNode(type: string): boolean {
 export type TransformResult = { code: string; map: string } | null;
 
 /**
+ * The namespace the emitted helpers are reached through.
+ *
+ * A namespace rather than named imports, because the transform cannot know what the
+ * module already declares. `import { computed }` would be a duplicate binding in
+ * every file that imports `computed` itself — which is most of them — and `$` is a
+ * plausible enough identifier that aliasing it is not paranoia.
+ */
+const NS = "__dzr";
+
+export type TransformOptions = {
+  /** Module specifier for `signal.ts`, as the transformed file must import it. */
+  helpers: string;
+};
+
+/**
  * Rewrites one module. Returns null when nothing changed.
  *
  * `filename` is only used for diagnostics and to pick the parser's dialect.
  */
-export function transformReactive(source: string, filename: string): TransformResult {
+export function transformReactive(
+  source: string,
+  filename: string,
+  options: TransformOptions,
+): TransformResult {
   const parsed = parseSync(filename, source, {
     lang: filename.endsWith(".tsx") ? "tsx" : "ts",
   });
@@ -221,12 +287,21 @@ export function transformReactive(source: string, filename: string): TransformRe
   const reads: Node[] = [];
   const members: Node[] = [];
   const wraps: Node[] = [];
+  /** Shorthand `{ title }`, which has to become `{ title: $(title) }`. */
+  const shorthand: Node[] = [];
+  const frozen: [number, number][] = [];
+  const seen = new Set<number>();
+
+  const isFrozen = (node: Node): boolean =>
+    frozen.some(([start, end]) => node.start >= start && node.end <= end);
 
   walk(parsed.program as unknown as Node, (v) => {
     const { node, parent, field } = v;
 
     // Types are erased, and a `$()` inside one does not even parse.
     if (isTypeNode(node.type)) return false;
+
+    frozen.push(...frozenRangesOf(node));
 
     // JSX: a brace either becomes a `computed` or is left completely alone.
     //
@@ -249,7 +324,21 @@ export function transformReactive(source: string, filename: string): TransformRe
     }
 
     if (node.type !== "Identifier") return true;
+    if (isFrozen(node)) return true;
     if (!isRead(v)) return true;
+
+    // A shorthand property visits one node as both key and value, so without this
+    // it would be rewritten twice.
+    if (seen.has(node.start)) return true;
+    seen.add(node.start);
+
+    // `{ title }` is `{ title: title }`, and `{ $(title) }` is not valid shorthand —
+    // the key has to be written out. Caught by `state.ts`, which builds a row that
+    // way.
+    if (parent?.type === "Property" && parent.shorthand === true) {
+      shorthand.push(node);
+      return true;
+    }
 
     // `x.y` — the object is rewritten with `$m`, which decides whether `y` belongs
     // to the signal or to its value.
@@ -262,35 +351,81 @@ export function transformReactive(source: string, filename: string): TransformRe
     return true;
   });
 
-  // Wraps go in first, and the order is load-bearing rather than incidental.
-  //
-  // A wrapped expression and the first read inside it can begin at the same offset —
-  // `{count === 7}` starts the `BinaryExpression` and the identifier `count` at the
-  // same byte. `appendLeft` at one position emits in call order, so reads-first
-  // produced `$(computed(() => count) === 7)`: the wrapper closing around the
-  // identifier instead of the expression. Silently valid JavaScript, and wrong.
-  for (const node of wraps) {
-    out.appendLeft(node.start, "computed(() => ");
-    out.appendRight(node.end, ")");
+  /**
+   * Every unwrap, as a plain insertion list.
+   *
+   * A list rather than direct `MagicString` calls because the same edits are needed
+   * twice: once for the module, and once to render the *text* of each wrapped
+   * expression, which `inline` carries into the artifact. That text has to be the
+   * rewritten form — the artifact runs against real signals, so `count === 7` would
+   * compare a signal object and be false, where `$(count) === 7` is correct.
+   */
+  const inserts: { at: number; text: string }[] = [];
+  const insert = (at: number, text: string) => {
+    inserts.push({ at, text });
     touched = true;
-  }
+  };
 
   for (const node of reads) {
-    out.appendLeft(node.start, "$(");
-    out.appendRight(node.end, ")");
-    touched = true;
+    insert(node.start, `${NS}.$(`);
+    insert(node.end, ")");
   }
 
   for (const node of members) {
     // The property name is known statically here — `parent.computed` was false.
     const property = source.slice(node.end).match(/^\s*\.\s*([A-Za-z_$][\w$]*)/);
     if (!property) continue;
-    out.appendLeft(node.start, "$m(");
-    out.appendRight(node.end, `, ${JSON.stringify(property[1])})`);
+    insert(node.start, `${NS}.$m(`);
+    insert(node.end, `, ${JSON.stringify(property[1])})`);
+  }
+
+  for (const node of shorthand) {
+    insert(node.start, `${node.name as string}: ${NS}.$(`);
+    insert(node.end, ")");
+  }
+
+  /** `source[from, to)` with the unwraps inside it applied. */
+  const rendered = (from: number, to: number): string => {
+    const inside = inserts.filter((i) => i.at >= from && i.at <= to).sort((a, b) => a.at - b.at);
+    let out = "";
+    let cursor = from;
+    for (const { at, text } of inside) {
+      out += source.slice(cursor, at) + text;
+      cursor = at;
+    }
+    return out + source.slice(cursor, to);
+  };
+
+  // Wraps go in before the unwraps, and the order is load-bearing rather than
+  // incidental. A wrapped expression and the first read inside it can begin at the
+  // same offset — `{count === 7}` starts the `BinaryExpression` and the identifier
+  // `count` at the same byte. `appendLeft` at one position emits in call order, so
+  // unwraps-first produced `$(inline(() => count) === 7)`: the wrapper closing around
+  // the identifier instead of the expression. Valid JavaScript, and wrong.
+  //
+  // `inline` rather than `computed`, because a cell born inside a component has no
+  // export name and `resolve-refs` could not put it in the artifact. The second
+  // argument is how it gets there.
+  for (const node of wraps) {
+    out.appendLeft(node.start, `${NS}.inline(() => `);
+    out.appendRight(node.end, `, ${JSON.stringify(rendered(node.start, node.end))})`);
     touched = true;
   }
 
+  for (const { at, text } of inserts) {
+    // `appendLeft` at the start and `appendRight` at the end, so an insertion never
+    // lands inside a wrapper that opened at the same offset.
+    out.appendLeft(at, text);
+  }
+
   if (!touched) return null;
+
+  // Appended, not prepended, and that is the whole reason line numbers survive.
+  //
+  // ES imports are hoisted, so this binds before any of the code above runs. Putting
+  // it at the top would shift every line by one — breaking stack traces, the `golden`
+  // diff, and any `@jsxImportSource` pragma that has to lead the file.
+  out.append(`\nimport * as ${NS} from ${JSON.stringify(options.helpers)};\n`);
 
   return { code: out.toString(), map: out.generateMap({ hires: true }).toString() };
 }

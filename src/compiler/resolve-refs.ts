@@ -13,6 +13,7 @@
  */
 import type { CompileResult } from "./compile.ts";
 import { routeMatchOf, routePathBehind } from "./route.ts";
+import { inlineSourceOf, depsOf } from "./reactive-runtime.ts";
 
 export type RefSource = {
   /** Import specifier the generated module should use, e.g. "./state.ts". */
@@ -138,7 +139,54 @@ export function resolveRefs(
     return { specifier: route.specifier, name: route.name, expression: `computed(() => ${test})` };
   };
 
+  /**
+   * `{count * 2}` — a cell the reactive transform made, carrying its own source.
+   *
+   * Same shape as `asRouteMatch` and simpler, because there is nothing to
+   * reconstruct: the transform held the text and handed it over. What still has to
+   * be resolved are the *signals* it reads, which the cell discovered by running —
+   * each one needs an import, or `ui.gen.ts` names something it never imported.
+   *
+   * `__dzr.` is stripped because the artifact is generated: it can import `$` and
+   * `$m` under their own names with no risk of colliding with anything, which is
+   * exactly the risk that made the namespace necessary in authored files.
+   */
+  const asInline = (value: unknown): ResolvedRef | null => {
+    const text = inlineSourceOf(value);
+    if (text === undefined) return null;
+
+    const deps = depsOf(value);
+    let first: ResolvedRef | null = null;
+
+    for (const dep of deps) {
+      const ref = index.get(routePathBehind(dep) ?? dep);
+      if (!ref) {
+        throw new RefError(
+          `an inline expression reads a signal that is not a module-level export:\n` +
+            `    ${text}\n` +
+            `  Every signal an expression reads has to be nameable, because the generated\n` +
+            `  module imports it. Declare it as an export of the window's state module.`,
+        );
+      }
+      record(ref, `an inline expression (${text})`);
+      first ??= ref;
+    }
+
+    // A cell exists only when something reactive was read — `inline` folds the rest
+    // to a plain value before one is created — so this cannot be empty.
+    if (!first) return null;
+
+    return {
+      specifier: first.specifier,
+      name: first.name,
+      expression: `computed(() => ${text.replaceAll("__dzr.", "")})`,
+    };
+  };
+
   const lookup = (value: unknown, what: string): ResolvedRef => {
+    const inline = asInline(value);
+    if (inline) return inline;
+
     const derived = asRouteMatch(value);
     if (derived) return derived;
 
@@ -160,11 +208,13 @@ export function resolveRefs(
   };
 
   for (const binding of result.textBindings) {
-    binding.parts = binding.parts.map((part) =>
-      "source" in part
-        ? { export: lookup(part.source, `a signal interpolated into node ${binding.node}`).name }
-        : part,
-    );
+    binding.parts = binding.parts.map((part) => {
+      if (!("source" in part)) return part;
+      const ref = lookup(part.source, `a signal interpolated into node ${binding.node}`);
+      // The expression when the cell has no name of its own, the name otherwise. An
+      // inline `{count * 2}` is the first case; `{count}` is the second.
+      return { export: ref.expression ?? ref.name };
+    });
   }
 
   for (const handler of result.handlers) {

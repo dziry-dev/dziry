@@ -1,6 +1,6 @@
 {
-  "symbols": 23,
-  "bytes": 10318,
+  "symbols": 24,
+  "bytes": 10472,
   "bun": "1.3.14",
   "recorded": "2026-08-02",
   "inventory": [
@@ -22,6 +22,7 @@
     "signal.ts:$",
     "signal.ts:$m",
     "signal.ts:batch",
+    "signal.ts:collectReads",
     "signal.ts:computed",
     "signal.ts:isSignal",
     "signal.ts:setCompiling",

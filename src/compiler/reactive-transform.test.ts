@@ -14,35 +14,44 @@
 import { expect, test } from "bun:test";
 import { transformReactive } from "./reactive-transform.ts";
 
-const run = (source: string): string => transformReactive(source, "t.tsx")?.code ?? source;
+const HELPERS = "../runtime/signal.ts";
+const IMPORT = `\nimport * as __dzr from "${HELPERS}";\n`;
+
+/** The rewritten body, with the appended helper import stripped for legibility. */
+const run = (source: string): string => {
+  const out = transformReactive(source, "t.tsx", { helpers: HELPERS })?.code ?? source;
+  return out.endsWith(IMPORT) ? out.slice(0, -IMPORT.length) : out;
+};
 
 // ---------------------------------------------------------------------------
 // Reads are rewritten
 // ---------------------------------------------------------------------------
 
 test("a bare read in a computed body is unwrapped", () => {
-  expect(run("computed(() => count * 2)")).toBe("computed(() => $(count) * 2)");
+  expect(run("computed(() => count * 2)")).toBe("computed(() => __dzr.$(count) * 2)");
 });
 
 test("every operator that a bare signal used to break is covered", () => {
-  expect(run("computed(() => count === 7)")).toBe("computed(() => $(count) === 7)");
-  expect(run("computed(() => count ? a : b)")).toBe("computed(() => $(count) ? $(a) : $(b))");
-  expect(run("computed(() => !count)")).toBe("computed(() => !$(count))");
-  expect(run("computed(() => `n is ${count}`)")).toBe("computed(() => `n is ${$(count)}`)");
+  expect(run("computed(() => count === 7)")).toBe("computed(() => __dzr.$(count) === 7)");
+  expect(run("computed(() => count ? a : b)")).toBe(
+    "computed(() => __dzr.$(count) ? __dzr.$(a) : __dzr.$(b))",
+  );
+  expect(run("computed(() => !count)")).toBe("computed(() => !__dzr.$(count))");
+  expect(run("computed(() => `n is ${count}`)")).toBe("computed(() => `n is ${__dzr.$(count)}`)");
 });
 
 test("a member read unwraps the object, not the property", () => {
   // `$(user).name`, never `$(user).$(name)` — `name` is not a binding.
-  expect(run("computed(() => user.name)")).toBe('computed(() => $m(user, "name").name)');
+  expect(run("computed(() => user.name)")).toBe('computed(() => __dzr.$m(user, "name").name)');
 });
 
 test("a computed member reads both sides", () => {
-  expect(run("computed(() => obj[key])")).toBe("computed(() => $(obj)[$(key)])");
+  expect(run("computed(() => obj[key])")).toBe("computed(() => __dzr.$(obj)[__dzr.$(key)])");
 });
 
 test("handlers are rewritten too, so a read works anywhere", () => {
   expect(run("const inc = () => count.set(count + 1)")).toBe(
-    'const inc = () => $m(count, "set").set($(count) + 1)',
+    'const inc = () => __dzr.$m(count, "set").set(__dzr.$(count) + 1)',
   );
 });
 
@@ -56,7 +65,7 @@ test("handlers are rewritten too, so a read works anywhere", () => {
  */
 test("a shadowing parameter is rewritten and resolves to itself", () => {
   expect(run("computed(() => todos.filter((t) => t.done))")).toBe(
-    'computed(() => $m(todos, "filter").filter((t) => $m(t, "done").done))',
+    'computed(() => __dzr.$m(todos, "filter").filter((t) => __dzr.$m(t, "done").done))',
   );
 });
 
@@ -74,7 +83,7 @@ test("an assignment target is not a read — `$(x) = 1` does not parse", () => {
 
 test("a call callee is left alone, so module scope stays readable", () => {
   expect(run("const c = signal(0)")).toBe("const c = signal(0)");
-  expect(run("computed(() => fn(count))")).toBe("computed(() => fn($(count)))");
+  expect(run("computed(() => fn(count))")).toBe("computed(() => fn(__dzr.$(count)))");
 });
 
 test("imports and exports are not reads", () => {
@@ -83,8 +92,10 @@ test("imports and exports are not reads", () => {
 });
 
 test("object keys are not reads, but computed keys are", () => {
-  expect(run("computed(() => ({ count: count }))")).toBe("computed(() => ({ count: $(count) }))");
-  expect(run("computed(() => ({ [k]: 1 }))")).toBe("computed(() => ({ [$(k)]: 1 }))");
+  expect(run("computed(() => ({ count: count }))")).toBe(
+    "computed(() => ({ count: __dzr.$(count) }))",
+  );
+  expect(run("computed(() => ({ [k]: 1 }))")).toBe("computed(() => ({ [__dzr.$(k)]: 1 }))");
 });
 
 test("parameters are not reads in their own declaration", () => {
@@ -106,9 +117,18 @@ test("a JSX tag name is not a read", () => {
 // JSX braces
 // ---------------------------------------------------------------------------
 
-test("an expression in a brace becomes a computed", () => {
+/**
+ * The second argument is what lets the cell reach the artifact.
+ *
+ * A `computed` created inside a component has no export name, so `resolve-refs`
+ * cannot name it — it puts the *expression* in `ui.gen.ts` instead. The text is the
+ * rewritten form rather than what the author typed, because the artifact runs
+ * against real signals: `count === 7` would compare a signal object and be false,
+ * where `$(count) === 7` is right.
+ */
+test("an expression in a brace becomes an inline cell carrying its own source", () => {
   expect(run("const el = <div>{count * 2}</div>")).toBe(
-    "const el = <div>{computed(() => $(count) * 2)}</div>",
+    'const el = <div>{__dzr.inline(() => __dzr.$(count) * 2, "__dzr.$(count) * 2")}</div>',
   );
 });
 
@@ -142,36 +162,45 @@ test("a member expression in a brace keeps its identity", () => {
  * reactive is a separate feature that needs its own IR.
  */
 test("conditional rendering is not wrapped", () => {
-  const source = "const el = <div>{cond && <span />}</div>";
-  expect(run(source)).toBe(source);
+  const and = "const el = <div>{cond && <span />}</div>";
+  expect(run(and)).toBe(and);
+
+  // Shape says wrappable, meaning says otherwise — a ternary over JSX branches.
+  const ternary = "const el = <div>{cond ? <A /> : <B />}</div>";
+  expect(run(ternary)).toBe(ternary);
 });
 
 test("a wrapped brace still has its reads rewritten inside", () => {
-  expect(run('const el = <div>{count === 7 ? "a" : "b"}</div>')).toBe(
-    'const el = <div>{computed(() => $(count) === 7 ? "a" : "b")}</div>',
-  );
+  const out = run('const el = <div>{count === 7 ? "a" : "b"}</div>');
+  expect(out).toContain('__dzr.inline(() => __dzr.$(count) === 7 ? "a" : "b",');
+  // And the carried text matches the body it was built from, unwraps included.
+  expect(out).toContain(JSON.stringify('__dzr.$(count) === 7 ? "a" : "b"'));
 });
 
 // ---------------------------------------------------------------------------
 // Mechanics
 // ---------------------------------------------------------------------------
 
-test("a module with nothing to rewrite is returned unchanged", () => {
-  expect(transformReactive('const a = 1;\nexport { a };', "t.ts")).toBeNull();
+test("the helper import is appended, so no line number moves", () => {
+  const source = "const a = 1;\nconst b = 2;\ncomputed(() => count * 2);\nconst c = 3;";
+  const out = transformReactive(source, "t.ts", { helpers: HELPERS })!.code;
+  const lines = out.split("\n");
+
+  // The rewritten line is still line 3, and the import is past the end.
+  expect(lines[2]).toBe("computed(() => __dzr.$(count) * 2);");
+  expect(lines[3]).toBe("const c = 3;");
+  expect(out).toContain(`import * as __dzr from "${HELPERS}";`);
+});
+
+test("a module with nothing to rewrite gets no import", () => {
+  expect(transformReactive("const a = 1;\nexport { a };", "t.ts", { helpers: HELPERS })).toBeNull();
 });
 
 test("a syntax error defers to the real toolchain rather than guessing", () => {
-  expect(transformReactive("const = = =", "t.ts")).toBeNull();
-});
-
-test("line numbers survive, so a stack trace still points at the author's line", () => {
-  const source = "const a = 1;\nconst b = 2;\ncomputed(() => count * 2);\nconst c = 3;";
-  const out = run(source).split("\n");
-  expect(out[2]).toBe("computed(() => $(count) * 2);");
-  expect(out).toHaveLength(4);
+  expect(transformReactive("const = = =", "t.ts", { helpers: HELPERS })).toBeNull();
 });
 
 test("a source map is produced", () => {
-  const result = transformReactive("computed(() => count * 2)", "t.ts");
+  const result = transformReactive("computed(() => count * 2)", "t.ts", { helpers: HELPERS });
   expect(JSON.parse(result!.map).mappings.length).toBeGreaterThan(0);
 });
