@@ -74,6 +74,35 @@ const SCENARIOS: Scenario[] = [
   { name: "hover-nav", args: ["--hover", "11"] },
 
   /**
+   * `transform` and `opacity`, which are the only styles here that change *what
+   * the matrix is* rather than what gets filled — so a regression in them is
+   * invisible to every other scenario.
+   *
+   * Tall enough for the whole page on purpose. Each block is a different way to
+   * be wrong: the origin block is four identical rotations that must land in four
+   * different places, and the opacity block must fade each label *with* its box
+   * rather than separately, which is the difference between a layer and a
+   * per-draw alpha.
+   */
+  { name: "transforms", args: ["--route", "transforms", "--size", "1040x1500"] },
+
+  /**
+   * A transform that lives in a variant slot, which nothing else covers.
+   *
+   * Node 808 is the `hover:scale-110` button. It matters because the transform is
+   * only reachable through the *resolved* style — and because hit-testing has to
+   * agree, or the pointer leaves the box the moment it grows.
+   *
+   * Same tall size as above, and not incidentally: that button is near the bottom
+   * of the page, so at the default 700px the scenario captured only the header and
+   * proved nothing.
+   */
+  {
+    name: "transform-hover",
+    args: ["--route", "transforms", "--hover", "808", "--size", "1040x1500"],
+  },
+
+  /**
    * The reactive rewrite, rendered.
    *
    * Every value on this page is derived from one signal through an operator that a

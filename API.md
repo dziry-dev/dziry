@@ -259,16 +259,26 @@ canonical order, so this only bites hand-written lists.
 
 | API | Status | Milestone |
 |---|---|---|
-| `opacity` | **compiler done** — a style field; nothing paints it yet | A1 |
-| `transform` — `translate*` `rotate` `scale*` `skew*` | **compiler done** — decomposed into `STYLE_FIELDS`, protocol v11 | A1 |
-| `translate` / `rotate` / `scale` as their own properties | **compiler done** — they compose in that fixed order regardless of source order, measured | A1 |
-| `transform-origin` | **compiler done** — px and percentage per axis; the `50% 50%` default is a percentage, so the *engine* resolves it | A1 |
-| painting the transform | planned — `paint.rs` must concat the matrix and skip the viewport cull inside a transformed subtree | A1 |
-| hit-testing a transformed node | planned — a parent's transform moves a child's rect, measured, so this needs the inverse | A1 |
+| `opacity` | **done** — a style field, painted as a *layer* so the subtree composites as one | A1 |
+| `transform` — `translate*` `rotate` `scale*` `skew*` | **done** — decomposed into `STYLE_FIELDS`, protocol v11, composed in `paint.rs` | A1 |
+| `translate` / `rotate` / `scale` as their own properties | **done** — they compose in that fixed order regardless of source order, measured | A1 |
+| `transform-origin` | **done** — px and percentage per axis; the `50% 50%` default is a percentage, so the *engine* resolves it against the laid-out box | A1 |
+| hit-testing a transformed node | **done** — the pointer is mapped by the inverse on the way down the tree, so a parent's transform moves its children's hit areas as it moves their pixels | A1 |
+| a transform in a variant — `hover:scale-110` | **done** — reachable only through the resolved style, so hit-testing resolves variants too | A1 |
 | `transform: matrix()`, any 3D function | **refused by name** — a matrix would have to be decomposed back, and the decomposition is lossy for exactly the cases transitions care about | — |
+| a `transform` list outside translate · rotate · skew · scale | **refused by name** — the two orders are genuinely different matrices, measured, so reordering would render what no browser does | — |
+| `calc()` mixing a length and a percentage in one transform value | **refused by name** — the percentage needs the laid-out box and the length does not, and one field cannot hold both | — |
 | `transition-*` | planned — the endpoints are already two rows of the style table the compiler resolved; what is left is the clock | B3 |
 | `@keyframes`, `animate()` timeline | planned — transitions first; see ROADMAP B3 | B3 |
 | `prefers-reduced-motion` | planned — **disables** animation rather than slowing it | B3 |
+
+`@property` came with this and was not optional. Tailwind compiles `translate-x-4` to
+`--tw-translate-x: 1rem; translate: var(--tw-translate-x) var(--tw-translate-y)` and never sets
+`--tw-translate-y` — its value is the `initial-value` of an `@property` registration. With the
+at-rule ignored the `var()` did not resolve, CSS drops a declaration whose `var()` cannot resolve,
+and every Tailwind transform utility compiled cleanly while rendering nothing. `inherits: false` is
+honoured too, and also load-bearing: without it a translated card would shift a translated badge
+inside it by its own offset.
 
 Worth stating because it shapes B3: dziri already resolves *both endpoints of a transition at
 compile time*. A node with `:hover` carries a predicate mask and a run of fully-resolved style
@@ -277,6 +287,12 @@ already computed, so what stays at runtime is the clock and the current `t`, and
 
 Transform is also a coverage lever rather than only an animation prerequisite: it moved Tailwind
 from 41.2% to 43.0% on its own, and `property: translate` left the blocker list entirely.
+
+One caveat on that figure, recorded because it cuts against the number. `tailwind-coverage` had an
+`@property` blocker whose pattern was matched against declaration *values* while describing a
+property *name*, so it never fired — which means `translate-x-4` counted as working for as long as
+it rendered nothing. Implementing `@property` did not move the percentage; it made it true. The
+dead entry is gone and the reason is recorded where it was.
 
 ---
 

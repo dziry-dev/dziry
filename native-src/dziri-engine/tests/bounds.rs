@@ -76,6 +76,17 @@ fn init_style(t: &mut Tables, slot: usize) {
     t.set_f32(STYLES, styles::FLEX_SHRINK, slot, 1.0);
     t.set_f32(STYLES, styles::FONT_SIZE, slot, 16.0);
     t.set_u16(STYLES, styles::FONT_WEIGHT, slot, 400);
+    // The transform identities, and these are the sharpest case of the comment
+    // above: a zeroed row is `scale(0)`, which is a node scaled to nothing rather
+    // than a node with no transform. Leaving them out makes every box in the file
+    // invisible *and* unhittable, which is how it presents — not as a transform
+    // bug. `Uploader::uploadStyles` gives real tables the same values by deriving
+    // every spare slot from `INITIAL_STYLE`.
+    t.set_f32(STYLES, styles::SCALE_X, slot, 1.0);
+    t.set_f32(STYLES, styles::SCALE_Y, slot, 1.0);
+    t.set_f32(STYLES, styles::OPACITY, slot, 1.0);
+    t.set_f32(STYLES, styles::TRANSFORM_ORIGIN_PERCENT_X, slot, 0.5);
+    t.set_f32(STYLES, styles::TRANSFORM_ORIGIN_PERCENT_Y, slot, 0.5);
 }
 
 /// Links `children` under `parent` and gives every node its parent pointer.
@@ -767,6 +778,89 @@ fn hit_testing_finds_the_deepest_interactive_node() {
     );
     assert_eq!(engine.hit_test(10.0, 5.0), -1, "the non-interactive one");
     assert_eq!(engine.hit_test(500.0, 500.0), -1, "outside everything");
+}
+
+#[test]
+fn a_translated_node_is_hit_where_it_was_drawn() {
+    // The whole point of the inverse in `hit_test`. Layout puts the child at
+    // y=0..20; a 60px translate draws it at y=60..80, and a click has to follow
+    // the pixels rather than the layout rect.
+    //
+    // Both points stay inside the 200x100 viewport `config` builds — the root is
+    // clamped to it, so a point below y=100 is rejected at the root and never
+    // reaches the child, which says nothing about transforms.
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 50.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+        t.set_f32(STYLES, styles::TRANSLATE_Y, 1, 60.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::INTERACTIVE);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(
+        engine.hit_test(10.0, 70.0),
+        1,
+        "where the translate actually drew it"
+    );
+    assert_eq!(
+        engine.hit_test(10.0, 10.0),
+        -1,
+        "where layout put it, which is no longer where it is"
+    );
+}
+
+#[test]
+fn a_scaled_parent_moves_where_its_child_is_hit() {
+    // Measured on Chromium 151: a parent's transform scales and moves the child's
+    // reported rect. So the inverse has to compose down the tree rather than only
+    // applying at the node that declared it — this test fails if the child is
+    // hit-tested against its own untransformed box.
+    //
+    // The origin is the parent's top-left so the arithmetic stays obvious: a child
+    // laid out at (0,0,50,20) is simply drawn at (0,0,100,40).
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 50.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+        // Scale the parent about its top-left, which keeps the arithmetic obvious:
+        // the child's box simply doubles to (0,0,100,40).
+        t.set_f32(STYLES, styles::SCALE_X, 0, 2.0);
+        t.set_f32(STYLES, styles::SCALE_Y, 0, 2.0);
+        t.set_f32(STYLES, styles::TRANSFORM_ORIGIN_PERCENT_X, 0, 0.0);
+        t.set_f32(STYLES, styles::TRANSFORM_ORIGIN_PERCENT_Y, 0, 0.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::INTERACTIVE);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(
+        engine.hit_test(80.0, 30.0),
+        1,
+        "inside the doubled child, outside the original"
+    );
+    assert_eq!(
+        engine.hit_test(120.0, 30.0),
+        -1,
+        "past the doubled child's right edge"
+    );
 }
 
 #[test]

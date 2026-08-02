@@ -77,6 +77,16 @@ function initStyle(slot: number): void {
   styles.flexShrink[slot] = 1;
   styles.fontSize[slot] = 16;
   styles.fontWeight[slot] = 400;
+  // The transform identities, and the sharpest case of the comment above: a zeroed
+  // row is `scale(0)`, a node scaled to nothing rather than a node with no
+  // transform. Left out, every box here is invisible *and* unhittable, and it
+  // presents as a hit-testing failure rather than as a transform one. `Uploader`
+  // gives real tables these by deriving every slot from `INITIAL_STYLE`.
+  styles.scaleX[slot] = 1;
+  styles.scaleY[slot] = 1;
+  styles.opacity[slot] = 1;
+  styles.transformOriginPercentX[slot] = 0.5;
+  styles.transformOriginPercentY[slot] = 0.5;
 }
 
 for (let slot = 0; slot < 3; slot++) initStyle(slot);

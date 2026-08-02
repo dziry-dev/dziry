@@ -73,6 +73,15 @@ fn init_style(t: &mut Tables, slot: usize) {
     t.set_f32(STYLES, styles::FLEX_SHRINK, slot, 1.0);
     t.set_f32(STYLES, styles::FONT_SIZE, slot, 16.0);
     t.set_u16(STYLES, styles::FONT_WEIGHT, slot, 400);
+    // The transform identities. A zeroed row is `scale(0)` — a node scaled to
+    // nothing, not a node without a transform — so omitting these makes every box
+    // in the file invisible and unhittable. `Uploader::uploadStyles` derives the
+    // same values for real tables from `INITIAL_STYLE`.
+    t.set_f32(STYLES, styles::SCALE_X, slot, 1.0);
+    t.set_f32(STYLES, styles::SCALE_Y, slot, 1.0);
+    t.set_f32(STYLES, styles::OPACITY, slot, 1.0);
+    t.set_f32(STYLES, styles::TRANSFORM_ORIGIN_PERCENT_X, slot, 0.5);
+    t.set_f32(STYLES, styles::TRANSFORM_ORIGIN_PERCENT_Y, slot, 0.5);
 }
 
 /// A 120x120 vertical scroll container holding `rows` rows of 100.

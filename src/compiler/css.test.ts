@@ -12,12 +12,14 @@ import { compile, toCompiledUi } from "./compile.ts";
 import {
   CssError,
   expandDeclaration,
+  extendVarEnv,
   formatCssError,
   parseColor,
   parseContent,
   parseCss,
   parseLength,
   parseSelector,
+  substituteVars,
 } from "./css.ts";
 
 /** Parses and returns the rendered diagnostic, or `null` if it parsed. */
@@ -1022,6 +1024,92 @@ test("transform-origin refuses what CSS refuses", () => {
   expect(() => expand("transform-origin", "left right")).toThrow(/names the X axis twice/);
   // The third value is a Z origin, and dziri is 2D.
   expect(() => expand("transform-origin", "50% 50% 5px")).toThrow(/2D/);
+});
+
+// ---------------------------------------------------------------------------
+// @property
+//
+// Not an academic corner. Ignoring this at-rule made every Tailwind `translate-*`
+// and `scale-*` utility compile cleanly and render nothing, because the value they
+// depend on comes from `initial-value` and an unresolvable `var()` drops the whole
+// declaration. Found by looking at a screenshot.
+// ---------------------------------------------------------------------------
+
+test("@property supplies the initial value a var() would otherwise not resolve", () => {
+  // Exactly Tailwind's shape: the rule sets X and leaves Y to the registration.
+  const rules = parseCss(
+    `@property --tw-translate-y { syntax: "*"; inherits: false; initial-value: 0 }\n` +
+      `.a { --tw-translate-x: 4px; translate: var(--tw-translate-x) var(--tw-translate-y) }`,
+  );
+  expect(rules.properties.get("--tw-translate-y")).toEqual({ initial: "0", inherits: false });
+
+  const decls = rules[0]!.decls;
+  const env = extendVarEnv(new Map([["--tw-translate-x", "4px"]]), decls, rules.properties);
+  const value = substituteVars(decls.get("translate")!, env, 0, rules.properties);
+  expect(value).toBe("4px 0");
+});
+
+test("an unregistered var with no fallback still drops the declaration", () => {
+  // The registration is what makes the difference, so the negative case has to
+  // keep working or this would be a blanket "resolve to empty".
+  const rules = parseCss(`.a { translate: var(--nope) }`);
+  expect(substituteVars(rules[0]!.decls.get("translate")!, new Map(), 0, rules.properties)).toBe(
+    null,
+  );
+});
+
+test("a registered initial value beats a var() fallback", () => {
+  // A registered property is never *unset*, so its initial value is its computed
+  // value and the fallback arm is never reached.
+  const rules = parseCss(
+    `@property --x { syntax: "*"; inherits: false; initial-value: 7px }\n.a { width: var(--x, 99px) }`,
+  );
+  expect(substituteVars(rules[0]!.decls.get("width")!, new Map(), 0, rules.properties)).toBe("7px");
+});
+
+test("inherits: false stops a child seeing its parent's value", () => {
+  // The case that matters: a translated card containing a translated badge. If
+  // `--tw-translate-x` inherited, the badge would pick up the card's shift.
+  const rules = parseCss(
+    `@property --tw-translate-x { syntax: "*"; inherits: false; initial-value: 0 }\n` +
+      `@property --brand { syntax: "*"; inherits: true; initial-value: red }\n` +
+      `.child { translate: var(--tw-translate-x) 0 }`,
+  );
+  const parent = new Map([
+    ["--tw-translate-x", "16px"],
+    ["--brand", "blue"],
+  ]);
+  const child = extendVarEnv(parent, new Map(), rules.properties);
+
+  expect(child.has("--tw-translate-x")).toBe(false);
+  // So the child falls back to the registration's initial value, not the parent's.
+  expect(substituteVars(rules[0]!.decls.get("translate")!, child, 0, rules.properties)).toBe("0 0");
+  // An inheriting registration is left alone, which is what keeps themes working.
+  expect(child.get("--brand")).toBe("blue");
+});
+
+test("a registration with no initial-value is not recorded", () => {
+  // `@property --x { syntax: "*" }` is invalid CSS for a non-universal syntax and
+  // supplies nothing either way, so it must not register an `undefined` initial
+  // that would then resolve to the string "undefined".
+  const rules = parseCss(`@property --x { syntax: "*"; inherits: false }\n.a { width: var(--x) }`);
+  expect(rules.properties.has("--x")).toBe(false);
+  expect(substituteVars(rules[0]!.decls.get("width")!, new Map(), 0, rules.properties)).toBe(null);
+});
+
+test("Tailwind's negative and fractional transform utilities fold", () => {
+  // Both arrive as calc(), which is how Tailwind writes every negative utility and
+  // every fraction. Neither parsed before the demo page was built.
+  expect(expand("rotate", "calc(12deg * -1)").rotate).toBeCloseTo(-12, 6);
+  expect(expand("translate", "calc(1 / 2 * 100%) 0")).toEqual({
+    translateX: 0,
+    translateY: 0,
+    translatePctX: 0.5,
+    translatePctY: 0,
+  });
+  // A calc that genuinely mixes the two cannot fold — these are two fields
+  // precisely because one of them needs the laid-out box.
+  expect(() => expand("translate", "calc(10px + 50%) 0")).toThrow(/mixes a length and a percentage/);
 });
 
 test("opacity clamps rather than refusing, and takes a percentage", () => {

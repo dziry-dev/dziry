@@ -59,6 +59,7 @@ export const goTypography = () => go("typography");
 export const goColors = () => go("colors");
 export const goBorders = () => go("borders");
 export const goControls = () => go("controls");
+export const goTransforms = () => go("transforms");
 export const goFeatures = () => go("features");
 export const goReactivity = () => go("reactivity");
 export const goProducts = () => go("products/new");

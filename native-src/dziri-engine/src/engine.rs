@@ -920,7 +920,19 @@ impl Engine {
     }
 
     pub fn hit_test(&self, x: f32, y: f32) -> i32 {
-        hit_test(&self.tables, self.geometry(), self.root, x, y)
+        // The painter and the state come along because a transform can live in a
+        // variant slot: `hover:scale-105` is only visible through the resolved
+        // style, and hit-testing the base box would miss exactly the case
+        // transforms are most used for.
+        hit_test(
+            &self.painter,
+            &self.tables,
+            self.geometry(),
+            &self.state,
+            self.root,
+            x,
+            y,
+        )
     }
 
     /// Where a node's content currently sits, `[x, y]`, both >= 0.
@@ -979,7 +991,7 @@ impl Engine {
             return;
         }
 
-        let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
+        let hit = self.hit_test(x, y);
         if hit != self.state.hovered {
             self.state.hovered = hit;
             // A hover is a repaint the host never hears about until it drains, so the
@@ -1025,7 +1037,7 @@ impl Engine {
             return;
         }
 
-        let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
+        let hit = self.hit_test(x, y);
         // Clicking is the only way to acquire focus for now; keyboard traversal is A3.
         self.state.pressed = hit;
         self.state.focused = hit;
@@ -1049,7 +1061,7 @@ impl Engine {
             return;
         }
 
-        let hit = hit_test(&self.tables, self.geometry(), self.root, x, y);
+        let hit = self.hit_test(x, y);
         // A click is press and release on the *same* node, which is what makes
         // dragging off a button cancel it.
         if self.state.pressed != -1 && hit == self.state.pressed {

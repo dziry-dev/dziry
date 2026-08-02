@@ -25,6 +25,7 @@ import {
   goProducts,
   goReactivity,
   goSpacing,
+  goTransforms,
   goTypography,
 } from "./router.ts";
 
@@ -65,6 +66,12 @@ export function Nav() {
         </button>
         <button className={cn(LINK, { active: router.matches("controls") })} onClick={goControls}>
           Controls
+        </button>
+        <button
+          className={cn(LINK, { active: router.matches("transforms") })}
+          onClick={goTransforms}
+        >
+          Transform
         </button>
         <button className={cn(LINK, { active: router.matches("features") })} onClick={goFeatures}>
           Features

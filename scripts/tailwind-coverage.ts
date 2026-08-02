@@ -208,11 +208,22 @@ const VALUE_FEATURES: { name: string; test: RegExp }[] = [
   // already owns the latter.
   { name: "percentage length", test: /:[^;(){}]*\d%/ },
 
-  // A registered custom property is not the same thing as a custom property.
-  // `@property` gives one a type, an initial value and inheritance behaviour, and
-  // Tailwind uses that to make `--tw-*` animatable and to give them defaults that
-  // apply without ever being declared. Substitution alone does not supply those.
-  { name: "@property / registered custom properties", test: /^--tw-/ },
+  // `@property` was listed here and is now implemented — the compiler records
+  // `initial-value` and honours `inherits: false`, which is what Tailwind's
+  // `--tw-*` transform variables need.
+  //
+  // Worth recording how it left this list, because the entry was wrong in a way
+  // that flattered the number: `test` was matched against declaration *values*
+  // while the pattern `/^--tw-/` describes a property *name*, so it never fired.
+  // For as long as it sat here, `translate-x-4` counted as working — the property
+  // was supported and `var()` was not a blocker — while it rendered nothing at
+  // all, because `--tw-translate-y` had no value and CSS drops a declaration whose
+  // `var()` cannot resolve. The percentage did not move when `@property` landed;
+  // it became true.
+  //
+  // The lesson for anything added below: a `test` over `values` cannot see a
+  // property name, and a blocker that never fires is indistinguishable from a
+  // feature that works.
 ];
 
 const supported = await dziriSupported();

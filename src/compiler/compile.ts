@@ -42,6 +42,7 @@ import {
   parseInlineStyle,
   substituteVars,
   type OriginValue,
+  type RegisteredProperty,
   type MediaCond,
   type AttrSel,
   type Compound,
@@ -345,6 +346,7 @@ function applyDecls(
   decls: Map<string, string>,
   where: string,
   vars: VarEnv = EMPTY_VARS,
+  registered: ReadonlyMap<string, RegisteredProperty> = new Map(),
 ): ComputedStyle {
   const patch: Partial<Record<StyleField, number>> = {};
 
@@ -356,7 +358,9 @@ function applyDecls(
 
     // Substituted before the expander sees it, which is what lets `var()` supply
     // part of a value — `padding: var(--y) 4px` — rather than only whole ones.
-    const resolved = value.includes("var(") ? substituteVars(value, vars) : value;
+    const resolved = value.includes("var(")
+      ? substituteVars(value, vars, 0, registered)
+      : value;
     if (resolved === null) {
       // CSS drops a declaration whose `var()` cannot resolve, rather than taking
       // a partial value. Silent because it is a legitimate authoring pattern:
@@ -703,7 +707,14 @@ export function compileTree(
 ): CompileResult {
   // UA rules first in the array purely for readability; `Origin.UA` is what
   // actually keeps them below the author's, and it beats specificity.
-  const rules = [...parseCss(UA_SHEET, Origin.UA), ...parseCss(css)];
+  const uaSheet = parseCss(UA_SHEET, Origin.UA);
+  const authorSheet = parseCss(css);
+  const rules = [...uaSheet, ...authorSheet];
+
+  // `@property` registrations from both sheets. Author last, so an app that
+  // re-registers one of the UA sheet's properties wins — the same precedence
+  // everything else here has.
+  const registered = new Map([...uaSheet.properties, ...authorSheet.properties]);
 
   // Assigned as conditions are met during the walk, so bit order is first-use
   // order and a sheet's unused breakpoints cost nothing.
@@ -831,11 +842,12 @@ export function compileTree(
       element === null ? withInline(decls, el) : decls;
 
     const base = inline(collectDecls(rules, path, ["none"], media, 0, element));
-    // Custom properties inherit, so the environment is the parent's with this
-    // node's own laid over it — and it is built from the *cascaded* declarations,
-    // so `--x` obeys specificity like everything else.
-    const vars = extendVarEnv(parentVars, base);
-    const style = applyDecls(inherited, base, where, vars);
+    // Custom properties inherit *unless registered otherwise*, so the environment
+    // is the parent's with this node's own laid over it and any non-inheriting
+    // registration removed — and it is built from the *cascaded* declarations, so
+    // `--x` obeys specificity like everything else.
+    const vars = extendVarEnv(parentVars, base, registered);
+    const style = applyDecls(inherited, base, where, vars, registered);
 
     // Precomputed variants: the compiler emits finished styles and the runtime
     // only picks an index. Each state is resolved as a full cascade from
@@ -894,7 +906,8 @@ export function compileTree(
         inherited,
         stateDecls,
         label,
-        extendVarEnv(parentVars, stateDecls),
+        extendVarEnv(parentVars, stateDecls, registered),
+        registered,
       );
       run[combo] = styles.intern(resolvedStyle);
     }
@@ -953,7 +966,7 @@ export function compileTree(
       if (raw === undefined) return null;
 
       const substituted = raw.includes("var(")
-        ? substituteVars(raw, extendVarEnv(parentVars, decls))
+        ? substituteVars(raw, extendVarEnv(parentVars, decls, registered), 0, registered)
         : raw;
       // CSS drops a declaration whose `var()` cannot resolve, and an absent
       // `content` means no box — so the two arrive at the same answer.

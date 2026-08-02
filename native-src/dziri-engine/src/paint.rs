@@ -13,7 +13,7 @@
 //! resolve here beyond picking an index.
 
 use skia_safe::textlayout::TextAlign;
-use skia_safe::{Canvas, Color, Paint, PaintStyle, Point, RRect, Rect};
+use skia_safe::{Canvas, Color, Matrix, Paint, PaintStyle, Point, RRect, Rect};
 
 use crate::protocol::{self, display, node_kind, predicate};
 use crate::tables::Tables;
@@ -309,7 +309,12 @@ impl Geometry<'_> {
 enum Step {
     /// A node, plus the scroll its ancestors have applied — needed so the viewport
     /// reject can compare a window-coordinate rect against a window-coordinate clip.
-    Node(usize, f32, f32),
+    ///
+    /// The `bool` is whether any ancestor has applied a transform. It rides down the
+    /// walk because the viewport reject is only meaningful in the space `viewport`
+    /// was read in, and a concat leaves that space for the whole subtree — not just
+    /// for the node that opened it.
+    Node(usize, f32, f32, bool),
     /// Pop the clip this node opened, then draw its scrollbars.
     ///
     /// The node index rides along because the bars must be drawn *after* the restore:
@@ -317,6 +322,122 @@ enum Step {
     /// the scroll translate the restore undoes — and they must be drawn after the
     /// content so they sit on top of it.
     Restore(usize),
+    /// Pop a transform or opacity layer. No node index, because unlike `Restore`
+    /// there is nothing to draw afterwards — the save it undoes was opened *before*
+    /// the node drew itself, so that the node and its subtree share one matrix.
+    Pop,
+}
+
+/// A node's `transform`, composed, or `None` when it is the identity.
+///
+/// Composed here rather than in the compiler because two of its inputs are the
+/// laid-out box: a percentage `translate` is relative to the node's own border
+/// box, and so is `transform-origin` — whose *initial* value is `50% 50%`, which
+/// is why even a node that never mentions the property needs its size. Measured
+/// on Chromium 151; see BROWSER-FACTS.md.
+///
+/// The order is translate, rotate, skewX, skewY, scale, and it is the only order
+/// decomposed storage can express — the compiler refuses a list that needs
+/// another. Mirrors `composed()` in `css.test.ts`, which pins this exact sequence
+/// against the matrices Chromium produced.
+fn transform_of(tables: &Tables, slot: usize, bounds: [f32; 4]) -> Option<Matrix> {
+    use protocol::styles as f;
+    let g = |field: usize, dflt: f32| -> f32 {
+        tables
+            .f32s(STYLES, field)
+            .get(slot)
+            .copied()
+            .unwrap_or(dflt)
+    };
+
+    let (tx, ty) = (g(f::TRANSLATE_X, 0.0), g(f::TRANSLATE_Y, 0.0));
+    let (px, py) = (
+        g(f::TRANSLATE_PERCENT_X, 0.0),
+        g(f::TRANSLATE_PERCENT_Y, 0.0),
+    );
+    let rotate = g(f::ROTATE, 0.0);
+    let (sx, sy) = (g(f::SCALE_X, 1.0), g(f::SCALE_Y, 1.0));
+    let (kx, ky) = (g(f::SKEW_X, 0.0), g(f::SKEW_Y, 0.0));
+
+    // The early-out that keeps this free for the overwhelming majority of nodes.
+    // Checked before the origin is read, because the origin is meaningless — and
+    // its default non-zero — when there is nothing to transform about it.
+    if tx == 0.0
+        && ty == 0.0
+        && px == 0.0
+        && py == 0.0
+        && rotate == 0.0
+        && sx == 1.0
+        && sy == 1.0
+        && kx == 0.0
+        && ky == 0.0
+    {
+        return None;
+    }
+
+    let [x, y, w, h] = bounds;
+
+    // Percentages resolve against this node's own border box, then add to the px
+    // half. Two fields rather than one precisely so this addition can happen here,
+    // where the width is known, instead of being guessed at compile time.
+    let tx = tx + px * w;
+    let ty = ty + py * h;
+
+    // The origin is relative to the box, so it has to be offset by where the box
+    // actually is: the matrix is composed in the same space the node is painted
+    // in, which is layout coordinates rather than node-local ones.
+    let ox = x + g(f::TRANSFORM_ORIGIN_PERCENT_X, 0.5) * w + g(f::TRANSFORM_ORIGIN_X, 0.0);
+    let oy = y + g(f::TRANSFORM_ORIGIN_PERCENT_Y, 0.5) * h + g(f::TRANSFORM_ORIGIN_Y, 0.0);
+
+    // Move the origin to zero, apply, move it back — which is what makes
+    // `transform-origin` mean anything at all.
+    let mut m = Matrix::translate((ox, oy));
+    m = m * Matrix::translate((tx, ty));
+
+    if rotate != 0.0 {
+        // Degrees, and deliberately not wrapped: the compiler keeps the winding
+        // because 360 and 0 are the same matrix but not the same animation.
+        m = m * Matrix::rotate_deg(rotate);
+    }
+    // Two multiplications, not one `Matrix::skew((kx, ky))`. Skia's two-argument
+    // skew builds `[1 kx; ky 1]` in one step, but CSS `skewX(a) skewY(b)` is the
+    // *product* of two functions, whose m00 is `1 + tan(a)tan(b)` rather than 1.
+    // Measured: Chromium gives `matrix(1.01543, …)` for `skewX(10deg) skewY(5deg)`
+    // and the combined form gives 1. Caught by the test below, having passed on
+    // the TypeScript side where the composition was already two steps.
+    if kx != 0.0 {
+        m = m * Matrix::skew((kx.to_radians().tan(), 0.0));
+    }
+    if ky != 0.0 {
+        m = m * Matrix::skew((0.0, ky.to_radians().tan()));
+    }
+    if sx != 1.0 || sy != 1.0 {
+        m = m * Matrix::scale((sx, sy));
+    }
+
+    m = m * Matrix::translate((-ox, -oy));
+    Some(m)
+}
+
+/// A node's `opacity`, or `None` when it is fully opaque.
+///
+/// `None` is the case worth optimising: opacity is a *group* property — the node
+/// and its subtree composite as one, so overlapping children do not show through
+/// each other — and the only way to get that is a layer, which is expensive
+/// enough that it must not be paid by every node that never asked for it.
+fn opacity_of(tables: &Tables, slot: usize) -> Option<f32> {
+    let a = tables
+        .f32s(STYLES, protocol::styles::OPACITY)
+        .get(slot)
+        .copied()
+        .unwrap_or(1.0);
+    // NaN fails every comparison, so a nonsense value falls through to opaque
+    // rather than making the subtree invisible.
+    if a >= 1.0 || a.is_nan() {
+        None
+    } else {
+        Some(a.max(0.0))
+    }
 }
 
 /// Which scrollbar the pointer is on, and whether it is being held.
@@ -464,7 +585,7 @@ impl Painter {
     /// Still free for the nodes that do not participate: the early return means
     /// only nodes that are actually hovered, pressed or focused — or that read a
     /// global predicate — reach the binary search.
-    fn style_for(&self, tables: &Tables, node: usize, state: &InputState) -> usize {
+    pub(crate) fn style_for(&self, tables: &Tables, node: usize, state: &InputState) -> usize {
         let base = tables
             .u16s(NODES, protocol::nodes::STYLE)
             .get(node)
@@ -588,7 +709,7 @@ impl Painter {
         // Pre-order, iterative: children paint over their parents, and a hostile
         // tree must not be able to overflow the render thread's stack. Each entry
         // carries the scroll its ancestors have applied.
-        let mut stack = vec![Step::Node(root, 0.0, 0.0)];
+        let mut stack = vec![Step::Node(root, 0.0, 0.0, false)];
         let mut siblings: Vec<usize> = Vec::with_capacity(16);
         let mut budget = count.saturating_mul(2) + 16;
 
@@ -601,13 +722,17 @@ impl Painter {
             // A clip ends when the subtree that opened it does. Pushed *before* the
             // children, so it pops after all of them — which is what makes an
             // explicit stack able to express save/restore at all.
-            let (node, scrolled_x, scrolled_y) = match step {
-                Step::Node(node, sx, sy) => (node, sx, sy),
+            let (node, scrolled_x, scrolled_y, mut transformed) = match step {
+                Step::Node(node, sx, sy, t) => (node, sx, sy, t),
                 Step::Restore(opened_by) => {
                     canvas.restore();
                     // Now in the space the container itself was painted in: its
                     // ancestors' scrolls are still applied, its own is not.
                     self.scrollbars(canvas, tables, geometry, state, opened_by);
+                    continue;
+                }
+                Step::Pop => {
+                    canvas.restore();
                     continue;
                 }
             };
@@ -627,8 +752,37 @@ impl Painter {
             //
             // Resolved, not base: `display` can differ per predicate, and reading
             // the live slot is the whole point of the variant machinery.
-            if display_of(tables, self.style_for(tables, node, state)) == display::NONE {
+            let slot = self.style_for(tables, node, state);
+            if display_of(tables, slot) == display::NONE {
                 continue;
+            }
+
+            // `transform` and `opacity`, opened *before* the node draws itself so
+            // that the node and its whole subtree share one matrix and one layer.
+            // That is the difference from the clip below, which is opened after —
+            // a scroll container is not clipped by its own clip, but a transformed
+            // element certainly is transformed by its own transform.
+            //
+            // Both are paint-only, which is measured rather than assumed: neither
+            // moves a sibling or changes a parent's height, so layout has already
+            // finished and its answer stands.
+            let matrix = transform_of(tables, slot, geometry.bounds[node]);
+            let alpha = opacity_of(tables, slot);
+
+            if matrix.is_some() || alpha.is_some() {
+                match alpha {
+                    // A layer, not a per-draw alpha, because CSS `opacity` groups:
+                    // the subtree composites as one, so two overlapping children at
+                    // 50% do not show through each other. `None` bounds lets Skia
+                    // work the extent out from what actually gets drawn.
+                    Some(a) => canvas.save_layer_alpha_f(None, a),
+                    None => canvas.save(),
+                };
+                if let Some(m) = matrix {
+                    canvas.concat(&m);
+                }
+                transformed = true;
+                stack.push(Step::Pop);
             }
 
             // Rejected per node, never per subtree: an absolutely-positioned child
@@ -638,21 +792,34 @@ impl Painter {
             //
             // NaN compares false everywhere, so a nonsense rect fails open and is
             // drawn — Skia's own clip is still behind this.
-            let visible = match viewport {
-                Some(vp) => {
-                    // Where this node is *on screen*: its layout rect minus what its
-                    // ancestors have scrolled. Comparing the unscrolled rect against
-                    // a window-coordinate viewport is what made scrolled content
-                    // vanish — a footer at content y=600 is on screen once the page
-                    // has scrolled 500, and the stale comparison rejected it.
-                    let [x, y, w, h] = geometry.bounds[node];
-                    let (x, y) = (x - scrolled_x, y - scrolled_y);
-                    !(x + w <= vp.left || x >= vp.right || y + h <= vp.top || y >= vp.bottom)
+            //
+            // Skipped entirely inside a transform, and it has to be. `viewport` was
+            // read once per frame in the canvas space of that moment, and a concat
+            // has since changed what the node's layout rect means — so the
+            // comparison is not merely imprecise, it is between two different
+            // spaces. It also fails in the dangerous direction: a translate can
+            // bring an off-screen node *on* screen, and a stale reject would drop a
+            // node that should be drawn. Skia's own clip still bounds the work.
+            let visible = if transformed {
+                true
+            } else {
+                match viewport {
+                    Some(vp) => {
+                        // Where this node is *on screen*: its layout rect minus what
+                        // its ancestors have scrolled. Comparing the unscrolled rect
+                        // against a window-coordinate viewport is what made scrolled
+                        // content vanish — a footer at content y=600 is on screen
+                        // once the page has scrolled 500, and the stale comparison
+                        // rejected it.
+                        let [x, y, w, h] = geometry.bounds[node];
+                        let (x, y) = (x - scrolled_x, y - scrolled_y);
+                        !(x + w <= vp.left || x >= vp.right || y + h <= vp.top || y >= vp.bottom)
+                    }
+                    // An empty clip: nothing is visible, but the walk still has to
+                    // reach the children, which is what makes this a `false` rather
+                    // than an early return.
+                    None => false,
                 }
-                // An empty clip: nothing is visible, but the walk still has to
-                // reach the children, which is what makes this a `false` rather
-                // than an early return.
-                None => false,
             };
 
             if visible {
@@ -739,11 +906,14 @@ impl Painter {
 
             // Reversed, because the stack pops last-in first. Children inherit this
             // node's scroll on top of their ancestors'.
-            stack.extend(
-                siblings.iter().rev().map(|&c| {
-                    Step::Node(c, scrolled_x + own_scroll[0], scrolled_y + own_scroll[1])
-                }),
-            );
+            stack.extend(siblings.iter().rev().map(|&c| {
+                Step::Node(
+                    c,
+                    scrolled_x + own_scroll[0],
+                    scrolled_y + own_scroll[1],
+                    transformed,
+                )
+            }));
         }
 
         // Unconditional, and it must be: every `break` above and every clip left on
@@ -1316,7 +1486,29 @@ impl Painter {
 /// no row in the tree. [`Painter::bar_at`] is their walk, and the input path asks it
 /// *first* — an overlay bar is on top of the content, so a press on one is aimed at it
 /// rather than at whatever it covers.
-pub fn hit_test(tables: &Tables, geometry: Geometry, root: usize, px: f32, py: f32) -> i32 {
+///
+/// **Transforms are undone on the way down.** A parent's transform moves its
+/// children's on-screen rects — measured on Chromium 151, a `scale(2)` parent
+/// doubles the child's reported box — so a walk that compared the pointer against
+/// raw layout bounds would hit-test a node where it *was not* drawn. Rather than
+/// mapping every box forward, the pointer is mapped *backward* by the inverse at
+/// each transformed node, which is one inversion per transformed node instead of
+/// one matrix multiply per box.
+///
+/// It takes the painter and the input state to do this, which the pre-transform
+/// version did not need: the transform can live in a variant slot, so
+/// `hover:scale-105` is only visible through the *resolved* style. Reading the
+/// base slot would have hit-tested the untransformed box for exactly the case
+/// transforms are most used for.
+pub fn hit_test(
+    painter: &Painter,
+    tables: &Tables,
+    geometry: Geometry,
+    state: &InputState,
+    root: usize,
+    px: f32,
+    py: f32,
+) -> i32 {
     let count = geometry.bounds.len();
     let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
     let flags = tables.u8s(NODES, protocol::nodes::FLAGS);
@@ -1324,16 +1516,17 @@ pub fn hit_test(tables: &Tables, geometry: Geometry, root: usize, px: f32, py: f
     let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
 
     let mut hit = -1i32;
-    // Each entry carries how far its ancestors have scrolled. Without this, clicking
-    // a scrolled row hits whichever node *used* to be under the cursor — the pointer
-    // is in window coordinates and `bounds` are unscrolled, so one of them has to
-    // move, and moving the box is what paint does too.
-    let mut stack: Vec<(usize, f32, f32)> = vec![(root, 0.0, 0.0)];
+    // Each entry carries how far its ancestors have scrolled, and the pointer as
+    // that node's ancestors' transforms have left it. Without the scroll, clicking
+    // a scrolled row hits whichever node *used* to be under the cursor — the
+    // pointer is in window coordinates and `bounds` are unscrolled, so one of them
+    // has to move, and moving the box is what paint does too.
+    let mut stack: Vec<(usize, f32, f32, f32, f32)> = vec![(root, 0.0, 0.0, px, py)];
     let mut budget = count.saturating_mul(2) + 16;
     // Reused per node so the reversal below does not allocate per level.
     let mut children: Vec<usize> = Vec::new();
 
-    while let Some((node, sx, sy)) = stack.pop() {
+    while let Some((node, sx, sy, mut px, mut py)) = stack.pop() {
         if budget == 0 {
             break;
         }
@@ -1341,6 +1534,25 @@ pub fn hit_test(tables: &Tables, geometry: Geometry, root: usize, px: f32, py: f
 
         if node >= count || hidden.get(node).copied().unwrap_or(0) != 0 {
             continue;
+        }
+
+        // Undone before this node's own box is tested, matching paint, which
+        // concats before the node draws itself. A transform that cannot be
+        // inverted is degenerate — a zero scale, so the node occupies no area —
+        // and the whole subtree is correctly unhittable.
+        if let Some(m) = transform_of(
+            tables,
+            painter.style_for(tables, node, state),
+            geometry.bounds[node],
+        ) {
+            match m.invert() {
+                Some(inv) => {
+                    let p = inv.map_point((px, py));
+                    px = p.x;
+                    py = p.y;
+                }
+                None => continue,
+            }
         }
 
         let [bx, by, w, h] = geometry.bounds[node];
@@ -1377,7 +1589,7 @@ pub fn hit_test(tables: &Tables, geometry: Geometry, root: usize, px: f32, py: f
             children
                 .iter()
                 .rev()
-                .map(|&c| (c, sx + own[0], sy + own[1])),
+                .map(|&c| (c, sx + own[0], sy + own[1], px, py)),
         );
     }
 
@@ -1469,5 +1681,194 @@ mod tests {
             1,
             "a node that is not a generated box reads its own state"
         );
+    }
+
+    /// Tables holding one style slot, with the transform fields at their initial
+    /// values so a test only has to say what it is changing.
+    fn one_style() -> Tables {
+        let mut tables = Tables::new(Capacities {
+            nodes: 2,
+            styles: 2,
+            variants: 1,
+            variant_slots: 2,
+            media: 1,
+            lists: 1,
+            strings: 2,
+            string_bytes: 16,
+        });
+        let s = Table::Styles as usize;
+        // The identities, which are 1 rather than 0 for the scales — the whole
+        // reason `transform_of` cannot just read zeroed memory.
+        tables.set_f32(s, protocol::styles::SCALE_X, 0, 1.0);
+        tables.set_f32(s, protocol::styles::SCALE_Y, 0, 1.0);
+        tables.set_f32(s, protocol::styles::TRANSFORM_ORIGIN_PERCENT_X, 0, 0.5);
+        tables.set_f32(s, protocol::styles::TRANSFORM_ORIGIN_PERCENT_Y, 0, 0.5);
+        tables.set_f32(s, protocol::styles::OPACITY, 0, 1.0);
+        tables
+    }
+
+    fn assert_matrix(got: Matrix, want: [f32; 6], what: &str) {
+        // CSS `matrix(a,b,c,d,e,f)` against Skia's row-major accessors.
+        let mine = [
+            got.scale_x(),
+            got.skew_y(),
+            got.skew_x(),
+            got.scale_y(),
+            got.translate_x(),
+            got.translate_y(),
+        ];
+        for i in 0..6 {
+            assert!(
+                (mine[i] - want[i]).abs() < 1e-3,
+                "{what}: component {i} was {}, expected {} (full: {mine:?})",
+                mine[i],
+                want[i]
+            );
+        }
+    }
+
+    /// The composed matrix must equal the one Chromium computes.
+    ///
+    /// The expected values are readings from `probes/transform-composition.html`
+    /// on Chromium 151, and the same numbers `css.test.ts` asserts on the compiler
+    /// side. Both ends of the boundary are pinned to one measurement, so a
+    /// composition order that drifts on either side shows up here rather than as a
+    /// frame that looks slightly wrong.
+    ///
+    /// The origin is `0 0` throughout, because these matrices were measured with
+    /// the transform applied about the element's origin — the probe's own
+    /// `transform-origin` cases cover the centring separately.
+    #[test]
+    fn the_composed_matrix_matches_chromium() {
+        let s = Table::Styles as usize;
+        let at_origin = |t: &mut Tables| {
+            t.set_f32(s, protocol::styles::TRANSFORM_ORIGIN_PERCENT_X, 0, 0.0);
+            t.set_f32(s, protocol::styles::TRANSFORM_ORIGIN_PERCENT_Y, 0, 0.0);
+        };
+        let bounds = [0.0, 0.0, 100.0, 50.0];
+
+        // translate(10px,20px) rotate(30deg) scale(2,3)
+        let mut t = one_style();
+        at_origin(&mut t);
+        t.set_f32(s, protocol::styles::TRANSLATE_X, 0, 10.0);
+        t.set_f32(s, protocol::styles::TRANSLATE_Y, 0, 20.0);
+        t.set_f32(s, protocol::styles::ROTATE, 0, 30.0);
+        t.set_f32(s, protocol::styles::SCALE_X, 0, 2.0);
+        t.set_f32(s, protocol::styles::SCALE_Y, 0, 3.0);
+        t.commit();
+        assert_matrix(
+            transform_of(&t, 0, bounds).expect("not the identity"),
+            [1.73205, 1.0, -1.5, 2.59808, 10.0, 20.0],
+            "translate rotate scale",
+        );
+
+        // skewX(10deg) skewY(5deg) — the pair that does not commute, so this also
+        // pins which of the two dziri applies first.
+        let mut t = one_style();
+        at_origin(&mut t);
+        t.set_f32(s, protocol::styles::SKEW_X, 0, 10.0);
+        t.set_f32(s, protocol::styles::SKEW_Y, 0, 5.0);
+        t.commit();
+        assert_matrix(
+            transform_of(&t, 0, bounds).expect("not the identity"),
+            [1.01543, 0.0874887, 0.176327, 1.0, 0.0, 0.0],
+            "skewX then skewY",
+        );
+
+        // The full canonical order.
+        let mut t = one_style();
+        at_origin(&mut t);
+        t.set_f32(s, protocol::styles::TRANSLATE_X, 0, 10.0);
+        t.set_f32(s, protocol::styles::TRANSLATE_Y, 0, 20.0);
+        t.set_f32(s, protocol::styles::ROTATE, 0, 30.0);
+        t.set_f32(s, protocol::styles::SKEW_X, 0, 10.0);
+        t.set_f32(s, protocol::styles::SKEW_Y, 0, 5.0);
+        t.set_f32(s, protocol::styles::SCALE_X, 0, 2.0);
+        t.set_f32(s, protocol::styles::SCALE_Y, 0, 3.0);
+        t.commit();
+        assert_matrix(
+            transform_of(&t, 0, bounds).expect("not the identity"),
+            [1.67128, 1.16696, -1.04189, 2.86257, 10.0, 20.0],
+            "translate rotate skew scale",
+        );
+    }
+
+    /// An untransformed node costs nothing, and a percentage needs the box.
+    #[test]
+    fn the_identity_is_none_and_percentages_resolve_against_the_box() {
+        let s = Table::Styles as usize;
+
+        let mut t = one_style();
+        t.commit();
+        assert!(
+            transform_of(&t, 0, [0.0, 0.0, 100.0, 50.0]).is_none(),
+            "a node with no transform must not pay for a matrix"
+        );
+
+        // `translateX(50%)` on a 100px-wide box is 50px — measured, and the reason
+        // the percentage cannot be folded at compile time.
+        let mut t = one_style();
+        t.set_f32(s, protocol::styles::TRANSLATE_PERCENT_X, 0, 0.5);
+        t.set_f32(s, protocol::styles::TRANSLATE_PERCENT_Y, 0, 1.0);
+        t.commit();
+        let m = transform_of(&t, 0, [0.0, 0.0, 100.0, 50.0]).expect("not the identity");
+        assert_matrix(m, [1.0, 0.0, 0.0, 1.0, 50.0, 50.0], "percentage translate");
+
+        // The same declaration on a different box is a different matrix, which is
+        // the whole point of resolving it here.
+        let m = transform_of(&t, 0, [0.0, 0.0, 40.0, 10.0]).expect("not the identity");
+        assert_matrix(
+            m,
+            [1.0, 0.0, 0.0, 1.0, 20.0, 10.0],
+            "percentage on a smaller box",
+        );
+    }
+
+    /// `transform-origin` is what a rotation turns about, and it defaults to the
+    /// centre of the box rather than to its corner.
+    #[test]
+    fn rotation_turns_about_the_origin() {
+        let s = Table::Styles as usize;
+        // A 100x50 box at (0,0), rotated a quarter turn about its own centre.
+        // The centre is (50,25) and must be a fixed point.
+        let mut t = one_style();
+        t.set_f32(s, protocol::styles::ROTATE, 0, 90.0);
+        t.commit();
+
+        let m = transform_of(&t, 0, [0.0, 0.0, 100.0, 50.0]).expect("not the identity");
+        let centre = m.map_point((50.0, 25.0));
+        assert!(
+            (centre.x - 50.0).abs() < 1e-3 && (centre.y - 25.0).abs() < 1e-3,
+            "the default origin is the centre, so the centre must not move: {centre:?}"
+        );
+
+        // The corner swings a quarter turn about that centre: (0,0) -> (75,-25).
+        let corner = m.map_point((0.0, 0.0));
+        assert!(
+            (corner.x - 75.0).abs() < 1e-3 && (corner.y + 25.0).abs() < 1e-3,
+            "corner should swing to (75,-25), got {corner:?}"
+        );
+    }
+
+    /// Opacity is `None` unless it is actually doing something, because the layer
+    /// it implies is expensive.
+    #[test]
+    fn opacity_is_none_when_opaque() {
+        let s = Table::Styles as usize;
+
+        let mut t = one_style();
+        t.commit();
+        assert_eq!(opacity_of(&t, 0), None);
+
+        let mut t = one_style();
+        t.set_f32(s, protocol::styles::OPACITY, 0, 0.25);
+        t.commit();
+        assert_eq!(opacity_of(&t, 0), Some(0.25));
+
+        // NaN must read as opaque rather than making the subtree vanish.
+        let mut t = one_style();
+        t.set_f32(s, protocol::styles::OPACITY, 0, f32::NAN);
+        t.commit();
+        assert_eq!(opacity_of(&t, 0), None);
     }
 }

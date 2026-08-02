@@ -285,15 +285,36 @@ const TRANSPARENT_GROUPS = new Set(["@layer"]);
  */
 const ROOT_DECL_GROUPS = new Set(["@theme"]);
 
-export function parseCss(src: string, origin: OriginValue = Origin.AUTHOR): Rule[] {
+/**
+ * One `@property` registration: what a custom property is worth when nobody has
+ * set it, and whether it reaches a child.
+ */
+export type RegisteredProperty = { initial: string; inherits: boolean };
+
+/**
+ * What `parseCss` returns: the rules, plus the `@property` registrations found
+ * alongside them.
+ *
+ * Hung off the array rather than changing the return type, because every caller
+ * but one uses this as a plain `Rule[]` and a registration is not a rule — it has
+ * no selector and contributes no declaration to any element. The compiler reads
+ * `.properties`; the tests carry on indexing.
+ */
+export type RuleList = Rule[] & { properties: Map<string, RegisteredProperty> };
+
+export function parseCss(src: string, origin: OriginValue = Origin.AUTHOR): RuleList {
   const text = stripComments(src);
   const rules: Rule[] = [];
+  const registered = new Map<string, RegisteredProperty>();
   const order = { n: 0 };
-  parseRuleList(text, 0, text.length, rules, order);
+  parseRuleList(text, 0, text.length, rules, order, registered);
   // Stamped after the walk rather than threaded through it: `order` is per-call,
   // so UA and author rules can share numbers, and only origin keeps them apart.
   if (origin !== Origin.AUTHOR) for (const r of rules) r.origin = origin;
-  return rules;
+
+  const out = rules as RuleList;
+  out.properties = registered;
+  return out;
 }
 
 /**
@@ -438,6 +459,7 @@ function parseRuleList(
   to: number,
   rules: Rule[],
   order: { n: number },
+  registered: Map<string, RegisteredProperty>,
 ): void {
   let i = from;
 
@@ -479,7 +501,7 @@ function parseRuleList(
         // A prelude with no block of its own — `@layer a, b;` — has already been
         // consumed as an empty body by the scan above; recursing over it is a
         // no-op, which is the right outcome.
-        parseRuleList(text, bodyFrom, bodyTo, rules, order);
+        parseRuleList(text, bodyFrom, bodyTo, rules, order, registered);
         continue;
       }
 
@@ -502,7 +524,7 @@ function parseRuleList(
         // media query — a symptom nowhere near its cause. dziri renders into an SDL
         // window with a mouse; `(hover: hover)` and `(pointer: fine)` hold, and
         // pretending otherwise is the wrong answer to a question we can answer.
-        parseRuleList(text, bodyFrom, bodyTo, rules, order);
+        parseRuleList(text, bodyFrom, bodyTo, rules, order, registered);
         continue;
       }
 
@@ -518,12 +540,41 @@ function parseRuleList(
           continue;
         }
         const inner: Rule[] = [];
-        parseRuleList(text, bodyFrom, bodyTo, inner, order);
+        parseRuleList(text, bodyFrom, bodyTo, inner, order, registered);
         for (const rule of inner) {
           // Nested `@media` intersects: the inner block's conditions are added to
           // whatever the outer one already required.
           rule.media = [...conds, ...(rule.media ?? [])];
           rules.push(rule);
+        }
+        continue;
+      }
+
+      // `@property` is a *declaration* about a custom property, not a rule, and
+      // ignoring it broke Tailwind's transforms outright.
+      //
+      // `translate-x-4` compiles to `--tw-translate-x: …; translate:
+      // var(--tw-translate-x) var(--tw-translate-y)` — and nothing sets
+      // `--tw-translate-y`. Its value comes from `@property { initial-value: 0 }`.
+      // With the at-rule skipped the `var()` did not resolve, CSS says a
+      // declaration with an unresolvable `var()` is dropped, and so the whole
+      // `translate` disappeared. The page compiled cleanly and rendered nothing
+      // moved, which is why this was found by looking at a screenshot rather than
+      // by a failing build.
+      if (keyword === "@property") {
+        const name = prelude.slice("@property".length).trim().toLowerCase();
+        if (name.startsWith("--")) {
+          const body = parseDeclarations(text.slice(bodyFrom, bodyTo), bodyFrom);
+          const initial = body.get("initial-value");
+          if (initial !== undefined) {
+            registered.set(name, {
+              initial: initial.trim(),
+              // The default is `false`, and it is the answer that matters:
+              // Tailwind relies on it so a translated parent does not translate
+              // its children through an inherited `--tw-translate-x`.
+              inherits: body.get("inherits")?.trim().toLowerCase() === "true",
+            });
+          }
         }
         continue;
       }
@@ -1322,7 +1373,12 @@ const VAR_DEPTH_LIMIT = 32;
  *    depth limit is what stops `--a: var(--b); --b: var(--a)` from hanging the
  *    compiler; CSS calls that a cycle and treats it as invalid.
  */
-export function substituteVars(value: string, env: VarEnv, depth = 0): string | null {
+export function substituteVars(
+  value: string,
+  env: VarEnv,
+  depth = 0,
+  registered: ReadonlyMap<string, RegisteredProperty> = NO_PROPERTIES,
+): string | null {
   const start = value.indexOf("var(");
   if (start === -1) return value;
   if (depth >= VAR_DEPTH_LIMIT) return null;
@@ -1344,9 +1400,15 @@ export function substituteVars(value: string, env: VarEnv, depth = 0): string | 
 
   let resolved: string | null;
   if (env.has(name)) {
-    resolved = substituteVars(env.get(name)!, env, depth + 1);
+    resolved = substituteVars(env.get(name)!, env, depth + 1, registered);
+  } else if (registered.has(name)) {
+    // A registered property is never *unset*: its initial value is its computed
+    // value when nobody assigned one. So this comes before the `var()` fallback
+    // rather than after it — the fallback arm is for properties that really have
+    // no value, and a registration means there always is one.
+    resolved = substituteVars(registered.get(name)!.initial, env, depth + 1, registered);
   } else if (fallback !== null) {
-    resolved = substituteVars(fallback, env, depth + 1);
+    resolved = substituteVars(fallback, env, depth + 1, registered);
   } else {
     resolved = null;
   }
@@ -1354,8 +1416,16 @@ export function substituteVars(value: string, env: VarEnv, depth = 0): string | 
 
   // Re-run over the whole string: the replacement may itself have introduced a
   // `var()`, and there may be more after this one.
-  return substituteVars(value.slice(0, start) + resolved + value.slice(cursor), env, depth + 1);
+  return substituteVars(
+    value.slice(0, start) + resolved + value.slice(cursor),
+    env,
+    depth + 1,
+    registered,
+  );
 }
+
+/** No `@property` registrations, for the callers that have none. */
+const NO_PROPERTIES: ReadonlyMap<string, RegisteredProperty> = new Map();
 
 /** Index of the first comma not inside parentheses, or -1. */
 function topLevelComma(s: string): number {
@@ -1370,15 +1440,38 @@ function topLevelComma(s: string): number {
 }
 
 /**
- * The environment a node sees: its parent's, plus its own `--*` declarations.
+ * The environment a node sees: its parent's, plus its own `--*` declarations,
+ * minus any registered property that does not inherit.
  *
  * The declarations arrive already in cascade order, so a later one wins by being
  * written last — the same rule the rest of `collectDecls` runs on. Values are
  * resolved lazily rather than here, because a variable may refer to one declared
  * after it on the same element, which CSS allows.
+ *
+ * **`inherits: false` is why the subtraction is here** and not only a detail of
+ * the spec. Tailwind registers every `--tw-*` transform variable as
+ * non-inheriting, and relies on it: a card with `translate-x-4` sets
+ * `--tw-translate-x`, and a badge inside it with `translate-y-2` emits
+ * `translate: var(--tw-translate-x) var(--tw-translate-y)`. If the parent's value
+ * inherited, the badge would silently pick up its parent's horizontal shift.
  */
-export function extendVarEnv(parent: VarEnv, decls: Map<string, string>): VarEnv {
+export function extendVarEnv(
+  parent: VarEnv,
+  decls: Map<string, string>,
+  registered: ReadonlyMap<string, RegisteredProperty> = NO_PROPERTIES,
+): VarEnv {
   let own: Map<string, string> | null = null;
+
+  // Only pay for the filtered copy when the parent actually carries a
+  // non-inheriting value. Tailwind's theme block puts hundreds of `--color-*` in
+  // this map, and copying it at every node to remove nothing would be the
+  // expensive way to change no behaviour.
+  for (const [name, prop] of registered) {
+    if (prop.inherits || !parent.has(name)) continue;
+    own ??= new Map(parent);
+    own.delete(name);
+  }
+
   for (const [prop, value] of decls) {
     if (!prop.startsWith("--")) continue;
     own ??= new Map(parent);
@@ -1405,10 +1498,10 @@ export function extendVarEnv(parent: VarEnv, decls: Map<string, string>): VarEnv
  * one is just a parenthesised sub-expression, and that is what stripping the
  * keyword leaves behind.
  */
-function foldCalc(raw: string): number {
+function foldCalc(raw: string, resolve: (token: string) => number = parseLength): number {
   const inner = raw.trim().slice(raw.trim().indexOf("(") + 1, -1);
   const tokens = tokeniseCalc(inner.replace(/\bcalc\(/g, "("));
-  const parser = new CalcParser(tokens, raw);
+  const parser = new CalcParser(tokens, raw, resolve);
   const value = parser.expression();
   parser.expectEnd();
   return value;
@@ -1440,10 +1533,19 @@ class CalcParser {
   #tokens: string[];
   #at = 0;
   #whole: string;
+  #resolve: (token: string) => number;
 
-  constructor(tokens: string[], whole: string) {
+  /**
+   * `resolve` turns one dimensioned atom into a number, and it is a parameter
+   * because `calc()` appears in more than one kind of value. Tailwind writes
+   * every negative utility as a multiplication — `-rotate-12` is
+   * `calc(12deg * -1)` — so an angle has to fold here too, and folding it with
+   * the length parser reports "bad length" for a perfectly good angle.
+   */
+  constructor(tokens: string[], whole: string, resolve: (token: string) => number = parseLength) {
     this.#tokens = tokens;
     this.#whole = whole;
+    this.#resolve = resolve;
   }
 
   #peek(): string | undefined {
@@ -1499,9 +1601,10 @@ class CalcParser {
       throw new CssError(`unexpected "${tok}" in "${this.#whole}"`);
     }
 
-    // A bare number is a scalar (a multiplier); anything else is a length, and
-    // `parseLength` is what decides which units this engine can answer for.
-    return /^-?[\d.]+(e[-+]?\d+)?$/i.test(tok) ? Number(tok) : parseLength(tok);
+    // A bare number is a scalar (a multiplier); anything else is dimensioned, and
+    // the resolver this parser was built with is what decides which units it can
+    // answer for.
+    return /^-?[\d.]+(e[-+]?\d+)?$/i.test(tok) ? Number(tok) : this.#resolve(tok);
   }
 }
 
@@ -1547,6 +1650,16 @@ export function parseLength(raw: string): number {
  */
 export function parseAngle(raw: string): number {
   const v = raw.trim().toLowerCase();
+  // Tailwind writes every negative utility as a multiplication, so `-rotate-12`
+  // arrives as `calc(12deg * -1)` rather than as `-12deg`. Found by building the
+  // demo page, not by reading the grammar.
+  if (v.startsWith("calc(")) return foldCalc(v, angleAtom);
+  return angleAtom(v);
+}
+
+/** One dimensioned angle, with no `calc()` around it. */
+function angleAtom(raw: string): number {
+  const v = raw.trim().toLowerCase();
   const m = v.match(/^(-?[\d.]+(?:e[-+]?\d+)?)(deg|rad|grad|turn)?$/);
   if (!m) throw new CssError(`bad angle "${raw}"`);
 
@@ -1584,25 +1697,43 @@ export function parseAngle(raw: string): number {
 function lengthPercent(raw: string): { px: number; pct: number } {
   const v = raw.trim().toLowerCase();
 
-  if (v.endsWith("%")) {
+  if (v.endsWith("%") && !v.startsWith("calc(")) {
     const n = Number(v.slice(0, -1));
     if (!Number.isFinite(n)) throw new CssError(`bad percentage "${raw}"`);
     return { px: 0, pct: n / 100 };
   }
 
-  // `calc()` mixing the two would need the px and the fraction kept apart all the
-  // way through the fold, and `foldCalc` returns one number. Refused by name,
-  // because the message it would otherwise give — "percentage lengths are not
-  // supported" — describes a different limitation than the real one.
-  if (v.includes("calc(") && v.includes("%")) {
-    throw new CssError(
-      `"${raw}" mixes a length and a percentage in one calc(), which dziri cannot ` +
-        `fold: the percentage resolves against the laid-out box and the length does not. ` +
-        `Write the two parts as separate transform functions instead.`,
-    );
+  // A `calc()` over percentages folds like any other, as long as *every*
+  // dimensioned atom in it is a percentage: `translate-x-1/2` arrives as
+  // `calc(1 / 2 * 100%)`, which is 50% and nothing else. Found by building the
+  // demo page — the fraction utilities are the reason the percentage half of these
+  // fields exists, so refusing this would have left them unreachable.
+  //
+  // A calc mixing the two genuinely cannot fold here: `foldCalc` returns one
+  // number, and these are two fields precisely because one of them is not known
+  // until layout. `percentAtom` throwing on a length is what tells the two apart.
+  if (v.startsWith("calc(") && v.includes("%")) {
+    try {
+      return { px: 0, pct: foldCalc(v, percentAtom) / 100 };
+    } catch {
+      throw new CssError(
+        `"${raw}" mixes a length and a percentage in one calc(), which dziri cannot ` +
+          `fold: the percentage resolves against the laid-out box and the length does not. ` +
+          `Write the two parts as separate transform functions instead.`,
+      );
+    }
   }
 
   return { px: parseLength(v), pct: 0 };
+}
+
+/** One percentage atom, for a `calc()` that must contain nothing else. */
+function percentAtom(raw: string): number {
+  const v = raw.trim();
+  if (!v.endsWith("%")) throw new CssError(`"${raw}" is not a percentage`);
+  const n = Number(v.slice(0, -1));
+  if (!Number.isFinite(n)) throw new CssError(`bad percentage "${raw}"`);
+  return n;
 }
 
 type Patch = Partial<Record<StyleField, number>>;
