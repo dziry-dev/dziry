@@ -366,17 +366,34 @@ test("accent-color and caret-color take auto or a colour", () => {
   expect(expand("caret-color", "AUTO")).toEqual({ caretColor: 0x00000000 });
 });
 
-test("appearance takes none or auto, and refuses the compat values", () => {
+test("appearance folds <compat-auto> to auto and keeps base-select distinct", () => {
   expect(expand("appearance", "none")).toEqual({ appearance: 0 });
   expect(expand("appearance", "auto")).toEqual({ appearance: 1 });
 
-  // `<compat-auto>` asks for one element to be drawn as a *different* control,
-  // which needs a UA control library to borrow from. dziri draws a control from
-  // the element's own kind, so accepting these would mean accepting a declaration
-  // and then not honouring it.
-  expect(() => expand("appearance", "button")).toThrow(CssError);
-  expect(() => expand("appearance", "checkbox")).toThrow(CssError);
+  // The opt-in for a fully styleable `<select>` and its `::picker(select)`. The
+  // one value that changes *what* is drawn rather than merely whether.
+  expect(expand("appearance", "base-select")).toEqual({ appearance: 2 });
+
+  // "The values all behave as `auto`" — so they are accepted and folded, not
+  // refused. dziri's field stores the effect; Chrome's computed value is
+  // as-specified, which is a representation divergence recorded in conformance.
+  for (const v of ["button", "checkbox", "radio", "menulist", "listbox", "meter", "progress-bar", "searchfield", "textarea"]) {
+    expect(expand("appearance", v)).toEqual({ appearance: 1 });
+  }
+
+  // Chromium 151 rejects these three outright, though MDN's prose lists them.
+  // Measured — BROWSER-FACTS.md, same class as `scrollbar-width: thick`.
+  expect(() => expand("appearance", "push-button")).toThrow(CssError);
+  expect(() => expand("appearance", "square-button")).toThrow(CssError);
+  expect(() => expand("appearance", "slider-horizontal")).toThrow(CssError);
+
+  // Specified but unimplemented anywhere, and Chromium drops the declaration.
+  expect(() => expand("appearance", "base")).toThrow(CssError);
+
+  // `<compat-special>`: real distinct effects, and dziri has neither an input-type
+  // system nor a picker to apply them to. Refusing beats accepting-and-ignoring.
   expect(() => expand("appearance", "textfield")).toThrow(CssError);
+  expect(() => expand("appearance", "menulist-button")).toThrow(CssError);
 });
 
 /**

@@ -432,13 +432,13 @@ export const ENUMS: EnumDef[] = [
   {
     name: "Appearance",
     doc:
-      "`styles.appearance`. Two values, and the grammar's other half is deliberately " +
-      "absent: `<compat-auto>` (`button`, `checkbox`, `textfield`, …) exists so a page can " +
-      "make one element *look like* a different control, which needs a UA control library to " +
-      "borrow from. dziri draws its controls from the element's own kind, so the only " +
-      "meaningful question is whether it draws one at all.",
+      "`styles.appearance`. An *effect*, not the specified value — `<compat-auto>` keywords all " +
+      "collapse to `AUTO` here, which is what the spec says they do and what makes storing nine " +
+      "more variants pointless. `BASE_SELECT` is the opt-in that makes a `<select>` and its " +
+      "`::picker(select)` fully styleable; it is the one value that changes what gets drawn " +
+      "rather than merely whether. Measured against Chromium 151 — see BROWSER-FACTS.md.",
     ty: "u8",
-    values: { NONE: 0, AUTO: 1 },
+    values: { NONE: 0, AUTO: 1, BASE_SELECT: 2 },
   },
   {
     name: "MediaKind",

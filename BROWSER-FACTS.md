@@ -282,3 +282,46 @@ An adjacent finding from the same work, recorded because it is the opposite mist
 `ParagraphStyle::apply_rounding_hack` is on by default** and rounds line widths up to whole
 pixels, which browsers do not do. dziri turns it off. What dziri *does* round is the measurement
 it hands Taffy, and for an unrelated reason — see the comment on `Measurer::measure`.
+
+## Which `appearance` values the parser keeps
+
+**Measured 2026-08-02 · Chromium 151 (via Edge 151) · every value declared on both a `<div>` and a
+`<select>`, read back with `getComputedStyle`.** A dropped declaration reads back as the initial
+value, so `none` on the div and `auto` on the select — the select's `auto` comes from the UA sheet,
+which is why the two columns differ for the rejected values and agree for the kept ones.
+
+| Declared | on `<div>` | on `<select>` | kept |
+|---|---|---|---|
+| `none` / `auto` | as written | as written | yes |
+| `base-select` | `base-select` | `base-select` | **yes** |
+| `base` | `none` | `auto` | **no** |
+| `button` `checkbox` `radio` `menulist` `listbox` `meter` `progress-bar` `searchfield` `textarea` | as written | as written | yes |
+| `textfield` / `menulist-button` | as written | as written | yes |
+| `push-button` / `square-button` / `slider-horizontal` | `none` | `auto` | **no** |
+
+1. **`base-select` is real and shipping**, on any element, not only `<select>`. It is the opt-in
+   that makes a `<select>` and its `::picker(select)` fully styleable, and it is the whole reason
+   `appearance` is worth having in a framework that draws its own controls. **`mdn-data` does not
+   list it**: its `appearance` syntax is still `none | auto | <compat-auto> | <compat-special>`.
+   MDN's prose page has it. When the two disagree, the browser settles it — here the prose was right.
+2. **MDN's prose lists three values Chromium rejects.** `push-button`, `square-button` and
+   `slider-horizontal` appear on the `appearance` page; all three are dropped. `mdn-data`'s
+   `<compat-auto>` — nine keywords, none of those three — is the accurate list. **This is the second
+   time an MDN prose page has been refuted by measurement** (the first was `scrollbar-width: thick`,
+   above), and the second time `mdn-data` was right where the prose was not. Prefer `mdn-data` for
+   grammar; use the prose for values too new for it, and measure those.
+3. **`base` is specified and implemented nowhere**, exactly as MDN says. Refused rather than folded
+   to `auto`, because "the spec defines it" is not the same claim as "a browser does it".
+4. **`<compat-auto>` computes as-specified, not as `auto`.** The spec says the values *behave* as
+   `auto`; it does not say they *compute* to it, and `appearance`'s computed value is `asSpecified`.
+   dziri's style field stores the effect, so it folds them and reports `auto` where Chrome reports
+   `button`. That is a representation divergence with no behavioural difference, and it is
+   `conformance`'s first `KNOWN` entry rather than something hidden.
+
+**Bearing on dziri.** The customizable-`<select>` model is the one to build against, and it is
+*not* shadow DOM: MDN documents the parts as ordinary light-DOM children —
+`<select><button><selectedcontent></selectedcontent></button><option>…</option></select>` — with
+`::picker(select)` defined as "all descendants except the first `<button>`". That is a structural
+grouping a compiler can compute, which is why compile-time expansion is a fit and `::part`,
+`::-webkit-*` and shadow piercing are not needed. What it does need that dziri lacks is the popover
+and anchor-positioning the picker relies on — the overlay layer, ROADMAP B1.

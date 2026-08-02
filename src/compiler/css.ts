@@ -51,6 +51,25 @@ const SUPPORTED_PSEUDO = new Set<string>([
   "disabled",
 ]);
 
+/**
+ * `<compat-auto>` — `appearance` keywords that are all synonyms for `auto`.
+ *
+ * Taken from `mdn-data`'s syntax rather than MDN's prose, which lists three more
+ * (`push-button`, `square-button`, `slider-horizontal`) that Chromium 151 rejects
+ * outright. Measured; see BROWSER-FACTS.md.
+ */
+const COMPAT_AUTO = new Set([
+  "searchfield",
+  "textarea",
+  "checkbox",
+  "radio",
+  "menulist",
+  "listbox",
+  "meter",
+  "progress-bar",
+  "button",
+]);
+
 export type Compound = { tag: string | null; id: string | null; classes: string[] };
 
 export type Selector = {
@@ -1836,11 +1855,21 @@ export function expandDeclaration(
       out.caretColor = value.toLowerCase() === "auto" ? 0x00000000 : parseColor(value);
       return;
 
-    // `appearance: none | auto`. The rest of the grammar — `<compat-auto>`, so
-    // `button`, `checkbox`, `textfield`, `menulist-button` — is refused rather
-    // than folded into `auto`, because those values ask for one element to be
-    // drawn as a *different* control, and dziri draws a control from the element's
-    // own kind. Folding them would accept the declaration and then not honour it.
+    // `appearance`, whose grammar was measured rather than remembered — and which
+    // an earlier pass here got wrong from memory in both directions.
+    //
+    // `<compat-auto>` is **accepted and folded to `auto`**, because that is what
+    // the spec says those keywords do: "the values all behave as `auto`". Refusing
+    // them was the earlier mistake. dziri's field stores the *effect*, so nine
+    // more enum variants that all mean AUTO would be nine values nothing reads.
+    // The cost is a representation divergence — Chrome's computed value is
+    // as-specified, so it reports `button` where dziri reports `auto` — and that
+    // is recorded as `conformance`'s KNOWN entry rather than hidden.
+    //
+    // The list is `mdn-data`'s, not the prose's. MDN's `appearance` page also
+    // lists `push-button`, `square-button` and `slider-horizontal`, and Chromium
+    // 151 rejects all three — the same way its scrollbars guide invented
+    // `scrollbar-width: thick`. See BROWSER-FACTS.md.
     //
     // Written as ifs rather than a nested switch so that `css-coverage`, which
     // reads this function's `case` labels to find out what dziri parses, does not
@@ -1851,14 +1880,25 @@ export function expandDeclaration(
         out.appearance = Appearance.NONE;
         return;
       }
-      if (keyword === "auto") {
+      if (keyword === "auto" || COMPAT_AUTO.has(keyword)) {
         out.appearance = Appearance.AUTO;
         return;
       }
+      // The opt-in that makes a `<select>` and its `::picker(select)` fully
+      // styleable, and the reason this property is worth having at all: it is how
+      // an author says "stop drawing the platform control, I am styling the
+      // parts". Measured as shipping in Chromium 151, on any element.
+      if (keyword === "base-select") {
+        out.appearance = Appearance.BASE_SELECT;
+        return;
+      }
       throw new CssError(
-        `appearance takes none or auto, got "${value}" — the <compat-auto> values ` +
-          `(button, checkbox, textfield, …) ask for one control to be drawn as ` +
-          `another, which dziri does not do`,
+        `appearance: "${value}" is not a value dziri accepts.\n` +
+          `  Supported: none, auto, base-select, and the <compat-auto> keywords ` +
+          `(${[...COMPAT_AUTO].join(", ")}), which fold to auto.\n` +
+          `  Refused: base (specified, but no browser implements it — Chromium 151 ` +
+          `drops the declaration); textfield and menulist-button (real distinct ` +
+          `effects on input types and on a select's picker, and dziri has neither yet).`,
       );
     }
 

@@ -135,7 +135,24 @@ const CORPUS: Check[] = [
     field: "appearance",
     prop: "appearance",
     kind: "keyword",
-    keywords: ["none", "auto"],
+    keywords: ["none", "auto", "base-select"],
+  },
+  // The opt-in for a fully styleable `<select>`. Measured as shipping in Chromium
+  // 151 and accepted on any element, which is why a `.probe` div can assert it.
+  {
+    decl: "appearance: base-select",
+    field: "appearance",
+    prop: "appearance",
+    kind: "keyword",
+    keywords: ["none", "auto", "base-select"],
+  },
+  // Deliberately a disagreement — see KNOWN below.
+  {
+    decl: "appearance: button",
+    field: "appearance",
+    prop: "appearance",
+    kind: "keyword",
+    keywords: ["none", "auto", "base-select"],
   },
 ];
 
@@ -240,16 +257,28 @@ let pass = 0;
  * Declarations where dziri differs from Chrome **on purpose**, keyed by the
  * declaration exactly as it appears in CORPUS, valued by the reason.
  *
- * Empty today, and that is the honest state: all 23 cases agree. It exists so the
- * first real divergence has somewhere to go that is not "delete the case", which
- * is what happens to a corpus with no way to say "expected".
+ * It exists so the first real divergence has somewhere to go that is not "delete
+ * the case", which is what happens to a corpus with no way to say "expected".
  *
  * The bar for adding one, same as `html-coverage`'s: the decision must already be
  * written down somewhere else, and the entry cites it. This records decisions, it
  * does not make them. An entry that stops matching fails the run, so the list
  * cannot rot into a way of not fixing things — that check is at the bottom.
  */
-const KNOWN: Record<string, string> = {};
+const KNOWN: Record<string, string> = {
+  // The first entry, and it is a representation divergence rather than a
+  // behavioural one — which is exactly the kind this list was made for.
+  //
+  // `appearance`'s computed value is as-specified, so Chrome reports `button`.
+  // dziri's field stores the *effect*, and the spec says every `<compat-auto>`
+  // keyword behaves as `auto`, so it stores `auto`. Both agree on what should be
+  // drawn. Storing nine more enum variants to match the string would be nine
+  // values nothing reads. Decision recorded in `css.ts`'s `appearance` case and
+  // in BROWSER-FACTS.md.
+  "appearance: button":
+    "dziri stores appearance as an effect, not the specified value; the spec says " +
+    "every <compat-auto> keyword behaves as auto, so `button` folds to it",
+};
 const matched = new Set<string>();
 
 const fails: string[] = [];

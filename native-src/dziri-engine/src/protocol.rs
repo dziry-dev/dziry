@@ -430,10 +430,11 @@ pub mod scrollbar_width {
     pub const NONE: u8 = 2;
 }
 
-/// `styles.appearance`. Two values, and the grammar's other half is deliberately absent: `<compat-auto>` (`button`, `checkbox`, `textfield`, …) exists so a page can make one element *look like* a different control, which needs a UA control library to borrow from. dziri draws its controls from the element's own kind, so the only meaningful question is whether it draws one at all.
+/// `styles.appearance`. An *effect*, not the specified value — `<compat-auto>` keywords all collapse to `AUTO` here, which is what the spec says they do and what makes storing nine more variants pointless. `BASE_SELECT` is the opt-in that makes a `<select>` and its `::picker(select)` fully styleable; it is the one value that changes what gets drawn rather than merely whether. Measured against Chromium 151 — see BROWSER-FACTS.md.
 pub mod appearance {
     pub const NONE: u8 = 0;
     pub const AUTO: u8 = 1;
+    pub const BASE_SELECT: u8 = 2;
 }
 
 /// `media.kind`. Which axis a threshold tests, and which side of it counts as true. `MIN_*` holds at the threshold and above, `MAX_*` at it and below — the same inclusive bounds `min-width`/`max-width` have in CSS, which is why a `min-width: 768px` and a `max-width: 768px` query are both true at exactly 768.
