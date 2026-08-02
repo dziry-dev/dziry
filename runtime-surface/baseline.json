@@ -1,8 +1,8 @@
 {
-  "symbols": 21,
-  "bytes": 10179,
+  "symbols": 23,
+  "bytes": 10318,
   "bun": "1.3.14",
-  "recorded": "2026-08-01",
+  "recorded": "2026-08-02",
   "inventory": [
     "bindings.ts:Dirty",
     "bindings.ts:MAX_SLOT_CHARS",
@@ -19,6 +19,8 @@
     "patches.ts:applyStylePatches",
     "patches.ts:patchesAffectLayout",
     "patches.ts:subscribeStylePatches",
+    "signal.ts:$",
+    "signal.ts:$m",
     "signal.ts:batch",
     "signal.ts:computed",
     "signal.ts:isSignal",

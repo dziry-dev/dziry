@@ -205,6 +205,54 @@ export function isSignal(value: unknown): value is ReadonlySignal<unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// The two helpers the reactive transform emits
+// ---------------------------------------------------------------------------
+
+/**
+ * Unwraps a signal, and passes everything else through.
+ *
+ * The whole reactive rewrite rests on this being decided at *run time*. The
+ * transform rewrites every identifier read it sees, without knowing — or being able
+ * to know — which of them are signals. `$` answers that question when the code
+ * actually runs, which is why the transform needs no type information, no module
+ * graph, and no scope analysis.
+ *
+ * Over-rewriting is therefore safe rather than merely tolerable. `$(t)` inside
+ * `todos.filter(t => …)` returns `t`; a parameter shadowing a signal resolves to the
+ * parameter, because that is the binding in scope. The cost of a read that was never
+ * a signal is one predicate.
+ */
+export function $<T>(value: T): T extends ReadonlySignal<infer V> ? V : T {
+  return (isSignal(value) ? value.value : value) as never;
+}
+
+/**
+ * `$` for the object of a member expression: `count.set(…)`, `todos.filter(…)`.
+ *
+ * A plain `$` would turn `count.set(5)` into `(0).set(5)`, because unwrapping is
+ * exactly wrong when the property being reached for belongs to the *signal* rather
+ * than to its value. The key decides:
+ *
+ * ```
+ * count.set(5)            -> the signal   (set is the signal's)
+ * todos.filter(…)         -> the array    (filter is the value's)
+ * user.name               -> the object   (name is the value's)
+ * todos.map(fn, { key })  -> the array    — see below
+ * ```
+ *
+ * `map` resolves to the value deliberately. A signal's array is already handed out
+ * as `compileTimeArray` during compilation, whose `map` builds a dynamic list when
+ * given a key and behaves as `Array.prototype.map` otherwise. Routing `map` through
+ * the signal would take that decision away from the one place that has the context
+ * to make it.
+ */
+const SIGNAL_MEMBERS = new Set(["set", "subscribe"]);
+
+export function $m<T>(value: T, key: string): unknown {
+  return isSignal(value) && SIGNAL_MEMBERS.has(key) ? value : $(value);
+}
+
+// ---------------------------------------------------------------------------
 // Compile-time `.value`
 // ---------------------------------------------------------------------------
 

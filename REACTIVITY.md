@@ -18,14 +18,14 @@ everywhere** — a build-time source rewrite unwraps them. The authoring surface
 
 ```ts
 // ── create ────────────────────────────────────────────────
-const count = signal(0);
-const todos = signal<Todo[]>([]);
+const count = state(0);
+const todos = state<Todo[]>([]);
 
 // ── derive ────────────────────────────────────────────────
-const doubled = computed(() => count * 2);
-const isBig   = computed(() => count > 3);
-const full    = computed(() => `${first} ${last}`);
-const view    = computed(() => todos.map((t) => ({ ...t, mark: t.done ? "x" : "" })));
+const doubled = derived(() => count * 2);
+const isBig   = derived(() => count > 3);
+const full    = derived(() => `${first} ${last}`);
+const view    = derived(() => todos.map((t) => ({ ...t, mark: t.done ? "x" : "" })));
 
 // ── write ─────────────────────────────────────────────────
 count.set(5);
@@ -33,7 +33,7 @@ count.set((n) => n + 1);
 todos.set((ts) => [...ts, item]);
 
 // ── read ──────────────────────────────────────────────────
-// Nothing. `count` is the read, everywhere — markup, computed bodies, handlers.
+// Nothing. `count` is the read, everywhere — markup, derived bodies, handlers.
 export const increment = () => count.set(count + 1);
 ```
 
@@ -48,9 +48,37 @@ onClick={increment}                         // handler
 {todos.map(row, { key: (t) => t.id })}      // list
 ```
 
-That is the whole surface: `signal`, `computed`, `.set`, `.map`, `cn`.
+That is the whole surface: `state`, `derived`, `.set`, `.map`, `cn`.
 
 **No `.value`. No `peek`. No `update`. No dependency arrays.** A read is the identifier.
+
+### Naming
+
+`state` and `derived` rather than `signal` and `computed`. Both of those are implementation
+words — a signal is a graph node, a computed is a memoised call — and neither describes what the
+author is doing. `state(0)` says what it is; `derived(() => …)` says where the value comes from.
+The pairing also reads as one idea, which `signal`/`computed` never did.
+
+Full renames, applied together:
+
+| today | after |
+|---|---|
+| `signal(v)` | `state(v)` |
+| `computed(fn)` | `derived(fn)` |
+| `Signal<T>` | `State<T>` |
+| `ReadonlySignal<T>` | `ReadonlyState<T>` |
+| `isSignal(x)` | `isState(x)` |
+| `src/runtime/signal.ts` | `src/runtime/state.ts` |
+
+**Not renamed:** the `signal` *field* on `StylePatchRef`, `TextPart` and the `routeMatches`
+entry. Those name a graph node in the IR, which is exactly what a signal is, and the emitted
+artifact reads correctly as `{ signal: route }`. The authoring word changing does not make the
+internal word wrong.
+
+**Deferred.** The code still says `signal`/`computed` and will until §5.2, which changes the
+shape of those same declarations anyway. Renaming first would churn 49 files twice. The rest of
+this document uses the current names where it describes current code, and the new names where it
+describes the target API.
 
 `.set` takes a value or a function of the previous value — one method, not two. (Same shape as
 `@tanstack/store`'s `Atom.set`: `((fn: (prev: T) => T) => void) & ((value: T) => void)`.) The
