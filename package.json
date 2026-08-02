@@ -9,6 +9,7 @@
     "lint": "cd native-src/dziri-engine && cargo fmt --check && cargo clippy --release --all-targets",
     "gen:protocol": "bun run scripts/gen-protocol.ts",
     "probe": "bun run scripts/probe.ts",
+    "signals": "bun run scripts/signals.tsx",
     "doc-lint": "bun run scripts/doc-lint.ts",
     "protocol-guard": "bun run scripts/protocol-guard.ts",
     "characterize": "bun run scripts/characterize.ts",
