@@ -47,8 +47,8 @@ several blockers, so those counts overlap and the top entry is often nearly wort
   6268  property: mask-composite     <- ranked #1
   6265  property: mask-image
 
-  +   4  ->  8257/22763 (36.3%)  after property: mask-composite   <- what it actually unblocks
-  +6265  ->  14522/22763 (63.8%)  after property: mask-image
+  +   4  ->  8166/22763 (35.9%)  after property: mask-composite   <- what it actually unblocks
+  +5887  ->  14053/22763 (61.7%)  after property: mask-image
 ```
 
 `mask-composite` ranks first and unblocks **four** classes, because almost every class it blocks is
@@ -66,10 +66,23 @@ and value-syntax work. Cheap, self-contained, no protocol change. `inset-inline-
 (`src/compiler/css.ts:1402`) is the precedent: map the logical name onto the physical field and
 return.
 
-As of 2026-08-02 the six logical border-colour blockers are all Tier A — `border-inline-color`,
-`border-block-color`, `border-{inline,block}-{start,end}-color` all fold onto the single
-`borderColor` field (`src/ir.ts:124`), for ~1,746 classes with no protocol or Rust work. Prefer
-Tier A when the class counts are close; a pass that lands beats a pass that spans three files.
+Prefer Tier A when the class counts are close; a pass that lands beats a pass that spans three
+files.
+
+**The logical border family is *not* Tier A, though it looks like it.** An earlier version of this
+file claimed `border-inline-color` and friends fold onto the single `borderColor` field for ~1,746
+easy classes. They do not. dziri has *one* `borderColor` and *one* `borderWidth`
+(`src/ir.ts:124-129`), and `paint.rs:987-1018` strokes a single uniform border — one width
+subtracted equally on all four sides. Folding `border-inline-width` onto that makes `border-x-2`
+paint all four edges, and `border-2 border-x-red-500` colour all four red. There is no `borderStyle`
+field at all, so `border-inline-style` has nothing to fold onto either.
+
+The family is real and it is the largest non-mask item on the board — `--what-if
+"border-inline,border-block"` is +1,781 classes — but it is Tier B and it is *eight* fields (four
+colours, four widths) plus a paint rewrite from one stroke to four edges. `borderWidth` is a
+`LAYOUT_FIELD`, so per-side widths change the Taffy box maths too. Same shape as per-corner
+border-radius (`078bd11`, "four fields, because that is what CSS has") and bigger. It needs its own
+plan, not a loop pass.
 
 **Tier B — a new `STYLE_FIELDS` entry.** `fill`, `stroke`, `accent-color`, `caret-color`,
 `text-decoration-color` and `outline-color` have no field to fold onto, so each one touches
@@ -86,7 +99,7 @@ Rules:
 
 ## Masks are a scope call, not a backlog item
 
-`mask-image` is the single largest item on the list at 6,265 classes — 36.3% to 63.8% in one
+`mask-image` is the single largest item on the list at 5,887 classes — 35.9% to 61.7% in one
 feature. It is also ~6,000 classes of a subsystem that may be out of scope, and
 `css-coverage`'s `OUT_OF_SCOPE_GROUPS` does **not** currently list CSS Masking either way.
 
@@ -101,6 +114,14 @@ read the ranked list with masks removed: `bun run tailwind-coverage --what-if "c
   `expandDeclaration()`. An empty case, or one that parses a value and drops it, raises the
   coverage number while changing nothing on screen. This is the one way to make this tool lie, it
   is a single line, and it is never acceptable.
+- **Check what the value parsers do with the values Tailwind actually emits, before adding the
+  `case`.** Support is measured per *property*, but `parseLength` and `parseColor` reject whole
+  classes of *value*. Adding a `case` for a property whose values dziri cannot parse converts
+  "warned and ignored" (`css.ts:1705`) into a fatal build error, because `compile.ts:290` rethrows
+  `CssError` — and the coverage number goes *up* while the class goes from silently inert to
+  breaking the build. `parseLength` throws on every percentage (`css.ts:1044`), which is why
+  `inset` is not the free +125 it looks like: `inset-1/2` is `inset: 50%`. Run the value through
+  the parser in a scratch script first.
 - **Never delete or widen a `VALUE_FEATURES` entry to move the number.** When `var()` and foldable
   `calc()` landed, the `calc()` entry was *narrowed* to the part that genuinely cannot be folded
   (`scripts/tailwind-coverage.ts:145-152`) rather than removed. The number moves because the
@@ -142,4 +163,13 @@ call" from "needs paint work first".
 
 | Pass | Result |
 |---|---|
-| baseline (2026-08-02, tailwindcss 4.3.3) | 8253/22763 (36.3%) |
+| baseline (2026-08-02, tailwindcss 4.3.3) | 8253/22763 (36.3%) — overstated, see below |
+| fix the stick (2026-08-02) | 8162/22763 (35.9%) — added the `percentage length` blocker; no properties implemented |
+
+Pass one raised no coverage on purpose. The first thing it found was that the baseline was wrong:
+`VALUE_FEATURES` had no entry for a bare percentage, so every class Tailwind emits as a plain `%`
+length counted as working — `w-full` and `h-full` among them, which are `width: 100%` and
+`height: 100%` and throw a fatal `CssError`. 91 classes were being reported as supported while the
+compiler refused to build them. Correcting that *lowers* the number, and that is the only honest
+direction; the two candidate items it had queued up (`inset`, the logical border family) both turned
+out to be blocked by findings above, so nothing was implemented.

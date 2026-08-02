@@ -151,6 +151,25 @@ const VALUE_FEATURES: { name: string; test: RegExp }[] = [
   // the measuring stick was shortened.
   { name: "calc() over percentages / viewport units", test: /calc\([^)]*(%|\d(vw|vh|vmin|vmax)\b)/ },
 
+  // A bare percentage length, which `parseLength` rejects outright
+  // (`css.ts:1044`) for the same reason as the calc() case above: there is no
+  // parent box to resolve it against until layout runs.
+  //
+  // This entry was missing, and its absence was not a rounding error. Nothing
+  // else here tests for a percentage *outside* calc(), so every class Tailwind
+  // emits as a plain `%` length counted as working — including `w-full` and
+  // `h-full`, which are `width: 100%` and `height: 100%` and throw a fatal
+  // CssError through `compile.ts:290`. The tool reported support for two of the
+  // most-used classes in Tailwind while the compiler refused to build them.
+  //
+  // The `[^;(){}]*` is the whole trick: it forbids an opening paren between the
+  // colon and the `%`, which is what separates a percentage used as a length
+  // from one used as a component inside a function. `width: 50%` matches;
+  // `oklch(70% 0.1 200)` does not, because its `%` is a lightness; gradient
+  // stops and `calc(100% - 1rem)` do not either, and the calc() entry above
+  // already owns the latter.
+  { name: "percentage length", test: /:[^;(){}]*\d%/ },
+
   // A registered custom property is not the same thing as a custom property.
   // `@property` gives one a type, an initial value and inheritance behaviour, and
   // Tailwind uses that to make `--tw-*` animatable and to give them defaults that

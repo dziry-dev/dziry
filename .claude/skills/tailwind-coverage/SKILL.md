@@ -46,11 +46,12 @@ Current, 2026-08-02, tailwindcss 4.3.3:
 
 ```
   properties   93/273 supported (34.1%)
-  classes      8253/22763 work today (36.3%)
+  classes      8162/22763 work today (35.9%)
 
      6268  property: mask-composite
      6265  property: mask-image
      1163  calc() over percentages / viewport units
+      580  percentage length
       444  property: translate
       333  color-mix()
       292  property: fill / stroke / accent-color
@@ -70,9 +71,10 @@ worthless. `mask-composite` ranks first at 6,268 and unblocks **four** classes, 
 everything it blocks is also blocked by `mask-image`:
 
 ```
-  +   4  ->   8257/22763 (36.3%)  after property: mask-composite
-  +6265  ->  14522/22763 (63.8%)  after property: mask-image
-  + 651  ->  15173/22763 (66.7%)  after calc() over percentages / viewport units
+  +   4  ->   8166/22763 (35.9%)  after property: mask-composite
+  +5887  ->  14053/22763 (61.7%)  after property: mask-image
+  + 651  ->  14704/22763 (64.6%)  after calc() over percentages / viewport units
+  + 469  ->  15173/22763 (66.7%)  after percentage length
   + 444  ->  15617/22763 (68.6%)  after property: translate
   + 333  ->  15950/22763 (70.1%)  after color-mix()
 ```
@@ -101,6 +103,27 @@ landed, not because the measuring stick got shorter. Keep it that way.
 Note the matching hazard on the other side: `dziriSupported()` detects support by scanning for
 `case "name":` in `expandDeclaration()`, so an empty case arm raises coverage while rendering
 nothing. `/tw-loop` bans it outright.
+
+## Property support and value support are different questions
+
+Support is detected per *property*, but a property's parser can reject whole classes of *value*.
+Where `VALUE_FEATURES` does not model one of those rejections, the tool overcounts.
+
+That was not hypothetical. Until 2026-08-02 there was no entry for a bare percentage, only for
+percentages inside `calc()`, so every class Tailwind emits as a plain `%` length counted as working.
+`parseLength` throws on all of them (`css.ts:1044`) and `compile.ts:290` rethrows it as fatal — so
+`w-full` and `h-full`, which are `width: 100%` and `height: 100%`, were reported as supported while
+the compiler refused to build them. 91 classes, and two of the most-used in Tailwind.
+
+The fix lowered the reported number from 36.3% to 35.9%, which is the direction an honest correction
+goes. The regex is `/:[^;(){}]*\d%/`, and the `[^;(){}]*` is the whole trick: forbidding an opening
+paren between the colon and the `%` is what separates a percentage used as a length from one used as
+a component inside a function. `width: 50%` matches; `oklch(70% 0.1 200)` does not, because its `%`
+is a lightness, and gradient stops and `color-mix()` ratios do not either.
+
+The general rule when adding a property: run the values Tailwind actually emits for it through
+`parseLength`/`parseColor` in a scratch script first. If they throw, implementing the property makes
+the class go from silently inert to breaking the build, and the coverage number rises anyway.
 
 ## Judgement the tool does not make
 
