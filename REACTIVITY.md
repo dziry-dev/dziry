@@ -1,292 +1,270 @@
 # Reactivity — one system
 
-**Status:** design. Nothing in §4–§6 is built.
-**Measured by:** `bun run signals`. Every claim here is a command that was run — see §8.
+**Status:** design, decided. Nothing in §5 is built.
+**Measured by:** `bun run signals`. Every claim here is a command that was run — see §9.
 **Written:** 2026-08-02.
 
-Reactivity in dziri grew one feature at a time, and each feature answered the same question its
-own way. There are now six brand symbols, three sentinel kinds, two recording proxies, a
-side-table `WeakMap`, an unwrapping `Proxy`, and a `TextPart` union whose valid shapes depend on
-which compiler phase you are in. None of it is wrong. All of it is the same idea.
+Reactivity grew one feature at a time and each feature answered the same question its own way.
+There are now six brand symbols, three sentinel kinds, two recording proxies, a side-table
+`WeakMap`, an unwrapping `Proxy`, and a `TextPart` union whose valid shapes depend on which
+compiler phase you are in.
 
-This document names the one idea, states the authoring API, and lists the work that follows.
+The decision below removes most of that rather than organising it. **`.value` is deleted.** One
+authoring form, and the holes close because a signal object never appears in an expression.
 
 ---
 
 ## 1. What exists today
 
-Everything below is a mechanism for the *same* question: **a value the build cannot know — how
-does the compiler learn where it comes from at run time?**
-
-### How a read announces itself
+Every mechanism below answers: *a value the build cannot know — how does the compiler learn
+where it comes from at run time?*
 
 | # | mechanism | where | used by |
 |---|---|---|---|
-| 1 | **identity** — the signal object itself | `isSignal`, `signal.ts:203` | `{count}`, `cn({active: sig})`, `bindValue`, `onClick` |
-| 2 | **item recorder** — Proxy records a property path | `item-path.ts`, `Symbol.for("skia-proto.itemPath")` | `{t.title}` inside `.map` |
-| 3 | **param recorder** — Proxy records a name | `route-args.ts`, `Symbol.for("skia-proto.routeParam")` | `args.id` — *records, never emits* |
-| 4 | **array proxy** — `.value` returns a Proxy that remembers its owner | `compileTimeArray`, `signal.ts:235` | `todos.value.map(…)` |
-| 5 | **route proxy** — `.value` returns a marker; `UNWRAP` gets back the signal | `guardedPath`, `route.ts:253` | `router.path.value` |
-| 6 | **sentinels** ×3 — un-internable markers | `sentinel.ts` | a recorder or route read that escaped into a string |
-| 7 | **derived-cell memo** — `WeakMap` remembering how a cell was built | `routeMatches`, `route.ts:159` | `router.matches(p)` |
+| 1 | **identity** — the signal object itself | `isSignal`, `signal.ts:203` | `{count}`, `cn({on: sig})`, `bindValue`, `onClick` |
+| 2 | **item recorder** — Proxy records a path | `item-path.ts` | `{t.title}` inside `.map` |
+| 3 | **param recorder** — Proxy records a name | `route-args.ts` | `args.id` — *records, never emits* |
+| 4 | **array proxy** — `.value` returns a Proxy remembering its owner | `compileTimeArray`, `signal.ts:235` | `todos.value.map(…)` |
+| 5 | **route proxy** — `.value` returns a marker; `UNWRAP` recovers the signal | `guardedPath`, `route.ts:253` | `router.path.value` |
+| 6 | **sentinels** ×3 | `sentinel.ts` | a recorder or route read that escaped into a string |
+| 7 | **derived-cell memo** — `WeakMap` of how a cell was built | `routeMatches`, `route.ts:159` | `router.matches(p)` |
 
-### What the compiler emits
+**The inconsistency, in the demo's own code.** The same operation, written two ways:
 
-| sink | shape | runtime |
-|---|---|---|
-| text binding | `TextPart[]` — `literal \| source \| export \| item` | `applyTextBindings` |
-| list | template + arena + `keyPath` | `list-runtime.ts` |
-| style patch | boolean signal → field writes | `applyStylePatches` |
-| editable | signal ↔ node | `typeInto` |
-| handler | name (not reactive, same resolution) | `dispatch` |
+```jsx
+{view.map(t => …, { key })}                 // features.tsx:134 — bare signal
+computed(() => todos.value.map(t => …))     // state.ts:33      — .value
+```
 
-### The redundancies, named
-
-- **#4 and #5 are the same trick.** Both make `.value` return something that remembers its
-  owning signal. One does it for arrays, one for the route, neither for anything else.
-- **#7 and `ResolvedRef.expression` are one idea in two places** — `route.ts` remembers
-  `{signal, path}`, `resolve-refs.ts:130` rebuilds the comparison from it by hand.
-- **`TextPart.source` vs `.export` is a phase smell.** `source` is only valid before
-  `resolve-refs`, `export` only after. The type admits both at all times, so every consumer
-  handles a state that cannot occur.
-- **#5 exists only because the route needed it first.** Once every signal's `.value` records
-  (§4.1), `guardedPath`, `UNWRAP`, `RoutePath` and `RouteValueLeakError` all delete.
-- **#2 and #3 stay separate on purpose.** A row path and a matcher-bound name mean different
-  things at the same call site. `sentinel.ts` already shares their plumbing without merging
-  their identity; that is the correct treatment and it is the model for the rest.
+**The redundancies.** #4 and #5 are the same trick twice — both make `.value` return something
+that remembers its owner, one for arrays and one for the route. #7 and `ResolvedRef.expression`
+are one idea in two files. `TextPart.source`/`.export` is a phase smell: `source` is only valid
+before `resolve-refs`, `export` only after, and the type admits both always.
 
 ---
 
-## 2. The one idea: a `Source`
+## 2. The decision
 
-Every mechanism above produces one of four things. Name that, and the rest collapses.
+> **`.value` does not exist. A signal is passed, never unwrapped by the author.**
 
-```ts
-/** Where a runtime value comes from. The compiler's only vocabulary for "not known yet". */
-export type Source =
-  /** A signal, by identity. `{count}` */
-  | { kind: "signal"; signal: unknown }
-  /** A property path off a signal. `{user.value.name}`, `{items.value.length}` */
-  | { kind: "path"; signal: unknown; path: Step[] }
-  /** A path into the current row. `{t.title}` inside `.map` */
-  | { kind: "item"; path: Step[] }
-  /** An expression the artifact contains rather than names. `router.matches("x")` */
-  | { kind: "expr"; text: string; deps: unknown[] };
+The invariant that follows is the whole point:
 
-type Step = string | number;
-```
+> **A signal object never appears in an expression.**
 
-Four facts about it:
-
-- **`{kind:"signal"}` is `{kind:"path"}` with an empty path.** They are separate because the
-  emitted binding differs — one reads the slot, one calls `readPath` — not because the authoring
-  differs.
-- **`{kind:"expr"}` is what a value with no name looks like.** `router.matches("x")` today;
-  anything derived inline tomorrow. `deps` is what `resolve-refs` must be able to name;
-  `text` is what `ui.gen.ts` contains.
-- **Every sink takes a `Source`.** Text parts, patch sources, list keys, editables. One shape.
-- **One resolver, one error, one leak check.** `resolve-refs` turns any `Source` into an
-  emittable form. `describe(source)` produces every diagnostic. Today those are spread across
-  three sentinel classes and four call sites in `jsx-runtime.ts`.
-
-`TextPart` becomes two shapes, valid in every phase:
-
-```ts
-type TextPart = { literal: string } | { source: Source };
-```
-
-`Source` gains a resolved form in place (`{kind:"signal", signal, name?}`) rather than the union
-switching shape between phases.
+Every hole in reactivity is a signal object sitting somewhere JavaScript evaluates it —
+`count === 7`, `count ? a : b`, `` `${count}` ``, `count * 2`. Remove every context where that
+can happen and the holes are not patched, they are unreachable.
 
 ---
 
-## 3. The authoring API — decided
-
-> **In markup, pass the signal. In code, read `.value`. Both work in markup.**
+## 3. The API
 
 ```ts
-// state.ts — signals and derived values are module-level exports, always.
-export const count  = signal(0);
-export const items  = signal<Todo[]>([]);
-export const isBig  = computed(() => count.value > 3);
+const count = signal(0);          // state
+const items = signal<Todo[]>([]);
+
+derive(count, (c) => c * 2);           // derived — the callback gets VALUES
+derive([first, last], (f, l) => …);    // several deps
+
+count.peek();                     // read now, untracked — handlers only
+count.set(5);                     // write
+count.update((n) => n + 1);       // write from current
+items.map(render, { key });       // list
 ```
 
 ```jsx
-{count}                                   // identity        → binding
-{count.value}                             // path, empty     → binding      (§4.1)
-{user.value.name}                         // path            → binding      (§4.1)
-{`n is ${count.value}`}                   // literal + path  → binding      (§4.1)
-{items.map(row, { key: t => t.id })}      // list
-className={cn("box", { big: isBig })}     // patch
+{count}                                   // render
+{isBig}                                   // render a derived
+className={cn("box", { big: isBig })}     // conditional class
 bindValue={draft}                         // editable
 onClick={submit}                          // handler
+{items.map(row, { key: (t) => t.id })}    // list
 ```
 
-**Why both forms.** `{count}` is the clean one. `{count.value}` is the explicit one, and readers
-who want to see the machinery should not be punished for it. After §4.1 they compile to the same
-IR — which is already true for the route, and `bun run signals` proves it byte for byte.
+**No `.value` anywhere.** Reads in markup are the signal itself. Reads in derived code arrive as
+plain arguments. Reads in handlers are `peek()`, which names exactly what a handler wants — the
+value at this instant, untracked.
 
-**Why `.value` stays mandatory in a `computed` body.** `computed(() => count * 2)` cannot be
-made to work without harm; §7 has the measurement. `tsc` already refuses it at the line.
+### Why the callback takes values, not signals
 
-**What is not in the API.** No `effect()`, no `watch()`, no `untrack()`, no inline `computed()`
-in a component (§6). Each would need somewhere to live at run time, and components are erased.
+Measured. Every form that was broken is reactive when the body receives a plain value:
 
-### The rules, and who enforces them
+```
+  c === 7        true       -> false      reactive
+  c ? 'y':'n'    y          -> n          reactive
+  !c             false      -> true       reactive
+  c * 2          14         -> 0          reactive
+  c > 3          true       -> false      reactive
+  `${f} ${l}`    ada lovelace -> grace hopper  reactive
+```
 
-| rule | enforced by | today |
-|---|---|---|
-| signals and derived values are module-level exports | `resolve-refs`, build error | ✅ |
-| `.value` in markup binds | §4.1 | ❌ silently frozen |
-| a computed expression cannot be written inline in markup | `tsc` (TS2362/2365/2367) | ✅ |
-| a bare signal cannot be coerced | §4.2, build error | ❌ `"[object Object]"` |
-| a bare signal cannot be tested for truthiness | **nobody — see §5** | ❌ |
+And chains propagate:
+
+```
+  before: 14 15 deep:15
+  after:  200 201 deep:201
+```
+
+`===` works because `c` is a number. Truthiness works because `c` is a number. There is no trick
+here and nothing to defend — the body never holds a signal.
+
+### What enforces it
+
+**The type.** With `value` removed from `ReadonlySignal<T>`, every broken form in
+`bun run signals` becomes a `tsc` error at the author's own line:
+
+```ts
+{count.value}          // Property 'value' does not exist on type 'Signal<number>'
+{items.value.length}   // same
+{isBig.value}          // same
+count.value = 5        // same
+```
+
+No marker, no recorder, no sentinel. **Deleting a property is the enforcement.** This is why the
+decision shrinks the system instead of adding to it.
+
+### Migration — the whole demo
+
+| today | after |
+|---|---|
+| `computed(() => route.value === "products/new")` | `derive(route, (r) => r === "products/new")` |
+| `computed(() => todos.value.map(t => …))` | `derive(todos, (ts) => ts.map(t => …))` |
+| `computed(() => todos.value.filter(t => !t.done).length)` | `derive(todos, (ts) => ts.filter(t => !t.done).length)` |
+| `if (path === route.value) return` | `if (path === route.peek()) return` |
+| `route.value = path` | `route.set(path)` |
+| `const title = draft.value.trim()` | `const title = draft.peek().trim()` |
+| `todos.value = [...todos.value, t]` | `todos.update((ts) => [...ts, t])` |
+| `isLight.value = !isLight.value` | `isLight.update((v) => !v)` |
+
+Roughly twenty lines across `state.ts` and `router.ts`. Three of them get shorter: `update`
+removes the read entirely.
 
 ---
 
-## 4. The work
+## 4. The costs, stated
 
-Ordered. Each step lands and is verified by `bun run signals` on its own.
+**Deps are explicit.** `derive(count, (c) => c * 2)` is more to type than
+`computed(() => count.value * 2)`. In exchange the dep list is *complete by construction* — there
+is no way to read an undeclared signal inside the body, because no signal is in scope as a
+readable thing. That is strictly stronger than React's `useMemo`, whose dep list can be wrong and
+is policed by a lint rule.
 
-### 4.1 — `.value` records, everywhere
+**Conditional deps evaluate eagerly.** `derive([a, b, c], (a, b, c) => a ? b : c)` subscribes to
+all three. Correct for dziri, where the dependency table in the IR is static anyway.
 
-One case, at the door every `.value` read already goes through:
+**`peek()` in markup is a snapshot.** `{count.peek()}` renders a constant. That is a deliberate
+escape hatch rather than a trap, because the name says so — the same treatment
+`[...todos.value].map(…)` already has as the documented way to opt out of a dynamic list.
+
+**One residual hole.** A signal held in a boolean position in *handler* code:
 
 ```ts
-// src/runtime/signal.ts:253
-function readValue<T>(owner: ReadonlySignal<unknown>, current: T): T {
-  if (compiling && Array.isArray(current)) return compileTimeArray(owner, current);
-  if (compiling && listener === null) return valueRecorder(owner) as unknown as T;
-  return current;
-}
+if (isLight) { … }        // ✗ always truthy, and tsc has no flag for it
+if (isLight.peek()) { … } // ✓
 ```
 
-`listener === null` is the discriminator and it already exists: `listener` is non-null exactly
-while a `computed` body evaluates (`signal.ts:150-156`). So `computed(() => count.value * 2)` is
-untouched, and only a read during component expansion records.
+`ToBoolean` invokes no user code and TypeScript cannot refuse truthiness on an object, so nothing
+can catch this. It is the honest floor. Note how much smaller it is than today's: markup and
+derived bodies are both immune, because neither can hold a signal.
 
-**A recorder, not a marker.** A marker string has a `.length`, so `{items.value.length}` would
-silently render `27`. A recording Proxy captures `["length"]`, and property paths come free:
-`{user.value.name}`, `{todo.value.done}`.
+---
 
-It carries `owner`, so it produces `{kind:"path", signal, path}` directly — no scope lookup. That
-is strictly better than `route.ts`'s marker, which had to ask `currentRoute()` because it had no
-identity of its own.
+## 5. The work
 
-**Deletes:** `guardedPath`, `UNWRAP`, `RoutePath`, `RouteValueLeakError`, `hasRouteSentinel`,
-`splitRouteSentinel`, and `sentinel("route")`. The route becomes an ordinary signal.
+Ordered. Each step lands and is verified by `bun run signals`.
 
-**Folds in:** `compileTimeArray` becomes the array case of the same recorder — it already carries
-`owner` for exactly this reason.
+### 5.1 — `derive(deps, fn)`, and `.value` removed from the type
 
-**Cost:** `{count.value * 2}` moves from `text "14"` (silently frozen) to a build error. Real
-authoring change; same trade as `{args.id}`.
+Add `derive`, `peek`, `set`, `update`. Remove `value` from `ReadonlySignal<T>` and `Signal<T>`.
+Migrate `windows/` per §3. The runtime's own reads move to an internal accessor.
 
-### 4.2 — a bare signal cannot be coerced
+**Consequence worth verifying rather than assuming:** with explicit deps, ambient dependency
+tracking may become unnecessary — `derive` subscribes to its deps directly, so the `listener`
+global (`signal.ts:48`) and the tracking scope in `computed` (`signal.ts:150-156`) may have no
+remaining callers. If so, that deletes as well. Check `subscribeBindings` and
+`subscribeStylePatches` before removing anything.
 
-`` `${count}` `` renders `"[object Object]"` today. A template literal *does* call us:
+### 5.2 — a bare signal cannot be coerced
+
+`` `${count}` `` renders `"[object Object]"` today, and `tsc` does not refuse it. A template
+literal *does* call us:
 
 ```ts
 [Symbol.toPrimitive](hint) {
-  throw new SignalCoercionError(hint);   // not: return current
+  throw new SignalCoercionError(hint);   // not: return the value
 }
 ```
 
-Throwing rather than returning the value is deliberate. Returning it would make `` `${count}` ``
-work while `count === 7` still silently fails — teaching that bare signals are fine in
-expressions, which is the opposite of the rule.
+Throwing rather than returning is deliberate. Returning would make `` `${count}` `` work while
+leaving `if (isLight)` silently broken — teaching that bare signals are fine in expressions,
+which is the opposite of §2.
 
-### 4.3 — unify on `Source`
+### 5.3 — the route stops being special
 
-Mechanical, once 4.1 lands and the route mechanisms are gone:
+`guardedPath`, `UNWRAP`, `RoutePath`, `RouteValueLeakError`, `hasRouteSentinel`,
+`splitRouteSentinel` and `sentinel("route")` all delete. `router.path` becomes an ordinary
+signal; `{router.path}` is the only form and already works. `router.matches(p)` stays — it is a
+derived cell with no export name, which is §5.4's problem.
 
-- `TextPart` → `{ literal } | { source: Source }`
-- `routeMatches` WeakMap → `matches()` returns a cell carrying `{kind:"expr"}`
-- `ResolvedRef.expression` → the resolved form of `{kind:"expr"}`
+`compileTimeArray` (#4) also goes: `todos.value.map(…)` is unreachable once `.value` is gone, and
+`todos.map(…)` is the only form.
+
+### 5.4 — unify on `Source`
+
+What remains after the deletions still needs one vocabulary:
+
+```ts
+export type Source =
+  | { kind: "signal"; signal: unknown }        // {count}
+  | { kind: "item";   path: Step[] }           // {t.title} inside .map
+  | { kind: "param";  name: string }           // {args.id}  — §5.5
+  | { kind: "expr";   text: string; deps: unknown[] };  // router.matches("x")
+```
+
+Note it is four kinds, not the five an earlier draft needed — the `path` kind existed only to
+serve `{user.value.name}`, which is now `derive(user, (u) => u.name)`.
+
+- `TextPart` → `{ literal } | { source: Source }`, valid in every phase
+- `routeMatches` WeakMap and `ResolvedRef.expression` → `{kind:"expr"}`
 - one `describe(source)` behind every diagnostic
-- one leak check, replacing the three in `checkAuthored` and the four in `jsx-runtime.ts`
+- one leak check, replacing three in `checkAuthored` and four in `jsx-runtime.ts`
 
-### 4.4 — `args.id` becomes a binding
+### 5.5 — `args.id` becomes a binding
 
-The last recorder that records and never emits. `{kind:"item"}` has a sibling — a matcher-bound
-name — and once `Source` exists it is a fifth kind rather than a fourth bespoke mechanism.
-Needs the route matcher, which is separate work.
+The last recorder that records and never emits. A fifth kind of bespoke mechanism today; a
+`Source` kind once §5.4 lands. Needs the route matcher, which is separate work.
 
 ---
 
-## 5. What stays broken, and why that is the floor
+## 6. On a parser or Babel plugin
+
+**Not needed for this.** That is the measured result in §3: every form that a parser was going to
+rescue — `===`, truthiness, arithmetic, interpolation — is already reactive when the derived
+callback receives values. The signal-pattern change does the whole job.
+
+A transform would only buy dropping the word `derive`:
 
 ```jsx
-count ? a : b        // ✗ always truthy — ToBoolean calls nothing
-!count               // ✗ always false
-count.value ? a : b  // ✓ correct and reactive today
-!count.value         // ✓ correct and reactive today
+{count === 7}         // would need a parser
+{isSeven}             // works, with `export const isSeven = derive(count, c => c === 7)`
 ```
 
-`ToBoolean` invokes no user code, and TypeScript has no flag for truthiness on an object. Two
-forms, no defence, `.value` fixes both. This is the honest floor of an evaluation-based compiler
-and it goes in API.md as the one rule the compiler cannot enforce.
-
----
-
-## 6. Deliberately excluded
-
-**Inline `computed()` in a component.** `{computed(() => count.value === 7)}` fails at
-`resolve-refs` — the cell has no export name. `Function.prototype.toString()` survives Bun's TSX
-transform intact (verified), so the author's own text could be emitted, which is `matches()`
-generalised. Excluded because free variables that are not signals produce a `tsc` error pointing
-at generated code. Revisit after §4.3, when `{kind:"expr"}` makes it a two-line change.
-
-**A source transform.** The only way to make `{count.value === 7}` reactive, and a *boundary*
-decision rather than a work item:
+And it carries a boundary problem the current design does not have:
 
 ```jsx
-{count.value === 7}                     // reactive, with a parser
-const x = count.value === 7;  …  {x}    // frozen, silently
+{count === 7}                        // reactive, with a parser
+const x = count === 7;  …  {x}       // frozen, silently
 ```
 
-Reactive-in-a-brace but frozen-in-a-`const` is a worse rule than today's uniform "always frozen,
-and refused where visible". Svelte is the only version that does not lie, and it works by
-rewriting every read in the file — incompatible with cross-module signals in the same way
-Svelte 5 cannot do `export let count = $state(0)`. Nothing in §4 has to be undone if this is
-taken up later.
+Reactive-in-a-brace but frozen-in-a-`const` is worse than a uniform rule. Svelte is the only
+version that does not lie, and it works by rewriting every read in the file — incompatible with
+cross-module signals in the same way Svelte 5 cannot do `export let count = $state(0)`.
+
+Nothing in §5 has to be undone if a transform is taken up later.
 
 ---
 
-## 7. Decided: `computed(() => count * 2)` will not be supported
-
-`Symbol.toPrimitive` makes it work at run time — measured:
-
-```
-count * 2     7->100   14 -> 200      reactive
-count > 3     7->1     true -> false  reactive
-`${count}`    7->1     7 -> 1         reactive
-```
-
-But `tsc` does not consult `Symbol.toPrimitive` for arithmetic. `Signal<number> * 2` stays
-`TS2362` regardless of run-time behaviour. For the *line to compile*, `Signal<number>` must be
-structurally a number:
-
-```ts
-type Signal<T> = T & { subscribe(…): …; … }
-```
-
-which reopens the hole currently closed:
-
-```ts
-count === 7   // number & {…} IS comparable to 7 → type-checks → false, for ever
-```
-
-Same trap as the branded `RoutePath`, found the same way: TypeScript treats an intersection
-containing `number` as comparable to a number literal. **Making `count * 2` type-check
-necessarily makes `count === 7` type-check.** Today both are errors at the line.
-
-Both caught beats one convenience and one silent lie.
-
-> Reversible: widen `Signal<T>` and add `Symbol.toPrimitive`. Everything else here is unaffected,
-> but §4.2 changes meaning and `===` needs a different defence.
-
-### What everyone else does
+## 7. What everyone else does
 
 | library | the read | derived deps |
 |---|---|---|
@@ -294,48 +272,68 @@ Both caught beats one convenience and one silent lie.
 | TanStack Store 0.11 | `count.get()` | auto, by running |
 | Preact signals | `count.value` | auto, by running |
 | Svelte 5 | `count` | auto — compiler rewrites every read in the file |
+| **dziri (this)** | **`count`** | **explicit, unwrapped into the callback** |
 
 Verified against `@tanstack/store@0.11.0`: `createAtom(7)` for state,
-`createAtom(() => count.get() * 2)` for derived, read via `.get()`. The explicit-deps
+`createAtom(() => count.get() * 2)` for derived, read via `.get()`; the explicit-deps
 `Derived({ deps, fn })` API is gone.
 
-Svelte is the only one where a bare signal works in an expression, and it pays by having no brace
-boundary at all. Nobody makes coercion carry it.
+Everyone else makes the read syntactically explicit — `count()`, `.get()`, `.value` — because
+their derived bodies hold signals and need a way to unwrap them. dziri does not need one: the
+body never holds a signal. That is what buys the bare `{count}` in markup *and* a working `===`,
+which no library in that table has at the same time.
 
 ---
 
-## 8. Verification
+## 8. Superseded
 
-`bun run signals` is the measure. Target:
+An earlier draft proposed making `.value` record via a Proxy, and separately asked whether
+`computed(() => count * 2)` should work via `Symbol.toPrimitive`.
+
+Both are moot. The recorder existed to make `{count.value}` bind; deleting `.value` makes it a
+type error instead, which is better and smaller. And the `count * 2` question dissolves — the
+answer is `derive(count, (c) => c * 2)`, with no type widening and therefore without reopening
+`count === 7`.
+
+Recorded because the reasoning still applies if `.value` is ever reinstated: `tsc` does not
+consult `Symbol.toPrimitive` for arithmetic, so making `count * 2` type-check requires
+`Signal<number> = number & {…}`, and an intersection containing `number` is comparable to a
+number literal — so `count === 7` would type-check and be false for ever. Same trap as the
+branded `RoutePath`.
+
+---
+
+## 9. Verification
+
+`bun run signals` is the measure. After §5.1 the five silent rows should be `tsc` errors rather
+than table rows at all, and the table should read:
 
 ```
-  {count}                  bind  bind    source signal count
-  {count.value}            bind  bind    source signal count             ← 4.1
-  {label.value}            bind  bind    source signal label             ← 4.1
-  {isBig.value}            bind  bind    source signal isBig             ← 4.1
-  `n is ${count.value}`    bind  bind    "n is " + source signal count   ← 4.1
-  {items.value.length}     bind  bind    source path items.length        ← 4.1
-  {count.value * 2}        error error   SignalExpressionError           ← 4.1, deliberate
-  `${count}`               error error   SignalCoercionError             ← 4.2
+  {count}                bind   bind   source signal count
+  {isBig}                bind   bind   source signal isBig
+  {items.map(…,{key})}   list   list   template + arena
+  {router.path}          bind   bind   source signal route
+  {router.matches("x")}  bind   bind   expr computed(() => …)
+  `${count}`             error  error  SignalCoercionError        ← 5.2
 ```
 
-Plus the full sweep, all green: `bun test`, `check`, `window`, `golden`, `characterize`,
-`boundary-diff`, `conformance`, `runtime-surface`, `protocol-guard`, `doc-lint`.
+Full sweep green: `bun test`, `check`, `window`, `golden`, `characterize`, `boundary-diff`,
+`conformance`, `runtime-surface`, `protocol-guard`, `doc-lint`.
 
-`golden` matters most — the demo's `{router.path}` and `` {`currently at ${router.path.value}`} ``
-must render identical pixels, since §4.1 changes how both are produced.
+`golden` matters most — §5.1 and §5.3 change how every binding in the demo is produced, and the
+pixels must not move.
 
 ### Measurements this rests on
 
 Each was run, not assumed:
 
-- `bun run signals` — 9 of 20 forms wrong; 5 silent.
-- `Symbol.toPrimitive` makes `count * 2`, `count > 3`, `` `${count}` `` reactive inside a
-  `computed` — and does **not** make them type-check.
-- `tsc` already refuses `count * 2` / `> 3` / `+ 1` / `=== 7`. It does not refuse truthiness,
-  negation, or template interpolation.
-- `count.value ? a : b` and `!count.value` are correct and reactive today.
-- `Function.prototype.toString()` survives Bun's `.tsx` transform, type annotations stripped.
+- `bun run signals` — 9 of 20 forms wrong today; 5 silent.
+- `derive(deps, fn)` with unwrapped arguments: `===`, truthiness, `!`, `*`, `>`, and template
+  interpolation all reactive. Chains propagate through three levels.
+- `tsc` already refuses `count * 2` / `> 3` / `+ 1` / `=== 7` on a bare signal. It does **not**
+  refuse truthiness, negation, or template interpolation.
+- `Symbol.toPrimitive` makes those reactive at run time and does **not** make them type-check.
 - `@tanstack/store@0.11.0` auto-tracks and reads via `.get()`.
-- Six `Symbol.for("skia-proto.*")` brands exist; `setCompiling` has two callers; `TextPart` has
-  four shapes of which two are phase-exclusive.
+- The demo writes `.map` two ways: `view.map(…)` in markup, `todos.value.map(…)` in a computed.
+- Six `Symbol.for("skia-proto.*")` brands; `setCompiling` has two callers; `TextPart` has four
+  shapes of which two are phase-exclusive.
