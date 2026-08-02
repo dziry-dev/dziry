@@ -148,6 +148,48 @@ test("a colour the subset cannot express is a diagnostic", () => {
   }
 });
 
+/**
+ * `color-mix()` against a transparent operand, which is how Tailwind v4 spells
+ * every opacity modifier — `bg-red-500/50` compiles to one of these. Verified
+ * against Chrome in `scripts/conformance.ts`, which is where the claim that the
+ * interpolation space cancels out is actually asserted.
+ */
+test("color-mix() against transparent folds to a scaled alpha", () => {
+  const cases: Array<[string, number]> = [
+    ["color-mix(in oklab, red 50%, transparent)", 0x80ff0000],
+    ["color-mix(in srgb, red 50%, transparent)", 0x80ff0000], // the space cancels out
+    ["color-mix(in oklab, red 25%, transparent)", 0x40ff0000],
+    ["color-mix(in oklab, red, transparent)", 0x80ff0000], // omitted percentage is 50/50
+    ["color-mix(in oklab, transparent, red 25%)", 0x40ff0000], // either argument may be the transparent one
+    ["color-mix(in oklab, red 100%, transparent)", 0xffff0000],
+    ["color-mix(in oklab, red 0%, transparent)", 0x00ff0000],
+    // an operand that already carries alpha has it scaled, not replaced
+    ["color-mix(in oklab, rgb(0 128 255 / 0.8) 50%, transparent)", 0x660080ff],
+    // any zero-alpha operand is premultiplied-invisible, not only the keyword
+    ["color-mix(in oklab, red 50%, rgb(0 255 0 / 0))", 0x80ff0000],
+    // percentages are normalised when they do not sum to 100
+    ["color-mix(in oklab, red 25%, transparent 25%)", 0x80ff0000],
+  ];
+  for (const [input, expected] of cases) {
+    expect(parseColor(input) >>> 0, input).toBe(expected >>> 0);
+  }
+});
+
+test("a color-mix() that needs real interpolation is a diagnostic", () => {
+  const bad = [
+    "color-mix(in oklab, red 50%, blue)", // two visible colours
+    "color-mix(in oklab, currentcolor 50%, transparent)", // no inherited colour at parse time
+    "color-mix(oklab, red 50%, transparent)", // missing `in`
+    "color-mix(in oklab, red 50%)", // one colour
+    "color-mix(in oklab, red 50% 20%, transparent)", // two percentages on one argument
+    "color-mix(in oklab, red -10%, transparent)", // negative weight
+    "color-mix(in oklab, red 0%, transparent 0%)", // weights sum to zero
+  ];
+  for (const b of bad) {
+    expect(() => parseColor(b), b).toThrow(CssError);
+  }
+});
+
 /** The fields one declaration expands to, as a plain object. */
 function expand(prop: string, value: string): Record<string, number> {
   const out: Record<string, number> = {};

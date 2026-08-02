@@ -710,7 +710,106 @@ export function parseColor(raw: string): number {
   const oklchArgs = v.match(/^oklch\(([^)]+)\)$/);
   if (oklchArgs) return parseOklch(oklchArgs[1]!, raw);
 
+  // Greedy `(.*)`, not `([^)]+)`: the arguments contain their own parens —
+  // `color-mix(in oklab, oklch(63.7% 0.237 25.331) 50%, transparent)`.
+  const mixArgs = v.match(/^color-mix\((.*)\)$/);
+  if (mixArgs) return parseColorMix(mixArgs[1]!, raw);
+
   throw new CssError(`unsupported color "${raw}"`);
+}
+
+/** Paren-aware split on top-level commas. `splitTopLevel` does whitespace; `color-mix()` needs commas. */
+function splitTopLevelCommas(value: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let current = "";
+  for (const ch of value) {
+    if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    if (depth === 0 && ch === ",") {
+      parts.push(current.trim());
+      current = "";
+      continue;
+    }
+    current += ch;
+  }
+  parts.push(current.trim());
+  return parts;
+}
+
+/** One `<color> <percentage>?` argument of `color-mix()`; the percentage may precede the colour. */
+function parseMixComponent(part: string, raw: string): { color: string; weight: number | null } {
+  let weight: number | null = null;
+  const colors: string[] = [];
+  for (const tok of splitTopLevel(part)) {
+    // `oklch(63.7% 0.237 25.331)` also contains a `%`, but it ends with `)`.
+    if (tok.endsWith("%")) {
+      if (weight !== null) throw new CssError(`two percentages in one color-mix() argument ("${raw}")`);
+      const n = Number(tok.slice(0, -1));
+      if (!Number.isFinite(n)) throw new CssError(`bad color-mix() percentage "${tok}" in "${raw}"`);
+      weight = n / 100;
+    } else colors.push(tok);
+  }
+  if (colors.length !== 1) throw new CssError(`expected one color per color-mix() argument, got "${part}"`);
+  return { color: colors[0]!, weight };
+}
+
+/**
+ * `color-mix(in <space>, <color> <pct>?, <color> <pct>?)` folded to a packed sRGB
+ * value — but only the one form that folds *exactly*.
+ *
+ * Mixing against `transparent` is the whole reason this exists: it is how
+ * Tailwind v4 spells every opacity modifier, so `bg-red-500/50` arrives here as
+ * `color-mix(in oklab, oklch(63.7% 0.237 25.331) 50%, transparent)`.
+ *
+ * That form needs no colour-space conversion at all. CSS interpolates
+ * premultiplied, and `transparent` is `rgb(0 0 0 / 0)`, whose premultiplied
+ * components are all zero — so it contributes nothing but its weight, and the
+ * result is the other colour with its alpha scaled. The interpolation space
+ * cancels out, which is why `in oklab` and `in srgb` fold identically here and
+ * why this needs none of the OKLab machinery `parseOklch` carries. Tailwind
+ * emits both spellings (srgb as the `@supports` fallback), and they must agree.
+ *
+ * Every other mix is a real interpolation between two visible colours. Those are
+ * left unsupported rather than approximated: a wrong colour that renders is
+ * worse than one that refuses to compile, because nothing downstream flags it.
+ */
+function parseColorMix(args: string, raw: string): number {
+  const parts = splitTopLevelCommas(args);
+  if (parts.length !== 3) {
+    throw new CssError(`color-mix() takes an interpolation space and two colors ("${raw}")`);
+  }
+  if (!/^in\s+\S/.test(parts[0]!)) {
+    throw new CssError(`bad color-mix() interpolation space "${parts[0]}" in "${raw}"`);
+  }
+
+  const a = parseMixComponent(parts[1]!, raw);
+  const b = parseMixComponent(parts[2]!, raw);
+
+  // CSS Color 5's weight rules: one omitted percentage is `100% - other`, both
+  // omitted is 50/50, and whatever is left is normalised to sum to 1.
+  let wa = a.weight;
+  let wb = b.weight;
+  if (wa === null && wb === null) [wa, wb] = [0.5, 0.5];
+  else if (wa === null) wa = 1 - wb!;
+  else if (wb === null) wb = 1 - wa;
+  if (wa! < 0 || wb! < 0) throw new CssError(`negative color-mix() percentage in "${raw}"`);
+  const sum = wa! + wb!;
+  if (sum === 0) throw new CssError(`color-mix() percentages sum to zero in "${raw}"`);
+  wa = wa! / sum;
+  wb = wb! / sum;
+
+  const ca = parseColor(a.color);
+  const cb = parseColor(b.color);
+  const withAlpha = (c: number, alpha: number) =>
+    ((Math.round(Math.max(0, Math.min(255, alpha))) << 24) | (c & 0x00ffffff)) >>> 0;
+
+  // Any zero-alpha colour is premultiplied-invisible, not just the `transparent`
+  // keyword — `rgb(255 0 0 / 0)` contributes exactly as little.
+  if (cb >>> 24 === 0) return withAlpha(ca, (ca >>> 24) * wa);
+  if (ca >>> 24 === 0) return withAlpha(cb, (cb >>> 24) * wb);
+
+  throw new CssError(`color-mix() is only supported against a transparent color ("${raw}")`);
 }
 
 /**

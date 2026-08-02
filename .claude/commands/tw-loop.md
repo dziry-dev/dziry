@@ -47,8 +47,8 @@ several blockers, so those counts overlap and the top entry is often nearly wort
   6268  property: mask-composite     <- ranked #1
   6265  property: mask-image
 
-  +   4  ->  8166/22763 (35.9%)  after property: mask-composite   <- what it actually unblocks
-  +5887  ->  14053/22763 (61.7%)  after property: mask-image
+  +   4  ->  8499/22763 (37.3%)  after property: mask-composite   <- what it actually unblocks
+  +5887  ->  14386/22763 (63.2%)  after property: mask-image
 ```
 
 `mask-composite` ranks first and unblocks **four** classes, because almost every class it blocks is
@@ -99,7 +99,7 @@ Rules:
 
 ## Masks are a scope call, not a backlog item
 
-`mask-image` is the single largest item on the list at 5,887 classes — 35.9% to 61.7% in one
+`mask-image` is the single largest item on the list at 5,887 classes — 37.3% to 63.2% in one
 feature. It is also ~6,000 classes of a subsystem that may be out of scope, and
 `css-coverage`'s `OUT_OF_SCOPE_GROUPS` does **not** currently list CSS Masking either way.
 
@@ -165,6 +165,7 @@ call" from "needs paint work first".
 |---|---|
 | baseline (2026-08-02, tailwindcss 4.3.3) | 8253/22763 (36.3%) — overstated, see below |
 | fix the stick (2026-08-02) | 8162/22763 (35.9%) — added the `percentage length` blocker; no properties implemented |
+| `color-mix()` against transparent (2026-08-02) | 8162 → **8495/22763 (37.3%)**, +333 |
 
 Pass one raised no coverage on purpose. The first thing it found was that the baseline was wrong:
 `VALUE_FEATURES` had no entry for a bare percentage, so every class Tailwind emits as a plain `%`

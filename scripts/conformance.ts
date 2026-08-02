@@ -52,6 +52,25 @@ const CORPUS: Check[] = [
   { decl: "color: #e4e4e7", field: "fg", prop: "color", kind: "color" },
   { decl: "border-color: #3f3f46", field: "borderColor", prop: "border-top-color", kind: "color" },
 
+  // `color-mix()` against `transparent` is how Tailwind v4 spells every opacity
+  // modifier, and the fold in `parseColorMix` rests on one claim: CSS
+  // interpolates premultiplied, so a zero-alpha operand contributes nothing but
+  // its weight and the result is the other colour with a scaled alpha —
+  // identically in every interpolation space. That is exactly the kind of claim
+  // that must come from the oracle rather than from memory, so these three are
+  // the assertion. The oklab/srgb pair must agree because Tailwind emits both,
+  // srgb as its `@supports` fallback.
+  // Mixed `in srgb` so Chrome's answer converts exactly — see the `color(srgb …)`
+  // branch in `normalise`, which also records what the oklab spelling returns.
+  { decl: "background: color-mix(in srgb, red 50%, transparent)", field: "bg", prop: "background-color", kind: "color" },
+  { decl: "background: color-mix(in srgb, red, transparent)", field: "bg", prop: "background-color", kind: "color" },
+  {
+    decl: "background: color-mix(in srgb, oklch(63.7% 0.237 25.331) 25%, transparent)",
+    field: "bg",
+    prop: "background-color",
+    kind: "color",
+  },
+
   // `border-style` is deliberately spelled out. Chrome computes
   // `border-*-width: 0` unless a style is set, and dziri has no `border-style`
   // field at all — so bare `border-width: 2px` paints in dziri and paints
@@ -130,6 +149,29 @@ function normalise(kind: Check["kind"], chrome: string, dziri: number): [string,
       const r = (dziri >>> 16) & 0xff;
       const g = (dziri >>> 8) & 0xff;
       const b = dziri & 0xff;
+
+      // `color(srgb r g b / a)` — Chrome serialises a `color-mix()` result in the
+      // space it was mixed in, not as rgb(). The srgb form converts exactly:
+      // components are already sRGB, in 0..1. Handled rather than tolerated,
+      // because the alternative is an empty match that compares "undefined" to a
+      // real colour and calls it a failure.
+      //
+      // The `oklab(...)` form Chrome returns for `in oklab` mixes is deliberately
+      // NOT handled. Converting it would mean either duplicating the OKLab
+      // matrices here or borrowing dziri's own, and borrowing them would compare
+      // dziri against itself and make the conversion untestable. Mix `in srgb`
+      // when a case needs to assert a colour; observed 2026-08-02, Chrome returns
+      // `color-mix(in oklab, red 50%, transparent)` as
+      // `oklab(0.627966 0.22488 0.125859 / 0.5)`, which is red's exact oklab
+      // triple at half alpha — the space cancels out, as the fold assumes.
+      const srgb = chrome.match(/^color\(srgb\s+([^)]+)\)$/);
+      if (srgb) {
+        const n = srgb[1]!.split(/[/\s]+/).filter(Boolean).map(Number);
+        const to255 = (x: number) => Math.round(Math.max(0, Math.min(1, x)) * 255);
+        const ca = n[3] === undefined ? 255 : Math.round(n[3] * 255);
+        return [`${to255(n[0]!)},${to255(n[1]!)},${to255(n[2]!)},${ca}`, `${r},${g},${b},${a}`];
+      }
+
       const m = chrome.match(/rgba?\(([^)]+)\)/);
       const parts = m ? m[1]!.split(",").map((s) => s.trim()) : [];
       const ca = parts[3] === undefined ? 255 : Math.round(Number(parts[3]) * 255);

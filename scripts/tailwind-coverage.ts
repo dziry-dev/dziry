@@ -140,7 +140,18 @@ function rulesByClass(css: string): Map<string, { props: Set<string>; values: st
  * blocked by *how* a value is written even when the property itself is supported.
  */
 const VALUE_FEATURES: { name: string; test: RegExp }[] = [
-  { name: "color-mix()", test: /\bcolor-mix\(/ },
+  // `color-mix()` is implemented for the one form that folds exactly: against a
+  // transparent operand, which is how Tailwind spells every opacity modifier.
+  // Narrowed rather than deleted, same as calc() below.
+  //
+  // What is left is `currentcolor`, which `parseColor` has no value for — there
+  // is no inherited colour at parse time. A mix between two *visible* colours is
+  // also unsupported (it needs real interpolation, and `parseColorMix` throws
+  // rather than approximating), but it gets no entry here because the corpus
+  // contains none: every color-mix Tailwind v4 emits is against `transparent`.
+  // If that changes, this is the line that has to grow — a regex for a form that
+  // does not occur is untested either way.
+  { name: "color-mix() with currentcolor", test: /color-mix\([^;]*currentcolor/ },
 
   // `var()` and plain `calc()` are gone from this list because they are
   // implemented: the compiler resolves custom properties through the cascade and

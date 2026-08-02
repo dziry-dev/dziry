@@ -46,16 +46,16 @@ Current, 2026-08-02, tailwindcss 4.3.3:
 
 ```
   properties   93/273 supported (34.1%)
-  classes      8162/22763 work today (35.9%)
+  classes      8495/22763 work today (37.3%)
 
      6268  property: mask-composite
      6265  property: mask-image
      1163  calc() over percentages / viewport units
       580  percentage length
       444  property: translate
-      333  color-mix()
       292  property: fill / stroke / accent-color
       291  property: border-inline-color, border-block-color, … (6 logical colour names)
+      125  property: inset
 ```
 
 A class is blocked by *how a value is written* as well as by which property it sets, so the
@@ -71,12 +71,11 @@ worthless. `mask-composite` ranks first at 6,268 and unblocks **four** classes, 
 everything it blocks is also blocked by `mask-image`:
 
 ```
-  +   4  ->   8166/22763 (35.9%)  after property: mask-composite
-  +5887  ->  14053/22763 (61.7%)  after property: mask-image
-  + 651  ->  14704/22763 (64.6%)  after calc() over percentages / viewport units
-  + 469  ->  15173/22763 (66.7%)  after percentage length
-  + 444  ->  15617/22763 (68.6%)  after property: translate
-  + 333  ->  15950/22763 (70.1%)  after color-mix()
+  +   4  ->   8499/22763 (37.3%)  after property: mask-composite
+  +5887  ->  14386/22763 (63.2%)  after property: mask-image
+  + 651  ->  15037/22763 (66.1%)  after calc() over percentages / viewport units
+  + 469  ->  15506/22763 (68.1%)  after percentage length
+  + 444  ->  15950/22763 (70.1%)  after property: translate
 ```
 
 `--what-if` walks the ranked list cumulatively and reports the classes left with *no* blockers,
@@ -84,7 +83,7 @@ which is the only figure a plan can be built on. `--what-if "a,b"` handles the c
 are not rank prefixes — "var() and calc(), but not masks" is the shape of a real plan and cannot be
 read off the ranking.
 
-## Why `var()` is no longer on the list
+## Why `var()` and most of `color-mix()` are no longer on the list
 
 The first run (2026-07-31) measured 469/22759 — 2.1% — with `var()` blocking 20,432 classes on its
 own, because v4 routes every spacing, colour and shadow utility through `--tw-*`. That was the
@@ -92,6 +91,15 @@ ceiling, and it is why the early number looked hopeless.
 
 `var()` and foldable `calc()` have since landed: the compiler resolves custom properties through
 the cascade and folds `calc()` to a number, which is most of the distance from 2.1% to 36.3%.
+
+`color-mix()` went the same way on 2026-08-02, for +333 classes. Only one form is implemented —
+against a `transparent` operand, which is how v4 spells every opacity modifier, so `bg-red-500/50`
+is `color-mix(in oklab, … 50%, transparent)`. That form folds exactly and needs no colour-space
+conversion: CSS interpolates premultiplied, a zero-alpha operand contributes nothing but its weight,
+so the result is the other colour with a scaled alpha *in any interpolation space*. Chrome confirms
+it in `scripts/conformance.ts`, which is where that claim is asserted rather than assumed. The entry
+narrowed to `color-mix() with currentcolor`, the one spelling left that `parseColor` has no value
+for.
 
 **How that was recorded matters more than the number.** The `calc()` entry was *narrowed* to the
 part that genuinely cannot be folded — a length not knowable until layout runs — rather than
