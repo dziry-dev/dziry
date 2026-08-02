@@ -66,8 +66,13 @@ Blitz still has no `<select>` at all and stubs it with `option { display: none }
 
 Five engine features gate everything in Tier 2, and none is per-element work:
 
-1. **New state predicates** — `:checked`, `:disabled`, `:indeterminate`. Only `HOVER/ACTIVE/FOCUS`
-   exist (`native-src/dziri-engine/src/protocol.rs:287-291`); the mask table generalises cleanly.
+1. ~~**New state predicates**~~ — **done for `:checked` and `:disabled`**
+   (`native-src/dziri-engine/src/protocol.rs:448-455`). It generalised even more cleanly than
+   "cleanly": the compiler names a predicate in one table and the run and engine work in bits, so
+   the two states cost two entries there, two in `SUPPORTED_PSEUDO` and two bits — protocol v9. The
+   compiler resolves them; **no engine reads them yet**, so a `:checked` node wears its base style
+   until A3 can say which nodes are checked. `:indeterminate` is deliberately still absent — same
+   shape, same cost, but nothing can author it until a control can be in that state.
 2. **Attribute selectors** (`[type=checkbox]`) — already scheduled for A1 (`ROADMAP.md:314-317`).
 3. **Pseudo-elements or a UA shadow tree** — the mechanism all three reference engines use for
    widget internals. Highest-leverage missing piece: it is how you get sliders, meters and
@@ -217,8 +222,10 @@ expressed today, because the properties and the state selectors it needs do not 
 
 ### 2.7 What "interactive" means today
 
-- Three predicates exist: `HOVER`, `ACTIVE`, `FOCUS` (`native-src/dziri-engine/src/protocol.rs:287-291`).
-  Nothing for checked, selected, disabled, indeterminate, expanded, invalid.
+- Five predicates exist: `HOVER`, `ACTIVE`, `FOCUS`, and — since protocol v9 — `CHECKED` and
+  `DISABLED` (`native-src/dziri-engine/src/protocol.rs:448-455`). The compiler resolves all five;
+  the engine only *sets* the first three, so the last two are compiled and never live.
+  Nothing at all for selected, indeterminate, expanded, invalid.
 - Ten event kinds exist: `NONE, QUIT, RESIZE, MOUSE_MOVE, MOUSE_DOWN, MOUSE_UP, CLICK, KEY_DOWN,
   TEXT_INPUT, FOCUS` (`native-src/dziri-engine/src/protocol.rs:295-306`). No wheel, no drag, no
   double-click, no composition/IME events.
@@ -890,7 +897,7 @@ repo does not have (§2.7):
 
 | Prerequisite | Status here |
 | --- | --- |
-| New predicates: `:checked`, `:disabled`, `:indeterminate`, `:required`, `:invalid`, `:placeholder-shown` | only `HOVER/ACTIVE/FOCUS` exist (`protocol.rs:287-291`). The mask table generalises — `FIRST_GLOBAL = 256` leaves bits 3–7 free per-node. |
+| New predicates: `:checked`, `:disabled`, `:indeterminate`, `:required`, `:invalid`, `:placeholder-shown` | `:checked` and `:disabled` **compile** as of protocol v9 (`protocol.rs:448-455`), and are never live because nothing sets them — that half is A3. The mask table generalised as predicted; bits 5–7 are still free per-node under `FIRST_GLOBAL = 256`. The other four are unstarted. |
 | Attribute selectors `[type=checkbox]` | not in the parser; **already scheduled** for A1 (`ROADMAP.md:314-317`) |
 | Pseudo-elements (`::before`, `::marker`, `::placeholder`, `::checkmark`) *or* a UA shadow tree | neither exists. This is the single highest-leverage missing mechanism — it is how all three reference engines build widget internals. |
 | Sub-node hit regions | `hit_test` returns whole nodes (`paint.rs:314-368`). A slider thumb or spin button needs a child node, which pseudo-elements/shadow trees would supply. |
