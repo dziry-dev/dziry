@@ -417,9 +417,9 @@ for (const window of windows) {
       `  ${compiled.routeCount} route(s), ${compiled.hiddenCount} hidden on the first frame\n` +
       `  ${compiled.nodeCount} nodes, ${compiled.styleCount} styles, ` +
       `${compiled.bytes} bytes of IR, ${compiled.elapsed.toFixed(1)}ms` +
-      // Said out loud, because a rewrite that silently did not run looks exactly
-      // like a rewrite that ran and did nothing.
-      (reactiveEnabled() ? "\n  reactive rewrite ON (DZIRI_REACTIVE=1)" : ""),
+      // Said out loud when *off*, because the authoring types assume it is on: a
+      // build without it accepts `count * 2` and compiles it to a frozen value.
+      (reactiveEnabled() ? "" : "\n  reactive rewrite OFF (DZIRI_REACTIVE=0)"),
   );
 }
 

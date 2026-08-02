@@ -40,16 +40,16 @@ export const route = signal("/");
  * that section, so they need equality: on `products/new`, "New" is active and
  * "First" is not.
  */
-export const onNewProduct = computed(() => route.value === "products/new");
-export const onProductDetail = computed(() => route.value === "products/$id");
+export const onNewProduct = computed(() => route === "products/new");
+export const onProductDetail = computed(() => route === "products/$id");
 
 /** The previous route, for `back()`. History is one entry deep, by decision. */
 let previous = "/";
 
 function go(path: string): void {
-  if (path === route.value) return;
-  previous = route.value;
-  route.value = path;
+  if (path === route) return;
+  previous = route;
+  route.set(path);
 }
 
 export const goOverview = () => go("/");

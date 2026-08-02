@@ -28,9 +28,14 @@ export type MapOptions<Item> = {
   capacity?: number;
 };
 
-export type ReadonlySignal<T> = {
+/**
+ * What a signal can do, on top of behaving as its value.
+ *
+ * Split from the value type so `ReadonlySignal<T>` can be `T & Ops<T>` — see below
+ * for why that intersection is the whole point.
+ */
+type Ops<T> = {
   readonly [BRAND]: true;
-  readonly value: T;
   subscribe(fn: Subscriber): () => void;
   /**
    * Compiles to a list template plus arena — see `DynList`.
@@ -40,9 +45,48 @@ export type ReadonlySignal<T> = {
    * method on the signal so authoring stays `todos.map(t => …)`.
    */
   map<Item, Out>(render: (item: Item, index: number) => Out, options: MapOptions<Item>): never;
+  /**
+   * The value, for code the reactive rewrite does not reach.
+   *
+   * The framework's own modules under `src/` are not rewritten — they are where `$`
+   * is *defined* — so they read through this. Authored windows do not need it and
+   * should not use it: `count` is the read.
+   */
+  readonly value: T;
 };
 
-export type Signal<T> = ReadonlySignal<T> & { value: T };
+/**
+ * A signal, typed as the value it holds.
+ *
+ * `T & Ops<T>` rather than `{ value: T }`, and this is the type-level half of the
+ * reactive rewrite rather than a convenience. `count * 2` has to *type-check*, or
+ * the transform makes code work that `bun run check` still rejects — which is the
+ * worst of both, since the author is told to write something the compiler refuses.
+ *
+ * The intersection was rejected once, for a real reason: an intersection containing
+ * `number` is comparable to a number literal, so `count === 7` would type-check and
+ * be `false` for ever — a signal object is not 7. The transform is what changes the
+ * answer. `count === 7` is rewritten to `$(count) === 7` and is simply correct, so
+ * the type is no longer promising something the runtime fails to deliver.
+ *
+ * That dependency runs one way and is worth stating plainly: **this type is only
+ * honest where the rewrite runs.** Under `windows/`, it is. In framework code it is
+ * not, which is why `Ops` still carries `value` and why `src/` reads through it.
+ */
+export type ReadonlySignal<T> = T & Ops<T>;
+
+export type Signal<T> = ReadonlySignal<T> & {
+  /**
+   * Writes, taking a value or a function of the previous one.
+   *
+   * One method rather than `set` plus `update`: the ambiguity is a signal holding a
+   * function, which is rare enough to document rather than design around. Same shape
+   * as `@tanstack/store`'s `Atom.set`.
+   */
+  set(next: T | ((previous: T) => T)): void;
+  /** Kept for framework code and un-migrated call sites; authors write `.set`. */
+  value: T;
+};
 
 /** Currently-evaluating computed, for automatic dependency capture. */
 let listener: Subscriber | null = null;
@@ -76,15 +120,38 @@ function notify(subs: Set<Subscriber>): void {
   }
 }
 
-export function signal<T>(initial: T): Signal<T> {
+/**
+ * Literal types widened to their base.
+ *
+ * `signal("/")` must be a `Signal<string>`, not a `Signal<"/">`. TypeScript widens a
+ * literal when it is inferred into a mutable position, and `T & Ops<T>` reaches `T`
+ * through `readonly value: T` first — so inference keeps the literal and every later
+ * write becomes "Type 'string' is not assignable to type '/'". Caught by `router.ts`,
+ * where it also turned `route.value === "products/new"` into a no-overlap error.
+ */
+type Widen<T> = T extends string
+  ? string
+  : T extends number
+    ? number
+    : T extends boolean
+      ? boolean
+      : T;
+
+export function signal<T>(initial: T): Signal<Widen<T>> {
   let current = initial;
   const subs = new Set<Subscriber>();
 
-  const self: Signal<T> = {
+  // Built as a plain object, then cast.
+  //
+  // The members are all genuinely here; what the *type* additionally claims is that
+  // a signal behaves as `T`, and the reactive rewrite is what makes that true. No
+  // object literal can satisfy `T & Ops<T>` for an unresolved `T`, so this cast is
+  // where the two halves of that claim meet — one place, named.
+  const self = {
     [BRAND]: true,
     get value(): T {
       if (listener) subs.add(listener);
-      return readValue(self, current);
+      return readValue(self as unknown as ReadonlySignal<unknown>, current);
     },
     set value(next: T) {
       if (Object.is(next, current)) return;
@@ -95,12 +162,20 @@ export function signal<T>(initial: T): Signal<T> {
       subs.add(fn);
       return () => subs.delete(fn);
     },
-    map(render, options) {
-      return buildList(self, current, render as never, options as never) as never;
+    set(next: T | ((previous: T) => T)): void {
+      self.value = typeof next === "function" ? (next as (p: T) => T)(current) : next;
+    },
+    map(render: unknown, options: unknown): never {
+      return buildList(
+        self as unknown as ReadonlySignal<unknown>,
+        current,
+        render as never,
+        options as never,
+      ) as never;
     },
   };
 
-  return self;
+  return self as unknown as Signal<Widen<T>>;
 }
 
 /**
@@ -134,7 +209,11 @@ export function computed<T>(compute: () => T): ReadonlySignal<T> {
   let stale = true;
   const subs = new Set<Subscriber>();
   // Named so `readValue` and `map` can pass identity along for reference resolution.
-  let self: ReadonlySignal<T>;
+  // Typed structurally rather than as `ReadonlySignal<T>` — that is `T & Ops<T>`
+  // now, which no object literal can satisfy for an unresolved `T`. Same reason as
+  // in `signal`: the intersection is a claim the reactive rewrite makes true, not
+  // one this object can.
+  let self: Ops<T> & { readonly value: T };
 
   const invalidate: Invalidator = (): void => {
     if (stale) return;
@@ -157,7 +236,7 @@ export function computed<T>(compute: () => T): ReadonlySignal<T> {
         stale = false;
       }
       if (listener) subs.add(listener);
-      return readValue(self, cached!);
+      return readValue(self as unknown as ReadonlySignal<unknown>, cached!);
     },
     subscribe(fn: Subscriber): () => void {
       // Priming, and it is load-bearing.
@@ -177,12 +256,17 @@ export function computed<T>(compute: () => T): ReadonlySignal<T> {
       return () => subs.delete(fn);
     },
     // A computed can hold an array too, so it gets the same list support.
-    map(render, options) {
-      return buildList(self, self.value, render as never, options as never) as never;
+    map(render: unknown, options: unknown): never {
+      return buildList(
+        self as unknown as ReadonlySignal<unknown>,
+        self.value,
+        render as never,
+        options as never,
+      ) as never;
     },
   };
 
-  return self;
+  return self as unknown as ReadonlySignal<T>;
 }
 
 /** Groups writes so subscribers run once at the end. */

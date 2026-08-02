@@ -30,24 +30,24 @@ let nextId = 4;
  * mark is computed here where real values exist.
  */
 export const view = computed(() =>
-  todos.value.map((t) => ({
+  todos.map((t) => ({
     ...t,
     mark: t.done ? "[x]" : "[ ]",
   })),
 );
 
-export const remaining = computed(() => todos.value.filter((t) => !t.done).length);
-export const total = computed(() => todos.value.length);
+export const remaining = computed(() => todos.filter((t) => !t.done).length);
+export const total = computed(() => todos.length);
 
 export function addTodo(): void {
-  const title = draft.value.trim();
+  const title = draft.trim();
   if (title === "") return;
-  todos.value = [...todos.value, { id: nextId++, title, done: false }];
-  draft.value = "";
+  todos.set([...todos, { id: nextId++, title, done: false }]);
+  draft.set("");
 }
 
 export function clearDraft(): void {
-  draft.value = "";
+  draft.set("");
 }
 
 // --- per-row handlers -------------------------------------------------------
@@ -55,11 +55,11 @@ export function clearDraft(): void {
 // clicked node back into (slot, offset), then looks up which item that slot holds.
 
 export function toggleDone(item: Todo): void {
-  todos.value = todos.value.map((t) => (t.id === item.id ? { ...t, done: !t.done } : t));
+  todos.set((ts) => ts.map((t) => (t.id === item.id ? { ...t, done: !t.done } : t)));
 }
 
 export function deleteTodo(item: Todo): void {
-  todos.value = todos.value.filter((t) => t.id !== item.id);
+  todos.set((ts) => ts.filter((t) => t.id !== item.id));
 }
 
 // --- appearance -------------------------------------------------------------
@@ -68,9 +68,9 @@ export const isLight = signal(false);
 export const isCompact = signal(false);
 
 export function toggleTheme(): void {
-  isLight.value = !isLight.value;
+  isLight.set((on) => !on);
 }
 
 export function toggleDensity(): void {
-  isCompact.value = !isCompact.value;
+  isCompact.set((on) => !on);
 }

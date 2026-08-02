@@ -1,0 +1,10 @@
+# The reactive rewrite has to be installed before anything under `windows/` is
+# imported, and three different processes import those modules: the compiler, the
+# window host, and `bun test`. A preload is the one place that covers all of them.
+#
+# See `src/compiler/reactive-preload.ts`. `DZIRI_REACTIVE=0` disables the rewrite
+# without touching this file.
+preload = ["./src/compiler/reactive-preload.ts"]
+
+[test]
+preload = ["./src/compiler/reactive-preload.ts"]

@@ -11,8 +11,13 @@
  * `signal.ts` would import its own helpers through the transform that needs them.
  * Authored windows are the only code that should be getting this.
  *
- * Opt-in via `DZIRI_REACTIVE=1` while the rewrite is proven. Off, the build is
- * byte-for-byte what it was; that is what makes `golden` a meaningful check of it.
+ * On by default, and `DZIRI_REACTIVE=0` turns it off. It has to be on: the authoring
+ * types now say a signal behaves as its value — `count * 2` type-checks — and only
+ * the rewrite makes that true. A build with the types and without the rewrite would
+ * accept code it then compiles wrong, which is worse than either half alone.
+ *
+ * The escape hatch stays because it is the only way to ask "did the rewrite cause
+ * this?", and because `golden` used it to prove the wiring changed no pixels.
  */
 import { plugin } from "bun";
 import { readFile } from "node:fs/promises";
@@ -33,7 +38,7 @@ const HELPERS = resolve(process.cwd(), "src", "compiler", "reactive-runtime.ts")
 
 /** Whether the rewrite is on for this build. */
 export function reactiveEnabled(): boolean {
-  return process.env.DZIRI_REACTIVE === "1";
+  return process.env.DZIRI_REACTIVE !== "0";
 }
 
 /**

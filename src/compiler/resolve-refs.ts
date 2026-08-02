@@ -157,9 +157,11 @@ export function resolveRefs(
 
     const deps = depsOf(value);
     let first: ResolvedRef | null = null;
+    const named: [unknown, ResolvedRef][] = [];
 
     for (const dep of deps) {
       const ref = index.get(routePathBehind(dep) ?? dep);
+      if (ref) named.push([dep, ref]);
       if (!ref) {
         throw new RefError(
           `an inline expression reads a signal that is not a module-level export:\n` +
@@ -175,6 +177,24 @@ export function resolveRefs(
     // A cell exists only when something reactive was read — `inline` folds the rest
     // to a plain value before one is created — so this cannot be empty.
     if (!first) return null;
+
+    // Every signal it read must appear in the text under the name it is exported by.
+    //
+    // The text goes into `ui.gen.ts` verbatim, where the only bindings in scope are
+    // the imports. A local reaches the same signal under a different name —
+    // `useRouter().path` is the route, but the text says `router` — and emitting that
+    // produces a module referring to something it never imported. Caught here rather
+    // than as "Cannot find name 'router'" in generated code.
+    for (const [dep, ref] of named) {
+      if (new RegExp(`\\b${ref.name}\\b`).test(text)) continue;
+      throw new RefError(
+        `an inline expression reads a signal through a local name:\n    ${text}\n` +
+          `  It resolves to the export "${ref.name}" (${ref.specifier}), but the generated\n` +
+          `  module can only import that name — a local like \`useRouter()\` is gone by then.\n` +
+          `  Read the export directly, or keep the expression whole: {router.path} compiles\n` +
+          `  as a binding without being rewritten.`,
+      );
+    }
 
     return {
       specifier: first.specifier,

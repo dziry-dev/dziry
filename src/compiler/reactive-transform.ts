@@ -289,6 +289,8 @@ export function transformReactive(
   const wraps: Node[] = [];
   /** Shorthand `{ title }`, which has to become `{ title: $(title) }`. */
   const shorthand: Node[] = [];
+  /** `router.path` — a member whose result is itself a signal. */
+  const unwraps: Node[] = [];
   const frozen: [number, number][] = [];
   const seen = new Set<number>();
 
@@ -352,6 +354,34 @@ export function transformReactive(
   });
 
   /**
+   * A member expression whose *result* is a signal — `router.path`.
+   *
+   * `$m` unwraps the object; nothing was unwrapping what came back. So
+   * `` `at ${router.path}` `` produced `at [object Object]`: `router` is a plain
+   * object, `$m` hands it straight back, `.path` is a signal, and a template literal
+   * stringifies it. Rendered exactly that way in the routing golden.
+   *
+   * Excluded when the member is a call's callee, which is the whole distinction —
+   * `count.set(5)` must stay `count.set(5)`, not `$(count.set)(5)`, and the same for
+   * `todos.filter(…)`. Excluded again when it is itself the object of another
+   * member, so `a.b.c` unwraps once at the end rather than at every step.
+   */
+  walk(parsed.program as unknown as Node, (v) => {
+    const { node, parent, field } = v;
+    if (isTypeNode(node.type)) return false;
+    if (node.type !== "MemberExpression" || node.computed === true) return true;
+    if (isFrozen(node)) return true;
+    if (parent?.type === "CallExpression" && field === "callee") return true;
+    if (parent?.type === "NewExpression" && field === "callee") return true;
+    if (parent?.type === "MemberExpression" && field === "object") return true;
+    // Only where the object itself was rewritten — otherwise this is an ordinary
+    // property read on something that was never a signal.
+    if (!members.some((m) => m.start === (node.object as Node | undefined)?.start)) return true;
+    unwraps.push(node);
+    return true;
+  });
+
+  /**
    * Every unwrap, as a plain insertion list.
    *
    * A list rather than direct `MagicString` calls because the same edits are needed
@@ -367,6 +397,15 @@ export function transformReactive(
   };
 
   for (const node of reads) {
+    insert(node.start, `${NS}.$(`);
+    insert(node.end, ")");
+  }
+
+  // Before `members`, and that ordering is forced. A `MemberExpression` begins at the
+  // same byte as the identifier it reads from — `t.done` starts where `t` does — and
+  // insertions at one offset nest in the order they are made. Members first gave
+  // `$m($(t, "done").done)`: the two wrappers interleaved instead of nesting.
+  for (const node of unwraps) {
     insert(node.start, `${NS}.$(`);
     insert(node.end, ")");
   }

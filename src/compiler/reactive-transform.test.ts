@@ -40,9 +40,33 @@ test("every operator that a bare signal used to break is covered", () => {
   expect(run("computed(() => `n is ${count}`)")).toBe("computed(() => `n is ${__dzr.$(count)}`)");
 });
 
-test("a member read unwraps the object, not the property", () => {
-  // `$(user).name`, never `$(user).$(name)` — `name` is not a binding.
-  expect(run("computed(() => user.name)")).toBe('computed(() => __dzr.$m(user, "name").name)');
+/**
+ * Both ends of a member read are unwrapped, and each for its own reason.
+ *
+ * `$m` on the object decides whether the property belongs to the signal or to its
+ * value. `$` on the result covers the case where the property *is itself* a signal —
+ * `router.path`. Without the outer one, `` `at ${router.path}` `` rendered
+ * `at [object Object]`, which is exactly how the routing golden caught it.
+ *
+ * The property name is never rewritten: `name` is not a binding.
+ */
+test("a member read unwraps both the object and the result", () => {
+  expect(run("computed(() => user.name)")).toBe(
+    'computed(() => __dzr.$(__dzr.$m(user, "name").name))',
+  );
+  expect(run("computed(() => `at ${router.path}`)")).toBe(
+    'computed(() => `at ${__dzr.$(__dzr.$m(router, "path").path)}`)',
+  );
+});
+
+test("a call's callee is not unwrapped, or the method would vanish", () => {
+  // `$(count.set)(5)` would call the unwrapped function with no receiver.
+  expect(run("const f = () => count.set(5)")).toBe('const f = () => __dzr.$m(count, "set").set(5)');
+  // The callee is spared; the *argument* is an ordinary read like any other, and
+  // `$(fn)` on a function passes it straight through.
+  expect(run("computed(() => todos.filter(fn))")).toBe(
+    'computed(() => __dzr.$m(todos, "filter").filter(__dzr.$(fn)))',
+  );
 });
 
 test("a computed member reads both sides", () => {
@@ -65,7 +89,7 @@ test("handlers are rewritten too, so a read works anywhere", () => {
  */
 test("a shadowing parameter is rewritten and resolves to itself", () => {
   expect(run("computed(() => todos.filter((t) => t.done))")).toBe(
-    'computed(() => __dzr.$m(todos, "filter").filter((t) => __dzr.$m(t, "done").done))',
+    'computed(() => __dzr.$m(todos, "filter").filter((t) => __dzr.$(__dzr.$m(t, "done").done)))',
   );
 });
 
