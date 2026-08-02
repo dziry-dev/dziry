@@ -53,6 +53,19 @@ function helpersFor(file: string): string {
   return rel.startsWith(".") ? rel : `./${rel}`;
 }
 
+/**
+ * `windows/**` only, and `scripts/signals.tsx` deliberately not.
+ *
+ * Including the harness was tried and reverted. It builds its cases by passing
+ * values to a helper — `el(count)` — rather than through JSX braces, so the rewrite
+ * turned the *identity* cases into plain reads and every row went frozen. It also
+ * rewrote the harness's own plumbing: `withWindowRoute(route, …)` became
+ * `withWindowRoute($(route), …)`, a string where a signal was expected.
+ *
+ * The lesson generalises. This transform is for code shaped like a component, and a
+ * file that manipulates signals as *data* is not that. The rewrite is covered by
+ * `reactive-transform.test.ts` and end-to-end by the `reactivity` golden.
+ */
 function isAuthored(file: string): boolean {
   const path = resolve(file);
   return path.startsWith(WINDOWS + sep) && !path.endsWith(".gen.ts");

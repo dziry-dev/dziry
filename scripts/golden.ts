@@ -72,6 +72,17 @@ const SCENARIOS: Scenario[] = [
   // silently dropped for every Tailwind `hover:` utility until `@media (hover:
   // hover)` stopped being skipped.
   { name: "hover-nav", args: ["--hover", "11"] },
+
+  /**
+   * The reactive rewrite, rendered.
+   *
+   * Every value on this page is derived from one signal through an operator that a
+   * bare signal used to break — `*`, `>`, `===`, a ternary, a template literal. The
+   * page reads `true` beside `tick === 3` and `odd` beside the ternary, so a
+   * regression in the rewrite shows up as text rather than as a passing build. Taller
+   * than the rest because the point is the whole list.
+   */
+  { name: "reactivity", args: ["--route", "reactivity", "--size", "1040x1400"] },
 ];
 
 /** IHDR is always the first chunk: width and height are bytes 16..24, big-endian. */

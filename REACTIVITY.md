@@ -1,8 +1,41 @@
 # Reactivity — one system
 
-**Status:** design, decided. Not built.
-**Measured by:** `bun run signals`. Every claim here is a command that was run — see §9.
+**Status:** §1–§2 built and shipping. §5.3–§5.5 outstanding.
+**Measured by:** the `reactivity` golden and `src/compiler/reactive-transform.test.ts`.
 **Written:** 2026-08-02.
+
+## Built
+
+```ts
+const count = signal(0);
+const doubled = computed(() => count * 2);      // no .value, no deps
+count.set(5);
+count.set((n) => n + 1);
+```
+```jsx
+{count}  {count * 2}  {count === 7 ? "y" : "n"}  {`n is ${count}`}  {count ? "on" : "off"}
+```
+
+A `Bun.plugin` rewrite (`reactive-transform.ts`, `reactive-plugin.ts`) turns every
+identifier read into `$(x)`, which unwraps a signal at run time and passes everything else
+through — so it needs no type information, no module graph, and no scope analysis.
+`Signal<T>` is `T & Ops<T>`, so the same expressions type-check. Installed via a
+`bunfig.toml` preload, because three processes import authored modules: the compiler, the
+window host, and `bun test`. `DZIRI_REACTIVE=0` turns it off.
+
+The `reactivity` route in the demo renders every form, and the golden holds it.
+
+**Still to do:** §5.3 (delete the route's private marker), §5.4 (`Source`), §5.5 (`args.id`),
+and removing `.value` from the public type — `Ops` still carries it for framework code.
+
+**Known limit, refused loudly:** an expression compiled into a cell reaches `ui.gen.ts` as
+*text*, so it can only name module exports. `` {`at ${router.path}`} `` is a build error
+naming the export it should have used, because `router` is a local from `useRouter()`.
+`{router.path}` on its own compiles by identity and is fine.
+
+---
+
+The rest of this document is the design as decided, with the reasoning that got there.
 
 Reactivity grew one feature at a time and each feature answered the same question its own way:
 six brand symbols, three sentinel kinds, two recording proxies, a side-table `WeakMap`, an

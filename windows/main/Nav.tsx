@@ -25,6 +25,7 @@ import {
   goLayout,
   goOverview,
   goProducts,
+  goReactivity,
   goSpacing,
   goTypography,
 } from "./router.ts";
@@ -66,6 +67,12 @@ export function Nav() {
         </button>
         <button className={cn(LINK, { active: router.matches("features") })} onClick={goFeatures}>
           Features
+        </button>
+        <button
+          className={cn(LINK, { active: router.matches("reactivity") })}
+          onClick={goReactivity}
+        >
+          Reactivity
         </button>
         {/* Prefix-aware: stays lit on products/new and products/$id too. */}
         <button className={cn(LINK, { active: router.matches("products") })} onClick={goProducts}>
