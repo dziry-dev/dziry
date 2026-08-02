@@ -8,13 +8,13 @@ A UI framework that resolves CSS, the cascade and every interaction state before
 ## Layers
 
 - **Authoring** — What a person writes: JSX, a stylesheet, and module-level signals. None of it ships — the compiler evaluates it and keeps the result.
-  <br>`app/`
+  <br>`windows/`
 - **Compiler** — Selector matching, specificity, cascade, inheritance, shorthand expansion, unit resolution and interning — all of it at build time, ending in integer arrays.
-  <br>`src/compiler/`, `src/compile.ts`, `src/ir.ts`, `src/variants.ts`
+  <br>`src/compiler/`, `src/compile.ts`, `src/compile-window.ts`, `src/ir.ts`, `src/variants.ts`, `src/routes.ts`, `src/route-chain.test.ts`, `src/index.ts`, `src/cli/`
 - **Runtime** — The only code that survives to run time: signals, and the three things they drive — text bindings, style patches, list arenas. No parser, no cascade, no diff of a tree.
   <br>`src/runtime/`
 - **Protocol & host** — The boundary. One schema generates both sides' field identities; the engine reports byte offsets at run time. Everything else is a direct write into shared memory.
-  <br>`src/protocol/`, `src/engine/`, `src/app.ts`, `native-src/dziri-engine/src/protocol.rs`, `native-src/dziri-engine/src/tables.rs`, `native-src/dziri-engine/src/lib.rs`
+  <br>`src/protocol/`, `src/engine/`, `src/host/`, `src/window-host.ts`, `native-src/dziri-engine/src/protocol.rs`, `native-src/dziri-engine/src/tables.rs`, `native-src/dziri-engine/src/lib.rs`
 - **Engine** — Rust cdylib: Taffy lays out, Skia paints, SDL3 owns the window and input. It reads Bun-written memory as untrusted input and never lets a panic cross back.
   <br>`native-src/dziri-engine/src/`, `native-src/dziri-engine/examples/`, `native-src/dziri-engine/tests/`, `native-src/dziri-engine/build.rs`
 - **Guards & oracles** — The scripts that keep claims honest — Chrome as an oracle for CSS and layout, golden frames for paint, generated-vs-source checks for the protocol.
@@ -44,7 +44,7 @@ The authoring surface is ordinary JSX and ordinary CSS. State is a signal create
 There are two front-ends — JSX and HTML — and they land on the same `Element` tree, so everything after the parse is shared. JSX is the default; the HTML path is what existed first.
 
 
-`app/app.tsx`, `app/app.css`, `app/state.ts`, `src/compiler/html.ts`
+`windows/main/index.tsx`, `windows/main/in.css`, `windows/main/state.ts`, `src/compiler/html.ts`
 
 
 #### Evaluate, don't render
@@ -139,7 +139,7 @@ This is the point of the whole design: a style patch, a list relink, a `hidden` 
 The uploader is deliberately unconditional about *which* tables it writes, because the engine's commit compares span by span and reports what changed — a second diff on this side would be the same work with less information. Strings are the exception, uploaded incrementally, because re-encoding every row of a long list per keystroke is not free.
 
 
-`src/engine/upload.ts`, `src/app.ts`
+`src/engine/upload.ts`, `src/host/main.ts`, `src/host/worker.ts`
 
 > **Do not undo.** Keep the staged/live/bounds split and span-wise commit. This — not monomorphism — is the real argument for struct-of-arrays. Do not collapse to one arena; do not go AoS.
 
@@ -214,14 +214,15 @@ A signal changing closes the loop: it mutates the IR in place, and the next uplo
 
 ## The shared-memory boundary
 
-Protocol version 6. Struct-of-arrays: every field is its own contiguous span.
+Protocol version 8. Struct-of-arrays: every field is its own contiguous span.
 
 | Table | Fields | Bytes/elem | Sized by | Written by | Read by |
 | --- | --- | --- | --- | --- | --- |
 | `nodes` | 9 | 23 | nodes | compiler, then list relinking and `hidden` | engine |
-| `styles` | 52 | 156 | styles | compiler, then variant patches | engine, every frame |
+| `styles` | 55 | 168 | styles | compiler, then variant patches | engine, every frame |
 | `variants` | 3 | 12 | own | compiler | engine painter |
 | `variantSlots` | 1 | 2 | own | compiler | engine painter |
+| `media` | 3 | 9 | own | compiler | engine, re-evaluated from the surface size each frame |
 | `lists` | 7 | 28 | own | list runtime | engine |
 | `layout` | 4 | 16 | nodes | engine | Bun — hit-testing and the imperative API |
 | `strings` | 2 | 8 | strings | Bun, incrementally | engine |
@@ -230,6 +231,7 @@ Protocol version 6. Struct-of-arrays: every field is its own contiguous span.
 - **`styles`** — Style values stay zeroed, and there zero is real — `width: 0`, not auto. Auto is NaN.
 - **`variants`** — Per interactive node: a bitmask of the predicates its styling reads, and where its style run begins.
 - **`variantSlots`** — Entry runStart+i is the style for the predicate combination whose compacted bits equal i; entry 0 is the base style.
+- **`media`** — One row per *atomic* condition, not per @media block, so the variant machinery resolves `and` for free as the combination where both bits are live. Thresholds are px — the engine never learns that rem exists. On the wire at all because a media query is the first styling input whose answer changes.
 - **`lists`** — The one place node count is a run-time value. Arenas grow by appending; ids are never reused.
 - **`layout`** — The only table that flows the other way.
 - **`strings`** — JS strings cannot be shared, so Bun writes UTF-8 into an arena and records (offset, length) here.

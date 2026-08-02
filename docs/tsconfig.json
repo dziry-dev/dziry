@@ -1,0 +1,14 @@
+{
+  // Its own project, like `architecture/`. This is browser + Node code with JSX,
+  // and none of the root tsconfig's assumptions (bun types, no DOM) apply.
+  "extends": "@docusaurus/tsconfig",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src", "docusaurus.config.ts", "sidebars.ts", "../scripts/lib"],
+  "exclude": ["build", ".docusaurus", "node_modules"]
+}

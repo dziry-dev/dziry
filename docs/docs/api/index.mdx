@@ -1,0 +1,45 @@
+---
+title: API
+sidebar_position: 1
+---
+
+# API
+
+Everything an app should need is exported from `dziri`:
+
+```ts no-check
+import { signal, computed, cn, Window, Outlet, useRouter } from "dziri";
+```
+
+Deep paths (`dziri/runtime/signal.ts` and the rest) resolve, but they exist because
+the **emitter** writes those specifiers into the generated artifact — not as an
+invitation. What is re-exported from the barrel is what is intended to keep working.
+
+## Two halves that run at different times
+
+This is the distinction worth holding on to, because it explains most of the errors
+you can hit.
+
+**Build time, then gone.** `Window`, `Outlet`, `cn`, `bind`, `useRoute` and
+`useRouter` run inside the compiler and do not exist in the shipped app.
+
+**Survives into the process.** `signal`, `computed`, `batch`, `isSignal` and `$` are
+the runtime.
+
+They are exported together because you write them together — a page imports `cn` and
+the signal it is conditioned on from the same place. But the split is why a signal
+created inside a component has nowhere to live, and why an inline style with a
+non-static value is a build error rather than a silent drop.
+
+## Pages
+
+- **[Signals](./signals.mdx)** — `signal`, `computed`, `batch`, `isSignal`, `$`
+- **[Markup](./markup.mdx)** — `cn`, `bind`, `Fragment`, props, inline styles, lists
+- **[Window](./window.mdx)** — `Window`, `Outlet`, and window configuration
+- **[Routing](./routing.mdx)** — `useRoute`, `useRouter`, `Href`
+
+## Status of every surface
+
+Read from the table in `API.md` at build time, so this page cannot outrun it.
+
+<StatusTable />

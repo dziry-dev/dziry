@@ -1,0 +1,95 @@
+/**
+ * Theme tokens.
+ *
+ * The accent is carried over from `architecture/theme.css` so the docs and the
+ * architecture map do not read as two different products.
+ */
+
+:root {
+  --ifm-color-primary: #0b7285;
+  --ifm-color-primary-dark: #0a6778;
+  --ifm-color-primary-darker: #096070;
+  --ifm-color-primary-darkest: #074f5c;
+  --ifm-color-primary-light: #0c7d92;
+  --ifm-color-primary-lighter: #0d849a;
+  --ifm-color-primary-lightest: #0f95ae;
+
+  --ifm-code-font-size: 92%;
+  --ifm-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] {
+  --ifm-color-primary: #4dd4e8;
+  --ifm-color-primary-dark: #33cee5;
+  --ifm-color-primary-darker: #26cbe3;
+  --ifm-color-primary-darkest: #17a8bd;
+  --ifm-color-primary-light: #67daeb;
+  --ifm-color-primary-lighter: #74dded;
+  --ifm-color-primary-lightest: #9ce7f2;
+
+  --docusaurus-highlighted-code-line-bg: rgba(255, 255, 255, 0.1);
+}
+
+/* A citation that resolved but has nowhere to link still earns its tooltip. */
+code[title] {
+  border-bottom: 1px dotted var(--ifm-color-emphasis-500);
+  cursor: help;
+}
+
+/* ---------------------------------------------------------------------------
+   Status badges. `<Status of="signal" />` renders one of these; the value comes
+   from API.md, so a surface cannot be documented as done while the table says
+   otherwise. See docs/src/components/Status.tsx.
+   --------------------------------------------------------------------------- */
+
+.status {
+  display: inline-block;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.status--done {
+  background: #0b728522;
+  color: #0b7285;
+  box-shadow: inset 0 0 0 1px #0b728555;
+}
+.status--partial {
+  background: #b0800022;
+  color: #8a6500;
+  box-shadow: inset 0 0 0 1px #b0800055;
+}
+.status--planned {
+  background: #6b6b6b22;
+  color: #5a5a5a;
+  box-shadow: inset 0 0 0 1px #6b6b6b55;
+}
+
+[data-theme="dark"] .status--done {
+  background: #4dd4e822;
+  color: #7fe4f2;
+  box-shadow: inset 0 0 0 1px #4dd4e855;
+}
+[data-theme="dark"] .status--partial {
+  background: #f0b42922;
+  color: #f0c469;
+  box-shadow: inset 0 0 0 1px #f0b42955;
+}
+[data-theme="dark"] .status--planned {
+  background: #9a9a9a22;
+  color: #a8a8a8;
+  box-shadow: inset 0 0 0 1px #9a9a9a55;
+}
+
+/* A heading that carries a badge should not have it crash into the text. */
+h1 .status,
+h2 .status,
+h3 .status {
+  margin-left: 0.5rem;
+}

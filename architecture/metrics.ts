@@ -77,7 +77,7 @@ function layerOf(path: string): LayerId | null {
 
 export function collectMetrics(): Metrics {
   const paths: string[] = [];
-  for (const dir of ["src", "app", "scripts", "native-src"]) {
+  for (const dir of ["src", "windows", "scripts", "native-src"]) {
     const full = join(ROOT, dir);
     try {
       walk(full, paths);
@@ -90,9 +90,11 @@ export function collectMetrics(): Metrics {
   const files: FileMetric[] = paths
     .map((full) => {
       const path = rel(full);
-      // `app/ui.gen.ts` is compiler output — counting it would report the size of
-      // the demo's integer arrays as if someone had written them.
-      if (path === "app/ui.gen.ts") return null;
+      // Compiler output — `windows/<id>/ui.gen.ts` and the generated entries
+      // (`windows.gen.ts`, `entry.gen.ts`, `worker.gen.ts`, `single.gen.ts`).
+      // Counting them would report the size of the demo's integer arrays, and of
+      // code the emitter wrote, as if someone had authored them.
+      if (/^windows\/.*\.gen\.ts$/.test(path)) return null;
       const text = readFileSync(full, "utf8");
       // Count newlines, not split parts: a file ending in one would otherwise
       // report a phantom last line and disagree with every other tool.

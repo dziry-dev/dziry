@@ -40,7 +40,7 @@ export const LAYERS: Layer[] = [
   {
     id: "authoring",
     label: "Authoring",
-    roots: ["app/"],
+    roots: ["windows/"],
     blurb:
       "What a person writes: JSX, a stylesheet, and module-level signals. None of it ships — " +
       "the compiler evaluates it and keeps the result.",
@@ -48,7 +48,17 @@ export const LAYERS: Layer[] = [
   {
     id: "compiler",
     label: "Compiler",
-    roots: ["src/compiler/", "src/compile.ts", "src/ir.ts", "src/variants.ts"],
+    roots: [
+      "src/compiler/",
+      "src/compile.ts",
+      "src/compile-window.ts",
+      "src/ir.ts",
+      "src/variants.ts",
+      "src/routes.ts",
+      "src/route-chain.test.ts",
+      "src/index.ts",
+      "src/cli/",
+    ],
     blurb:
       "Selector matching, specificity, cascade, inheritance, shorthand expansion, unit " +
       "resolution and interning — all of it at build time, ending in integer arrays.",
@@ -67,7 +77,9 @@ export const LAYERS: Layer[] = [
     roots: [
       "src/protocol/",
       "src/engine/",
-      "src/app.ts",
+      // The host: the engine thread, the app Worker, and the lock between them.
+      "src/host/",
+      "src/window-host.ts",
       "native-src/dziri-engine/src/protocol.rs",
       "native-src/dziri-engine/src/tables.rs",
       "native-src/dziri-engine/src/lib.rs",
@@ -137,7 +149,12 @@ export const STAGES: Stage[] = [
         "everything after the parse is shared. JSX is the default; the HTML path is what " +
         "existed first.",
     ],
-    files: ["app/app.tsx", "app/app.css", "app/state.ts", "src/compiler/html.ts"],
+    files: [
+      "windows/main/index.tsx",
+      "windows/main/in.css",
+      "windows/main/state.ts",
+      "src/compiler/html.ts",
+    ],
   },
   {
     id: "evaluate",
@@ -276,7 +293,7 @@ export const STAGES: Stage[] = [
         "side would be the same work with less information. Strings are the exception, uploaded " +
         "incrementally, because re-encoding every row of a long list per keystroke is not free.",
     ],
-    files: ["src/engine/upload.ts", "src/app.ts"],
+    files: ["src/engine/upload.ts", "src/host/main.ts", "src/host/worker.ts"],
     invariant:
       "Keep the staged/live/bounds split and span-wise commit. This — not monomorphism — is the real argument for struct-of-arrays. Do not collapse to one arena; do not go AoS.",
   },
@@ -396,6 +413,11 @@ export const TABLE_ROLES: Record<string, { writer: string; reader: string; note:
     writer: "compiler",
     reader: "engine painter",
     note: "Per interactive node: a bitmask of the predicates its styling reads, and where its style run begins.",
+  },
+  media: {
+    writer: "compiler",
+    reader: "engine, re-evaluated from the surface size each frame",
+    note: "One row per *atomic* condition, not per @media block, so the variant machinery resolves `and` for free as the combination where both bits are live. Thresholds are px — the engine never learns that rem exists. On the wire at all because a media query is the first styling input whose answer changes.",
   },
   variantSlots: {
     writer: "compiler",

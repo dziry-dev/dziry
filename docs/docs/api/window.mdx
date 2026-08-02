@@ -1,0 +1,103 @@
+---
+title: Window
+sidebar_position: 4
+---
+
+# Window
+
+A window is an OS window. Each directory under `windows/` is one, and its
+`index.tsx` default-exports a `<Window>`.
+
+## Window
+
+<Status of="Window" />
+```tsx no-check
+import { cn, Outlet, Window } from "dziri";
+import { route } from "./router.ts";
+import { isLight } from "./state.ts";
+
+export default function Main() {
+  return (
+    <Window
+      title="dziri — compiled UI"
+      width={1040}
+      height={700}
+      minWidth={520}
+      minHeight={400}
+      route={route}
+      className={cn({ light: isLight })}
+    >
+      <Outlet />
+    </Window>
+  );
+}
+```
+
+`<Window>` *is* the body element. That is why a theme rule written `body.light ...`
+is toggled by putting the class here.
+
+### Props
+
+| Prop | Type | Notes |
+| --- | --- | --- |
+| `title` | `string` | **Required.** What the OS shows in the title bar and task switcher. |
+| `width` `height` | `number` | Compile-time integers, physical pixels. |
+| `minWidth` `minHeight` | `number` | Size floor. |
+| `route` | `ReadonlySignal<string>` | This window's route signal. |
+
+Every configuration field is a compile-time constant, and that is why they are props
+rather than signals: a window's size floor and title are known before the process
+starts.
+
+An empty or missing `title` is an error — there is no sensible default, and a window
+with no title is a window nobody can find. A non-integer or non-positive size is an
+error for the same reason.
+
+### route
+
+```ts no-check
+// windows/main/router.ts
+export const route = signal("/");
+```
+
+Passed **in** rather than imported from the framework, and this is the whole of
+navigation's plumbing: the host subscribes, looks the path up in the route table, and
+writes `hidden` over the routes that left the chain.
+
+A module-level `currentRoute` inside dziri would make every window share one route,
+and two windows on different routes is the normal case. Passing it in makes the
+ownership explicit.
+
+Everything else about a route is decided at compile time.
+
+## Outlet
+
+<Status of="Outlet" />
+```tsx
+<Outlet />
+```
+
+Where the matched route renders. Takes nothing.
+
+Boundaries — `fallback`, `error`, `notFound` — are carried in `API.md` as proposals
+that have not been decided, and adding them here would settle by accident what has
+not been settled on purpose.
+
+## One table set per window
+
+<Status of="hidden" />
+Every route in a window compiles into **one** set of tables, with an emitted `hidden`
+column. Navigating does not build anything: it flips `hidden` over the routes that
+left the chain and clears it on the ones that joined.
+
+That is why route changes cost integer writes rather than a render.
+
+## Types
+
+```ts
+import type { WindowConfig, WindowProps } from "dziri";
+```
+
+`WindowConfig` is the compile-time configuration — title and sizes — and is defined
+alongside the IR, because that is what it becomes. `WindowProps` is `Props` plus
+`WindowConfig` plus `route`.

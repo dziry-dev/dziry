@@ -5,6 +5,11 @@
   "extends": "../tsconfig.json",
   "compilerOptions": {
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    // The root sets `jsxImportSource: "dziri"` so authored windows need no pragma.
+    // This directory is the one place that is *not* a dziri app — it is a React
+    // site — so it has to opt back out, or every `<div>` here is checked against
+    // dziri's IntrinsicElements and `<StrictMode>` stops being a valid component.
+    "jsxImportSource": "react",
     "types": ["bun", "react", "react-dom"]
   },
   "include": ["."]

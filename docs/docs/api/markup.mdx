@@ -1,0 +1,196 @@
+---
+title: Markup
+sidebar_position: 3
+---
+
+# Markup
+
+JSX, compiled. Your components run once at build time and are gone from the shipped
+app — what survives is a node tree and a style table.
+
+There is no `@jsxImportSource` pragma to write: `jsxImportSource: "dziri"` is set once
+in `tsconfig.json`, and Bun's transpiler reads it too.
+
+## cn
+
+<Status of="cn" />
+```tsx
+const isBig = signal(false);
+
+<div className={cn("box", "rounded", { active: isBig })} />;
+```
+
+Builds a class list the compiler can read. Unlike `clsx`, **it does not return a
+string** — it cannot. By the time a conditional class is a string, the connection to
+the signal driving it is gone, and the compiler needs that connection to resolve the
+class both ways at build time.
+
+The result is that toggling a conditional class costs a few integer writes into the
+style table. There is no selector matching and no string comparison at run time, and
+nothing at all per frame.
+
+Accepts strings, `false`, `null`, `undefined`, and objects. A literal boolean is
+resolved immediately — `cn({ big: true })` is just `"big"`, with no runtime mechanism.
+
+:::danger This is the one to get right
+
+```tsx no-check
+// Wrong — evaluates a signal object at build time and freezes.
+<div className={"box " + (isBig ? "big" : "")} />
+
+// Right.
+<div className={cn("box", { big: isBig })} />
+```
+
+The first compiles cleanly and never updates.
+:::
+
+## Props
+
+Both `class` and `className` are accepted. `className` is the JSX convention.
+
+```tsx
+const draft = signal("");
+const onSave = () => {};
+
+<div
+  id="save-row"
+  className="flex gap-2"
+  style={{ padding: 8, fontWeight: 600 }}
+  onClick={onSave}
+  bindValue={draft}
+/>;
+```
+
+### onClick
+
+A module-level exported function, because the generated artifact imports it by name.
+
+Inside a list item it receives that row's item and index, since one compiled handler
+serves every row:
+
+```ts no-check
+export function toggleDone(item: Todo): void {
+  todos.set((ts) => ts.map((t) => (t.id === item.id ? { ...t, done: !t.done } : t)));
+}
+```
+
+### style
+
+<Status of="style" />
+Either CSS text or an object of camelCased properties:
+
+```tsx
+<div style="color: red; padding: 8px" />;
+<div style={{ color: "red", padding: 8, fontWeight: 600 }} />;
+```
+
+A number means pixels, except for the genuinely unitless properties — `fontWeight`,
+`flexGrow`, `flexShrink`, `flex`, `aspectRatio`, `gridColumn`, `gridRow`, `zIndex`,
+`opacity`, `lineClamp`. Same rule React uses, chosen because it is the one people
+already have.
+
+Inline styles are applied after the cascade and beat every selector, matching browser
+precedence. Both forms resolve at build time and cost the runtime nothing.
+
+A value that is **not** static is a build error rather than a silent drop, because
+there is no node left to attach it to once the compiler is gone. Use a conditional
+class instead.
+
+### bindValue
+
+<Status of="bindValue" note />
+```tsx
+const draft = signal("");
+
+<div className="rounded bg-zinc-800 px-3 py-2" bindValue={draft} />;
+```
+
+A string signal the element edits. Click to focus, then typing appends and Backspace
+deletes. The value renders automatically when the element has no children of its own.
+
+:::warning Partial
+
+Append and backspace only. No caret, no selection, no IME, no clipboard. There are no
+real form widgets yet — `<input>` compiles to an empty box, and `type` and `name` are
+accepted and ignored so markup written against HTML habits still typechecks.
+:::
+
+## bind
+
+```ts
+const count = signal(0);
+const text = bind(count);
+```
+
+Wraps a signal as a dynamic text node. You rarely need it — interpolating a signal
+does this for you. It exists for cases where the value must be built as data rather
+than written in markup.
+
+## Fragment
+
+```tsx
+<>
+  <div />
+  <div />
+</>
+```
+
+Groups children without introducing a node, and is spliced away during flattening.
+JSX desugars to it automatically; the export exists so it can be named directly.
+
+## Lists
+
+<Status of="map" />
+```tsx no-check
+{
+  todos.map((t) => <Row title={t.title} mark={t.mark} />, { key: (t) => t.id });
+}
+```
+
+`key` is **required**. The list compiles to a template plus an arena of item slots:
+the callback runs once at build time with a recording proxy, so `t.title` becomes a
+path the runtime reads out of the array rather than a value baked into the output.
+
+That is also the constraint. Because the callback runs once with a proxy rather than
+once per item with real data, **an item template cannot contain a conditional**:
+
+```tsx no-check
+// Wrong — the proxy is always truthy, so this always takes the first branch.
+todos.map((t) => <div>{t.done ? "x" : " "}</div>, { key: (t) => t.id });
+```
+
+Anything conditional per row has to be *data*. Compute it where real values exist:
+
+```ts no-check
+export const view = computed(() =>
+  todos.map((t) => ({ ...t, mark: t.done ? "[x]" : "[ ]" })),
+);
+```
+
+Note that this inner `.map` has no `key`, so it is an ordinary build-time map over
+real values — which is exactly what a `computed` body needs.
+
+To deliberately snapshot rather than build a live list, copy the array first:
+`[...todos].map(...)` takes the static path.
+
+## Types
+
+```ts
+import type { Child, ClassArg, ClassSpec, Component, Props, StyleObject } from "dziri";
+```
+
+`Props` is the base prop type; extend it for your own components:
+
+```tsx
+function Row({ title, mark }: Props & { title: string; mark: string }) {
+  return (
+    <div className="row">
+      {mark} {title}
+    </div>
+  );
+}
+```
+
+`ClassSpec` is what `cn` returns, `ClassArg` what it accepts, `StyleObject` the object
+form of `style`, and `Child` the type of `children`.

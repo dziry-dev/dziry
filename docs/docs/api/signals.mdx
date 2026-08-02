@@ -1,0 +1,166 @@
+---
+title: Signals
+sidebar_position: 2
+---
+
+# Signals
+
+The runtime's only state primitive. About sixty lines, written rather than imported,
+because the compiler needs to *recognise* signals by identity at build time.
+
+## signal
+
+<Status of="signal" />
+```ts
+const count = signal(0);
+const name = signal("ada");
+const todos = signal<string[]>([]);
+```
+
+`signal(initial)` returns a `Signal<T>`, which is typed as `T & Ops<T>` — it *is* its
+value, plus a few methods. That intersection is what makes a bare read type-check.
+
+Literal types are widened: `signal("/")` is a `Signal<string>`, not a `Signal<"/">`,
+so later writes are not rejected.
+
+### Reading
+
+The read is the identifier. No `.value`.
+
+```ts
+const count = signal(0);
+
+const doubled = computed(() => count * 2);
+const isBig = computed(() => count > 5);
+const isThree = computed(() => count === 3);
+const label = computed(() => `count is ${count}`);
+```
+
+All four work, including `===`, which is the one people expect to be broken. A
+build-time rewrite turns `count === 3` into `$(count) === 3`.
+
+### Writing
+
+```ts
+const count = signal(0);
+
+count.set(5);
+count.set((n) => n + 1);
+```
+
+One method, taking a value **or** a function of the previous value. The ambiguity is a
+signal that holds a function, which is rare enough to document rather than design
+around.
+
+Writing an equal value is a no-op — equality is `Object.is`, so subscribers do not run.
+
+### subscribe
+
+```ts
+const count = signal(0);
+const stop = count.subscribe(() => {
+  /* ... */
+});
+stop();
+```
+
+Returns an unsubscribe function. You will rarely call this: the compiler wires
+bindings for you.
+
+## computed
+
+<Status of="computed" />
+```ts
+const todos = signal([{ done: false }]);
+const remaining = computed(() => todos.filter((t) => !t.done).length);
+```
+
+Derived, lazy, and cached. It recomputes on the next read after any dependency
+changes, so **a computed nobody reads costs nothing**.
+
+Dependencies are captured automatically. There is no dependency array, and there is
+nothing to keep in sync.
+
+A `computed` is a signal to everything downstream — it can be interpolated, passed to
+`cn`, or read inside another `computed`.
+
+:::note Where a computed can live
+
+A `computed()` created inside a component has nowhere to go once components are
+erased: the generated module imports every cell by name, and an anonymous one has no
+name. Declare derived state in a module beside the signal it derives from.
+
+Component-local *state* is different, and does work — see
+[component-local state](../guide/reactivity.md#component-local-state).
+:::
+
+## batch
+
+<Status of="batch" />
+```ts
+const first = signal("");
+const last = signal("");
+
+batch(() => {
+  first.set("Ada");
+  last.set("Lovelace");
+});
+```
+
+Groups writes so subscribers run once at the end rather than once per write.
+
+Invalidation still propagates immediately inside a batch — only the *effects* are
+deferred. That distinction is what stops a subscriber of both a signal and a computed
+derived from it from running twice.
+
+## isSignal
+
+<Status of="isSignal" />
+```ts
+const count = signal(0);
+isSignal(count); // true
+isSignal(0); // false
+```
+
+A brand check. Mostly used by framework code and by anything writing a helper that
+takes "a signal or a plain value".
+
+## \$
+
+```ts
+const count = signal(0);
+$(count); // 0
+$(41 + 1); // 42
+```
+
+Unwraps a signal and passes everything else straight through.
+
+You do not normally write this — **the compiler emits it**. It is exported because the
+rewrite puts it in your module's compiled output, and because framework code and
+un-rewritten modules occasionally need it by hand.
+
+The whole reactive rewrite rests on `$` deciding at *run time*. The transform rewrites
+every identifier read it sees without knowing which are signals, so over-rewriting is
+safe rather than merely tolerable: `$(t)` inside `todos.filter((t) => ...)` returns
+`t`, because that is the binding in scope. The cost of a read that was never a signal
+is one predicate.
+
+## Types
+
+```ts
+import type { MapOptions, ReadonlySignal, Signal } from "dziri";
+```
+
+`ReadonlySignal<T>` is `T & Ops<T>` — readable, subscribable, mappable, but no `.set`.
+`computed` returns one.
+
+`Signal<T>` adds `.set`. `signal` returns one.
+
+`MapOptions<Item>` is the second argument to `.map` — see [Markup](./markup.mdx#lists).
+
+## Not built yet
+
+`effect` <Status of="effect" />, `untrack` <Status of="untrack" />,
+`peek` <Status of="peek" />, `source` <Status of="source" /> and
+`resource` <Status of="resource" /> are designed but not implemented. They are
+described in `API.md`; nothing on this page depends on them.
