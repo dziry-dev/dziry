@@ -468,6 +468,20 @@ pub extern "C" fn dziri_engine_tick(handle: Handle) -> i32 {
     })
 }
 
+/// Services the window without reading the staged tables.
+///
+/// For a host whose app code runs on another thread: when the writer holds the
+/// staging lock, this keeps the window answering the OS — input, resize, scroll
+/// glide and repaint — while leaving the staged tables strictly alone. See
+/// [`Engine::pump`].
+#[no_mangle]
+pub extern "C" fn dziri_engine_pump(handle: Handle) -> i32 {
+    with(handle, |engine| match engine.pump() {
+        Ok(()) => status::OK,
+        Err(e) => fail(e.status, e.detail),
+    })
+}
+
 /// Moves queued events to the host. `*written` is how many were moved; call
 /// again while it equals `capacity`.
 ///

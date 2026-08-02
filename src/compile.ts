@@ -167,12 +167,9 @@ const elapsed = performance.now() - started;
 
 for (const w of result.warnings) console.warn(`  warn: ${w}`);
 
-// Where the generated module finds the types it declares it satisfies. A
-// package build would make this a bare specifier; until then it is a path.
-const typesFrom = relative(dirname(outPath), join(ROOT, "src")).replaceAll("\\", "/");
 const source = emit(
   result,
-  { html: rel(inputPath), css: rel(cssPath), typesFrom: typesFrom || "." },
+  { html: rel(inputPath), css: rel(cssPath) },
   imports,
   variants,
 );

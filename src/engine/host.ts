@@ -10,27 +10,20 @@
  * the engine at run time, because they depend on capacity and a list arena can
  * regrow. Neither side hardcodes the other's layout.
  */
-import { dlopen, FFIType, ptr, toArrayBuffer, type Pointer } from "bun:ffi";
+import { dlopen, FFIType, ptr, type Pointer } from "bun:ffi";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import {
-  F,
-  FIELD_COUNTS,
-  FIELD_NAMES,
-  FIELD_SIZES,
-  FIELD_VIEWS,
   PROTOCOL_VERSION,
   SCHEMA_HASH,
   Status,
-  TABLE_NAMES,
   type SharedTables,
-  type TableName,
 } from "../protocol/generated.ts";
+import { bindSpans, readSpans, SPAN_SIZE, type Span } from "./bind.ts";
+import type { Capacities } from "./upload.ts";
 
 const { i32, u32, f32, ptr: PTR } = FFIType;
 
-/** Matches `SpanDesc` in `tables.rs`: two `i32`, a `u64` (8-aligned), two `u32`. */
-const SPAN_SIZE = 24;
 /**
  * Matches `EngineConfig` in `engine.rs`, including the pointer's alignment padding.
  *
@@ -40,10 +33,6 @@ const SPAN_SIZE = 24;
 const CONFIG_SIZE = 72;
 /** Matches `Event` in `engine.rs`: six 4-byte fields plus 32 inline text bytes. */
 export const EVENT_SIZE = 56;
-
-/** A span belonging to a named region rather than a table field. */
-const REGION = -1;
-const REGION_STRING_BYTES = 0;
 
 /**
  * The engine handle is a `u32`, not a pointer.
@@ -64,6 +53,7 @@ const SYMBOLS = {
   dziri_engine_describe: { args: [u32, PTR, u32, PTR], returns: i32 },
   dziri_engine_generation: { args: [u32, PTR], returns: i32 },
   dziri_engine_tick: { args: [u32], returns: i32 },
+  dziri_engine_pump: { args: [u32], returns: i32 },
   dziri_engine_drain_events: { args: [u32, PTR, u32, PTR], returns: i32 },
   dziri_engine_grow: { args: [u32, PTR], returns: i32 },
   dziri_engine_resize: { args: [u32, u32, u32], returns: i32 },
@@ -79,13 +69,41 @@ const SYMBOLS = {
   dziri_engine_panic_for_testing: { args: [u32], returns: i32 },
 } as const;
 
+/** The engine's file name on this platform. */
+export function libraryName(): string {
+  return process.platform === "win32"
+    ? "dziri_engine.dll"
+    : process.platform === "darwin"
+      ? "libdziri_engine.dylib"
+      : "libdziri_engine.so";
+}
+
+/** Where the engine is, when something already knows. See {@link useEngineLibrary}. */
+let override: string | null = null;
+
+/**
+ * Names the engine binary to open, ahead of the search.
+ *
+ * A standalone build embeds the library and extracts it to a real path — `dlopen`
+ * needs a file on disk, and on macOS so does code signing — so by the time the app
+ * starts, the answer is known and no search should run. Must be called before the
+ * first `Engine.open`, which is why the `dlopen` below is lazy: this module used to
+ * open the library while it was being imported, so importing it *to* set the path
+ * had already lost the race.
+ */
+export function useEngineLibrary(path: string): void {
+  if (loaded !== null && override !== path) {
+    throw new Error(
+      `the engine is already open from ${override ?? "the search path"}; ` +
+        `useEngineLibrary must be called before the first Engine.open`,
+    );
+  }
+  override = path;
+}
+
 function libraryPath(): string {
-  const name =
-    process.platform === "win32"
-      ? "dziri_engine.dll"
-      : process.platform === "darwin"
-        ? "libdziri_engine.dylib"
-        : "libdziri_engine.so";
+  if (override !== null) return override;
+  const name = libraryName();
 
   const candidates = [
     join(import.meta.dir, "..", "..", "native-src", "dziri-engine", "target", "release", name),
@@ -99,8 +117,36 @@ function libraryPath(): string {
   );
 }
 
-const lib = dlopen(libraryPath(), SYMBOLS);
-const engine = lib.symbols;
+/**
+ * The opened library, or null until something needs it.
+ *
+ * Lazy on purpose. Opening at module scope meant every importer paid for a
+ * `dlopen` — `bun test` loading a module that merely re-exports a type, the CLI
+ * printing `--help` — and, more importantly, it made the library path unsettable
+ * from TypeScript, because the only way to reach the setter was to import the
+ * module that had already used it.
+ */
+function openLibrary() {
+  return dlopen(libraryPath(), SYMBOLS).symbols;
+}
+
+type EngineSymbols = ReturnType<typeof openLibrary>;
+
+let loaded: EngineSymbols | null = null;
+
+function symbols(): EngineSymbols {
+  return (loaded ??= openLibrary());
+}
+
+/**
+ * A proxy over the symbol table, so the call sites below stay `engine.foo(…)`.
+ *
+ * The alternative was `symbols().foo(…)` at each of thirty call sites, which reads
+ * as though the load might be doing something at each one.
+ */
+const engine = new Proxy({} as EngineSymbols, {
+  get: (_, name: string) => symbols()[name as keyof EngineSymbols],
+});
 
 const STATUS_NAMES = Object.fromEntries(
   Object.entries(Status).map(([name, value]) => [value, name]),
@@ -183,6 +229,7 @@ export class Engine {
   #stringBytes!: Uint8Array;
   /** Keeps the wrapped buffers reachable for as long as the engine is alive. */
   #buffers: ArrayBuffer[] = [];
+  #capacities!: Capacities;
 
   private constructor(handle: number) {
     this.#handle = handle;
@@ -258,14 +305,14 @@ export class Engine {
   }
 
   /**
-   * Wraps every span as a typed array over the engine's own memory.
+   * The engine's own account of where its tables are.
    *
-   * **No finalizer is passed to `toArrayBuffer`.** The three-argument form
-   * attaches none, which is what makes this safe: the memory belongs to Rust,
-   * and a JS-side deallocator would free it out from under the engine. Rust
-   * allocating and Bun viewing is the only direction that works.
+   * Public because the main thread forwards it verbatim to the Worker, which
+   * binds the same addresses with the same function. Plain numbers, so it
+   * survives `postMessage` — see `bind.ts` for why sharing the memory rather
+   * than copying it is the whole point.
    */
-  #bindTables(): void {
+  describe(): Span[] {
     const count = new Uint32Array(1);
     check(
       engine.dziri_engine_span_count(this.#handle, ptr(count) as Pointer),
@@ -284,79 +331,15 @@ export class Engine {
       "dziri_engine_describe",
     );
 
-    const view = new DataView(raw);
-    const byIndex: Record<string, Record<string, unknown>> = {};
-    const seen: Record<string, number> = {};
-    this.#buffers = [];
+    return readSpans(raw, written[0]!);
+  }
 
-    for (let i = 0; i < written[0]!; i++) {
-      const at = i * SPAN_SIZE;
-      const table = view.getInt32(at, true);
-      const field = view.getInt32(at + 4, true);
-      const address = Number(view.getBigUint64(at + 8, true));
-      const elemSize = view.getUint32(at + 16, true);
-      const capacity = view.getUint32(at + 20, true);
-
-      const buffer = toArrayBuffer(address as Pointer, 0, elemSize * capacity);
-      this.#buffers.push(buffer);
-
-      if (table === REGION) {
-        if (field === REGION_STRING_BYTES) this.#stringBytes = new Uint8Array(buffer);
-        continue;
-      }
-
-      const name = TABLE_NAMES[table];
-      if (!name) throw new Error(`descriptor names table ${table}, which the schema does not`);
-
-      const Ctor = (FIELD_VIEWS[name] as Array<new (b: ArrayBuffer) => unknown>)[field];
-      if (!Ctor) {
-        throw new Error(
-          `descriptor has ${name}.${field}, but the schema stops at ` +
-            `${FIELD_COUNTS[name]} fields — regenerate and rebuild`,
-        );
-      }
-
-      /* Width is checked per span, not assumed.
-         `elemSize` used to be read here and never validated, which meant the
-         descriptor could disagree with the schema about a field's *type* and
-         still bind cleanly — an `i32` column wrapped as `Float32Array` reads
-         every value as a denormal rather than raising anything. */
-      const expected = FIELD_SIZES[name][field];
-      if (elemSize !== expected) {
-        throw new Error(
-          `${name}.${FIELD_NAMES[name][field] ?? field}: the engine reports ` +
-            `${elemSize}-byte elements, the schema says ${expected}. ` +
-            `Rebuild the engine (\`bun run engine\`).`,
-        );
-      }
-
-      (byIndex[name] ??= {})[String(field)] = new Ctor(buffer);
-      seen[name] = (seen[name] ?? 0) + 1;
-    }
-
-    /* The startup backstop. `SCHEMA_HASH` already proved both sides came from
-       the same schema, so this can only fire if the descriptor itself is built
-       wrong — a bug in `Tables::plan` rather than a version skew. */
-    for (const name of TABLE_NAMES) {
-      if (seen[name] !== FIELD_COUNTS[name]) {
-        throw new Error(
-          `table ${name}: the engine reported ${seen[name] ?? 0} fields, ` +
-            `the schema says ${FIELD_COUNTS[name]}. Rebuild the engine.`,
-        );
-      }
-    }
-
-    /* The descriptor carries field *indices*; the rest of the runtime wants
-       names. `FIELD_ORDER` comes from the same generated map, so the two cannot
-       drift apart. */
-    const named: Record<string, Record<string, unknown>> = {};
-    for (const name of TABLE_NAMES) {
-      named[name] = {};
-      FIELD_ORDER[name].forEach((fieldName, index) => {
-        named[name]![fieldName] = byIndex[name]![String(index)];
-      });
-    }
-    this.#tables = named as unknown as SharedTables;
+  #bindTables(): void {
+    const bound = bindSpans(this.describe());
+    this.#tables = bound.tables;
+    this.#stringBytes = bound.stringBytes;
+    this.#capacities = bound.capacities;
+    this.#buffers = bound.buffers;
 
     const generation = new BigUint64Array(1);
     check(
@@ -376,6 +359,11 @@ export class Engine {
     return this.#stringBytes;
   }
 
+  /** What the tables can currently hold. Satisfies `TableHost`. */
+  capacities(): Capacities {
+    return this.#capacities;
+  }
+
   /**
    * Applies staged writes, relays out what that invalidated, paints, presents.
    *
@@ -385,7 +373,23 @@ export class Engine {
    */
   tick(): void {
     check(engine.dziri_engine_tick(this.#handle), "dziri_engine_tick");
+    this.#rebindIfMoved();
+  }
 
+  /**
+   * A frame that services the window without reading the staged tables.
+   *
+   * What the main thread calls when the Worker holds the staging lock. See
+   * `Engine::pump` in `engine.rs` for why the commit has to be skippable rather
+   * than merely delayed: a link column caught mid-splice is a malformed chain,
+   * not a frame of wrong pixels.
+   */
+  pump(): void {
+    check(engine.dziri_engine_pump(this.#handle), "dziri_engine_pump");
+    this.#rebindIfMoved();
+  }
+
+  #rebindIfMoved(): void {
     const generation = new BigUint64Array(1);
     check(
       engine.dziri_engine_generation(this.#handle, ptr(generation) as Pointer),
@@ -577,20 +581,6 @@ export class Engine {
     this.#buffers = [];
   }
 }
-
-/**
- * Field names per table, in descriptor order.
- *
- * Derived from the generated `F` map rather than restated, so it cannot drift.
- */
-const FIELD_ORDER: Record<TableName, string[]> = (() => {
-  const out = {} as Record<TableName, string[]>;
-  for (const table of TABLE_NAMES) {
-    const fields = F[table] as Record<string, number>;
-    out[table] = Object.keys(fields).sort((a, b) => fields[a]! - fields[b]!);
-  }
-  return out;
-})();
 
 /** Writes a string into the arena and points a slot at it. Returns the new cursor. */
 export function writeString(

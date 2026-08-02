@@ -1,0 +1,21 @@
+{
+  "name": "{{name}}",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "dziri dev",
+    "build": "dziri build",
+    "compile": "dziri compile",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dziri": "{{dziri}}"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "@types/bun": "latest",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5"
+  }
+}

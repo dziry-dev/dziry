@@ -146,8 +146,28 @@ export function capacitiesFor(ui: CompiledUi): Capacities {
   };
 }
 
+/**
+ * What the uploader needs from whatever owns the shared tables.
+ *
+ * Narrower than `Engine` on purpose, and the reason is threading. When app code
+ * runs in a Worker, the *tables* are reachable there — they are engine memory
+ * wrapped by `toArrayBuffer`, and a pointer is a pointer on any thread — but the
+ * engine *handle* is not: the registry pins it to the thread that created it,
+ * because SDL pins its window and event pump there. So the Worker has views and
+ * no handle, and this is the half of `Engine` that survives the crossing.
+ *
+ * Growing is deliberately absent. It takes the handle, so off the main thread it
+ * is a request rather than a call — see {@link Uploader.needsGrowth}.
+ */
+export type TableHost = {
+  readonly tables: SharedTables;
+  readonly stringBytes: Uint8Array;
+  /** What the tables can currently hold. */
+  capacities(): Capacities;
+};
+
 export class Uploader {
-  #engine: Engine;
+  #host: TableHost;
   #ui: CompiledUi;
   #tables: SharedTables;
   #encoder = new TextEncoder();
@@ -161,27 +181,42 @@ export class Uploader {
   /** Bump allocator into the UTF-8 arena. */
   #cursor = 0;
 
-  constructor(engine: Engine, ui: CompiledUi) {
-    this.#engine = engine;
+  constructor(host: TableHost, ui: CompiledUi) {
+    this.#host = host;
     this.#ui = ui;
-    this.#tables = engine.tables;
+    this.#tables = host.tables;
   }
 
   /**
-   * Grows the engine's tables if the IR has outgrown them, then re-binds.
+   * The capacities the tables would need to hold the IR, or null if they fit.
    *
-   * Returns true when the tables moved, which invalidates every view and forces
-   * a full re-upload — the caller must not assume anything survived.
+   * A question rather than an action, because the answer is acted on differently
+   * depending on which thread is asking. On the engine's own thread the caller
+   * grows and re-uploads in the same breath; in a Worker it has to ask the main
+   * thread and wait for the tables to be rebuilt, so a synchronous
+   * `ensureCapacity(): boolean` could not have been honest there.
    */
-  ensureCapacity(): boolean {
+  needsGrowth(): Capacities | null {
     const want = capacitiesFor(this.#ui);
-    const grew = this.#engine.grow(want);
-    if (grew) {
-      this.#tables = this.#engine.tables;
-      this.#uploaded = [];
-      this.#cursor = 0;
+    const have = this.#host.capacities();
+
+    for (const key of Object.keys(want) as Array<keyof Capacities>) {
+      if (want[key] > have[key]) return want;
     }
-    return grew;
+    return null;
+  }
+
+  /**
+   * Re-reads the host's views after the tables were reallocated.
+   *
+   * Everything cached against the old memory is dropped: the views themselves,
+   * what each string slot last held, and the arena cursor. The caller must follow
+   * with {@link uploadAll} — nothing survived.
+   */
+  rebind(): void {
+    this.#tables = this.#host.tables;
+    this.#uploaded = [];
+    this.#cursor = 0;
   }
 
   /** Everything. Used on the first frame and after the tables are reallocated. */
@@ -341,7 +376,7 @@ export class Uploader {
   uploadStrings(force = false): void {
     const strings = this.#ui.strings;
     const slots = this.#tables.strings;
-    const arena = this.#engine.stringBytes;
+    const arena = this.#host.stringBytes;
 
     // What the encoded bytes would need if every changed slot is appended.
     let needed = 0;
@@ -377,7 +412,7 @@ export class Uploader {
   #repack(): void {
     const strings = this.#ui.strings;
     const slots = this.#tables.strings;
-    const arena = this.#engine.stringBytes;
+    const arena = this.#host.stringBytes;
 
     this.#cursor = 0;
     this.#uploaded = new Array(strings.length);

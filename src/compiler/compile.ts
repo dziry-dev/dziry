@@ -1290,22 +1290,38 @@ function typedArray(ctor: string, values: number[]): string {
   return `new ${ctor}([${values.map(num).join(",")}])`;
 }
 
+/**
+ * The package the framework is published as, and the specifier every generated
+ * artifact imports its types through.
+ *
+ * One string, in one place, because it appears in emitted *text*: get it wrong
+ * and the failure is a module the author never wrote failing to resolve.
+ */
+export const PACKAGE = "dziri";
+
 export function emit(
   result: CompileResult,
   source: {
     html: string;
     css: string;
     /**
-     * Specifier of the `src` directory relative to the output file, so the
-     * generated module can import the types it claims to satisfy.
+     * Where the generated module finds the types it claims to satisfy.
      *
      * The alternative was for the consumer to assert the shape — which is what
      * `as unknown as CompiledUi` did, and an `as unknown as` is a promise that
      * the compiler stops checking. This is the one interface in the project
      * `tsc` could not see, in a project whose entire safety story is generated
      * identity.
+     *
+     * Defaults to {@link PACKAGE}, which is what it should be: a bare specifier
+     * resolves the same from `windows/main/ui.gen.ts`, from a scaffolded app
+     * three directories deeper, and from the scratch directory `characterize`
+     * diverts output to. It used to be a relative path computed from the output
+     * location, which meant the emitted text changed with *where* it was written
+     * — so the characterization harness compared an artifact against a golden
+     * copy that differed in its import lines and nothing else.
      */
-    typesFrom: string;
+    typesFrom?: string;
   },
   /** Import specifier -> names, from the reference-resolution pass. */
   imports: Map<string, Set<string>> = new Map(),
@@ -1325,6 +1341,7 @@ export function emit(
   routing?: EmittedRouting,
 ): string {
   const { strings, nodes, root } = result;
+  const typesFrom = source.typesFrom ?? PACKAGE;
 
   const { firstChild, nextSibling } = flattenLinks(nodes);
 
@@ -1384,7 +1401,7 @@ export function emit(
 
   const importLines = [
     ...(runtimeNames.length > 0
-      ? [`import { ${runtimeNames.sort().join(", ")} } from "${source.typesFrom}/runtime/signal.ts";`]
+      ? [`import { ${runtimeNames.sort().join(", ")} } from "${typesFrom}/runtime/signal.ts";`]
       : []),
     ...[...imports].map(
       ([specifier, names]) =>
@@ -1540,10 +1557,10 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${source.typesFrom}/ir.ts";
-import type { EditableRef } from "${source.typesFrom}/runtime/bindings.ts";
-import type { ListBindingRef } from "${source.typesFrom}/runtime/list-runtime.ts";
-import type { StylePatchRef } from "${source.typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${source.typesFrom}/runtime/signal.ts";` : ""}
+import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { EditableRef } from "${typesFrom}/runtime/bindings.ts";
+import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
+import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
 
 /** Mutable past the static entries: text bindings overwrite their own slots. */
 export const strings: string[] = ${JSON.stringify(strings)};

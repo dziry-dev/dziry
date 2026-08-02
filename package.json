@@ -1,8 +1,37 @@
 {
-  "name": "skia-proto",
+  "name": "dziri",
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "workspaces": ["docs", "packages/*"],
+  "bin": {
+    "dziri": "./src/cli/index.ts"
+  },
+  "//exports": [
+    "The package's own name is how the demo under windows/ imports it, and it is what",
+    "a scaffolded project imports too — the same specifiers either way, so windows/main",
+    "*is* the template rather than something a codemod has to rewrite. Bun and tsc both",
+    "resolve a package's self-reference through this map.",
+    "",
+    "Two tiers, and the split is the API-versus-internal policy D4 asks for. The named",
+    "entries are the authoring surface. The wildcards exist because the generated",
+    "artifact imports `dziri/ir.ts` and `dziri/runtime/*.ts` by construction — emit()",
+    "writes those specifiers — and because the host reaches for dziri/engine/*. They are",
+    "not a promise."
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./jsx-runtime": "./src/compiler/jsx-runtime.ts",
+    "./jsx-dev-runtime": "./src/compiler/jsx-dev-runtime.ts",
+    "./ir.ts": "./src/ir.ts",
+    "./runtime/*": "./src/runtime/*",
+    "./compiler/*": "./src/compiler/*",
+    "./engine/*": "./src/engine/*",
+    "./protocol/*": "./src/protocol/*",
+    "./host": "./src/window-host.ts",
+    "./host/*": "./src/host/*",
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "test": "bun test && bun run engine:test",
     "check": "tsc --noEmit && tsc --noEmit -p architecture",
@@ -33,15 +62,24 @@
     "compile": "bun run src/compile.ts",
     "routes": "bun run src/routes.ts",
     "window": "bun run src/compile-window.ts",
-    "dev": "bun run tw:css && bun run src/compile-window.ts && bun run src/window-host.ts",
+    "dev": "bun run src/cli/index.ts dev",
     "variants": "bun run src/variants.ts",
-    "shot": "bun run tw:css && bun run src/compile-window.ts && bun run src/window-host.ts --screenshot engine-demo.png",
+    "shot": "bun run src/cli/index.ts dev -- --screenshot engine-demo.png",
     "tw:css": "bunx @tailwindcss/cli -i windows/main/in.css -o windows/main/index.css",
     "tw": "bun run dev",
-    "tw:shot": "bun run tw:css && bun run src/compile-window.ts && bun run src/window-host.ts --screenshot windows/main/shot.png",
+    "tw:shot": "bun run src/cli/index.ts dev -- --screenshot windows/main/shot.png",
     "bench": "bun run scripts/bench.ts",
     "runtime-surface": "bun run scripts/runtime-surface.ts",
-    "run": "bun run src/window-host.ts"
+    "template:sync": "bun run scripts/template-sync.ts",
+    "template:check": "bun run scripts/template-sync.ts --check",
+    "run": "bun run windows/entry.gen.ts",
+    "build": "bun run src/cli/index.ts build",
+    "cli": "bun run src/cli/index.ts",
+    "docs": "cd docs && bun run start",
+    "docs:build": "bun run doc-lint --quiet && bun run docs-check --quiet && cd docs && bun run build",
+    "docs:serve": "cd docs && bun run serve",
+    "docs:version": "cd docs && bun run docusaurus docs:version",
+    "docs-check": "bun run scripts/docs-check.ts"
   },
   "devDependencies": {
     "@tailwindcss/cli": "^4.3.3",

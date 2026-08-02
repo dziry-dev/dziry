@@ -19,9 +19,10 @@
  * The escape hatch stays because it is the only way to ask "did the rewrite cause
  * this?", and because `golden` used it to prove the wiring changed no pixels.
  */
-import { plugin } from "bun";
+import { plugin, type BunPlugin } from "bun";
 import { readFile } from "node:fs/promises";
-import { relative, dirname, resolve, sep } from "node:path";
+import { resolve, sep } from "node:path";
+import { PACKAGE } from "./compile.ts";
 import { transformReactive } from "./reactive-transform.ts";
 
 const WINDOWS = resolve(process.cwd(), "windows");
@@ -33,24 +34,19 @@ const WINDOWS = resolve(process.cwd(), "windows");
  * build-time only — it records an expression's source for the compiler to emit.
  * Keeping it in a compiler module is what stops it reaching the shipped runtime,
  * since nothing under `windows/` is ever bundled.
+ *
+ * A package specifier, not a path. It used to be resolved against `process.cwd()`
+ * and then made relative to the importing file, which quietly assumed the project
+ * being compiled *was* this repository — in a scaffolded app there is no
+ * `./src/compiler/` under the working directory, and the rewrite would have
+ * emitted an import of a file that does not exist. The bare specifier resolves
+ * the same from either.
  */
-const HELPERS = resolve(process.cwd(), "src", "compiler", "reactive-runtime.ts");
+const HELPERS = `${PACKAGE}/compiler/reactive-runtime.ts`;
 
 /** Whether the rewrite is on for this build. */
 export function reactiveEnabled(): boolean {
   return process.env.DZIRI_REACTIVE !== "0";
-}
-
-/**
- * The specifier a rewritten file should import its helpers by.
- *
- * A path relative to the importer rather than an absolute one: Bun resolves both,
- * but an absolute path bakes this machine's directory layout into the module graph,
- * and the same source is read by `characterize` and by the tests.
- */
-function helpersFor(file: string): string {
-  const rel = relative(dirname(file), HELPERS).split(sep).join("/");
-  return rel.startsWith(".") ? rel : `./${rel}`;
 }
 
 /**
@@ -71,37 +67,51 @@ function isAuthored(file: string): boolean {
   return path.startsWith(WINDOWS + sep) && !path.endsWith(".gen.ts");
 }
 
+/**
+ * The rewrite as a plugin object, usable by the runtime *and* by the bundler.
+ *
+ * It has to be both, and for a while it was only one. `plugin(...)` registers with
+ * the module loader, which covers `bun run` and `bun test`; `bun build` never sees
+ * it, and a `bunfig.toml` preload does not change that — measured, the bundled
+ * output contained a raw `todos.filter(…)`, which is a method on a signal object
+ * and does not exist. A packaged app therefore threw on its first frame while
+ * `dziri dev` was fine, and the two differed by whether the transform had run.
+ *
+ * So `dziri build` passes this to `Bun.build({ plugins })` instead, and both paths
+ * now load the same object.
+ */
+export const reactivePlugin: BunPlugin = {
+  name: "dziri-reactive",
+  setup(build) {
+    // The filter does the scoping, not a check inside the callback.
+    //
+    // A *runtime* plugin's `onLoad` must return a module — `undefined` means "the
+    // mock returned nothing", not "skip this file", which is a bundler-only
+    // affordance. So the hook must never fire for a file it does not intend to
+    // rewrite, and every path it does fire for gets contents back.
+    build.onLoad({ filter: /[\\/]windows[\\/].+\.tsx?$/ }, async ({ path }) => {
+      const loader = path.endsWith(".tsx") ? ("tsx" as const) : ("ts" as const);
+      const source = await readFile(path, "utf8");
+
+      if (!isAuthored(path)) return { contents: source, loader };
+
+      const result = transformReactive(source, path, { helpers: HELPERS });
+      return { contents: result?.code ?? source, loader };
+    });
+  },
+};
+
 let installed = false;
 
 /**
- * Registers the rewrite. Safe to call more than once.
+ * Registers the rewrite with the module loader. Safe to call more than once.
  *
  * Must run before the first `import()` of a window module, and Bun caches a module
  * after loading it — so a plugin registered late silently does nothing to anything
- * already imported. `compile-window.ts` calls this at the top for that reason.
+ * already imported. `compileProject` calls this at the top for that reason.
  */
 export function installReactivePlugin(): void {
   if (installed || !reactiveEnabled()) return;
   installed = true;
-
-  plugin({
-    name: "dziri-reactive",
-    setup(build) {
-      // The filter does the scoping, not a check inside the callback.
-      //
-      // A *runtime* plugin's `onLoad` must return a module — `undefined` means "the
-      // mock returned nothing", not "skip this file", which is a bundler-only
-      // affordance. So the hook must never fire for a file it does not intend to
-      // rewrite, and every path it does fire for gets contents back.
-      build.onLoad({ filter: /[\\/]windows[\\/].+\.tsx?$/ }, async ({ path }) => {
-        const loader = path.endsWith(".tsx") ? ("tsx" as const) : ("ts" as const);
-        const source = await readFile(path, "utf8");
-
-        if (!isAuthored(path)) return { contents: source, loader };
-
-        const result = transformReactive(source, path, { helpers: helpersFor(path) });
-        return { contents: result?.code ?? source, loader };
-      });
-    },
-  });
+  plugin(reactivePlugin);
 }

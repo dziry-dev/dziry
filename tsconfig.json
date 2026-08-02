@@ -6,6 +6,12 @@
     "moduleResolution": "bundler",
     "types": ["bun"],
     "jsx": "react-jsx",
+    // Set once here rather than as a pragma at the top of every .tsx. A page
+    // then opens with what the page is about, and a scaffolded project inherits
+    // the setting from its tsconfig instead of having to repeat a relative path
+    // whose depth changes with the folder. Bun's transpiler reads this too, so
+    // `bun run` and `tsc` agree without a second place to keep in sync.
+    "jsxImportSource": "dziri",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,
@@ -13,5 +19,7 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src", "scripts", "app"]
+  // `windows` is the demo, and it is checked like anything else — it is the one
+  // place the authoring types are exercised the way an author would exercise them.
+  "include": ["src", "scripts", "windows"]
 }

@@ -743,9 +743,27 @@ accessibility — shipping the visuals while dropping the reason it exists will 
 ## Phase D — product readiness
 
 ### D1 · CLI, template, hot reload
-- Split into packages: `compiler`, `runtime`, `cli`, `primitives`, `components`.
-- `create <name>` template with Tailwind preinstalled, so integration is exercised from day one.
-- CLI: `compile`, `dev`, `build`.
+
+**CLI and template landed 2026-08-02.** `dziri compile | dev | build`, and
+`bun create dziri my-app` scaffolds from the demo this repository develops against.
+
+- **Not split into packages, deliberately.** `compiler`, `runtime`, `cli` as separate
+  npm packages was the plan; what actually unblocked everything was giving the
+  existing tree a *package identity* — `name: "dziri"` plus an `exports` map — and
+  letting the demo under `windows/` import through it. Bun and `tsc` both resolve a
+  package's self-reference, so `windows/main` *is* the scaffold template rather than
+  something a codemod has to rewrite, and the twenty-odd harness scripts kept
+  working. A package split remains available and is no longer on the critical path.
+  The exports map is also where the "public API versus internal" line D4 asks for now
+  physically lives: named entries are the authoring surface, wildcards exist because
+  the emitter writes those specifiers.
+- **The compiler had to stop assuming it lived in the project it compiles.** It took
+  the project directory to be its own repository, which is true exactly once.
+- `create <name>` template with Tailwind preinstalled, so integration is exercised
+  from day one. The template is *derived* from `windows/` by `bun run template:sync`
+  and `template:check` fails the build if they drift — a hand-maintained template
+  rots into one that will not compile against the framework that scaffolded it.
+- **Hot reload: still not started.** The three stages below are unchanged.
 - **Hot reload in three stages, easiest first:**
   1. **CSS-only** — a stylesheet change alters the style table but not the tree, so swap tables
      and repaint. State, focus and scroll all survive. This is the demo that sells the thesis.
@@ -758,8 +776,34 @@ accessibility — shipping the visuals while dropping the reason it exists will 
 ### D2 · Packaging and distribution
 Simpler than before: the engine is **one** statically linked artifact, not three fetched DLLs.
 
+**`dziri build` landed 2026-08-02**, on this machine's platform. It produces a single
+executable that renders byte-identically to `dziri dev`, verified by hashing the same
+frame out of both.
+
 - `bun build --compile`; the engine extracted to a real path on first run, since `dlopen` needs a
-  file — and on macOS, code signing requires that too.
+  file — and on macOS, code signing requires that too. Confirmed necessary rather than
+  assumed: `dlopen` refuses the `B:/~BUN/root/` path an embedded file reports. The
+  copy is keyed by a hash the *build* computes, so startup does not re-hash 18 MB.
+- **Four things about `bun build --compile` that had to be measured**, each of which
+  produced a shipped-app-only failure:
+  1. A **runtime plugin is not a bundler plugin**, and a `bunfig.toml` preload does
+     not change that. The reactive rewrite never ran, so the binary contained a raw
+     `todos.filter(…)` and threw on its first frame while `dziri dev` was fine. Fixed
+     by driving `Bun.build({ plugins })` instead of the CLI — `compile` is
+     undocumented in `@types/bun` 1.3.14 but implemented.
+  2. A **standalone binary reads `bunfig.toml` from its working directory** and
+     honours the top-level `preload` it finds, resolving it against its own virtual
+     filesystem. A shipped app started next to any project's bunfig dies before its
+     first line. The template therefore carries `[test]` preload only.
+  3. The **embedded worker must be pre-bundled JavaScript.** The standalone runtime
+     loads an embedded `.ts` verbatim and dies on the first `const`.
+  4. **`--windows-hide-console` does not produce a GUI binary** — the PE subsystem
+     field is still 3, so launching the app pops a terminal behind its window.
+     `dziri build` writes the field itself; `--console` opts out for diagnostics,
+     since a GUI-subsystem process has no stdout.
+- **Still to do:** cross-compilation. `--target` can cross-build the JavaScript half,
+  but the embedded engine is the one built for this machine, so shipping for another
+  OS means building there. That is CI work with a pinned toolchain.
 - Cross-compilation for win/mac/linux × x64/arm64, built in CI with a pinned toolchain.
 - **macOS notarization and Windows code signing are prerequisites for distribution**, not polish.
 - Windowing: title, sizing, min/max, DPI. **Multiple windows, tray and native menus are cut from
@@ -774,10 +818,41 @@ Lead with **~28 ms compile for 1215 nodes** and **memory per window** against El
 versus 200 MB for a comparable UI is the headline, and it is where we beat Tauri too, since Tauri
 still hosts a system webview.
 
-Binary size replaces the old "~20 KB runtime" claim. Earlier estimate of 10–15 MB was wrong:
-`skia-safe` enables `embed-icudtl` by default on Windows, which bakes ~10 MB of ICU data into the
-binary, putting it at **20+ MB** — or ship `icudtl.dat` as a sidecar and take the complexity
-instead. Against Electron's ~150 MB it is still a strong number, but it must be stated honestly.
+**Binary size is not a number to lead with, and that is now measured rather than
+estimated.** The "20+ MB" figure counted the engine and forgot the host: a
+`bun build --compile` executable is `bun.exe` with the payload appended, and on
+Windows that floor is **98.5 MB** before a single line of the app. The demo packages
+to **117.3 MB** — 18.7 MB engine, 98.6 MB Bun runtime and app.
+
+**And no bundler flag reaches it.** Tree-shaking works — a dead export and a 50 KB
+dead string were verified gone — but it only ever touched the JavaScript, and the
+JavaScript is not the problem: the whole app is **24 KiB** (engine thread) plus
+**124 KiB** (app thread) before minification. `--minify` is on by default now and
+takes the executable from 117,345,792 to 117,294,592 bytes: **50 KiB, 0.04 %**. An
+empty program compiles to 98,480,216 bytes, which is `bun.exe` byte for byte. Bun's
+own documentation is candid about it — *"Bun's binary is still way too big and we
+need to make it smaller"* — and offers no flag that strips or compresses the
+runtime.
+
+(`--bytecode` is not available to us either: it emits CommonJS, and the wrapper needs
+top-level `await` to unpack the engine before the app loads. It would buy startup
+time rather than size, and reaching it means making the unpack synchronous.)
+
+Against Electron's ~150 MB that is a 22 % saving, not an order of magnitude, and
+publishing it as a headline would invite exactly the comparison it loses. Nothing
+about the thesis changes; the number that was supposed to carry it does. Options, in
+the order they should be considered:
+
+- **Lead with memory per window instead.** It was always the stronger claim and it is
+  where we beat Tauri too, since Tauri still hosts a system webview. This needs the
+  measurement D3 already asks for.
+- Ship a directory rather than one file — a small launcher beside a shared Bun
+  runtime and the engine — for anyone shipping several dziri apps.
+- Treat the single file as a *convenience*, which is what it actually is.
+
+The old "~20 KB runtime" headline stays dead either way; `runtime-surface` reports
+10,517 minified bytes across four modules, which is the honest version of it and is
+about the JavaScript, not the download.
 
 **Document the Tauri comparison aggressively.** Every prospective user will ask "why not Tauri?"
 Without a published answer, "no web target" reads as a limitation rather than a deliberate
@@ -971,17 +1046,58 @@ Two things are deliberately left for later, in this order:
    `Engine { inner: RefCell<Inner> }` with the borrow released before pumping and
    retaken by the watcher — right, and a refactor of every method on `Engine`. Do it
    if the current shape ever produces a bug that is not obviously something else.
-2. **Blocking loop on Bun's main thread, app code in a Worker.** This is the real
-   version of "the engine owns the frame loop", and it is what Electrobun does: the
-   Bun main thread blocks in the native event loop, the app's TypeScript runs in a
-   Worker in the same process, so the zero-copy tables survive — the Worker wraps the
-   same engine memory through `toArrayBuffer`. What needs designing is the split:
-   the Worker writes tables freely, while calls that take the engine handle (`grow`,
-   event drain) have to be marshalled to the main thread, which the handle table's
-   owner-thread check already enforces. **Only worth doing if the event watcher turns
-   out to be insufficient** — a caret blink during a long JS computation is the
-   scenario it would not cover. No launcher process is needed either way:
-   `bun build --compile` already produces a binary whose main thread runs the app.
+2. **App code in a Worker — landed 2026-08-02.** The main thread owns the engine
+   and does nothing but service the window; the app's TypeScript runs in a Worker in
+   the same process, and the zero-copy tables survive exactly as predicted — the
+   Worker wraps the same engine memory through `toArrayBuffer`, so a style patch and
+   a list relink still cost no FFI call and no copy. Calls that take the engine
+   handle (`grow`, the event drain) are marshalled to the main thread, which the
+   handle table's owner-thread check already enforced.
+
+   What the design note above got right: the split, the marshalling, and that no
+   launcher process is needed. What it got wrong is the priority — this was filed as
+   "only worth doing if the event watcher turns out to be insufficient", and the
+   watcher covers a *narrower* case than it appeared to. The watcher fires from
+   inside the OS's pump, so it saves the live-resize drag; it does nothing at all
+   when Bun simply never calls `tick()`, which is every long computation, every slow
+   handler, every synchronous import. That is not an edge case, and the OS marks the
+   window unresponsive for the whole of it.
+
+   **Measured**, demo window, app thread deliberately wedged for 2 s of a 3 s run
+   (`--block 2000 --run-ms 3000`, both paths still shipped so the comparison can be
+   re-run):
+
+   | | frames rendered |
+   | --- | --- |
+   | one thread (`dziri dev --single`) | **62** |
+   | app in a Worker (`dziri dev`) | **190** |
+
+   Three things had to exist, and each has an obvious wrong version:
+
+   - **A lock the engine thread may fail to take.** Not a mutex it waits on — that
+     reintroduces the freeze one level down. `tryAcquire` succeeds and the frame
+     commits; it fails and the frame *pumps* instead, servicing input, resize and
+     repaint while leaving the staged tables alone.
+   - **`Engine::pump`**, the new entry point that makes "instead" possible: `tick`
+     minus the commit. The commit has to be genuinely skippable rather than merely
+     delayed, because a link column caught mid-splice is not a frame of wrong
+     pixels — it is a chain that loops, which the traversal budget reports as a
+     malformed table and which poisons the engine.
+   - **Two generated entries.** `entry.gen.ts` is the engine thread and imports no
+     application code at all; `worker.gen.ts` is the app. That is what keeps a
+     packaged build from carrying the application twice, and it is why the engine
+     thread cannot be blocked by anything the app does — it has nothing of the
+     app's to run.
+
+   Two Bun behaviours had to be measured rather than assumed, and both were wrong in
+   the optimistic direction: **a Worker inherits neither the parent's loader plugins
+   nor its `process.argv`.** The first meant the reactive rewrite never reached the
+   app modules; the second meant `--route` and `--patch` were silently dropped, which
+   the goldens caught as twelve scenarios rendering the default route. Both are now
+   passed explicitly.
+
+   All 14 golden scenarios render pixel-identically through the Worker path, which is
+   the evidence that the split changed no behaviour.
 
 **Immediate next step: the IME proof** (A0 step 5).
 

@@ -1,0 +1,12 @@
+{
+  "name": "create-dziri",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Scaffold a dziri app — compiled UI on a native engine, no browser.",
+  "bin": {
+    "create-dziri": "./index.ts"
+  },
+  "files": ["index.ts", "template"],
+  "keywords": ["dziri", "desktop", "ui", "bun", "skia"],
+  "license": "MIT"
+}

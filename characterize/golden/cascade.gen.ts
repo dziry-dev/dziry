@@ -6,10 +6,10 @@
 // 0 text bindings, 0 handlers.
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable } from "../../../workspace/skia-proto/src/ir.ts";
-import type { EditableRef } from "../../../workspace/skia-proto/src/runtime/bindings.ts";
-import type { ListBindingRef } from "../../../workspace/skia-proto/src/runtime/list-runtime.ts";
-import type { StylePatchRef } from "../../../workspace/skia-proto/src/runtime/patches.ts";
+import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable } from "dziri/ir.ts";
+import type { EditableRef } from "dziri/runtime/bindings.ts";
+import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
+import type { StylePatchRef } from "dziri/runtime/patches.ts";
 
 /** Mutable past the static entries: text bindings overwrite their own slots. */
 export const strings: string[] = ["tie","inherited","shorthand"];

@@ -371,6 +371,55 @@ impl Engine {
         Ok(())
     }
 
+    /// A frame that services the window without reading what the host staged.
+    ///
+    /// `tick` minus the commit, and it exists for exactly one caller: a host whose
+    /// app code runs on another thread. The staged tables are that thread's to
+    /// write, and a `commit` racing a half-finished batch is not merely a frame of
+    /// wrong pixels — a link column caught mid-splice is a malformed chain, which
+    /// the traversal budget reports as an error and which poisons the engine.
+    ///
+    /// So the host takes a lock it can *fail* to take. Holding it means the writer
+    /// is between batches and `tick` is safe; failing to take it means calling
+    /// this instead. Either way the platform queue is drained, a resize is honoured
+    /// and a damaged surface is repainted on time, which is the whole point: the
+    /// window must not stop answering the OS because the app is busy.
+    ///
+    /// Input is still pumped, so hover, press, scroll and resize all keep working
+    /// during a long computation on the app thread. What does *not* happen is any
+    /// new application state reaching the screen, which is correct — there is none
+    /// to read until the writer says so.
+    pub fn pump(&mut self) -> Result<(), EngineError> {
+        let started = std::time::Instant::now();
+
+        self.pump_input()?;
+
+        // A resize inside `pump_input` sets `fresh`, and a fresh tree has no layout
+        // — painting it would blank the window. Same rule as `tick`, minus the diff
+        // that cannot exist here.
+        if self.fresh {
+            self.relayout()?;
+            self.needs_paint = true;
+        }
+
+        let dt = self.last_advance.elapsed().as_secs_f32();
+        self.last_advance = std::time::Instant::now();
+        self.advance_scrolls(dt);
+
+        if !self.needs_paint {
+            self.last_frame_ms = started.elapsed().as_secs_f32() * 1000.0;
+            return Ok(());
+        }
+
+        self.draw();
+        self.present()?;
+        self.needs_paint = false;
+
+        self.frame += 1;
+        self.last_frame_ms = started.elapsed().as_secs_f32() * 1000.0;
+        Ok(())
+    }
+
     /// Which global predicates the current surface satisfies.
     ///
     /// Read straight from the media table each time rather than cached against a
