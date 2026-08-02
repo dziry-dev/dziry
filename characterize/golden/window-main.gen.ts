@@ -77,6 +77,9 @@ export const styles = {
   scrollbarWidth: new Uint8Array(205),
   scrollbarThumb: new Uint32Array(205).fill(4283585115),
   scrollbarTrack: new Uint32Array(205),
+  accentColor: new Uint32Array(205),
+  caretColor: new Uint32Array(205),
+  appearance: new Uint8Array(205),
 } satisfies StyleTable;
 
 export const nodes = {

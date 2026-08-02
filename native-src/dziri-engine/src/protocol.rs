@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 8;
+pub const PROTOCOL_VERSION: u32 = 9;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,13 +15,13 @@ pub const PROTOCOL_VERSION: u32 = 8;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0xe9084806;
+pub const SCHEMA_HASH: u32 = 0x2f2f42ad;
 
 pub const TABLE_COUNT: usize = 8;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
-pub const MAX_FIELD_COUNT: usize = 55;
+pub const MAX_FIELD_COUNT: usize = 58;
 pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "nodes",
     "styles",
@@ -185,11 +185,14 @@ pub mod styles {
     pub const SCROLLBAR_WIDTH: usize = 52;
     pub const SCROLLBAR_THUMB: usize = 53;
     pub const SCROLLBAR_TRACK: usize = 54;
+    pub const ACCENT_COLOR: usize = 55;
+    pub const CARET_COLOR: usize = 56;
+    pub const APPEARANCE: usize = 57;
 
-    pub const FIELD_COUNT: usize = 55;
+    pub const FIELD_COUNT: usize = 58;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [
         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2,
-        2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4,
+        2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1,
     ];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
         "bg",
@@ -247,6 +250,9 @@ pub mod styles {
         "scrollbarWidth",
         "scrollbarThumb",
         "scrollbarTrack",
+        "accentColor",
+        "caretColor",
+        "appearance",
     ];
 
     /// Whether a change to this field can move a box.
@@ -259,7 +265,7 @@ pub mod styles {
         false, false, false, true, false, false, false, false, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
-        true, true, true, true, true, true, true, true, false, false, false,
+        true, true, true, true, true, true, true, true, false, false, false, false, false, false,
     ];
 }
 
@@ -424,6 +430,12 @@ pub mod scrollbar_width {
     pub const NONE: u8 = 2;
 }
 
+/// `styles.appearance`. Two values, and the grammar's other half is deliberately absent: `<compat-auto>` (`button`, `checkbox`, `textfield`, …) exists so a page can make one element *look like* a different control, which needs a UA control library to borrow from. dziri draws its controls from the element's own kind, so the only meaningful question is whether it draws one at all.
+pub mod appearance {
+    pub const NONE: u8 = 0;
+    pub const AUTO: u8 = 1;
+}
+
 /// `media.kind`. Which axis a threshold tests, and which side of it counts as true. `MIN_*` holds at the threshold and above, `MAX_*` at it and below — the same inclusive bounds `min-width`/`max-width` have in CSS, which is why a `min-width: 768px` and a `max-width: 768px` query are both true at exactly 768.
 pub mod media_kind {
     pub const MIN_WIDTH: u8 = 0;
@@ -432,11 +444,13 @@ pub mod media_kind {
     pub const MAX_HEIGHT: u8 = 3;
 }
 
-/// Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care.
+/// Bit positions in a variant mask. Bits 0-4 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care.
 pub mod predicate {
     pub const HOVER: u32 = 1;
     pub const ACTIVE: u32 = 2;
     pub const FOCUS: u32 = 4;
+    pub const CHECKED: u32 = 8;
+    pub const DISABLED: u32 = 16;
     pub const FIRST_GLOBAL: u32 = 256;
 }
 

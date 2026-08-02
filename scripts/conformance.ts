@@ -38,7 +38,14 @@ type Check = {
   decl: string; // what goes inside `.probe { … }`
   field: string; // key in the emitted `styles` object
   prop: string; // CSS property to read from getComputedStyle
-  kind: "color" | "px" | "number" | "int";
+  kind: "color" | "px" | "number" | "int" | "keyword";
+  /**
+   * For `keyword`: the CSS keyword each of dziri's enum values encodes, indexed
+   * by the value. Per-check rather than global, for the same reason `spec-audit`
+   * scopes its keyword table per field — the same word is a different number in
+   * different properties, and a shared table would make one of them a false pass.
+   */
+  keywords?: string[];
 };
 
 /**
@@ -104,6 +111,32 @@ const CORPUS: Check[] = [
 
   { decl: "top: 5px; position: absolute", field: "insetT", prop: "top", kind: "px" },
   { decl: "aspect-ratio: 2", field: "aspectRatio", prop: "aspect-ratio", kind: "number" },
+
+  // The form-control properties (ROADMAP C2 phase 0). Nothing draws a control
+  // yet, which is exactly why these belong here: the claim being checked is that
+  // the *computed value* is right, and that claim can be settled a milestone
+  // before any pixel depends on it.
+  //
+  // `auto` is deliberately not a case for either colour. dziri encodes it as
+  // alpha 0 and Chrome reports the resolved platform colour, so the two are
+  // answering different questions — and pretending otherwise would need a
+  // normaliser lenient enough to hide a real disagreement.
+  { decl: "accent-color: #0284c7", field: "accentColor", prop: "accent-color", kind: "color" },
+  { decl: "caret-color: rgb(20, 30, 40)", field: "caretColor", prop: "caret-color", kind: "color" },
+  {
+    decl: "appearance: none",
+    field: "appearance",
+    prop: "appearance",
+    kind: "keyword",
+    keywords: ["none", "auto"],
+  },
+  {
+    decl: "appearance: auto",
+    field: "appearance",
+    prop: "appearance",
+    kind: "keyword",
+    keywords: ["none", "auto"],
+  },
 ];
 
 const page = (decl: string) =>
@@ -141,8 +174,8 @@ async function dziriValue(dir: string, c: Check, i: number): Promise<number | nu
 }
 
 // ── chrome side ──────────────────────────────────────────────────────────────
-function normalise(kind: Check["kind"], chrome: string, dziri: number): [string, string] {
-  switch (kind) {
+function normalise(c: Check, chrome: string, dziri: number): [string, string] {
+  switch (c.kind) {
     case "color": {
       // dziri packs ARGB into a u32; Chrome says "rgb(r, g, b)" / "rgba(...)".
       const a = (dziri >>> 24) & 0xff;
@@ -187,6 +220,10 @@ function normalise(kind: Check["kind"], chrome: string, dziri: number): [string,
     }
     case "int":
       return [String(parseInt(chrome, 10)), String(Math.round(dziri))];
+    case "keyword":
+      // `?? String(dziri)` rather than a throw: an unmapped value should read as
+      // a disagreement with the number in it, not as a crashed run.
+      return [chrome.trim().toLowerCase(), c.keywords?.[dziri] ?? String(dziri)];
   }
 }
 
@@ -234,7 +271,7 @@ try {
     }
 
     const chrome = await session.computed(sheet(c.decl), ".probe", c.prop);
-    const [want, got] = normalise(c.kind, chrome, dz);
+    const [want, got] = normalise(c, chrome, dz);
 
     if (want === got) {
       pass++;

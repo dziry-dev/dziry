@@ -19,6 +19,7 @@ import {
   MediaKind as SchemaMediaKind,
   Predicate as SchemaPredicate,
   ScrollbarWidth as SchemaScrollbarWidth,
+  Appearance as SchemaAppearance,
 } from "./protocol/generated.ts";
 
 /**
@@ -59,6 +60,7 @@ export const FlexWrap = SchemaFlexWrap;
 export const Position = SchemaPosition;
 export const Overflow = SchemaOverflow;
 export const ScrollbarWidth = SchemaScrollbarWidth;
+export const Appearance = SchemaAppearance;
 
 /**
  * "The author said nothing" for an enum field.
@@ -203,6 +205,18 @@ export const STYLE_FIELDS = [
   ["scrollbarWidth", "Uint8Array", false, false],
   ["scrollbarThumb", "Uint32Array", true, false],
   ["scrollbarTrack", "Uint32Array", true, false],
+  // The three CSS properties a form control needs that nothing else does. Paint-only
+  // — none of them changes a box — and the two colours *inherit*, which is the part
+  // worth stating rather than assuming: `accent-color` and `caret-color` are both
+  // inherited per spec, so setting one on a form styles every control inside it,
+  // which is exactly how people use them.
+  //
+  // `appearance` does not inherit, and that asymmetry is also the spec's. It is a
+  // statement about one element's own rendering, and inheriting it would mean a
+  // `appearance: none` on a fieldset silently stripped every control in it.
+  ["accentColor", "Uint32Array", true, false],
+  ["caretColor", "Uint32Array", true, false],
+  ["appearance", "Uint8Array", false, false],
 ] as const;
 
 export type StyleField = (typeof STYLE_FIELDS)[number][0];
@@ -284,6 +298,17 @@ export const INITIAL_STYLE: ComputedStyle = {
   // already uses for "nothing was said here".
   scrollbarThumb: 0x00000000,
   scrollbarTrack: 0x00000000,
+  // `accent-color: auto` and `caret-color: auto`, spelled the same way
+  // `scrollbar-color: auto` is: alpha 0, meaning "the author said nothing, pick
+  // the platform answer". A real colour is never fully transparent in practice,
+  // and a control that painted its accent in transparent black would be a bug
+  // either way — so the sentinel costs no expressible value.
+  accentColor: 0x00000000,
+  caretColor: 0x00000000,
+  // The spec's initial value is `none`, not `auto`: CSS makes drawing a control
+  // something the UA stylesheet asks for on the elements that are controls,
+  // rather than something every element gets.
+  appearance: Appearance.NONE,
 };
 
 /** Shape of the generated module, so the runtime can type its import. */

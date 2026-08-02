@@ -14,6 +14,7 @@ import { parseHtml, type Element, type Node } from "./compiler/html.ts";
 import {
   analyzeVariants,
   analyzePatches,
+  ROLES,
   strategyBytes,
   type ToggleSpec,
 } from "./compiler/variants.ts";
@@ -199,8 +200,7 @@ console.log(
     `  (node pointers never change)`,
 );
 console.log(
-  `  slots by role: base ${p.roleSlots.base}, hover ${p.roleSlots.hover}, ` +
-    `active ${p.roleSlots.active}, focus ${p.roleSlots.focus}`,
+  `  slots by role: ${ROLES.map((r) => `${r} ${p.roleSlots[r]}`).join(", ")}`,
 );
 if (p.materializedStates > 0) {
   console.log(

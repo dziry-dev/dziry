@@ -183,6 +183,20 @@ const STYLES: Table = {
     // that costs.
     { name: "scrollbarThumb", type: "u32", affects: "paint" },
     { name: "scrollbarTrack", type: "u32", affects: "paint" },
+    // The form-control trio. Reserved here before anything draws a control,
+    // because they are ordinary compile-time fields — the cascade resolves them
+    // like any colour or keyword — and the alternative is discovering at A3 that
+    // adding three style fields is also a protocol bump.
+    //
+    // `appearance` is on the wire at all *because* dziri draws its own controls:
+    // it is the author's switch between "you draw it" and "I draw it", and only
+    // the side holding the canvas can act on it. See ROADMAP C2.
+    //
+    // Alpha 0 is `auto` for both colours, the convention `borderColor` and
+    // `scrollbar-color` already use — so neither needs a companion flag field.
+    { name: "accentColor", type: "u32", affects: "paint" },
+    { name: "caretColor", type: "u32", affects: "paint" },
+    { name: "appearance", type: "u8", affects: "paint", doc: "0 none, 1 auto" },
   ],
 };
 
@@ -416,6 +430,17 @@ export const ENUMS: EnumDef[] = [
     values: { AUTO: 0, THIN: 1, NONE: 2 },
   },
   {
+    name: "Appearance",
+    doc:
+      "`styles.appearance`. Two values, and the grammar's other half is deliberately " +
+      "absent: `<compat-auto>` (`button`, `checkbox`, `textfield`, …) exists so a page can " +
+      "make one element *look like* a different control, which needs a UA control library to " +
+      "borrow from. dziri draws its controls from the element's own kind, so the only " +
+      "meaningful question is whether it draws one at all.",
+    ty: "u8",
+    values: { NONE: 0, AUTO: 1 },
+  },
+  {
     name: "MediaKind",
     doc:
       "`media.kind`. Which axis a threshold tests, and which side of it counts as true. " +
@@ -428,7 +453,7 @@ export const ENUMS: EnumDef[] = [
   {
     name: "Predicate",
     doc:
-      "Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are " +
+      "Bit positions in a variant mask. Bits 0-4 are per-node; higher bits are " +
       "global, so the engine can flip them without knowing which nodes care.",
     ty: "u32",
     values: {
@@ -438,6 +463,25 @@ export const ENUMS: EnumDef[] = [
       ACTIVE: 1 << 1,
       /** This node holds focus. */
       FOCUS: 1 << 2,
+
+      /**
+       * This control is checked — a checkbox, radio, switch or pressed toggle.
+       *
+       * A per-node predicate like the three above, and cheap for the same reason:
+       * checked-ness is an enumerable boolean, so it is a second style id and an
+       * int write rather than anything the runtime has to compute. What differs
+       * is *who* sets it. `HOVER`, `ACTIVE` and `FOCUS` are answers the engine
+       * already has from the pointer and the focus ring; these two are the app's
+       * own `state()`, so the engine learns them the same way it learns `hidden`.
+       *
+       * The compiler emits the bit as soon as a stylesheet reads `:checked`. Until
+       * the engine can be told which nodes are checked (A3), the bit is simply
+       * never live, and such a node wears its base style — a control that does not
+       * light up yet, not a wrong-looking frame.
+       */
+      CHECKED: 1 << 3,
+      /** This control is disabled, and so takes no pointer or keyboard input. */
+      DISABLED: 1 << 4,
 
       /**
        * The first bit the *engine* owns rather than the input state.
@@ -505,6 +549,11 @@ export const ENUMS: EnumDef[] = [
  * scrollbar properties can be authored instead of the engine's own defaults being the
  * only answer.
  *
+ * v9 adds `accentColor`, `caretColor` and `appearance`, and the `CHECKED` and `DISABLED`
+ * predicate bits — the compile-time half of form controls (ROADMAP C2 phase 0). Nothing
+ * in the engine reads any of the five yet; they are reserved so that A3 is a feature
+ * rather than a protocol bump, and so the compiler can stop refusing `:checked`.
+ *
  * Also bumped when the *C ABI* changes shape, even though the tables did not —
  * v4 is where the engine handle stopped being a pointer and became a `u32` token
  * into a handle table. `SCHEMA_HASH` cannot cover that: it hashes the tables, and
@@ -513,7 +562,7 @@ export const ENUMS: EnumDef[] = [
  * call that is safe to make against a binary of unknown vintage — which is why the
  * ABI's own version lives here.
  */
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

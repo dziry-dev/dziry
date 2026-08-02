@@ -61,6 +61,12 @@ const OUT_OF_SCOPE_NAMES = [
   /^ruby-/,
   /^(speak|voice-|pause|rest|cue)/,
   /^(table-layout|border-collapse|border-spacing|caption-side|empty-cells)$/,
+  // The two form-control properties ROADMAP C2 declares non-goals. `resize` needs
+  // drag handles on a textarea and multi-line editing is deferred indefinitely, so
+  // it could never do anything; `field-sizing: content` makes layout depend on the
+  // runtime string. The other three — `accent-color`, `caret-color`, `appearance` —
+  // are ordinary supported fields and are counted as such.
+  /^(resize|field-sizing)$/,
 ];
 
 const isOutOfScope = (name: string, spec: Spec) =>

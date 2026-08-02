@@ -89,6 +89,9 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
   ["scrollbarWidth", "scrollbarWidth"],
   ["scrollbarThumb", "scrollbarThumb"],
   ["scrollbarTrack", "scrollbarTrack"],
+  ["accentColor", "accentColor"],
+  ["caretColor", "caretColor"],
+  ["appearance", "appearance"],
 ];
 
 /** How much room to leave beyond what the IR needs right now. */

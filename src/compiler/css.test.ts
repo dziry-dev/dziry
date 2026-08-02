@@ -350,6 +350,36 @@ test("scrollbar-color takes two colours, thumb then track", () => {
 });
 
 /**
+ * The three form-control properties, which are ordinary compile-time fields.
+ *
+ * That is the claim ROADMAP C2 rests on — that `accent-color`, `caret-color` and
+ * `appearance` cost the compiler nothing beyond a case here — so it is worth an
+ * assertion rather than an assumption.
+ */
+test("accent-color and caret-color take auto or a colour", () => {
+  expect(expand("accent-color", "#0284c7")).toEqual({ accentColor: 0xff0284c7 });
+  expect(expand("caret-color", "rgb(0 128 0)")).toEqual({ caretColor: 0xff008000 });
+
+  // `auto` is alpha 0, the same "nothing was said here" sentinel `scrollbar-color`
+  // uses — so neither property needs a companion flag field to be expressible.
+  expect(expand("accent-color", "auto")).toEqual({ accentColor: 0x00000000 });
+  expect(expand("caret-color", "AUTO")).toEqual({ caretColor: 0x00000000 });
+});
+
+test("appearance takes none or auto, and refuses the compat values", () => {
+  expect(expand("appearance", "none")).toEqual({ appearance: 0 });
+  expect(expand("appearance", "auto")).toEqual({ appearance: 1 });
+
+  // `<compat-auto>` asks for one element to be drawn as a *different* control,
+  // which needs a UA control library to borrow from. dziri draws a control from
+  // the element's own kind, so accepting these would mean accepting a declaration
+  // and then not honouring it.
+  expect(() => expand("appearance", "button")).toThrow(CssError);
+  expect(() => expand("appearance", "checkbox")).toThrow(CssError);
+  expect(() => expand("appearance", "textfield")).toThrow(CssError);
+});
+
+/**
  * The `visible`-to-`auto` coercion, against what Chromium 151 was measured doing.
  *
  * Every row here corresponds to a row of the table in BROWSER-FACTS.md

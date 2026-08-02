@@ -189,14 +189,21 @@ selection range become a new NOTES.md ledger entry** when A5 lands. The caret bl
 timer flipping one bit, never JS at frame rate.
 
 `bindValue` exists in partial form today — append and backspace only, through the `editables` table
-(`src/compiler/compile.ts:802`).
+(`src/compiler/compile.ts:808`).
+
+The compile-time half is already in. A stylesheet can write `:checked` and `:disabled` today and the
+compiler resolves them like `:hover`, merging combinations per property; the three CSS properties are
+ordinary style fields. What is missing is the other half — nothing tells the engine *which* nodes are
+checked or disabled, so those predicates are never live and such a node wears its base style. That is
+A3's, and it is why the rows below still say planned even though the compiler is done with them.
 
 | API | Status | Milestone |
 |---|---|---|
 | `<Checkbox>` `<Switch>` `<Radio>` `<Toggle>` `<Tabs>` | planned | C2 · Tier 1a (needs A3) |
-| `:checked` / `:disabled` / `:indeterminate` variants | planned — widens the `base/hover/active/focus` quad in `variants.ts` | A3 |
-| `accent-color` `caret-color` `appearance` | planned — ordinary compile-time `STYLE_FIELDS` | A1 |
-| `resize`, `field-sizing: content` | **non-goal** — see ROADMAP C2 | — |
+| `:checked` / `:disabled` variants | **compiler done** — predicate bits in `schema.ts`, `PREDICATE_PSEUDO` in `compile.ts`; not yet driven by the engine | A3 |
+| `:indeterminate` | planned — same shape and cost, held back until a control can be in that state | A3 |
+| `accent-color` `caret-color` `appearance` | **done** — `STYLE_FIELDS`, checked in `conformance` and `spec-audit` | A1 |
+| `resize`, `field-sizing: content` | **non-goal** — see ROADMAP C2; in `css-coverage`'s `OUT_OF_SCOPE_NAMES` | — |
 | `<Input>` | planned | C2 · Tier 1b (needs A5) |
 | `onSubmit` on `bindValue`; `onChange` vs `onInput` | planned | A3 |
 | caret, selection, IME, clipboard | planned — new ledger entry | A5 |

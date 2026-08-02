@@ -545,7 +545,7 @@ Still to do: **held-button auto-repeat** on a track click (one click, one page t
     transitions, which interpolate in Rust precisely so nothing runs in JS at frame rate — and it is
     what makes the caret survive a long JS computation, the worry recorded under `pump_input` below.
   - `bindValue` already exists in partial form — append and backspace, via the `editables` table
-    (`compile.ts:802`). A5 is what turns it into a real input rather than a demo.
+    (`compile.ts:808`). A5 is what turns it into a real input rather than a demo.
 - **Font discovery, not just font loading.** System fonts per platform (Segoe UI, San Francisco,
   Noto), a fallback chain, and an emoji font. Text without emoji fallback looks broken.
 
@@ -642,17 +642,30 @@ drawn by us.
 Which makes most of Tier 1a cheap. `:checked`, `:disabled` and `:indeterminate` are enumerable
 booleans, so they pass the compile-time gate at question 3 exactly like `:hover` — a second style id
 and an int write, with **no new ledger entry**, because a checkbox's checked-ness is a `state()`
-value and "current state values" is already on the list. The real work is that variant slots are a
-fixed `base/hover/active/focus` quad (`variants.ts:370-384`), so new roles widen a structure that
-crosses the protocol boundary: `variants.ts`, `compile.ts`, `ir.ts` and `schema.ts` together, plus
-`protocol-guard`.
+value and "current state values" is already on the list.
+
+**Phase 0 of this is done, and it was smaller than the paragraph above predicted.** The prediction
+was that variant slots are a fixed `base/hover/active/focus` quad, so a new role widens a structure
+crossing the protocol boundary — `variants.ts`, `compile.ts`, `ir.ts` and `schema.ts` together. Only
+the last part held. The quad had already stopped being the shipping representation when conditional
+styling became a predicate *mask*: `compile.ts` names a predicate in exactly one table
+(`PREDICATE_PSEUDO`), the run and the engine work in bits, and the surviving quad was a reporting
+detail in the measurement harness (`variants.ts`, `ROLES`). So `:checked` and `:disabled` cost two
+entries in that table, two in `SUPPORTED_PSEUDO`, and two bits in `schema.ts` — which *is* a protocol
+bump (v9) and did need `protocol-guard`, but not a structural change.
+
+The three compile-time CSS properties landed with them: `accent-color`, `caret-color` and
+`appearance` are ordinary `STYLE_FIELDS` (both colours inherit; `appearance` does not, per spec),
+checked against Chrome in `conformance` and against `mdn-data` in `spec-audit`. Nothing in the engine
+reads any of the five yet — a `:checked` node simply wears its base style until A3 can tell the
+engine which nodes are checked. `:indeterminate` is deliberately still absent: same shape, same cost,
+but nothing can author it until there is a control to be indeterminate.
 
 Two of the five form-control CSS properties are **non-goals**, and saying so keeps them out of the
 backlog: `resize` needs drag handles on a textarea and multi-line editing is deferred indefinitely,
 so it could never do anything; `field-sizing: content` makes layout depend on the runtime string,
-which is a larger ask than the other four combined. `accent-color`, `caret-color` and `appearance`
-are ordinary compile-time fields. (Both non-goals still need adding to `css-coverage`'s
-`OUT_OF_SCOPE_NAMES` so the two tools agree.)
+which is a larger ask than the other four combined. Both are now in `css-coverage`'s
+`OUT_OF_SCOPE_NAMES`, so the two tools agree.
 
 **On "shadcn-importable":** an `add` command that downloads the original and transforms it is
 appealing but would be a **React-to-ours source transpiler** — `forwardRef`, `useState`,

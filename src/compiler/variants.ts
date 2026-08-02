@@ -15,11 +15,12 @@
  */
 import {
   LAYOUT_FIELDS,
+  Predicate,
   STYLE_FIELDS,
   type ComputedStyle,
   type StyleField,
 } from "../ir.ts";
-import { compileTree, type CompileResult } from "./compile.ts";
+import { compileTree, soleStyle, type CompileResult } from "./compile.ts";
 import type { Element, Node } from "./html.ts";
 
 export type ToggleSpec = { name: string; target: string; class: string };
@@ -45,7 +46,7 @@ export type VariantAnalysis = {
   globalStyles: number;
   /** Base style ids per combination, in mask order. */
   combos: Uint16Array[];
-  /** All three roles per combination — base, hover, active. */
+  /** Every role in `ROLES` per combination. */
   comboRoles: RoleStyles[];
   /** Indexed by the ids in `combos` and `comboRoles`. */
   globalStyleList: ComputedStyle[];
@@ -132,36 +133,75 @@ class GlobalStyles {
   }
 }
 
-/** The style slots a node can wear, as the runtime resolves them. */
-export const ROLES = ["base", "hover", "active", "focus"] as const;
+/**
+ * The style slots a node can wear, one per single predicate plus the resting one.
+ *
+ * A quad until `:checked` and `:disabled` landed (ROADMAP C2). What made widening
+ * it cheap is that the *shipping* representation stopped being roles some time
+ * ago: `nodes.mask` and the variant run carry combinations, and the engine reads
+ * bits. This list only exists so the measurement below can report "how many slots
+ * exist because of hover" — a per-role question about a thing that is no longer
+ * stored per role.
+ */
+export const ROLES = ["base", "hover", "active", "focus", "checked", "disabled"] as const;
 export type Role = (typeof ROLES)[number];
+
+/** The predicate each non-resting role stands for. */
+const ROLE_PREDICATE: Record<Exclude<Role, "base">, number> = {
+  hover: Predicate.HOVER,
+  active: Predicate.ACTIVE,
+  focus: Predicate.FOCUS,
+  checked: Predicate.CHECKED,
+  disabled: Predicate.DISABLED,
+};
+
+/**
+ * What a role falls back to when the node has no rule for it.
+ *
+ * `active` falling back to `hover` is the odd one, and it is deliberate history:
+ * a pressed node was usually also hovered under the old *pick-one* runtime, so
+ * that chain is what "the style you actually saw" meant. It is kept because the
+ * numbers this file reports are comparable across commits only if it is — the
+ * shipping path no longer picks at all, it merges combinations, and none of that
+ * runs through here.
+ *
+ * The new roles fall back to `base`, like `focus`: a control can be checked or
+ * disabled without the pointer being anywhere near it.
+ */
+const ROLE_FALLBACK: Record<Exclude<Role, "base">, Role> = {
+  hover: "base",
+  active: "hover",
+  focus: "base",
+  checked: "base",
+  disabled: "base",
+};
 
 export type RoleStyles = Record<Role, Uint16Array>;
 
 /**
  * Node -> global style id per role, for one compiled variant.
  *
- * `hover` and `active` are resolved to their *effective* style here, mirroring
- * `Painter.styleFor`: an absent hover falls back to base, and an absent active
- * falls back to hover. Without that, a toggle that introduces a hover rule where
- * there was none would look like a structural change rather than a value change.
+ * Each role is resolved to its *effective* style, through `ROLE_FALLBACK`.
+ * Without that, a toggle that introduces a hover rule where there was none would
+ * look like a structural change rather than a value change.
  */
 function globalize(result: CompileResult, global: GlobalStyles): RoleStyles {
   const n = result.nodes.length;
-  const base = new Uint16Array(n);
-  const hover = new Uint16Array(n);
-  const active = new Uint16Array(n);
-  const focus = new Uint16Array(n);
+  const out = Object.fromEntries(ROLES.map((r) => [r, new Uint16Array(n)])) as RoleStyles;
 
   for (let i = 0; i < n; i++) {
     const node = result.nodes[i]!;
-    base[i] = global.intern(result.styles[node.style]!);
-    hover[i] = node.hover >= 0 ? global.intern(result.styles[node.hover]!) : base[i]!;
-    active[i] = node.active >= 0 ? global.intern(result.styles[node.active]!) : hover[i]!;
-    focus[i] = node.focus >= 0 ? global.intern(result.styles[node.focus]!) : base[i]!;
+    out.base[i] = global.intern(result.styles[node.style]!);
+    // In ROLES order, so a fallback always reads a role already filled in.
+    for (const role of ROLES) {
+      if (role === "base") continue;
+      const sole = soleStyle(node, ROLE_PREDICATE[role]);
+      out[role][i] =
+        sole >= 0 ? global.intern(result.styles[sole]!) : out[ROLE_FALLBACK[role]][i]!;
+    }
   }
 
-  return { base, hover, active, focus };
+  return out;
 }
 
 function changedFields(a: ComputedStyle, b: ComputedStyle): StyleField[] {
@@ -310,12 +350,12 @@ export type TogglePatch = {
 export type PatchAnalysis = {
   /** Style-table size once interned over variant vectors, across all roles. */
   variantStyles: number;
-  /** How many of those exist only because hover/active differ under some toggle. */
+  /** How many of those exist only because a state differs under some toggle. */
   roleSlots: Record<Role, number>;
   /**
-   * Nodes whose hover/active pointer had to be materialized because a toggle
-   * introduces a state style where the baseline had none. Their interactivity can
-   * no longer be inferred from `hover >= 0`.
+   * Nodes whose state pointer had to be materialized because a toggle introduces
+   * a state style where the baseline had none. Their interactivity can no longer
+   * be inferred from "this node has a hover style".
    */
   materializedStates: number;
   patches: TogglePatch[];
@@ -333,7 +373,7 @@ export function analyzePatches(a: VariantAnalysis, toggles: ToggleSpec[]): Patch
   const byVector = new Map<string, number>();
   /** variant style id -> a (node, role) that has it, for reading values back. */
   const representative: { node: number; role: Role }[] = [];
-  const roleSlots: Record<Role, number> = { base: 0, hover: 0, active: 0, focus: 0 };
+  const roleSlots = Object.fromEntries(ROLES.map((r) => [r, 0])) as Record<Role, number>;
   let materializedStates = 0;
 
   const internSlot = (node: number, role: Role): number => {
@@ -355,30 +395,23 @@ export function analyzePatches(a: VariantAnalysis, toggles: ToggleSpec[]): Patch
 
     // A state slot is only needed when it differs from its fallback in *some*
     // combination. Where it does, the node's pointer must be materialized in
-    // every combination so `nodes.hover` itself stays immutable — which is
-    // exactly why interactivity needs an explicit flag rather than `hover >= 0`.
-    let hoverDiffers = false;
-    let activeDiffers = false;
-    let focusDiffers = false;
-    for (let m = 0; m < comboCount; m++) {
-      const r = a.comboRoles[m]!;
-      if (r.hover[n] !== r.base[n]) hoverDiffers = true;
-      if (r.active[n] !== r.hover[n]) activeDiffers = true;
-      if (r.focus[n] !== r.base[n]) focusDiffers = true;
-    }
-
+    // every combination so `nodes.style` itself stays immutable — which is
+    // exactly why interactivity needs an explicit flag rather than being inferred
+    // from "this node has a hover style".
     const zero = a.comboRoles[0]!;
-    if (hoverDiffers) {
-      internSlot(n, "hover");
-      if (zero.hover[n] === zero.base[n]) materializedStates++;
-    }
-    if (activeDiffers) {
-      internSlot(n, "active");
-      if (zero.active[n] === zero.hover[n]) materializedStates++;
-    }
-    if (focusDiffers) {
-      internSlot(n, "focus");
-      if (zero.focus[n] === zero.base[n]) materializedStates++;
+    for (const role of ROLES) {
+      if (role === "base") continue;
+      const fallback = ROLE_FALLBACK[role];
+
+      let differs = false;
+      for (let m = 0; m < comboCount; m++) {
+        const r = a.comboRoles[m]!;
+        if (r[role][n] !== r[fallback][n]) differs = true;
+      }
+      if (!differs) continue;
+
+      internSlot(n, role);
+      if (zero[role][n] === zero[fallback][n]) materializedStates++;
     }
   }
 

@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 8;
+export const PROTOCOL_VERSION = 9;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,12 +19,12 @@ export const PROTOCOL_VERSION = 8;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xe9084806;
+export const SCHEMA_HASH = 0x2f2f42ad;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
   nodes: [1, 2, 4, 4, 4, 4, 2, 1, 1],
-  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4],
+  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1],
   variants: [4, 4, 4],
   variantSlots: [2],
   media: [4, 1, 4],
@@ -36,7 +36,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
 /** Field names per table, in descriptor order — used to name a mismatch. */
 export const FIELD_NAMES: Record<TableName, string[]> = {
   nodes: ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags"],
-  styles: ["bg", "fg", "borderColor", "borderWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack"],
+  styles: ["bg", "fg", "borderColor", "borderWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance"],
   variants: ["node", "mask", "runStart"],
   variantSlots: ["style"],
   media: ["bit", "kind", "value"],
@@ -53,7 +53,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
  * can be checked against it rather than trusted to agree.
  */
 export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
-  styles: [false, false, false, true, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false],
+  styles: [false, false, false, true, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false],
 };
 
 export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "layout", "strings"] as const;
@@ -130,6 +130,9 @@ export const F = {
     scrollbarWidth: 52, // 0 auto, 1 thin, 2 none
     scrollbarThumb: 53,
     scrollbarTrack: 54,
+    accentColor: 55,
+    caretColor: 56,
+    appearance: 57, // 0 none, 1 auto
   },
   /** Per-node predicate mask and where that node's style run begins. */
   variants: {
@@ -174,7 +177,7 @@ export const F = {
 /** Field counts, asserted against the engine's descriptor at startup. */
 export const FIELD_COUNTS: Record<TableName, number> = {
   nodes: 9,
-  styles: 55,
+  styles: 58,
   variants: 3,
   variantSlots: 1,
   media: 3,
@@ -186,7 +189,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
 /** Typed-array constructor per field, used to wrap the engine's memory. */
 export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   nodes: [Uint8Array, Uint16Array, Int32Array, Int32Array, Int32Array, Int32Array, Int16Array, Uint8Array, Uint8Array],
-  styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array],
+  styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array],
   variants: [Int32Array, Uint32Array, Int32Array],
   variantSlots: [Uint16Array],
   media: [Uint32Array, Uint8Array, Float32Array],
@@ -264,6 +267,9 @@ export type SharedTables = {
     scrollbarWidth: Uint8Array;
     scrollbarThumb: Uint32Array;
     scrollbarTrack: Uint32Array;
+    accentColor: Uint32Array;
+    caretColor: Uint32Array;
+    appearance: Uint8Array;
   };
   variants: {
     node: Int32Array;
@@ -386,6 +392,13 @@ export const ScrollbarWidth = {
 } as const;
 export type ScrollbarWidth = (typeof ScrollbarWidth)[keyof typeof ScrollbarWidth];
 
+/** `styles.appearance`. Two values, and the grammar's other half is deliberately absent: `<compat-auto>` (`button`, `checkbox`, `textfield`, …) exists so a page can make one element *look like* a different control, which needs a UA control library to borrow from. dziri draws its controls from the element's own kind, so the only meaningful question is whether it draws one at all. */
+export const Appearance = {
+  NONE: 0,
+  AUTO: 1,
+} as const;
+export type Appearance = (typeof Appearance)[keyof typeof Appearance];
+
 /** `media.kind`. Which axis a threshold tests, and which side of it counts as true. `MIN_*` holds at the threshold and above, `MAX_*` at it and below — the same inclusive bounds `min-width`/`max-width` have in CSS, which is why a `min-width: 768px` and a `max-width: 768px` query are both true at exactly 768. */
 export const MediaKind = {
   MIN_WIDTH: 0,
@@ -395,11 +408,13 @@ export const MediaKind = {
 } as const;
 export type MediaKind = (typeof MediaKind)[keyof typeof MediaKind];
 
-/** Bit positions in a variant mask. Bits 0-2 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care. */
+/** Bit positions in a variant mask. Bits 0-4 are per-node; higher bits are global, so the engine can flip them without knowing which nodes care. */
 export const Predicate = {
   HOVER: 1,
   ACTIVE: 2,
   FOCUS: 4,
+  CHECKED: 8,
+  DISABLED: 16,
   FIRST_GLOBAL: 256,
 } as const;
 export type Predicate = (typeof Predicate)[keyof typeof Predicate];

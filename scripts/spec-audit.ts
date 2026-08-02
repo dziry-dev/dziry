@@ -76,6 +76,9 @@ const PROPERTY: Record<string, string> = {
   fontWeight: "font-weight",
   overflowX: "overflow-x",
   overflowY: "overflow-y",
+  accentColor: "accent-color",
+  caretColor: "caret-color",
+  appearance: "appearance",
 };
 
 /**

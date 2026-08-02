@@ -143,6 +143,42 @@ test("hover and focus merge per property instead of one winning", () => {
   expect(border(run[3]!)).toBe(0xff00ff00);
 });
 
+test(":checked and :disabled are predicates like any other", () => {
+  // The whole of ROADMAP C2 phase 0, asserted: widening the state set is one
+  // entry in `PREDICATE_PSEUDO` and one in `SUPPORTED_PSEUDO`, and everything
+  // downstream — mask, run, merge — already worked in bits.
+  //
+  // So a disabled checkbox that is also checked gets a style resolved with *both*
+  // live, which is what a real form needs and what the old named-role triple
+  // could not have produced at all.
+  const html = `<body><div class="box"></div></body>`;
+  const css = `
+    .box { background: #000000; border-color: #000000; accent-color: #0284c7 }
+    .box:checked { accent-color: #16a34a }
+    .box:disabled { background: #cccccc }
+  `;
+
+  const ui = toCompiledUi(compile(html, css));
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const { variants } = ui;
+
+  expect(variants.count).toBe(1);
+  const mask = variants.mask[0]!;
+  expect(mask).toBe(Predicate.CHECKED | Predicate.DISABLED);
+
+  const start = variants.runStart[0]!;
+  const at = (live: number) => start + compactBits(live, mask);
+
+  expect(styles.accentColor[variants.slots[at(0)]!]!).toBe(0xff0284c7);
+  expect(styles.accentColor[variants.slots[at(Predicate.CHECKED)]!]!).toBe(0xff16a34a);
+  expect(styles.bg[variants.slots[at(Predicate.DISABLED)]!]!).toBe(0xffcccccc);
+
+  // Checked *and* disabled: the green accent and the grey background together.
+  const both = variants.slots[at(Predicate.CHECKED | Predicate.DISABLED)]!;
+  expect(styles.accentColor[both]!).toBe(0xff16a34a);
+  expect(styles.bg[both]!).toBe(0xffcccccc);
+});
+
 test("hover and focus still merge when a conditional class is present", () => {
   // The gap this closes. `compileVariants` re-interns every style over the
   // vector of its values across variants, so with a toggle in the document the

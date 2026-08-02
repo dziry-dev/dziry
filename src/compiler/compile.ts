@@ -386,15 +386,6 @@ class StyleInterner {
 type BuiltNode = {
   kind: number;
   style: number;
-  /**
-   * Style ids per interaction state, or -1 when the state adds nothing.
-   *
-   * Kept as the *single-predicate* view of `run`, because the variant compiler
-   * interns across toggles per role. `run` is what ships.
-   */
-  hover: number;
-  active: number;
-  focus: number;
   /** Predicate bits this node's styling depends on. */
   mask: number;
   /**
@@ -412,12 +403,38 @@ type BuiltNode = {
   children: number[];
 };
 
-/** Predicate bit ↔ the pseudo-class that sets it. */
-const PREDICATE_PSEUDO: Array<[number, Pseudo]> = [
+/**
+ * Predicate bit ↔ the pseudo-class that sets it.
+ *
+ * The one place a per-node predicate is named. Everything downstream — the mask,
+ * the run, the patch machinery, the engine — works on bits, so widening the set of
+ * states dziri understands is an entry here plus one in `SUPPORTED_PSEUDO`.
+ * `:checked` and `:disabled` are the first two added since that became true, and
+ * they cost exactly that (ROADMAP C2).
+ */
+export const PREDICATE_PSEUDO: Array<[number, Pseudo]> = [
   [Predicate.HOVER, "hover"],
   [Predicate.ACTIVE, "active"],
   [Predicate.FOCUS, "focus"],
+  [Predicate.CHECKED, "checked"],
+  [Predicate.DISABLED, "disabled"],
 ];
+
+/**
+ * The style a node wears with exactly one predicate live, or -1 when that
+ * predicate changes nothing for it.
+ *
+ * Derived from `mask` and `run` rather than stored, which is the point. The IR
+ * used to carry a `(hover, active, focus)` triple beside them — the same fact in
+ * two shapes, and a third place to edit for every new state. `run` is what ships;
+ * this is a view of it, and it is only ever wanted by the tools that report
+ * per-role numbers.
+ */
+export function soleStyle(node: { style: number; mask: number; run: number[] }, bit: number): number {
+  if ((node.mask & bit) === 0) return -1;
+  const id = node.run[compactBits(bit, node.mask)]!;
+  return id === node.style ? -1 : id;
+}
 
 /** Gathers the bits of `value` set in `mask` down to a dense index. */
 function compactBits(value: number, mask: number): number {
@@ -775,21 +792,10 @@ export function compileTree(
       run[combo] = styles.intern(resolved);
     }
 
-    /** The run entry for exactly one predicate, or -1 when it adds nothing. */
-    const soleEntry = (bit: number): number => {
-      if ((mask & bit) === 0) return -1;
-      const id = run[compactBits(bit, mask)]!;
-      return id === styleId ? -1 : id;
-    };
-
     const self = nodes.length;
     nodes.push({
       kind: KIND_BY_TAG[el.tag] ?? NodeKind.BOX,
       style: styleId,
-      // A state that resolves to the base style adds nothing to paint.
-      hover: soleEntry(Predicate.HOVER),
-      active: soleEntry(Predicate.ACTIVE),
-      focus: soleEntry(Predicate.FOCUS),
       mask,
       run,
       text: -1,
@@ -904,9 +910,6 @@ export function compileTree(
         nodes.push({
           kind: src.kind,
           style: src.style,
-          hover: src.hover,
-          active: src.active,
-          focus: src.focus,
           mask: src.mask,
           run: [...src.run],
           text: src.text,
@@ -973,9 +976,6 @@ export function compileTree(
       nodes.push({
         kind: NodeKind.TEXT,
         style: textStyleId,
-        hover: -1,
-        active: -1,
-        focus: -1,
         mask: 0,
         run: [textStyleId],
         text: slot,
@@ -1767,11 +1767,12 @@ export function dump(result: CompileResult): string {
     const n = nodes[i]!;
     const indent = "  ".repeat(depth);
     const label = n.text >= 0 ? ` ${JSON.stringify(strings[n.text])}` : "";
-    const variants = [
-      n.hover >= 0 ? `hover=${n.hover}` : null,
-      n.active >= 0 ? `active=${n.active}` : null,
-      n.focus >= 0 ? `focus=${n.focus}` : null,
-    ]
+    // In `PREDICATE_PSEUDO` order, so widening that table extends this line
+    // rather than rewriting it — and a node with no such rule prints as before.
+    const variants = PREDICATE_PSEUDO.map(([bit, pseudo]) => {
+      const id = soleStyle(n, bit);
+      return id >= 0 ? `${pseudo}=${id}` : null;
+    })
       .filter(Boolean)
       .join(" ");
 

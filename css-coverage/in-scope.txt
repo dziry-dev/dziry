@@ -156,7 +156,10 @@ cursor
 pointer-events
 user-select
 appearance
-resize
+# resize — committed non-goal (ROADMAP C2). It needs drag handles on a textarea and
+# multi-line editing is deferred indefinitely, so it could never do anything. Left
+# here as a comment rather than deleted: a bare absence reads as an oversight, and
+# the denominator is the published number.
 scroll-behavior
 caret-color
 accent-color

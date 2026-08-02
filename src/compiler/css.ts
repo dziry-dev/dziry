@@ -8,10 +8,12 @@
  * the runtime.
  *
  * Supported selectors: type, `.class`, `#id`, descendant combinator, and the
- * `:hover` / `:active` pseudo-classes (which become precompiled variants).
+ * `:hover` / `:active` / `:focus` / `:checked` / `:disabled` pseudo-classes
+ * (which become precompiled variants).
  */
 import {
   Align,
+  Appearance,
   AUTO,
   Direction,
   Display,
@@ -24,10 +26,30 @@ import {
   type StyleField,
 } from "../ir.ts";
 
-export type Pseudo = "none" | "hover" | "active" | "focus";
+export type Pseudo = "none" | "hover" | "active" | "focus" | "checked" | "disabled";
 
-/** Pseudo-classes compiled into precomputed style variants. */
-const SUPPORTED_PSEUDO = new Set<string>(["hover", "active", "focus"]);
+/**
+ * Pseudo-classes compiled into precomputed style variants.
+ *
+ * `:checked` and `:disabled` join the original three rather than needing anything
+ * new, and that is the whole argument for them: each is an enumerable boolean, so
+ * it is one more predicate bit, one more style id and an int write — the same
+ * shape as `:hover`. What makes them *form-control* pseudo-classes is only who
+ * supplies the answer, and that question lives on the engine's side of the
+ * boundary. See ROADMAP C2.
+ *
+ * `:indeterminate` is the third of the trio ROADMAP names and is deliberately not
+ * here. It is the same shape and would cost the same, but nothing can author it
+ * until there is a control to be indeterminate — adding it now would mean
+ * supporting a selector that provably cannot match.
+ */
+const SUPPORTED_PSEUDO = new Set<string>([
+  "hover",
+  "active",
+  "focus",
+  "checked",
+  "disabled",
+]);
 
 export type Compound = { tag: string | null; id: string | null; classes: string[] };
 
@@ -593,7 +615,7 @@ export function parseSelector(src: string, at = -1): Selector {
       throw new CssError(
         `unsupported selector syntax in "${part}".\n` +
           `  Supported: type, .class, #id, the descendant combinator, and ` +
-          `:hover/:active/:focus on the subject.\n` +
+          `:hover/:active/:focus/:checked/:disabled on the subject.\n` +
           `  Not yet supported: attribute selectors, child (>) and sibling (+ ~) ` +
           `combinators, and *.`,
         partAt,
@@ -1796,6 +1818,48 @@ export function expandDeclaration(
       out.scrollbarThumb = parseColor(parts[0]!);
       out.scrollbarTrack = parseColor(parts[1]!);
       return;
+    }
+
+    // The form-control properties. Three of the five ROADMAP C2 lists; `resize`
+    // and `field-sizing: content` are committed non-goals there and are refused
+    // by the `default` arm below like any other unsupported property.
+    //
+    // Both colours take `auto | <color>`, and `auto` is alpha 0 — the same
+    // "nothing was said here" sentinel `border-color` and `scrollbar-color` use.
+    // Spelling it as a value rather than a flag is what keeps these ordinary
+    // interned fields: the cascade, the variant runs and the patch machinery all
+    // work on numbers and never learn that this one has a keyword.
+    case "accent-color":
+      out.accentColor = value.toLowerCase() === "auto" ? 0x00000000 : parseColor(value);
+      return;
+    case "caret-color":
+      out.caretColor = value.toLowerCase() === "auto" ? 0x00000000 : parseColor(value);
+      return;
+
+    // `appearance: none | auto`. The rest of the grammar — `<compat-auto>`, so
+    // `button`, `checkbox`, `textfield`, `menulist-button` — is refused rather
+    // than folded into `auto`, because those values ask for one element to be
+    // drawn as a *different* control, and dziri draws a control from the element's
+    // own kind. Folding them would accept the declaration and then not honour it.
+    //
+    // Written as ifs rather than a nested switch so that `css-coverage`, which
+    // reads this function's `case` labels to find out what dziri parses, does not
+    // count `none` and `auto` as CSS properties.
+    case "appearance": {
+      const keyword = value.toLowerCase();
+      if (keyword === "none") {
+        out.appearance = Appearance.NONE;
+        return;
+      }
+      if (keyword === "auto") {
+        out.appearance = Appearance.AUTO;
+        return;
+      }
+      throw new CssError(
+        `appearance takes none or auto, got "${value}" — the <compat-auto> values ` +
+          `(button, checkbox, textfield, …) ask for one control to be drawn as ` +
+          `another, which dziri does not do`,
+      );
     }
 
     case "display":
