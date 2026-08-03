@@ -128,6 +128,38 @@ const NODES: Table = {
       type: "u8",
       doc: "Bit 0 interactive, bit 1 measurable text, bit 2 generated (predicates come from parent)",
     },
+    {
+      name: "activates",
+      type: "i32",
+      doc: "The control node a press here operates, or -1",
+    },
+  ],
+};
+
+/**
+ * Which nodes are form controls, and what kind. Sparse and sorted by node.
+ *
+ * Sparse because controls are rare — a page of 900 nodes has a dozen — and the
+ * engine's per-node lookup is a dense array it builds *itself* on rescan, exactly
+ * as `Anims` does. So nothing here is paid per node.
+ *
+ * The engine owns the live checkedness, and this table holds only what the
+ * compiler knows: which node is a control, which group it belongs to, and the
+ * state it was authored in. That split is deliberate — see `ControlFlags`.
+ */
+const CONTROLS: Table = {
+  name: "controls",
+  doc: "Form controls: kind, radio group, and authored initial state.",
+  sizedBy: "own",
+  fields: [
+    { name: "node", type: "i32", doc: "Sorted ascending, for binary search" },
+    { name: "kind", type: "u8", doc: "ControlKind" },
+    {
+      name: "group",
+      type: "i32",
+      doc: "Radio group id — interned per (form, name) — or -1",
+    },
+    { name: "flags", type: "u8", doc: "ControlFlags: the authored initial state" },
   ],
 };
 
@@ -517,6 +549,7 @@ export const TABLES: Table[] = [
   LISTS,
   TWEENS,
   KEYFRAMES,
+  CONTROLS,
   LAYOUT,
   STRINGS,
 ];
@@ -759,7 +792,27 @@ export const ENUMS: EnumDef[] = [
       KEY_DOWN: 7,
       TEXT_INPUT: 8,
       FOCUS: 9,
+      /**
+       * A control's own state changed — `a` is 1 for checked, 0 for unchecked.
+       *
+       * Distinct from `CLICK` because the two are not the same event and the
+       * difference is measured: clicking an already-checked radio fires `click`
+       * and no `change`, and clicking a *label* fires `click` on the label as
+       * well as on the control. A host wanting "the value changed" cannot get it
+       * by counting clicks.
+       */
+      CHANGE: 10,
     },
+  },
+  {
+    name: "ControlKind",
+    doc:
+      "`controls.kind`. What a press does to this node, which is the only thing the " +
+      "engine needs to know about a control — appearance is the stylesheet's job and " +
+      "is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets " +
+      "itself and clears its group, and cannot be unchecked by pointer (measured).",
+    ty: "u8",
+    values: { NONE: 0, CHECKBOX: 1, RADIO: 2 },
   },
   {
     name: "Status",
@@ -835,8 +888,18 @@ export const ENUMS: EnumDef[] = [
  * bump on its own — enums carry no layout — and that is worth restating here
  * precisely because `SCHEMA_HASH` cannot see enum *values*: retuning what
  * `STEPS` means would need this bumped by hand, exactly as v10 was.
+ *
+ * v13 makes a control a control: `nodes.activates` and the `controls` table, which
+ * together are what lets a press reach a checkbox and a radio clear its group. The
+ * hash moves on its own — a new table and a new node field — and the bump is the
+ * ordinary kind as well, twice: the nodes table grew, and `TABLE_COUNT` went from
+ * 10 to 11, so `layout` and `strings` both shifted index.
+ *
+ * The `CHECKED` and `DISABLED` predicate bits reserved back in v9 are finally read
+ * by something. They needed no protocol change to become live, which is what
+ * reserving them was for.
  */
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
@@ -858,4 +921,27 @@ export const NodeFlags = {
    * is not a direct child would need the column; none is.
    */
   GENERATED: 1 << 2,
+} as const;
+
+/**
+ * `controls.flags` — the state a control was **authored** in, not the state it is in.
+ *
+ * The distinction is the whole design, so it is worth being explicit about which
+ * side owns what. The compiler owns this table and never changes it. The engine
+ * owns the live checkedness in a dense array it builds on rescan, seeded from
+ * `CHECKED` here the first time it sees a row, and after that the user owns it.
+ *
+ * That seeding-once rule is not an optimisation, it is the correctness condition:
+ * Bun republishes the tables whenever any signal changes, and a rescan that reset
+ * from this table would silently un-tick a box the moment an unrelated counter
+ * incremented.
+ *
+ * `DISABLED` is different and is re-read from here on every rescan, because it is
+ * genuinely compile-time: it comes from the `disabled` attribute and the user
+ * cannot change it. A control that needs to become enabled at run time is a
+ * conditional class today, and a live bit when something needs it.
+ */
+export const ControlFlags = {
+  CHECKED: 1 << 0,
+  DISABLED: 1 << 1,
 } as const;

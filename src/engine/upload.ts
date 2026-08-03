@@ -110,6 +110,13 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
   ["animation", "animation"],
 ];
 
+/**
+ * The `node` a spare controls row claims: none, and larger than any real one.
+ *
+ * `i32::MAX`. See {@link Uploader.uploadControls} for why it is not `-1`.
+ */
+export const NO_CONTROL_NODE = 0x7fffffff;
+
 /** How much room to leave beyond what the IR needs right now. */
 const NODE_HEADROOM = 1.5;
 const STRING_HEADROOM = 2;
@@ -124,6 +131,7 @@ export type Capacities = {
   lists: number;
   tweens: number;
   keyframes: number;
+  controls: number;
   strings: number;
   stringBytes: number;
 };
@@ -167,6 +175,9 @@ export function capacitiesFor(ui: CompiledUi): Capacities {
     // The engine's per-node `t` is not a row.
     tweens: Math.max(ui.tweens.count, 1),
     keyframes: Math.max(ui.keyframes.count, 1),
+    // Fixed too: which nodes are controls is markup, and no run-time state can add
+    // one. The *checkedness* is what varies, and that is not a row.
+    controls: Math.max(ui.controls.count, 1),
     strings: Math.ceil(ui.strings.length * STRING_HEADROOM) + 16,
     stringBytes: arenaBytes(bytes),
   };
@@ -251,6 +262,7 @@ export class Uploader {
     this.uploadVariants();
     this.uploadMedia();
     this.uploadTweens();
+    this.uploadControls();
     this.uploadLists();
     this.uploadNodes();
     this.uploadStrings(true);
@@ -276,6 +288,7 @@ export class Uploader {
     t.nextSibling.set(nodes.nextSibling.subarray(0, count));
     t.list.set(nodes.list.subarray(0, count));
     t.hidden.set(nodes.hidden.subarray(0, count));
+    t.activates.set(nodes.activates.subarray(0, count));
 
     // Nodes past the IR's count are spare capacity: unreachable from the root,
     // but they must not claim to be anyone's child.
@@ -284,6 +297,9 @@ export class Uploader {
     t.parent.fill(-1, count);
     t.text.fill(-1, count);
     t.flags.fill(0, count);
+    // A spare row that pointed at node 0 would make an unreachable node's press
+    // operate a real control, which is why this is a `-1` fill and not left at zero.
+    t.activates.fill(-1, count);
 
     // Flags the old runtime kept in two side tables. `interactive` is emitted by
     // the compiler rather than inferred — inferring it from `hover >= 0` silently
@@ -423,6 +439,35 @@ export class Uploader {
     k.easeC.set(keyframes.easeC.subarray(0, m));
     k.easeD.set(keyframes.easeD.subarray(0, m));
     k.offset.fill(0, m);
+  }
+
+  /**
+   * The controls table.
+   *
+   * Spare rows are padded with {@link NO_CONTROL_NODE} rather than with `-1`, and
+   * that choice is load-bearing rather than cosmetic. The engine binary-searches this
+   * table by node, so the `node` column has to stay **sorted** — and padding at the
+   * *end* of a table can only stay sorted with a sentinel that is larger than every
+   * real node, not smaller. Left at zero, a spare row would claim node 0 is a
+   * checkbox and sort ahead of every real row; filled with `-1` it would sort ahead
+   * too, and the search for a real control would miss.
+   */
+  uploadControls(): void {
+    const { controls } = this.#ui;
+    const t = this.#tables.controls;
+    const n = Math.min(controls.count, t.node.length);
+
+    t.node.set(controls.node.subarray(0, n));
+    t.kind.set(controls.kind.subarray(0, n));
+    t.group.set(controls.group.subarray(0, n));
+    t.flags.set(controls.flags.subarray(0, n));
+
+    t.node.fill(NO_CONTROL_NODE, n);
+    t.kind.fill(0, n);
+    // Not a group anything can be in, so a spare row is never cleared as a
+    // group-mate — `-1` is already "no group" for a nameless radio.
+    t.group.fill(-1, n);
+    t.flags.fill(0, n);
   }
 
   uploadLists(): void {

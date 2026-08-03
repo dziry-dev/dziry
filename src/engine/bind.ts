@@ -180,7 +180,7 @@ export function bindSpans(spans: readonly Span[]): Bound {
   }
 
   /* `layout` is sized by `nodes` and has no capacity of its own, so it is not
-     asked for here — the ten names below are exactly `Capacities` in
+     asked for here — the eleven names below are exactly `Capacities` in
      `tables.rs`, which is what `grow` takes. */
   const capacities: Capacities = {
     nodes: capacity["nodes"] ?? 0,
@@ -191,6 +191,7 @@ export function bindSpans(spans: readonly Span[]): Bound {
     lists: capacity["lists"] ?? 0,
     tweens: capacity["tweens"] ?? 0,
     keyframes: capacity["keyframes"] ?? 0,
+    controls: capacity["controls"] ?? 0,
     strings: capacity["strings"] ?? 0,
     stringBytes: capacity["stringBytes"] ?? 0,
   };

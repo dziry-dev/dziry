@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 12;
+export const PROTOCOL_VERSION = 13;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,11 +19,11 @@ export const PROTOCOL_VERSION = 12;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xe9163ea4;
+export const SCHEMA_HASH = 0x91909483;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
-  nodes: [1, 2, 4, 4, 4, 4, 2, 1, 1],
+  nodes: [1, 2, 4, 4, 4, 4, 2, 1, 1, 4],
   styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2],
   variants: [4, 4, 4],
   variantSlots: [2],
@@ -31,13 +31,14 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
   lists: [4, 4, 4, 4, 4, 4, 4],
   tweens: [4, 4, 4, 4, 4, 2, 1, 4, 4, 4, 4],
   keyframes: [2, 4, 1, 4, 4, 4, 4],
+  controls: [4, 1, 4, 1],
   layout: [4, 4, 4, 4],
   strings: [4, 4],
 };
 
 /** Field names per table, in descriptor order — used to name a mismatch. */
 export const FIELD_NAMES: Record<TableName, string[]> = {
-  nodes: ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags"],
+  nodes: ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags", "activates"],
   styles: ["bg", "fg", "borderColor", "borderWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance", "opacity", "translateX", "translateY", "translatePercentX", "translatePercentY", "rotate", "scaleX", "scaleY", "skewX", "skewY", "transformOriginPercentX", "transformOriginPercentY", "transformOriginX", "transformOriginY", "transition", "animation"],
   variants: ["node", "mask", "runStart"],
   variantSlots: ["style"],
@@ -45,6 +46,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
   lists: ["container", "anchorPrev", "anchorNext", "arenaStart", "stride", "capacity", "active"],
   tweens: ["mask", "duration", "delay", "iterations", "firstSegment", "segmentCount", "easing", "easeA", "easeB", "easeC", "easeD"],
   keyframes: ["style", "offset", "easing", "easeA", "easeB", "easeC", "easeD"],
+  controls: ["node", "kind", "group", "flags"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
 };
@@ -112,7 +114,7 @@ export type AnimatableField = keyof typeof ANIM_BIT;
 /** Every animatable field's mask bit at once — what `transition-property: all` means here. */
 export const ANIM_ALL = 0x1ffffff;
 
-export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "tweens", "keyframes", "layout", "strings"] as const;
+export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "tweens", "keyframes", "controls", "layout", "strings"] as const;
 export type TableName = (typeof TABLE_NAMES)[number];
 
 /** Field index per table, in descriptor order. */
@@ -128,6 +130,7 @@ export const F = {
     list: 6, // Index into the list table, or -1
     hidden: 7, // Non-zero excludes the subtree entirely
     flags: 8, // Bit 0 interactive, bit 1 measurable text, bit 2 generated (predicates come from parent)
+    activates: 9, // The control node a press here operates, or -1
   },
   /** Resolved style values. Patches write field values in place. */
   styles: {
@@ -256,6 +259,13 @@ export const F = {
     easeC: 5,
     easeD: 6,
   },
+  /** Form controls: kind, radio group, and authored initial state. */
+  controls: {
+    node: 0, // Sorted ascending, for binary search
+    kind: 1, // ControlKind
+    group: 2, // Radio group id — interned per (form, name) — or -1
+    flags: 3, // ControlFlags: the authored initial state
+  },
   /** Final bounds per node, written by the engine. */
   layout: {
     x: 0,
@@ -272,7 +282,7 @@ export const F = {
 
 /** Field counts, asserted against the engine's descriptor at startup. */
 export const FIELD_COUNTS: Record<TableName, number> = {
-  nodes: 9,
+  nodes: 10,
   styles: 74,
   variants: 3,
   variantSlots: 1,
@@ -280,13 +290,14 @@ export const FIELD_COUNTS: Record<TableName, number> = {
   lists: 7,
   tweens: 11,
   keyframes: 7,
+  controls: 4,
   layout: 4,
   strings: 2,
 };
 
 /** Typed-array constructor per field, used to wrap the engine's memory. */
 export const FIELD_VIEWS: Record<TableName, unknown[]> = {
-  nodes: [Uint8Array, Uint16Array, Int32Array, Int32Array, Int32Array, Int32Array, Int16Array, Uint8Array, Uint8Array],
+  nodes: [Uint8Array, Uint16Array, Int32Array, Int32Array, Int32Array, Int32Array, Int16Array, Uint8Array, Uint8Array, Int32Array],
   styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array],
   variants: [Int32Array, Uint32Array, Int32Array],
   variantSlots: [Uint16Array],
@@ -294,6 +305,7 @@ export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
   tweens: [Uint32Array, Float32Array, Float32Array, Float32Array, Int32Array, Uint16Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
   keyframes: [Uint16Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
+  controls: [Int32Array, Uint8Array, Int32Array, Uint8Array],
   layout: [Float32Array, Float32Array, Float32Array, Float32Array],
   strings: [Uint32Array, Uint32Array],
 };
@@ -310,6 +322,7 @@ export type SharedTables = {
     list: Int16Array;
     hidden: Uint8Array;
     flags: Uint8Array;
+    activates: Int32Array;
   };
   styles: {
     bg: Uint32Array;
@@ -431,6 +444,12 @@ export type SharedTables = {
     easeC: Float32Array;
     easeD: Float32Array;
   };
+  controls: {
+    node: Int32Array;
+    kind: Uint8Array;
+    group: Int32Array;
+    flags: Uint8Array;
+  };
   layout: {
     x: Float32Array;
     y: Float32Array;
@@ -447,6 +466,11 @@ export const NodeFlags = {
   INTERACTIVE: 1 << 0,
   MEASURABLE: 1 << 1,
   GENERATED: 1 << 2,
+} as const;
+
+export const ControlFlags = {
+  CHECKED: 1 << 0,
+  DISABLED: 1 << 1,
 } as const;
 
 /** What a node is. `nodes.kind`. */
@@ -597,8 +621,17 @@ export const EventKind = {
   KEY_DOWN: 7,
   TEXT_INPUT: 8,
   FOCUS: 9,
+  CHANGE: 10,
 } as const;
 export type EventKind = (typeof EventKind)[keyof typeof EventKind];
+
+/** `controls.kind`. What a press does to this node, which is the only thing the engine needs to know about a control — appearance is the stylesheet's job and is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets itself and clears its group, and cannot be unchecked by pointer (measured). */
+export const ControlKind = {
+  NONE: 0,
+  CHECKBOX: 1,
+  RADIO: 2,
+} as const;
+export type ControlKind = (typeof ControlKind)[keyof typeof ControlKind];
 
 /** Return code of every FFI entry point. Negative is failure, and the detail is in `dziri_last_error`. */
 export const Status = {

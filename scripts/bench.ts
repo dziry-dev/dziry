@@ -100,6 +100,7 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     media: m.media,
     tweens: m.tweens,
     keyframes: m.keyframes,
+    controls: m.controls,
     root: m.root,
   };
 }

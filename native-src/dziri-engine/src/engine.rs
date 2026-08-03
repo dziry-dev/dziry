@@ -98,6 +98,8 @@ pub struct EngineConfig {
     pub tween_capacity: u32,
     /// Rows in the keyframe table, summed over every animation on the page.
     pub keyframe_capacity: u32,
+    /// Rows in the controls table — one per form control, not per node.
+    pub control_capacity: u32,
     pub string_capacity: u32,
     pub string_bytes: u32,
     pub root: u32,
@@ -229,6 +231,7 @@ impl Engine {
             lists: config.list_capacity.max(1),
             tweens: config.tween_capacity.max(1),
             keyframes: config.keyframe_capacity.max(1),
+            controls: config.control_capacity.max(1),
             strings: config.string_capacity.max(1),
             string_bytes: config.string_bytes.max(1),
         };
@@ -1144,6 +1147,19 @@ impl Engine {
         }
 
         let hit = self.hit_test(x, y);
+
+        // A disabled control receives no button events at all — not a click that gets
+        // ignored, no events. Measured, `probes/control-activation.html`: pressing one
+        // produced no `mousedown`, no `mouseup` and no `click`, and it never took focus.
+        // So the press is dropped here, before anything is recorded.
+        //
+        // Its *label* is deliberately not covered by this. A label of a disabled
+        // control still presses and still joins the `:active` chain; it simply forwards
+        // nothing, which `Controls::activate` refuses on its own.
+        if self.painter.press_is_swallowed(hit) {
+            return;
+        }
+
         // Clicking is the only way to acquire focus for now; keyboard traversal is A3.
         self.state.pressed = hit;
         self.state.focused = hit;
@@ -1169,8 +1185,16 @@ impl Engine {
 
         let hit = self.hit_test(x, y);
         // A click is press and release on the *same* node, which is what makes
-        // dragging off a button cancel it.
+        // dragging off a button cancel it. Measured too: pressing a checkbox and
+        // releasing away from it focused the box without ticking it.
         if self.state.pressed != -1 && hit == self.state.pressed {
+            // The activation behaviour runs *before* the click event, not after. That
+            // ordering is measured rather than chosen: a `mouseup` handler still sees
+            // the old checkedness while a `click` handler sees the new one, which is
+            // the spec's pre-click activation behaviour. So a host handler reading the
+            // state on CLICK reads the state after the flip, as it should.
+            let activation = self.painter.activate_control(&self.tables, hit);
+
             self.events.push(Event {
                 kind: event_kind::CLICK,
                 node: hit,
@@ -1178,6 +1202,38 @@ impl Engine {
                 y,
                 ..Default::default()
             });
+
+            if let Some(act) = activation {
+                self.needs_paint = true;
+
+                // The second click a browser dispatches at the control when a *label*
+                // was what got clicked. Only when the two differ: the forwarding is
+                // skipped when the target already is the control, which is measured and
+                // is the only thing stopping a wrapping label from acting twice.
+                if act.node != hit {
+                    self.events.push(Event {
+                        kind: event_kind::CLICK,
+                        node: act.node,
+                        x,
+                        y,
+                        ..Default::default()
+                    });
+                }
+
+                // `change` and `click` are not the same event, and the difference is
+                // measured: re-clicking an already-checked radio fires `click` and no
+                // `change`. A host counting clicks cannot recover that.
+                if act.changed {
+                    self.events.push(Event {
+                        kind: event_kind::CHANGE,
+                        node: act.node,
+                        a: i32::from(act.checked),
+                        x,
+                        y,
+                        ..Default::default()
+                    });
+                }
+            }
         }
         self.state.pressed = -1;
         self.state.hovered = hit;

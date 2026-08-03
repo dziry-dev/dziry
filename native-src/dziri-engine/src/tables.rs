@@ -73,6 +73,7 @@ pub struct Capacities {
     pub lists: u32,
     pub tweens: u32,
     pub keyframes: u32,
+    pub controls: u32,
     pub strings: u32,
     pub string_bytes: u32,
 }
@@ -94,6 +95,7 @@ impl Capacities {
                 "lists" => self.lists,
                 "tweens" => self.tweens,
                 "keyframes" => self.keyframes,
+                "controls" => self.controls,
                 other => unreachable!("table {other} has no capacity rule"),
             },
         }
@@ -789,6 +791,7 @@ impl Tables {
             lists: self.caps.lists.max(want.lists),
             tweens: self.caps.tweens.max(want.tweens),
             keyframes: self.caps.keyframes.max(want.keyframes),
+            controls: self.caps.controls.max(want.controls),
             strings: self.caps.strings.max(want.strings),
             string_bytes: self.caps.string_bytes.max(want.string_bytes),
         };
@@ -840,6 +843,7 @@ mod tests {
             lists: 1,
             tweens: 2,
             keyframes: 4,
+            controls: 4,
             strings: 4,
             string_bytes: 64,
         }

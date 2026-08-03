@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 12;
+pub const PROTOCOL_VERSION: u32 = 13;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,9 +15,9 @@ pub const PROTOCOL_VERSION: u32 = 12;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0xe9163ea4;
+pub const SCHEMA_HASH: u32 = 0x91909483;
 
-pub const TABLE_COUNT: usize = 10;
+pub const TABLE_COUNT: usize = 11;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
@@ -31,6 +31,7 @@ pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "lists",
     "tweens",
     "keyframes",
+    "controls",
     "layout",
     "strings",
 ];
@@ -46,8 +47,9 @@ pub enum Table {
     Lists = 5,
     Tweens = 6,
     Keyframes = 7,
-    Layout = 8,
-    Strings = 9,
+    Controls = 8,
+    Layout = 9,
+    Strings = 10,
 }
 
 impl Table {
@@ -65,6 +67,7 @@ pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [
     lists::FIELD_COUNT,
     tweens::FIELD_COUNT,
     keyframes::FIELD_COUNT,
+    controls::FIELD_COUNT,
     layout::FIELD_COUNT,
     strings::FIELD_COUNT,
 ];
@@ -72,7 +75,7 @@ pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [
 /// How each table is sized, so the engine can turn a capacity request into byte
 /// spans without a hand-written mapping that could drift from the schema.
 pub const SIZED_BY: [&str; TABLE_COUNT] = [
-    "nodes", "styles", "own", "own", "own", "own", "own", "own", "nodes", "strings",
+    "nodes", "styles", "own", "own", "own", "own", "own", "own", "own", "nodes", "strings",
 ];
 
 /// Element size per field, indexed by table. Empty for an unknown table.
@@ -86,8 +89,9 @@ pub fn elem_sizes(table: usize) -> &'static [usize] {
         5 => &lists::ELEM_SIZES,
         6 => &tweens::ELEM_SIZES,
         7 => &keyframes::ELEM_SIZES,
-        8 => &layout::ELEM_SIZES,
-        9 => &strings::ELEM_SIZES,
+        8 => &controls::ELEM_SIZES,
+        9 => &layout::ELEM_SIZES,
+        10 => &strings::ELEM_SIZES,
         _ => &[],
     }
 }
@@ -103,8 +107,9 @@ pub fn field_names(table: usize) -> &'static [&'static str] {
         5 => &lists::FIELD_NAMES,
         6 => &tweens::FIELD_NAMES,
         7 => &keyframes::FIELD_NAMES,
-        8 => &layout::FIELD_NAMES,
-        9 => &strings::FIELD_NAMES,
+        8 => &controls::FIELD_NAMES,
+        9 => &layout::FIELD_NAMES,
+        10 => &strings::FIELD_NAMES,
         _ => &[],
     }
 }
@@ -121,9 +126,10 @@ pub mod nodes {
     pub const LIST: usize = 6;
     pub const HIDDEN: usize = 7;
     pub const FLAGS: usize = 8;
+    pub const ACTIVATES: usize = 9;
 
-    pub const FIELD_COUNT: usize = 9;
-    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [1, 2, 4, 4, 4, 4, 2, 1, 1];
+    pub const FIELD_COUNT: usize = 10;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [1, 2, 4, 4, 4, 4, 2, 1, 1, 4];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
         "kind",
         "style",
@@ -134,6 +140,7 @@ pub mod nodes {
         "list",
         "hidden",
         "flags",
+        "activates",
     ];
 }
 
@@ -454,6 +461,19 @@ pub mod keyframes {
     ];
 }
 
+/// Form controls: kind, radio group, and authored initial state.
+pub mod controls {
+    /// Field indices, in descriptor order.
+    pub const NODE: usize = 0;
+    pub const KIND: usize = 1;
+    pub const GROUP: usize = 2;
+    pub const FLAGS: usize = 3;
+
+    pub const FIELD_COUNT: usize = 4;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 1, 4, 1];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["node", "kind", "group", "flags"];
+}
+
 /// Final bounds per node, written by the engine.
 pub mod layout {
     /// Field indices, in descriptor order.
@@ -478,11 +498,15 @@ pub mod strings {
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["offset", "length"];
 }
 
-/// Node flag bits.
 pub mod flags {
     pub const INTERACTIVE: u8 = 1 << 0;
     pub const MEASURABLE: u8 = 1 << 1;
     pub const GENERATED: u8 = 1 << 2;
+}
+
+pub mod control_flags {
+    pub const CHECKED: u8 = 1 << 0;
+    pub const DISABLED: u8 = 1 << 1;
 }
 
 /// What a node is. `nodes.kind`.
@@ -618,6 +642,14 @@ pub mod event_kind {
     pub const KEY_DOWN: u32 = 7;
     pub const TEXT_INPUT: u32 = 8;
     pub const FOCUS: u32 = 9;
+    pub const CHANGE: u32 = 10;
+}
+
+/// `controls.kind`. What a press does to this node, which is the only thing the engine needs to know about a control — appearance is the stylesheet's job and is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets itself and clears its group, and cannot be unchecked by pointer (measured).
+pub mod control_kind {
+    pub const NONE: u8 = 0;
+    pub const CHECKBOX: u8 = 1;
+    pub const RADIO: u8 = 2;
 }
 
 /// Return code of every FFI entry point. Negative is failure, and the detail is in `dziri_last_error`.

@@ -20,6 +20,7 @@
 //! hidden byte cost no FFI call at all. See [`tables`].
 
 pub mod anim;
+pub mod controls;
 pub mod engine;
 pub mod error;
 pub mod layout;
@@ -561,6 +562,33 @@ pub extern "C" fn dziri_engine_set_input_state(
 pub extern "C" fn dziri_engine_set_time_step(handle: Handle, dt: f32) -> i32 {
     with(handle, |engine| {
         engine.set_time_step(dt);
+        status::OK
+    })
+}
+
+/// Presses and releases at a point, exactly as the window pump would.
+///
+/// The counterpart to `set_input_state`, and needed for a different reason. That one
+/// *asserts* a hover; this one **happens** — it runs the whole press path, so
+/// hit-testing, the disabled-control swallow, a label's forwarding and the activation
+/// behaviour all take part. A checkbox that ticks only when a real press reaches it
+/// cannot be tested by declaring the state it ends in.
+///
+/// ROADMAP A0 asks for "interaction tests — click → signal → repaint"; this is the
+/// entry point that makes one possible headlessly. Two calls rather than one so a
+/// caller can also hold a button down, which `:active` needs.
+#[no_mangle]
+pub extern "C" fn dziri_engine_mouse_down(handle: Handle, x: f32, y: f32) -> i32 {
+    with(handle, |engine| {
+        engine.mouse_down(x, y);
+        status::OK
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dziri_engine_mouse_up(handle: Handle, x: f32, y: f32) -> i32 {
+    with(handle, |engine| {
+        engine.mouse_up(x, y);
         status::OK
     })
 }

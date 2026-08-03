@@ -449,13 +449,25 @@ winit-versus-SDL3 choice reversible.
 - Tab order over spatial navigation: it is the desktop convention and what Radix implements.
 
 **A3 alone unblocks most of forms.** Tier 1a below — Checkbox, Radio, Switch, Toggle, Tabs — needs
-nothing from A5: no text buffer, no IME, no clipboard. Only `Input` waits for A5. The engine already
-has the parts A3 builds on: `state.focused`, `KeyDown` routed to the focused node, `FocusChanged`,
-`hit_test` and `set_input_state` (`engine.rs`). What is missing is tab walking, `:focus-visible` as
-a bit distinct from `:focus`, and Enter/Space through the click dispatch.
+nothing from A5: no text buffer, no IME, no clipboard. Only `Input` waits for A5.
 
-**Probe before writing Rust.** Focus and blur ordering, and what `:focus-visible` actually resolves
-to, are exactly the semantics `/browser-oracle` exists for — nobody should assert them from memory.
+**Pointer activation has landed** (protocol v13, `controls.rs`): a click ticks a checkbox, a radio
+sets itself and clears its group, a disabled control swallows the press entirely, and a press on a
+label — or on the words beside a box — reaches the control. `:checked` and `:disabled` are live
+predicates, so the variants the compiler had been emitting since C2 phase 0 are finally selectable.
+The engine owns that state, and `controls.rs` opens with why that is the gate answered honestly
+rather than a shortcut: nobody declared the answer, so there is no signal to be the authority.
+
+What is still missing from A3, and none of it is blocked by the above: tab walking,
+`:focus-visible` as a bit distinct from `:focus`, Enter/Space through the click dispatch,
+`onChange`/`onInput` reaching a handler (the engine queues a `CHANGE` event and no host consumes it
+yet), and a way for a control to *become* disabled at run time.
+
+**Probe before writing Rust.** This was followed for activation and it paid for itself immediately —
+`probes/control-activation.html` found four things that would have been implemented backwards, the
+sharpest being that `:active` follows a label to its control from anywhere in the chain while
+`:hover` only does so from the label itself. Focus and blur ordering, and what `:focus-visible`
+actually resolves to, are the same kind of question and nobody should assert them from memory.
 Run the probes, record the answers in BROWSER-FACTS.md, then implement against that.
 
 ### A4 · Scrolling

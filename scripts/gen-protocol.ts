@@ -15,6 +15,7 @@
 import { join } from "node:path";
 import {
   ANIMATABLE_FIELDS,
+  ControlFlags,
   ELEM_SIZE,
   ELEM_VIEW,
   ENUMS,
@@ -40,13 +41,28 @@ const ROOT = join(import.meta.dir, "..");
  * is the same silent class as a wrong offset — the engine would test a bit
  * neither side agreed on — and `SCHEMA_HASH` does not cover flags.
  */
-const flagsTs = Object.entries(NodeFlags)
-  .map(([name, bit]) => `  ${name}: 1 << ${Math.log2(bit)},`)
-  .join("\n");
+const flagBodyTs = (bits: Record<string, number>) =>
+  Object.entries(bits)
+    .map(([name, bit]) => `  ${name}: 1 << ${Math.log2(bit)},`)
+    .join("\n");
 
-const flagsRust = Object.entries(NodeFlags)
-  .map(([name, bit]) => `    pub const ${name}: u8 = 1 << ${Math.log2(bit)};`)
-  .join("\n");
+const flagBodyRust = (bits: Record<string, number>) =>
+  Object.entries(bits)
+    .map(([name, bit]) => `    pub const ${name}: u8 = 1 << ${Math.log2(bit)};`)
+    .join("\n");
+
+/**
+ * Every flag group, so adding one is an entry here rather than four edits.
+ *
+ * `ControlFlags` is the second, and it is what turned the pair of hand-written
+ * renderings above into a table: the argument for generating `NodeFlags` applies
+ * verbatim to any further group, and the way to stop the same mistake recurring is
+ * to make "another group" cost nothing.
+ */
+const FLAG_GROUPS: Array<[string, string, Record<string, number>]> = [
+  ["flags", "NodeFlags", NodeFlags],
+  ["control_flags", "ControlFlags", ControlFlags],
+];
 
 /**
  * A structural fingerprint of the tables: every table name, field name and
@@ -336,10 +352,7 @@ ${fieldNameArms}
 
 ${tables}
 
-/// Node flag bits.
-pub mod flags {
-${flagsRust}
-}
+${FLAG_GROUPS.map(([mod, , bits]) => `pub mod ${mod} {\n${flagBodyRust(bits)}\n}`).join("\n\n")}
 
 ${enums}
 `;
@@ -465,9 +478,7 @@ export type SharedTables = {
 ${views}
 };
 
-export const NodeFlags = {
-${flagsTs}
-} as const;
+${FLAG_GROUPS.map(([, name, bits]) => `export const ${name} = {\n${flagBodyTs(bits)}\n} as const;`).join("\n\n")}
 
 ${ENUMS.map(tsEnum).join("\n\n")}
 `;

@@ -22,6 +22,8 @@ import {
   Appearance as SchemaAppearance,
   Easing as SchemaEasing,
   StepPosition as SchemaStepPosition,
+  ControlKind as SchemaControlKind,
+  ControlFlags as SchemaControlFlags,
 } from "./protocol/generated.ts";
 
 /**
@@ -65,6 +67,9 @@ export const ScrollbarWidth = SchemaScrollbarWidth;
 export const Appearance = SchemaAppearance;
 export const Easing = SchemaEasing;
 export const StepPosition = SchemaStepPosition;
+export const ControlKind = SchemaControlKind;
+export type ControlKind = (typeof ControlKind)[keyof typeof ControlKind];
+export const ControlFlags = SchemaControlFlags;
 
 /**
  * "The author said nothing" for an enum field.
@@ -419,7 +424,60 @@ export type NodeTable = {
   list: Int16Array;
   /** Non-zero excludes the node and its subtree from layout, paint and input. */
   hidden: Uint8Array;
+  /**
+   * The control node a press on this one operates, or -1.
+   *
+   * A control points at itself. A `<label>` points at the control it labels, and so
+   * does every descendant of that label — which is what makes clicking the text
+   * beside a checkbox tick it. Measured, `probes/control-activation.html`: a browser
+   * does this by dispatching a *second* click at the control, and the forwarding is
+   * skipped exactly when the target already is the control, so a wrapping label
+   * cannot toggle twice.
+   *
+   * Dense rather than sparse, unlike the `controls` table beside it, because this is
+   * what the hit path reads: one indexed load on the node the pointer landed on,
+   * against a binary search for a table whose rows are mostly *not* what was hit.
+   */
+  activates: Int32Array;
 };
+
+/**
+ * Which nodes are form controls. Sparse, sorted by `node` for binary search.
+ *
+ * The engine's answer to "is this checked" is a dense array it builds itself on
+ * rescan, so nothing here costs anything per node. What is here is only what the
+ * compiler can know, and the line between the two is the design:
+ *
+ * - `kind` and `group` are compile-time facts about the markup.
+ * - `flags` is the state the control was *authored* in, read once to seed the
+ *   engine's own state and never again. A rescan that re-read it would un-tick a
+ *   box whenever an unrelated signal caused Bun to republish.
+ *
+ * So checkedness is engine-owned interaction state, in the same category as
+ * `hovered` and `focused` rather than in the same category as a style. That is what
+ * makes an uncontrolled `<input type="checkbox">` work at all: there is no signal
+ * to be the authority, exactly as there is none for which node the pointer is over.
+ */
+export type ControlTable = {
+  count: number;
+  node: Int32Array;
+  /** `ControlKind`. */
+  kind: Uint8Array;
+  /** Radio group id, interned per `(form, name)`, or -1. */
+  group: Int32Array;
+  /** `ControlFlags` — the authored initial state. */
+  flags: Uint8Array;
+};
+
+export function emptyControlTable(): ControlTable {
+  return {
+    count: 0,
+    node: new Int32Array(0),
+    kind: new Uint8Array(0),
+    group: new Int32Array(0),
+    flags: new Uint8Array(0),
+  };
+}
 
 /**
  * Conditional styling as a predicate mask, stored sparsely.
@@ -576,6 +634,7 @@ export type CompiledUi = {
   media: MediaTable;
   tweens: TweenTable;
   keyframes: KeyframeTable;
+  controls: ControlTable;
   root: number;
 };
 

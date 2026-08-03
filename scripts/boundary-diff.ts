@@ -166,6 +166,7 @@ if (LIVE) {
       media: ui.media,
       tweens: ui.tweens,
       keyframes: ui.keyframes,
+      controls: ui.controls,
       root: ui.root,
     };
 

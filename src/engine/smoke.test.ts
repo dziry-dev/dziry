@@ -47,6 +47,7 @@ const engine = Engine.open({
   lists: 1,
   tweens: 1,
   keyframes: 1,
+  controls: 2,
   strings: 4,
   stringBytes: 256,
   windowed: false,

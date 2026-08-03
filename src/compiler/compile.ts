@@ -10,6 +10,8 @@
  */
 import {
   Align,
+  ControlFlags,
+  ControlKind,
   Direction,
   Display,
   Easing,
@@ -910,6 +912,21 @@ type BuiltNode = {
    * interactive nodes.
    */
   generated?: true;
+  /**
+   * The control node a press here operates. Filled by `resolveActivation`.
+   *
+   * Absent rather than -1 while it is being computed, so "not decided yet" and
+   * "decided to be nothing" stay distinguishable during the propagation sweep.
+   */
+  activates?: number;
+  /**
+   * This element handles its own press, so a label's target does not reach it.
+   *
+   * HTML's "interactive content" exclusion, which is what stops a `<button>` inside
+   * a label from toggling the checkbox beside it. Recorded during the walk because
+   * it is a fact about the *element* and `resolveActivation` works on nodes.
+   */
+  ownsPress?: true;
 };
 
 /**
@@ -1043,6 +1060,53 @@ export type BuiltEditable = {
   name: string;
 };
 
+/** One row of the controls table: what a press does, and the authored state. */
+export type BuiltControl = {
+  node: number;
+  /** `ControlKind`. */
+  kind: number;
+  /** Radio group id, or -1. */
+  group: number;
+  /** `ControlFlags`. */
+  flags: number;
+};
+
+/**
+ * `ControlKind` by tag and `type` attribute.
+ *
+ * Only the two types whose activation *does* something are here. The other twenty
+ * input types are still real elements with real UA styling; they simply have no
+ * press behaviour for the engine to run, so giving them a row would be a row that
+ * means "nothing happens". `select` is deliberately absent too — opening a picker
+ * needs the overlay layer, and a `ControlKind.SELECT` that toggled nothing would be
+ * a claim this cannot honour.
+ */
+function controlKindOf(el: Element): number {
+  if (el.tag !== "input") return ControlKind.NONE;
+  switch ((el.attrs.get("type") ?? "text").toLowerCase()) {
+    case "checkbox":
+      return ControlKind.CHECKBOX;
+    case "radio":
+      return ControlKind.RADIO;
+    default:
+      return ControlKind.NONE;
+  }
+}
+
+/**
+ * Whether a press on this element is aimed at *it* rather than at a label's
+ * control.
+ *
+ * HTML calls this "interactive content" and excludes it from a label's activation
+ * behaviour, which is why a button inside a label does not tick the checkbox beside
+ * it. dziri can only produce two kinds of it — a control and a `<button>` — so this
+ * is that category narrowed to what is reachable, not a general implementation of
+ * it.
+ */
+function ownsItsPress(el: Element): boolean {
+  return el.tag === "button" || el.tag === "a" || controlKindOf(el) !== ControlKind.NONE;
+}
+
 export type CompileResult = {
   strings: string[];
   styles: ComputedStyle[];
@@ -1058,6 +1122,8 @@ export type CompileResult = {
   tweens: BuiltTween[];
   /** Keyframe runs, addressed by a tween's `firstSegment`/`segmentCount`. */
   keyframes: BuiltKeyframe[];
+  /** Form controls, ascending by node. */
+  controls: BuiltControl[];
   /** Diagnostics worth surfacing but not worth failing over. */
   warnings: string[];
 };
@@ -1186,6 +1252,63 @@ export function compileTree(
    */
   const pendingAnchors: Array<{ list: number; container: number; after: number }> = [];
   const editables: BuiltEditable[] = [];
+
+  /**
+   * Every element that got a node, so the label pass can start from markup.
+   *
+   * A `for=` label points at an element by id, and that element may not have been
+   * compiled yet — so this cannot be resolved while walking, and the pass that does
+   * it needs the element tree rather than the node arrays. Filled unconditionally,
+   * unlike `opts.nodeOf`, which is a caller's optional hook.
+   */
+  const nodeOfEl = new Map<Element, number>();
+  const controls: BuiltControl[] = [];
+  /** Labels in document order, with their node, for the pass below. */
+  const labelEls: Array<{ el: Element; node: number }> = [];
+  /**
+   * Radio group ids, interned per `(form, name)`.
+   *
+   * Keyed on the form *element* and not just the name, because that is measured:
+   * three radios named `plan` were checked at once when two of them sat in their
+   * own `<form>` — see BROWSER-FACTS.md, "A radio cannot be unchecked by pointer,
+   * and its group is the form". Keying on the name alone would have silently made
+   * two independent groups into one, which is the kind of bug that only shows up in
+   * a form complicated enough that nobody is watching every radio.
+   */
+  const groupIds = new Map<string, number>();
+  const formIds = new Map<Element, number>();
+
+  /**
+   * The group id for a radio, or -1 when it has no `name`.
+   *
+   * A nameless radio is in no group: it can be checked and never unchecked, and it
+   * clears nothing. That is what a browser does, and -1 says it in a way the engine
+   * needs no special case for — "clear every other member of group -1" is naturally
+   * empty.
+   */
+  const radioGroup = (el: Element, path: Element[]): number => {
+    const name = el.attrs.get("name");
+    if (!name) return -1;
+
+    // The *innermost* enclosing form. `path` is the ancestor chain, so the last one
+    // wins, and nested forms — invalid HTML, but parseable — resolve the way the DOM
+    // would rather than throwing.
+    let form: Element | null = null;
+    for (const ancestor of path) if (ancestor.tag === "form") form = ancestor;
+
+    let formId = -1;
+    if (form !== null) {
+      formId = formIds.get(form) ?? formIds.size;
+      formIds.set(form, formId);
+    }
+
+    const key = `${formId} ${name}`;
+    const existing = groupIds.get(key);
+    if (existing !== undefined) return existing;
+    const id = groupIds.size;
+    groupIds.set(key, id);
+    return id;
+  };
 
   /**
    * The one place text can enter the IR, and therefore the one place worth
@@ -1499,11 +1622,28 @@ export function compileTree(
       text: -1,
       parent,
       children: [],
+      ...(ownsItsPress(el) ? { ownsPress: true as const } : {}),
     });
     opts.nodeOf?.set(el, self);
+    nodeOfEl.set(el, self);
 
     if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "" });
     if (el.bindValue) editables.push({ node: self, ref: el.bindValue, name: "" });
+
+    if (el.tag === "label") labelEls.push({ el, node: self });
+    const controlKind = controlKindOf(el);
+    if (controlKind !== ControlKind.NONE) {
+      controls.push({
+        node: self,
+        kind: controlKind,
+        group: controlKind === ControlKind.RADIO ? radioGroup(el, path) : -1,
+        // Presence, not value: `<input checked>` and `checked=""` both mean checked,
+        // which is what `parseAttributes` already normalises to.
+        flags:
+          (el.attrs.has("checked") ? ControlFlags.CHECKED : 0) |
+          (el.attrs.has("disabled") ? ControlFlags.DISABLED : 0),
+      });
+    }
 
     // `::before` is "an immediate child of the originating element", first in
     // order; `::after` is last. Ordinary children in between — so the generated
@@ -1723,6 +1863,8 @@ export function compileTree(
     list.anchorNext = kids[pending.after] ?? -1;
   }
 
+  resolveActivation(nodes, nodeOfEl, controls, labelEls, warnings);
+
   return {
     strings,
     styles: styles.list,
@@ -1746,8 +1888,92 @@ export function compileTree(
     })),
     tweens: tweens.tweens,
     keyframes: tweens.keyframes,
+    controls,
     warnings,
   };
+}
+
+/**
+ * Fills every node's `activates` — the control a press on it operates.
+ *
+ * Three steps, and the third is the one worth reading:
+ *
+ * 1. Each control points at itself.
+ * 2. Each `<label>` points at its control: the one named by `for=`, else the first
+ *    control in its subtree. Measured, both forms forward — see BROWSER-FACTS.md,
+ *    "A label's click is a second, synthetic click on the control".
+ * 3. **Every other node inherits from its parent**, in one forward pass. Node ids are
+ *    assigned parent-first by `walk`, so a single ascending sweep propagates a
+ *    label's target through its whole subtree and a control's through its `::before`
+ *    and `::after` boxes — which is what makes clicking a checkbox's *tick* tick it.
+ *
+ * The sweep stops at anything that owns its own press. A `<button>` inside a label
+ * is HTML's "interactive content" exclusion, and without the stop a button in a
+ * label would silently toggle the checkbox next to it.
+ *
+ * A `for=` that names nothing, or names something that is not a control, is a
+ * warning rather than an error: it is a typo in markup that renders perfectly, and
+ * the label simply stops forwarding. Failing the build over it would be worse than
+ * the bug.
+ */
+function resolveActivation(
+  nodes: BuiltNode[],
+  nodeOfEl: Map<Element, number>,
+  controls: BuiltControl[],
+  labels: Array<{ el: Element; node: number }>,
+  warnings: string[],
+): void {
+  if (controls.length === 0) return;
+
+  const controlNodes = new Set(controls.map((c) => c.node));
+  for (const control of controls) nodes[control.node]!.activates = control.node;
+
+  const byId = new Map<string, Element>();
+  for (const el of nodeOfEl.keys()) {
+    const id = el.id;
+    if (id !== null && !byId.has(id)) byId.set(id, el);
+  }
+
+  /** The first control in `el`'s subtree, in document order. */
+  const firstControlIn = (el: Element): number => {
+    for (const child of el.children) {
+      if (child.type !== "element") continue;
+      const node = nodeOfEl.get(child);
+      if (node !== undefined && controlNodes.has(node)) return node;
+      const deeper = firstControlIn(child);
+      if (deeper >= 0) return deeper;
+    }
+    return -1;
+  };
+
+  for (const { el, node } of labels) {
+    const target = el.attrs.get("for");
+    if (target !== undefined) {
+      const named = byId.get(target);
+      const namedNode = named === undefined ? undefined : nodeOfEl.get(named);
+      if (namedNode === undefined || !controlNodes.has(namedNode)) {
+        warnings.push(
+          `<label for="${target}"> does not name a form control, so clicking it does nothing`,
+        );
+        continue;
+      }
+      nodes[node]!.activates = namedNode;
+      continue;
+    }
+
+    const wrapped = firstControlIn(el);
+    if (wrapped >= 0) nodes[node]!.activates = wrapped;
+  }
+
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i]!;
+    if (n.activates !== undefined) continue;
+    const parent = n.parent;
+    if (parent < 0 || parent >= i) continue;
+    if (n.ownsPress) continue;
+    const inherited = nodes[parent]!.activates;
+    if (inherited !== undefined) n.activates = inherited;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1909,7 +2135,14 @@ function buildInteractive(
     // onto a node that could never be hovered.
     const stateful = n.mask !== 0 || (variants !== undefined && (variants.masks[i] ?? 0) !== 0);
 
-    if (n.kind === NodeKind.BUTTON || stateful || withHandler.has(i)) out.push(i);
+    // A node that operates a control has to be hittable even with no styling of its
+    // own — the `<span>` beside a checkbox is the common case, and `hit_test` only
+    // ever returns an `INTERACTIVE` node. Without this the compiler would emit a
+    // perfectly correct `activates` that nothing could ever reach, which is the same
+    // silent shape as a variant no predicate can select.
+    const operates = n.activates !== undefined;
+
+    if (n.kind === NodeKind.BUTTON || stateful || operates || withHandler.has(i)) out.push(i);
   }
   return out;
 }
@@ -1951,6 +2184,7 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
       nextSibling: new Int32Array(nextSibling),
       list: new Int16Array(result.nodes.length).fill(-1),
       hidden: new Uint8Array(result.nodes.length),
+      activates: activatesOf(result.nodes),
     },
     variants: {
       count: variants.node.length,
@@ -1973,7 +2207,23 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     lists: listTable(result.lists),
     tweens: tweenTable(result.tweens),
     keyframes: keyframeTable(result.keyframes),
+    controls: controlTable(result.controls),
     root: result.root,
+  };
+}
+
+/** `activates` as the wire carries it: -1 for "a press here operates nothing". */
+function activatesOf(nodes: BuiltNode[]): Int32Array {
+  return Int32Array.from(nodes, (n) => n.activates ?? -1);
+}
+
+function controlTable(controls: BuiltControl[]): CompiledUi["controls"] {
+  return {
+    count: controls.length,
+    node: Int32Array.from(controls, (c) => c.node),
+    kind: Uint8Array.from(controls, (c) => c.kind),
+    group: Int32Array.from(controls, (c) => c.group),
+    flags: Uint8Array.from(controls, (c) => c.flags),
   };
 }
 
@@ -2315,6 +2565,9 @@ export function emit(
    */
   const tweenRows = variants ? variants.tweens : result.tweens;
   const keyframeRows = variants ? variants.keyframes : result.keyframes;
+  // Not re-interned by `compileVariants` — a control row holds node ids and a group,
+  // no style index — so `result` is the only source there is.
+  const controlRows = result.controls;
 
   // Patches address (field, slot) pairs. Slot values are written in place, which
   // is why the style table's typed arrays are mutable and node pointers are not.
@@ -2346,7 +2599,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { ControlTable, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -2370,6 +2623,7 @@ export const nodes = {
   nextSibling: ${typedArray("Int32Array", nextSibling)},
   list: new Int16Array(${nodes.length}).fill(-1),
   hidden: ${routing ? typedArray("Uint8Array", hiddenAtStart(nodes.length, routing)) : `new Uint8Array(${nodes.length})`},
+  activates: ${typedArray("Int32Array", [...activatesOf(nodes)])},
 } satisfies NodeTable;
 
 /**
@@ -2495,6 +2749,22 @@ export const keyframes = {
   easeC: ${typedArray("Float32Array", keyframeRows.map((k) => k.easeC))},
   easeD: ${typedArray("Float32Array", keyframeRows.map((k) => k.easeD))},
 } satisfies KeyframeTable;
+
+/**
+ * Form controls, sparse and sorted by node.
+ *
+ * The flags column is the state each control was *authored* in, and is read exactly
+ * once — to seed the engine's own state. The engine owns it after that, so this
+ * table stays constant while a checkbox is being ticked and a republish caused by
+ * some unrelated signal cannot un-tick it.
+ */
+export const controls = {
+  count: ${controlRows.length},
+  node: ${typedArray("Int32Array", controlRows.map((c) => c.node))},
+  kind: ${typedArray("Uint8Array", controlRows.map((c) => c.kind))},
+  group: ${typedArray("Int32Array", controlRows.map((c) => c.group))},
+  flags: ${typedArray("Uint8Array", controlRows.map((c) => c.flags))},
+} satisfies ControlTable;
 
 export const root: number = ${root};
 ${routing ? routingSource(routing) : ""}`;

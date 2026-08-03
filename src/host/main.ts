@@ -238,6 +238,32 @@ export async function runMain(options: MainOptions): Promise<void> {
       engine.setTimeStep(advance);
     }
 
+    /**
+     * `--click <node>…` — press and release each node in turn before the shot.
+     *
+     * Distinct from `--hover` in kind rather than in degree, which is why it is a
+     * separate flag rather than another argument to that one: `--hover` *declares* an
+     * input state, while this **runs the press**. Hit-testing, a disabled control
+     * swallowing the press, a label forwarding to the box beside it and the activation
+     * behaviour itself all happen, and none of them can be reached by asserting the
+     * state a click would have left.
+     *
+     * It needs a laid-out frame to aim at — the node's box comes from the layout table
+     * — so it goes after the `--advance` priming frame and before the shot.
+     *
+     * Repeatable, and the order is the order given, because "click A then B" is a
+     * different picture from "click B then A" for a radio group.
+     */
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] !== "--click") continue;
+      const node = Number(argv[i + 1]);
+      if (!Number.isInteger(node) || node < 0) {
+        throw new Error(`--click takes a node id, got "${argv[i + 1]}"`);
+      }
+      frame();
+      engine.clickNode(node);
+    }
+
     engine.setInputState(numberFlag("--hover"), -1, numberFlag("--focus"));
     frame();
 

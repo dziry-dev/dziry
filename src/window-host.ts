@@ -123,6 +123,7 @@ export async function run(registry: WindowRegistry, options: RunOptions = {}): P
     media: generated.media,
     tweens: generated.tweens,
     keyframes: generated.keyframes,
+    controls: generated.controls,
     root: generated.root,
   };
 

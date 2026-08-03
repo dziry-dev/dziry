@@ -66,6 +66,8 @@ const SYMBOLS = {
   dziri_engine_set_input_state: { args: [u32, i32, i32, i32], returns: i32 },
   dziri_engine_set_time_step: { args: [u32, f32], returns: i32 },
   dziri_engine_hit_test: { args: [u32, f32, f32, PTR], returns: i32 },
+  dziri_engine_mouse_down: { args: [u32, f32, f32], returns: i32 },
+  dziri_engine_mouse_up: { args: [u32, f32, f32], returns: i32 },
   dziri_engine_bounds: { args: [u32, u32, PTR], returns: i32 },
   dziri_engine_surface_info: { args: [u32, PTR], returns: i32 },
   dziri_engine_read_pixels: { args: [u32, PTR, u32], returns: i32 },
@@ -211,6 +213,7 @@ export type EngineOptions = {
   lists: number;
   tweens: number;
   keyframes: number;
+  controls: number;
   strings: number;
   stringBytes: number;
   root?: number;
@@ -292,12 +295,15 @@ export class Engine {
     u32v[8] = options.lists;
     u32v[9] = options.tweens;
     u32v[10] = options.keyframes;
-    u32v[11] = options.strings;
-    u32v[12] = options.stringBytes;
-    u32v[13] = options.root ?? 0;
-    u8v[56] = options.windowed === false ? 0 : 1;
-    u8v[57] = options.decorated === false ? 0 : 1;
-    /* The title pointer sits at byte 64, not 60: `#[repr(C)]` aligns it to 8. */
+    u32v[11] = options.controls;
+    u32v[12] = options.strings;
+    u32v[13] = options.stringBytes;
+    u32v[14] = options.root ?? 0;
+    u8v[60] = options.windowed === false ? 0 : 1;
+    u8v[61] = options.decorated === false ? 0 : 1;
+    /* The title pointer sits at byte 64, not 64-adjacent by accident: `#[repr(C)]`
+       aligns it to 8, and with `controls` added the two flag bytes plus their two
+       reserved bytes now fill 60..64 exactly rather than leaving a 4-byte hole. */
     u64v[8] = BigInt(ptr(title));
     u32v[18] = title.length;
 
@@ -460,6 +466,40 @@ export class Engine {
     return scratch32[0]!;
   }
 
+  /**
+   * A real press and release at a point, as the window pump would deliver it.
+   *
+   * Distinct from `setInputState` in kind, not just in spelling: that one *declares* a
+   * hover, this one *happens*. Hit-testing runs, a disabled control swallows it, a
+   * label forwards it, and a checkbox ticks — none of which can be reached by
+   * asserting the state a press would have left behind.
+   *
+   * Split into two calls so a caller can hold the button down, which is the only way
+   * to render `:active`.
+   */
+  mouseDown(x: number, y: number): void {
+    check(engine.dziri_engine_mouse_down(this.#handle, x, y), "dziri_engine_mouse_down");
+  }
+
+  mouseUp(x: number, y: number): void {
+    check(engine.dziri_engine_mouse_up(this.#handle, x, y), "dziri_engine_mouse_up");
+  }
+
+  /**
+   * Presses and releases at the centre of a node's layout box.
+   *
+   * A node id rather than a coordinate pair, because a golden addressed by pixels
+   * stops pointing at the thing it names the first time the layout above it changes —
+   * the same argument the browser probes make for reading coordinates off real rects.
+   * The press itself is still a press at a point, so nothing about the path is
+   * shortcut.
+   */
+  clickNode(node: number): void {
+    const [x, y, w, h] = this.bounds(node);
+    this.mouseDown(x + w / 2, y + h / 2);
+    this.mouseUp(x + w / 2, y + h / 2);
+  }
+
   setInputState(hovered: number, pressed: number, focused: number): void {
     check(
       engine.dziri_engine_set_input_state(this.#handle, hovered, pressed, focused),
@@ -487,8 +527,8 @@ export class Engine {
    * re-upload everything.
    */
   grow(caps: Capacities): boolean {
-    /* Matches `Capacities` in `tables.rs`: ten `u32`, no padding, same order. */
-    const buf = new Uint32Array(10);
+    /* Matches `Capacities` in `tables.rs`: eleven `u32`, no padding, same order. */
+    const buf = new Uint32Array(11);
     buf[0] = caps.nodes;
     buf[1] = caps.styles;
     buf[2] = caps.variants;
@@ -497,8 +537,9 @@ export class Engine {
     buf[5] = caps.lists;
     buf[6] = caps.tweens;
     buf[7] = caps.keyframes;
-    buf[8] = caps.strings;
-    buf[9] = caps.stringBytes;
+    buf[8] = caps.controls;
+    buf[9] = caps.strings;
+    buf[10] = caps.stringBytes;
 
     check(engine.dziri_engine_grow(this.#handle, ptr(buf) as Pointer), "dziri_engine_grow");
 

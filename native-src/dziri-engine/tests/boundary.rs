@@ -23,6 +23,7 @@ fn config() -> EngineConfig {
         list_capacity: 1,
         tween_capacity: 1,
         keyframe_capacity: 1,
+        control_capacity: 4,
         string_capacity: 2,
         string_bytes: 32,
         root: 0,

@@ -16,7 +16,8 @@ use skia_safe::textlayout::TextAlign;
 use skia_safe::{Canvas, Color, Matrix, Paint, PaintStyle, Point, RRect, Rect};
 
 use crate::anim::{Anims, Blend};
-use crate::protocol::{self, display, node_kind, predicate};
+use crate::controls::{Activation, Controls};
+use crate::protocol::{self, control_flags, display, node_kind, predicate};
 use crate::tables::Tables;
 use crate::text::Measurer;
 
@@ -562,8 +563,9 @@ pub struct FrameState {
     hover: Vec<i32>,
     /// The pressed node and its ancestors, same rule.
     ///
-    /// Measured to be the *identical* set to `:hover`'s while a button is held, so this
-    /// is one rule applied twice rather than two rules that happen to agree.
+    /// Measured to be the *identical* set to `:hover`'s while a button is held — so
+    /// this was one rule applied twice, until labels turned out to be the exception.
+    /// See `set_input`.
     active: Vec<i32>,
 }
 
@@ -573,9 +575,51 @@ impl FrameState {
     /// Once per frame rather than per node: a membership test against a chain of tree
     /// depth is a few compares on one cache line, and the empty case — nothing hovered,
     /// which is most frames — is a length check.
+    ///
+    /// # The two chains differ, and only over labels
+    ///
+    /// A `<label>` drags its control into both chains, and *from where* is not the same
+    /// for the two. Measured, `probes/control-activation.html`:
+    ///
+    /// - `:hover` reaches the control when the label **is the hovered node**, and not
+    ///   when the hovered node is a descendant of the label. Pointing at the label's
+    ///   own padding matched the checkbox; pointing at a `<span>` inside the same label
+    ///   did not.
+    /// - `:active` reaches it from **any** label in the chain, descendant or not.
+    ///
+    /// Which is why the hover side asks `activates` of one node and the press side asks
+    /// it of every node it walks. Neither is guessable, and one of them looks like a
+    /// Chromium implementation artifact rather than a spec requirement — but both are
+    /// what Chromium does, so both are what this does.
     pub fn set_input(&mut self, tables: &Tables, state: &InputState) {
         walk_ancestors(tables, state.hovered, &mut self.hover);
+        push_activated(tables, state.hovered, &mut self.hover);
+
         walk_ancestors(tables, state.pressed, &mut self.active);
+        // Cloned bounds first: the loop reads what `walk_ancestors` wrote while pushing
+        // onto the same vector, and a control's own row must not then be re-examined.
+        for i in 0..self.active.len() {
+            push_activated(tables, self.active[i], &mut self.active);
+        }
+    }
+}
+
+/// Adds the control `node` operates to `out`, if it is not already there.
+///
+/// The dedup is not tidiness: a control's `activates` points at *itself*, so without
+/// it every hovered control would appear twice, and the pressed chain would grow by
+/// one entry per label per frame.
+fn push_activated(tables: &Tables, node: i32, out: &mut Vec<i32>) {
+    if node < 0 {
+        return;
+    }
+    let target = tables
+        .i32s(NODES, protocol::nodes::ACTIVATES)
+        .get(node as usize)
+        .copied()
+        .unwrap_or(-1);
+    if target >= 0 && !out.contains(&target) {
+        out.push(target);
     }
 }
 
@@ -618,6 +662,12 @@ pub struct Painter {
     /// build time. Everything *else* about it — the endpoints, the mask, the curve —
     /// is compile-time and is in the tables.
     anims: Anims,
+    /// Which controls are checked, and which are disabled.
+    ///
+    /// Here for the same reason `anims` is: "which style row does this node wear" is
+    /// this type's question, and `:checked` is one more predicate that answers it. See
+    /// `controls.rs` for why the live state is the engine's at all.
+    controls: Controls,
 }
 
 impl Default for Painter {
@@ -655,12 +705,25 @@ impl Painter {
             fill,
             frame: FrameState::default(),
             anims: Anims::new(),
+            controls: Controls::new(),
         }
     }
 
-    /// Rebuilds the animation watch list. Called when a commit changed the tables.
+    /// Rebuilds the animation watch list and the control state. Called when a commit
+    /// changed the tables.
     pub fn rescan_animations(&mut self, tables: &Tables, node_count: usize) {
         self.anims.rescan(tables, node_count);
+        self.controls.rescan(tables, node_count);
+    }
+
+    /// Runs the activation behaviour for a press on `node`. See `Controls::activate`.
+    pub fn activate_control(&mut self, tables: &Tables, node: i32) -> Option<Activation> {
+        self.controls.activate(tables, node)
+    }
+
+    /// Whether a press on `node` is swallowed because the node is a disabled control.
+    pub fn press_is_swallowed(&self, node: i32) -> bool {
+        self.controls.press_is_swallowed(node)
     }
 
     /// Whether any tween is still in flight, so an idle frame stays free.
@@ -679,13 +742,20 @@ impl Painter {
         // `&mut self`: the closure reads the frame state while `anims` is mutably
         // borrowed. `resolve_slot` is a free function for exactly this reason, and
         // `style_for` is a thin wrapper over it.
-        let Self { anims, frame, .. } = self;
-        anims.advance(tables, dt, |node| resolve_slot(tables, node, state, frame))
+        let Self {
+            anims,
+            frame,
+            controls,
+            ..
+        } = self;
+        anims.advance(tables, dt, |node| {
+            resolve_slot(tables, node, state, frame, controls)
+        })
     }
 
     /// Resolves which precompiled style a node wears right now. See `resolve_slot`.
     pub(crate) fn style_for(&self, tables: &Tables, node: usize, state: &InputState) -> usize {
-        resolve_slot(tables, node, state, &self.frame)
+        resolve_slot(tables, node, state, &self.frame, &self.controls)
     }
 
     /// The two rows a node is between, and how far — `style_for` plus its tween.
@@ -714,7 +784,13 @@ impl Painter {
 ///
 /// A free function rather than a method, because `advance_animations` needs it while
 /// holding `&mut` on the tween state beside the frame state it reads.
-fn resolve_slot(tables: &Tables, node: usize, state: &InputState, frame: &FrameState) -> usize {
+fn resolve_slot(
+    tables: &Tables,
+    node: usize,
+    state: &InputState,
+    frame: &FrameState,
+    controls: &Controls,
+) -> usize {
     let base = tables
         .u16s(NODES, protocol::nodes::STYLE)
         .get(node)
@@ -777,6 +853,22 @@ fn resolve_slot(tables: &Tables, node: usize, state: &InputState, frame: &FrameS
     }
     if subject == state.focused {
         live |= predicate::FOCUS;
+    }
+
+    // `:checked` and `:disabled`, from the state this engine owns. Reserved as
+    // predicate bits back in protocol v9 and read by nothing until now, which is what
+    // reserving them was for — the compiler has been resolving `:checked` variants
+    // correctly the whole time, against a bit that was never true.
+    //
+    // Read against `subject` like the other three, so `.check:checked::before` — the
+    // canonical way to draw a tick — resolves against the checkbox rather than against
+    // the generated box, which is never a control.
+    let control = controls.state(subject);
+    if control & control_flags::CHECKED != 0 {
+        live |= predicate::CHECKED;
+    }
+    if control & control_flags::DISABLED != 0 {
+        live |= predicate::DISABLED;
     }
 
     if live == 0 {
@@ -1791,6 +1883,7 @@ mod tests {
             lists: 1,
             tweens: 1,
             keyframes: 1,
+            controls: 4,
             strings: 2,
             string_bytes: 16,
         });
@@ -1883,6 +1976,7 @@ mod tests {
             lists: 1,
             tweens: 1,
             keyframes: 1,
+            controls: 4,
             strings: 1,
             string_bytes: 16,
         });
@@ -2031,6 +2125,7 @@ mod tests {
             lists: 1,
             tweens: 1,
             keyframes: 1,
+            controls: 4,
             strings: 1,
             string_bytes: 16,
         });
@@ -2063,6 +2158,7 @@ mod tests {
             lists: 1,
             tweens: 1,
             keyframes: 1,
+            controls: 4,
             strings: 2,
             string_bytes: 16,
         });

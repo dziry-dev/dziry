@@ -94,10 +94,14 @@ body.light .muted {
  * Nothing below is drawn by the engine. Each tick, dot and arrow is a `::before`
  * box that the compiler emits as an ordinary node.
  *
- * `[checked]` and `[disabled]` are the *authored attributes*, not the live
- * `:checked` / `:disabled` states. Those compile to predicate bits and nothing
- * sets them yet (A3), so a static attribute is the honest stand-in: it drives the
- * identical style-table machinery, one cascade earlier.
+ * `:checked` and `:disabled` are the **live states**, and clicking one of these
+ * changes what you see. They used to be written here as `[checked]` /
+ * `[disabled]` — the authored *attributes* — because the predicate bits existed
+ * and nothing set them; the attribute drove the identical style-table machinery
+ * one cascade earlier, which was an honest stand-in for a state that could not
+ * change. The engine owns that state now (`controls.rs`), so the stand-in is gone
+ * and the attributes below survive only as the *initial* value the compiler seeds
+ * it with.
  * ------------------------------------------------------------------------- */
 
 input[type="checkbox"],
@@ -114,7 +118,10 @@ input[type="radio"] {
 }
 
 input[type="checkbox"] { border-radius: 4px; }
-input[type="radio"]    { border-radius: 9px; }
+/* Larger than half the box on purpose. A radius is clamped to half the shorter
+   side when it overflows, so any big number is "a circle" and stays one if the
+   box is ever resized — where `9px` silently becomes a rounded square. */
+input[type="radio"]    { border-radius: 9999px; }
 
 input[type="checkbox"]::before {
     content: "\2713";
@@ -123,21 +130,31 @@ input[type="checkbox"]::before {
     font-weight: 700;
 }
 
+/* The radio's dot is an empty generated box rather than a `●` glyph, and that is
+   the difference between a dot and *nearly* a dot. A glyph is centred on a text
+   baseline and sized by a font's own idea of what `●` means, so it lands slightly
+   high and is only as round as the typeface; a box with a radius is a circle,
+   exactly centred by the flex centring above.
+
+   8 of 18px is 44%, which is inside the 45–50% measured off Chromium's own radio
+   at `zoom: 8` — see BROWSER-FACTS.md, "The tick and the dot have no DOM". */
 input[type="radio"]::before {
-    content: "\25CF";
-    color: transparent;
-    font-size: 11px;
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 9999px;
+    background: transparent;
 }
 
-input[type="checkbox"][checked] {
+input[type="checkbox"]:checked {
     background: #0284c7;
     border-color: #0284c7;
 }
 
-input[type="checkbox"][checked]::before { color: #f0f9ff; }
+input[type="checkbox"]:checked::before { color: #f0f9ff; }
 
-input[type="radio"][checked]          { border-color: #0284c7; }
-input[type="radio"][checked]::before  { color: #38bdf8; }
+input[type="radio"]:checked          { border-color: #0284c7; }
+input[type="radio"]:checked::before  { background: #38bdf8; }
 
 /* Hover on the element reaching its generated box. This is the case that needs
    the engine to resolve a generated box's predicates against its parent — the
@@ -146,16 +163,18 @@ input[type="checkbox"]:hover,
 input[type="radio"]:hover { border-color: #38bdf8; }
 
 input[type="checkbox"]:hover::before { color: #52525b; }
-input[type="checkbox"][checked]:hover::before { color: #ffffff; }
+input[type="checkbox"]:checked:hover::before { color: #ffffff; }
 
-/* Disabled, by authored attribute. */
-input[disabled] {
+/* Disabled. A live predicate now, though nothing can currently *become* disabled:
+   it is seeded from the attribute and the user cannot change it, which is exactly
+   what a browser does with `disabled` too. */
+input:disabled {
     background: #27272a;
     border-color: #3f3f46;
 }
 
-input[type="checkbox"][disabled]::before,
-input[type="radio"][disabled]::before { color: #52525b; }
+input[type="checkbox"]:disabled::before { color: #52525b; }
+input[type="radio"]:disabled::before { background: #52525b; }
 
 /* A text field. `caret-color` compiles and is not painted — there is no caret. */
 input[type="text"] {
@@ -173,7 +192,7 @@ input[type="text"] {
 }
 
 input[type="text"]:hover { border-color: #52525b; }
-input[type="text"][disabled] { color: #52525b; }
+input[type="text"]:disabled { color: #52525b; }
 
 /* A select, closed. The structure is MDN's customizable-select model: ordinary
    children, a `<button>` holding `<selectedcontent>`, then the options. */
@@ -210,7 +229,12 @@ select button::after {
     font-size: 11px;
 }
 
-select[disabled] { background: #27272a; }
+select:disabled { background: #27272a; }
+/* The *attribute*, deliberately, and the one place it is still the right spelling.
+   A predicate is only supported on the subject of a selector, and this one has to
+   reach the button inside. That costs nothing here: a `<select>` is not a
+   `ControlKind`, so nothing can disable one at run time and the attribute and the
+   state cannot disagree. */
 select[disabled] button { color: #52525b; }
 
 /* Quotes — `::before` and `::after` around real content, so their position in

@@ -139,6 +139,47 @@ const SCENARIOS: Scenario[] = [
   },
 
   /**
+   * Form controls, at rest and after a real press.
+   *
+   * The route had no golden at all until controls became interactive, which is worth
+   * naming rather than quietly fixing: while every control was frozen in its authored
+   * state there was nothing here a `--patch` scenario did not already cover. Three
+   * pictures now, and each one covers something no other scenario can.
+   *
+   * **`--click` is not `--hover` with a different verb.** `--hover` *declares* an input
+   * state; `--click` runs the press — hit-testing, the disabled swallow, a label
+   * forwarding to the box beside it, and the activation behaviour itself. Every one of
+   * those is a place the feature can fail while every predicate still resolves
+   * correctly, and none of them is reachable by asserting the state a click would have
+   * left behind.
+   *
+   *   - `controls` is the resting page: `:checked` and `:disabled` live from the
+   *     authored attributes, which is the *seed* rather than a fixed style.
+   *   - `controls-checked` presses node 264 — the **text** "unchecked", not the 18px
+   *     box. It is the label-forwarding case, and it is the one the pointer actually
+   *     hits most of the time. It fails if `activates` stops propagating to a label's
+   *     descendants, or if `buildInteractive` stops marking a node that operates a
+   *     control, which would leave `hit_test` walking straight past the span.
+   *   - `controls-radio` presses node 282 ("free"), which must check it *and clear*
+   *     "pro". Without the group clear both would be filled and the picture would look
+   *     like two checkboxes — a wrong frame that a per-control test cannot produce.
+   *
+   * Node ids rather than coordinates, as the hover scenarios above already do, so the
+   * scenario keeps pointing at the thing it names when the layout moves. They still
+   * shift if the *page* gains elements before them, which is what blessing a golden is
+   * for.
+   */
+  { name: "controls", args: ["--route", "controls", "--size", "1040x1400"] },
+  {
+    name: "controls-checked",
+    args: ["--route", "controls", "--size", "1040x1400", "--click", "264"],
+  },
+  {
+    name: "controls-radio",
+    args: ["--route", "controls", "--size", "1040x1400", "--click", "282"],
+  },
+
+  /**
    * The reactive rewrite, rendered.
    *
    * Every value on this page is derived from one signal through an operator that a

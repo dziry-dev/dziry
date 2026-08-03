@@ -44,6 +44,7 @@ fn config_of(nodes: u32) -> EngineConfig {
         list_capacity: 1,
         tween_capacity: 1,
         keyframe_capacity: 1,
+        control_capacity: 4,
         string_capacity: 1,
         string_bytes: 32,
         root: 0,

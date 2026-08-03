@@ -202,8 +202,16 @@ const draft = state("");
 
 Why this costs almost nothing for everything except `Input`: `:checked`, `:disabled` and
 `:indeterminate` are enumerable booleans, so they pass the compile-time gate at question 3 — a second
-style id and an int write. **No new ledger entry**, because checked-ness is a `state()` value and
-"current state values" is already irreducibly runtime.
+style id and an int write.
+
+**One correction to the paragraph that used to be here**, because it was wrong in a way worth naming
+rather than editing away. It said "no new ledger entry, because checked-ness is a `state()` value".
+That holds for `<Checkbox checked={done} />`, where the app declared the answer — but not for the
+element the compiler actually has to support. An `<input type="checkbox">` with no binding still ticks
+when you click it, and there is no signal to be the authority. So checkedness is **engine-owned
+interaction state**, in the same category as `hovered` and `focused`, and it is a ledger entry after
+all. `controls.rs` opens with the gate answered in those terms. The cost is still one bit per control
+and nothing per frame; what changed is who owns it, not how much it costs.
 
 `Input` is the exception and the only part that fails the gate. It fails at question 3 because the set
 of strings a user can type is unbounded, so there are no variants to emit. Its **caret index and
@@ -213,16 +221,23 @@ timer flipping one bit, never JS at frame rate.
 `bindValue` exists in partial form today — append and backspace only, through the `editables` table
 (`src/compiler/compile.ts:808`).
 
-The compile-time half is already in. A stylesheet can write `:checked` and `:disabled` today and the
-compiler resolves them like `:hover`, merging combinations per property; the three CSS properties are
-ordinary style fields. What is missing is the other half — nothing tells the engine *which* nodes are
-checked or disabled, so those predicates are never live and such a node wears its base style. That is
-A3's, and it is why the rows below still say planned even though the compiler is done with them.
+Both halves are in for checkbox and radio, as of protocol v13. A stylesheet writes `:checked` and
+`:disabled` and the compiler resolves them like `:hover`, merging combinations per property; the engine
+owns the live state, so clicking one changes what is drawn. The three CSS properties are ordinary style
+fields. What a press reaches comes from `nodes.activates`, which is the compiler's answer to the second,
+synthetic click a browser dispatches at a control when a *label* was clicked — so clicking the words
+beside a checkbox ticks it, and a `<button>` inside that label does not.
+
+Still missing, and named rather than implied: nothing can make a control *become* disabled at run time
+(`disabled` is seeded from the attribute, which is also what a browser does with it), `:indeterminate`
+has no way to be reached, a control inside a `map()` list gets no controls row, and `<select>` still
+cannot open — that one needs the overlay layer, not this machinery.
 
 | API | Status | Milestone |
 |---|---|---|
 | `<Checkbox>` `<Switch>` `<Radio>` `<Toggle>` `<Tabs>` | planned | C2 · Tier 1a (needs A3) |
-| `:checked` / `:disabled` variants | **compiler done** — predicate bits in `schema.ts`, `PREDICATE_PSEUDO` in `compile.ts`; not yet driven by the engine | A3 |
+| `:checked` / `:disabled` variants | **done** — live, and a click changes them. `controls.rs` owns the state; `nodes.activates` + the `controls` table are the compile-time half | A3 |
+| checkbox and radio activation, radio groups, label forwarding | **done** — protocol v13. A radio group is keyed on `(form, name)`, measured | A3 |
 | `:indeterminate` | planned — same shape and cost, held back until a control can be in that state | A3 |
 | `::before` / `::after` + `content` | **done** — generated boxes are real emitted nodes; this is what replaces a UA shadow tree | A1 |
 | `::picker(select)` `::picker-icon` `::checkmark` `::placeholder` `::marker` | planned — same machinery as `::before`, refused by name until the controls exist | C2 |

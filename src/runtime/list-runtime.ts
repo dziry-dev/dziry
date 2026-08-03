@@ -148,6 +148,7 @@ function growArena(ui: CompiledUi, ref: ListBindingRef, needed: number): void {
   nodes.nextSibling = growI32(nodes.nextSibling, count, -1);
   nodes.list = growI16(nodes.list, count, -1);
   nodes.hidden = growU8(nodes.hidden, count);
+  nodes.activates = growI32(nodes.activates, count, -1);
   nodes.count = count;
 
   // Replicate item 0 of the old arena. Its internal links are untouched by the
@@ -170,6 +171,16 @@ function growArena(ui: CompiledUi, ref: ListBindingRef, needed: number): void {
         k === 0 || nodes.nextSibling[src]! === -1 ? -1 : nodes.nextSibling[src]! + shift;
       nodes.hidden[dst] = 0;
       nodes.list[dst] = -1;
+      // Shifted like every other node reference in this block. A row's `activates`
+      // points inside its own item subtree — a label beside a checkbox in the same
+      // row — so copying it unshifted would make every replica operate item 0's
+      // control. `-1` stays `-1`.
+      //
+      // The *controls table* is deliberately not extended to match: a list row
+      // containing a real control would need one row per replica, and nothing emits
+      // that yet. So a control inside a list is a gap rather than a silent
+      // half-feature, and this line is what makes filling it a table append.
+      nodes.activates[dst] = nodes.activates[src]! === -1 ? -1 : nodes.activates[src]! + shift;
     }
 
     // Fresh string slots, so every row still owns its own text.
