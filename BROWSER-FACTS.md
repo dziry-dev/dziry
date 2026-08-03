@@ -519,3 +519,58 @@ that shape: every one of its utilities sets one `transition-duration` for the wh
 `display` is in Tailwind's default `transition-property` list, so discrete properties are not
 hypothetical. `transition-behavior: allow-discrete` parses as measured, but `display` is
 layout-affecting in dziri and transitions there are refused by name — see API.md.
+
+## `:hover` and `:active` match the ancestors too; `:focus` does not
+
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/hover-propagation.html`, run
+twice with identical output.** With a *real* pointer, dispatched over CDP — this is the first
+probe that needed one, and it is why `scripts/probe.ts` grew the mouse handshake. A
+synthesised `MouseEvent` does not set `:hover`, and DevTools' `CSS.forcePseudoState` forces
+the state on **one** element, which measures the tool rather than the browser when the
+question is precisely which *other* elements come along.
+
+`document.querySelectorAll(':hover')` is the whole measurement: the selector matches every
+element in the hover chain, so asking the document for it returns exactly the set in
+question, in document order. The structure is `body > #card > #mid > #button`.
+
+| Pointer over | `:hover` matched |
+|---|---|
+| `#button`, three levels deep | `html body card mid btn` |
+| `#mid` only | `html body card mid` |
+| `#card`'s padding | `html body card` |
+| nothing | `html` |
+
+So **`:hover` matches the element under the pointer and every ancestor of it**, up to and
+including `html`. And while the button is held down, `:active` matches the *identical* set —
+`html body card mid btn` — so the two rules are the same rule.
+
+`:focus` is the exception, and it is worth having measured rather than recalled because the
+three are always described in one breath:
+
+| | matched |
+|---|---|
+| `:focus` after `btn.focus()` | `btn` |
+| `:focus-within` after the same | `html body card mid btn` |
+
+So focus does **not** propagate, and `:focus-within` is the ancestor form. dziri has neither
+`:focus-within` nor any need to change `:focus`.
+
+### It is the DOM ancestor chain, not geometric containment
+
+The row that decides the implementation. `#escapee` is `position: absolute; left: 200px`
+inside a 120px-wide `#clip`, so it renders entirely **outside** its parent's box — and
+pointing at it still matches `clip`:
+
+```
+over the escapee, which is outside its parent's box
+    :hover        html body card clip escapee
+```
+
+So the chain is walked up the *tree*, which means `nodes.parent` is exactly the right column
+and no geometry is involved. dziri cannot currently reach this row from the other direction
+anyway: `hit_test` prunes a subtree whose parent rect does not contain the point — a
+deliberate divergence the TypeScript runtime also had — so a child outside its parent is
+unhittable, and every chain dziri can produce is geometric as well as structural. Recorded
+because the two stop agreeing the moment that pruning is relaxed, and then this row is the
+specification.
+

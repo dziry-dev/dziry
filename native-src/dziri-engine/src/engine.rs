@@ -371,6 +371,13 @@ impl Engine {
         // Both advances share the one `dt`, which is the whole reason it is read here
         // and passed down rather than sampled inside each. Two clocks would drift
         // against each other, and neither could be driven from a test.
+        // The hover and press chains, before anything reads a predicate. Here rather
+        // than inside `draw` because `advance_animations` below is what notices a slot
+        // change and starts a transition — resolving that against last frame's chain
+        // would make every hover a frame late. After `resync`, because the chains are
+        // walked up `nodes.parent` and a commit can move it.
+        self.painter.set_input_chains(&self.tables, &self.state);
+
         let dt = self.frame_dt();
         self.advance_scrolls(dt);
         self.advance_animations(dt);
@@ -422,6 +429,13 @@ impl Engine {
             self.relayout()?;
             self.needs_paint = true;
         }
+
+        // The hover and press chains, before anything reads a predicate. Here rather
+        // than inside `draw` because `advance_animations` below is what notices a slot
+        // change and starts a transition — resolving that against last frame's chain
+        // would make every hover a frame late. After `resync`, because the chains are
+        // walked up `nodes.parent` and a commit can move it.
+        self.painter.set_input_chains(&self.tables, &self.state);
 
         let dt = self.frame_dt();
         self.advance_scrolls(dt);
@@ -622,6 +636,12 @@ impl Engine {
     /// meant to remove.
     pub fn resize_and_repaint(&mut self, width: u32, height: u32) -> Result<(), EngineError> {
         self.resize(width, height)?;
+
+        // The third and last place that draws, so the third that needs the chains. A
+        // resize does not move the pointer, but `relayout` below can relink the tree the
+        // chains were walked from — and a mid-drag repaint is exactly when nobody is
+        // watching closely enough to notice a stale highlight.
+        self.painter.set_input_chains(&self.tables, &self.state);
 
         // `resize` set `fresh`, so this is a full relayout — which is the honest
         // cost of a resize, and the advance cache means it is not a re-shape.

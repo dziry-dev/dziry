@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>hover-propagation</title>
+<style>
+  body{font:12px ui-monospace,monospace;padding:16px;margin:0}
+  #out{white-space:pre;line-height:1.5}
+  .card{padding:24px;background:#eee;width:360px}
+  .mid{padding:20px;background:#ddd}
+  button{padding:10px 14px;font:inherit}
+  .clip{width:120px;height:40px;background:#cce;position:relative;margin-top:16px}
+  /* A child that sits *outside* its parent's box, which is the case dziri's
+     hit-testing prunes away before it can ever be reached. */
+  .escapee{position:absolute;left:200px;top:0;width:80px;height:40px;background:#fcc}
+</style>
+<h3>Which elements does `:hover` match when the pointer is over a nested one — and do `:active` and `:focus` follow the same rule?</h3>
+<div class="card" id="card">
+  <div class="mid" id="mid">
+    <button id="btn">button</button>
+    <span id="sib">sibling</span>
+  </div>
+  <div class="clip" id="clip">
+    <div class="escapee" id="escapee">outside</div>
+  </div>
+</div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * `document.querySelectorAll(':hover')` is the whole measurement.
+   *
+   * The selector matches every element in the hover chain, so asking the document for
+   * it returns exactly the set the question is about, in document order. There is no
+   * way to get this without a *real* pointer: a synthesised `MouseEvent` does not set
+   * `:hover`, and DevTools' force-state applies to one element, which would measure
+   * the tool rather than the browser. `scripts/probe.ts` dispatches the moves.
+   */
+  const matching = (sel) =>
+    [...document.querySelectorAll(sel)]
+      .map((el) => el.id || el.tagName.toLowerCase())
+      .join(" ");
+
+  const seen = [];
+  const centre = (id) => {
+    const r = document.getElementById(id).getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  };
+
+  // The points, read off real rects rather than hardcoded — a probe with hardcoded
+  // coordinates silently stops pointing at the thing it names the day the CSS moves.
+  const plan = [
+    ["over the button (3 deep)", centre("btn")],
+    ["over the mid box only", { ...centre("mid"), x: centre("mid").x + 150 }],
+    ["over the card's padding", { x: centre("card").x, y: centre("card").y - 90 }],
+    ["over the escapee, which is outside its parent's box", centre("escapee")],
+    ["outside the card entirely", { x: 700, y: 500 }],
+  ];
+
+  window.__probeMouse = plan.map(([, p], i) => ({ ...p, down: i === 0, up: i === 0 }));
+
+  /**
+   * One listener that both labels and records, because two cannot be trusted to agree.
+   *
+   * The first version had a recorder and a separate step-counter, both on `mousemove`.
+   * They fire in registration order on the *same* event, so every row was attributed to
+   * the previous point — the numbers were right and the labels were off by one, which is
+   * the worst way for a measurement to be wrong. Counting inside the recorder makes the
+   * two impossible to separate.
+   */
+  const labels = plan.map(([label]) => label);
+  let step = 0;
+  /** Where the pointer *is*, latched on the move so a press reuses it rather than
+   *  reading a counter the move has already advanced. Two attempts got this wrong in
+   *  opposite directions; latching is the version with nothing left to disagree. */
+  let current = labels[0];
+  const record = (suffix) => {
+    seen.push([
+      current + suffix,
+      matching(":hover"),
+      matching(":active"),
+      matching(":focus"),
+      matching(":focus-within"),
+    ]);
+  };
+
+  addEventListener("mousemove", () => {
+    current = labels[Math.min(step, labels.length - 1)] ?? "?";
+    step++;
+    record("");
+  });
+  addEventListener("mousedown", () => record(" — and held down"));
+
+  window.__probeMouseDone = () => {
+    log("=== the hover chain, by where the pointer is ===");
+    log("  (`:hover` matched, then `:active`, then `:focus`, then `:focus-within`)");
+    log("");
+    for (const [label, hover, active, focus, within] of seen) {
+      log("  " + label);
+      log("      :hover        " + (hover || "(none)"));
+      if (active) log("      :active       " + active);
+      if (focus) log("      :focus        " + focus);
+      if (within) log("      :focus-within " + within);
+    }
+
+    log("");
+    log("=== focus needs no pointer, and is the asymmetry worth being sure about ===");
+    document.getElementById("btn").focus();
+    log("  after btn.focus()");
+    log("      :focus        " + (matching(":focus") || "(none)"));
+    log("      :focus-within " + (matching(":focus-within") || "(none)"));
+    log("  (if `:focus` lists only `btn` while `:focus-within` lists its ancestors,");
+    log("   then focus does *not* propagate and `:focus-within` is the ancestor form)");
+
+    document.getElementById("btn").blur();
+    log("  after blur()");
+    log("      :focus        " + (matching(":focus") || "(none)"));
+    log("      :focus-within " + (matching(":focus-within") || "(none)"));
+
+    report();
+  };
+
+  // The client waits for this before dispatching anything.
+  document.title = "ready";
+</script>

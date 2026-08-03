@@ -457,3 +457,86 @@ fn a_page_with_no_tween_never_animates() {
     assert!(!engine.animating());
     assert_eq!(grey(&mut engine), 255);
 }
+
+/// Hovering a *button* fades the **card** it sits in, at the pixel level.
+///
+/// The two features meet here, and the meeting is what made the older bug worth fixing
+/// rather than documenting. `:hover` matches the pointed element and every ancestor of
+/// it — measured, `probes/hover-propagation.html` — and a transition starts only when a
+/// node's resolved slot *changes*. So an exact-equality hover test did not merely leave
+/// the card unhighlighted: it left the card's slot unchanged, which meant the transition
+/// never started either. One wrong comparison, two features silently doing nothing.
+///
+/// The card fills the window and the button is a child of it, so sampling the card's own
+/// area is sampling the card. Only the button is pointed at; the card is never
+/// `state.hovered`.
+#[test]
+fn hovering_a_button_fades_the_card_it_sits_in() {
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_u32(STYLES, styles::BG, 0, BLACK);
+        t.set_u32(STYLES, styles::BG, 1, WHITE);
+        t.set_u16(STYLES, styles::TRANSITION, 0, 1);
+        t.set_u16(STYLES, styles::TRANSITION, 1, 1);
+        linear_tween(t, 0, 1.0);
+
+        // The card: node 0, the root, with the button as its only child.
+        root_node(t, 0);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+
+        // The button: node 1. Transparent, so it does not paint over the card's fill and
+        // the sample below reads the card rather than the thing being hovered.
+        t.set_u8(NODES, nodes::KIND, 1, protocol::node_kind::BOX);
+        t.set_u16(NODES, nodes::STYLE, 1, 0);
+        t.set_i32(NODES, nodes::TEXT, 1, -1);
+        t.set_i32(NODES, nodes::PARENT, 1, 0);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 1, -1);
+        t.set_i32(NODES, nodes::NEXT_SIBLING, 1, -1);
+        t.set_i16(NODES, nodes::LIST, 1, -1);
+        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::INTERACTIVE);
+
+        // Only the **card** carries a HOVER variant. The button has none, which is the
+        // realistic shape — `.card:hover` with a plain button inside it — and it means
+        // nothing about this can pass by accident through the button's own styling.
+        t.set_i32(VARIANTS, variants::NODE, 0, 0);
+        t.set_u32(VARIANTS, variants::MASK, 0, predicate::HOVER);
+        t.set_i32(VARIANTS, variants::RUN_START, 0, 0);
+        t.set_u16(VARIANT_SLOTS, variant_slots::STYLE, 0, 0);
+        t.set_u16(VARIANT_SLOTS, variant_slots::STYLE, 1, 1);
+    }
+
+    engine.set_time_step(0.0);
+    engine.tick().expect("tick");
+    assert_eq!(grey(&mut engine), 0, "at rest the card is black");
+
+    // The pointer is on the **button**, never on the card.
+    engine.set_input_state(1, -1, -1);
+    engine.set_time_step(0.5);
+    engine.tick().expect("tick");
+    let half = grey(&mut engine);
+    assert!(
+        (half - 128).abs() <= 1,
+        "the card should be halfway through its fade with the pointer on its child, got {half}"
+    );
+
+    engine.tick().expect("tick");
+    assert_eq!(grey(&mut engine), 255, "and arrive");
+
+    // Away. The outgoing transition had *completed*, so the way back gets the full
+    // duration rather than a shortened one — measured, and the reason a finished tween is
+    // dropped rather than kept settled: a new one starting at `t = 0` on the flipped pair
+    // is exactly what "the full duration" means.
+    engine.set_input_state(-1, -1, -1);
+    engine.tick().expect("tick");
+    let back = grey(&mut engine);
+    assert!(
+        (back - 128).abs() <= 1,
+        "half a second back is halfway, not home, got {back}"
+    );
+
+    engine.tick().expect("tick");
+    assert_eq!(grey(&mut engine), 0, "and black once the second half runs");
+}

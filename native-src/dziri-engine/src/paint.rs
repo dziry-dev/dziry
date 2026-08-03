@@ -527,17 +527,84 @@ impl BarPhase {
     }
 }
 
+/// Everything the predicate resolution needs that is not per node.
+///
+/// One struct because it is one lifetime — all of it is recomputed at the top of a
+/// frame and read by every node during it — and because `resolve_slot` needs all of it
+/// while `advance_animations` holds `&mut` on the tween state beside it.
+#[derive(Default)]
+pub struct FrameState {
+    /// Predicate bits that hold for every node this frame.
+    ///
+    /// Media queries and colour scheme land here. They are the engine's to evaluate,
+    /// not the host's: the engine owns the window, so it re-evaluates them between a
+    /// resize and the relayout, and a resize repaints correctly even while Bun is busy.
+    globals: u32,
+    /// The hovered node **and every ancestor of it**, deepest first.
+    ///
+    /// A chain rather than the single id it used to be, because that is what CSS
+    /// matches — measured, `probes/hover-propagation.html`: pointing at a button three
+    /// levels deep matches `html body card mid btn`, every one of them. The exact
+    /// comparison it replaced could only ever light one node, so a hoverable card
+    /// containing a button went dark the moment the pointer reached the button. Worse,
+    /// it went dark *silently*: the compiler emitted the card's HOVER variant correctly
+    /// and nothing could ever select it.
+    ///
+    /// It is the **tree** chain, not geometric containment — also measured: a child
+    /// positioned entirely outside its parent's box still matches the parent. So
+    /// `nodes.parent` is the whole input and no rect is involved.
+    ///
+    /// Every ancestor that *cares* is already `INTERACTIVE`, which is what makes this
+    /// complete rather than half a fix: `buildInteractive` marks a node interactive when
+    /// its variant mask is non-zero, so a card with a `hover:` rule is interactive, and
+    /// `hit_test` returns it when the pointer is over its own padding. The chain covers
+    /// the other direction — the pointer over a descendant.
+    hover: Vec<i32>,
+    /// The pressed node and its ancestors, same rule.
+    ///
+    /// Measured to be the *identical* set to `:hover`'s while a button is held, so this
+    /// is one rule applied twice rather than two rules that happen to agree.
+    active: Vec<i32>,
+}
+
+impl FrameState {
+    /// Rebuilds both chains from the current input state.
+    ///
+    /// Once per frame rather than per node: a membership test against a chain of tree
+    /// depth is a few compares on one cache line, and the empty case — nothing hovered,
+    /// which is most frames — is a length check.
+    pub fn set_input(&mut self, tables: &Tables, state: &InputState) {
+        walk_ancestors(tables, state.hovered, &mut self.hover);
+        walk_ancestors(tables, state.pressed, &mut self.active);
+    }
+}
+
+/// `from` and every ancestor of it, deepest first, into `out`.
+///
+/// Budgeted, because Bun-written memory is untrusted input and a `parent` cycle must be
+/// a bounded walk rather than a hung render thread — the same rule the paint walk's
+/// traversal budget follows. A cycle here would be a host bug; hanging on one would be
+/// this file's.
+fn walk_ancestors(tables: &Tables, from: i32, out: &mut Vec<i32>) {
+    out.clear();
+    if from < 0 {
+        return;
+    }
+    let parents = tables.i32s(NODES, protocol::nodes::PARENT);
+    let mut node = from;
+    let mut budget = parents.len() + 1;
+    while node >= 0 && budget > 0 {
+        out.push(node);
+        node = parents.get(node as usize).copied().unwrap_or(-1);
+        budget -= 1;
+    }
+}
+
 pub struct Painter {
     /// The only paint there is. Borders are a two-rect fill rather than a stroke,
     /// so nothing here needs `PaintStyle::Stroke` or a per-node stroke width.
     fill: Paint,
-    /// Predicate bits that hold for every node this frame.
-    ///
-    /// Media queries and colour scheme land here. They are the engine's to
-    /// evaluate, not the host's: the engine owns the window, so it re-evaluates
-    /// them between a resize and the relayout, and a resize repaints correctly
-    /// even while Bun is busy.
-    globals: u32,
+    frame: FrameState,
     /// Every transition and animation in flight.
     ///
     /// Here rather than on the `Engine`, because "which style row does this node
@@ -562,11 +629,21 @@ impl Default for Painter {
 impl Painter {
     /// Sets the globally-true predicates for subsequent frames.
     pub fn set_globals(&mut self, globals: u32) {
-        self.globals = globals;
+        self.frame.globals = globals;
     }
 
     pub fn globals(&self) -> u32 {
-        self.globals
+        self.frame.globals
+    }
+
+    /// Recomputes the hover and press chains. Called once at the top of a frame.
+    ///
+    /// Separate from `set_globals` because the two go stale for different reasons and at
+    /// different rates: globals change on a resize, which is what `relayout` is for,
+    /// while these change on every pointer move. Both are per-frame; only one is
+    /// per-*layout*.
+    pub fn set_input_chains(&mut self, tables: &Tables, state: &InputState) {
+        self.frame.set_input(tables, state);
     }
 
     pub fn new() -> Self {
@@ -576,7 +653,7 @@ impl Painter {
 
         Self {
             fill,
-            globals: 0,
+            frame: FrameState::default(),
             anims: Anims::new(),
         }
     }
@@ -598,18 +675,17 @@ impl Painter {
     /// wall clock — `dt` is a parameter all the way down so a golden can sample an
     /// exact `t`.
     pub fn advance_animations(&mut self, tables: &Tables, state: &InputState, dt: f32) -> bool {
-        // Read out of `self` before the loop, so the closure below borrows neither the
-        // painter nor its tween state — `resolve_slot` is a free function for exactly
-        // this reason, and `style_for` is now a thin wrapper over it.
-        let globals = self.globals;
-        self.anims.advance(tables, dt, |node| {
-            resolve_slot(tables, node, state, globals)
-        })
+        // Destructured so the borrow checker sees two *disjoint fields* rather than one
+        // `&mut self`: the closure reads the frame state while `anims` is mutably
+        // borrowed. `resolve_slot` is a free function for exactly this reason, and
+        // `style_for` is a thin wrapper over it.
+        let Self { anims, frame, .. } = self;
+        anims.advance(tables, dt, |node| resolve_slot(tables, node, state, frame))
     }
 
     /// Resolves which precompiled style a node wears right now. See `resolve_slot`.
     pub(crate) fn style_for(&self, tables: &Tables, node: usize, state: &InputState) -> usize {
-        resolve_slot(tables, node, state, self.globals)
+        resolve_slot(tables, node, state, &self.frame)
     }
 
     /// The two rows a node is between, and how far — `style_for` plus its tween.
@@ -637,9 +713,8 @@ impl Painter {
 /// predicate — reach the binary search.
 ///
 /// A free function rather than a method, because `advance_animations` needs it while
-/// holding `&mut` on the tween state and `globals` — the only thing it ever wanted
-/// from the painter — is one `Copy` word.
-fn resolve_slot(tables: &Tables, node: usize, state: &InputState, globals: u32) -> usize {
+/// holding `&mut` on the tween state beside the frame state it reads.
+fn resolve_slot(tables: &Tables, node: usize, state: &InputState, frame: &FrameState) -> usize {
     let base = tables
         .u16s(NODES, protocol::nodes::STYLE)
         .get(node)
@@ -677,14 +752,27 @@ fn resolve_slot(tables: &Tables, node: usize, state: &InputState, globals: u32) 
         i
     };
 
-    // Which predicates hold for *this* node right now. The per-node ones come
-    // from the input state; the global ones (media queries, colour scheme)
-    // are the same for everybody and were evaluated once this frame.
-    let mut live = globals;
-    if subject == state.hovered {
+    // Which predicates hold for *this* node right now. The global ones (media queries,
+    // colour scheme) are the same for everybody and were evaluated once this frame; the
+    // per-node ones come from the input state.
+    //
+    // **Hover and press are membership in a chain; focus is an equality.** That
+    // asymmetry is measured rather than assumed, and it is the one thing about these
+    // three that is easy to get wrong precisely because they are always described in one
+    // breath: `:hover` and `:active` match the element under the pointer *and every
+    // ancestor of it* — identical sets, measured while a button was held — while
+    // `:focus` matches only the focused element. `:focus-within` is the ancestor form of
+    // focus, and dziri has neither it nor any reason to change this line.
+    //
+    // See BROWSER-FACTS.md, "`:hover` and `:active` match the ancestors too".
+    //
+    // Both chains are empty on a frame with nothing hovered and nothing pressed, which
+    // is most frames, so `contains` is a length check for almost every node.
+    let mut live = frame.globals;
+    if frame.hover.contains(&subject) {
         live |= predicate::HOVER;
     }
-    if subject == state.pressed {
+    if frame.active.contains(&subject) {
         live |= predicate::ACTIVE;
     }
     if subject == state.focused {
@@ -1732,10 +1820,16 @@ mod tests {
         tables.set_u16(slots, protocol::variant_slots::STYLE, 1, 3); // hovered
         tables.commit();
 
-        let painter = Painter::new();
+        let mut painter = Painter::new();
+
+        // `set_input_chains` is part of a frame now, not a nicety: `:hover` is
+        // membership in the chain of the hovered node and its ancestors, and the chain
+        // is walked once per frame rather than per node. A test that skipped it would be
+        // asserting against an empty chain, which is the "nothing hovered" answer.
 
         // Nothing hovered: the box wears its resting style.
         let idle = InputState::none();
+        painter.set_input_chains(&tables, &idle);
         assert_eq!(painter.style_for(&tables, 1, &idle), 1);
 
         // The *button* is hovered. The box is not, and never can be.
@@ -1743,6 +1837,7 @@ mod tests {
             hovered: 0,
             ..InputState::none()
         };
+        painter.set_input_chains(&tables, &hovering_parent);
         assert_eq!(
             painter.style_for(&tables, 1, &hovering_parent),
             3,
@@ -1752,13 +1847,208 @@ mod tests {
         // And the redirection is not a blanket "ask the parent": an ordinary node
         // still answers for itself, or hovering any parent would restyle its
         // children.
+        //
+        // Still true with ancestor propagation, and worth being sure of: the chain runs
+        // *up* from the hovered node, so a child of a hovered node is not in it. Hover
+        // reaches ancestors and never descendants, which is the whole difference between
+        // this and a subtree restyle.
         tables.set_u8(nodes, protocol::nodes::FLAGS, 1, 0);
         tables.commit();
+        painter.set_input_chains(&tables, &hovering_parent);
         assert_eq!(
             painter.style_for(&tables, 1, &hovering_parent),
             1,
             "a node that is not a generated box reads its own state"
         );
+    }
+
+    /// `:hover` reaches a node's ancestors; `:focus` does not. Both measured.
+    ///
+    /// This is the bug the exact comparison it replaced could not express: a hoverable
+    /// card containing a button went dark the moment the pointer reached the button, and
+    /// went dark *silently* — the compiler emitted the card's HOVER variant and nothing
+    /// could ever select it.
+    ///
+    /// The tree is `card(0) > mid(1) > button(2)`, and every one of the three carries a
+    /// HOVER and a FOCUS variant, so the assertion is about propagation rather than about
+    /// which nodes happen to have rules.
+    #[test]
+    fn hover_reaches_the_ancestors_and_focus_does_not() {
+        let mut tables = Tables::new(Capacities {
+            nodes: 3,
+            styles: 4,
+            variants: 3,
+            variant_slots: 12,
+            media: 1,
+            lists: 1,
+            tweens: 1,
+            keyframes: 1,
+            strings: 1,
+            string_bytes: 16,
+        });
+
+        let nodes = Table::Nodes as usize;
+        let variants = Table::Variants as usize;
+        let slots = Table::VariantSlots as usize;
+
+        // Styles: 0 resting, 1 hovered, 2 focused, 3 both.
+        for node in 0..3usize {
+            tables.set_u16(NODES, protocol::nodes::STYLE, node, 0);
+            tables.set_i32(
+                NODES,
+                protocol::nodes::PARENT,
+                node,
+                if node == 0 { -1 } else { node as i32 - 1 },
+            );
+            tables.set_u8(
+                nodes,
+                protocol::nodes::FLAGS,
+                node,
+                protocol::flags::INTERACTIVE,
+            );
+
+            // Two predicates, so the run is four long and the compacted index matters:
+            // bit 0 is HOVER and bit 2 is FOCUS, so `compact` maps them to 1 and 2.
+            tables.set_i32(variants, protocol::variants::NODE, node, node as i32);
+            tables.set_u32(
+                variants,
+                protocol::variants::MASK,
+                node,
+                predicate::HOVER | predicate::FOCUS,
+            );
+            tables.set_i32(
+                variants,
+                protocol::variants::RUN_START,
+                node,
+                node as i32 * 4,
+            );
+            for (offset, style) in [(0, 0u16), (1, 1), (2, 2), (3, 3)] {
+                tables.set_u16(
+                    slots,
+                    protocol::variant_slots::STYLE,
+                    node * 4 + offset,
+                    style,
+                );
+            }
+        }
+        tables.commit();
+
+        let mut painter = Painter::new();
+
+        // Pointing at the deepest node. Measured: `:hover` matches it *and* every
+        // ancestor — `html body card mid btn`, all five.
+        let hovering_button = InputState {
+            hovered: 2,
+            ..InputState::none()
+        };
+        painter.set_input_chains(&tables, &hovering_button);
+        for node in 0..3 {
+            assert_eq!(
+                painter.style_for(&tables, node, &hovering_button),
+                1,
+                "node {node} is the hovered node or an ancestor of it"
+            );
+        }
+
+        // Pointing at the middle one: the chain stops there, so the deepest node is
+        // resting. Hover reaches ancestors and never descendants.
+        let hovering_mid = InputState {
+            hovered: 1,
+            ..InputState::none()
+        };
+        painter.set_input_chains(&tables, &hovering_mid);
+        assert_eq!(painter.style_for(&tables, 0, &hovering_mid), 1, "the card");
+        assert_eq!(
+            painter.style_for(&tables, 1, &hovering_mid),
+            1,
+            "the middle box"
+        );
+        assert_eq!(
+            painter.style_for(&tables, 2, &hovering_mid),
+            0,
+            "a descendant of a hovered node is not hovered"
+        );
+
+        // Focus is the exception, and the reason it is measured rather than assumed:
+        // `:focus` matched only `btn` where `:focus-within` matched the whole chain. So
+        // this line stays an equality while the two above became membership.
+        let focused_button = InputState {
+            focused: 2,
+            ..InputState::none()
+        };
+        painter.set_input_chains(&tables, &focused_button);
+        assert_eq!(
+            painter.style_for(&tables, 0, &focused_button),
+            0,
+            "the card"
+        );
+        assert_eq!(
+            painter.style_for(&tables, 1, &focused_button),
+            0,
+            "the middle box"
+        );
+        assert_eq!(
+            painter.style_for(&tables, 2, &focused_button),
+            2,
+            "only the focused node"
+        );
+
+        // And both at once resolve to the *combination* the compiler produced, which is
+        // what the variant run is for — the card is hovered-not-focused while the button
+        // is both.
+        let both = InputState {
+            hovered: 2,
+            focused: 2,
+            ..InputState::none()
+        };
+        painter.set_input_chains(&tables, &both);
+        assert_eq!(
+            painter.style_for(&tables, 0, &both),
+            1,
+            "hovered, not focused"
+        );
+        assert_eq!(
+            painter.style_for(&tables, 2, &both),
+            3,
+            "hovered and focused"
+        );
+    }
+
+    /// A `parent` cycle is a bounded walk, not a hung render thread.
+    ///
+    /// Bun-written memory is untrusted input and can say anything, including that two
+    /// nodes are each other's parent. The chain walk is the newest thing to read that
+    /// column, so it needs the same budget the paint walk has — a cycle would be a host
+    /// bug, and hanging on one would be this file's.
+    #[test]
+    fn a_parent_cycle_does_not_hang_the_chain_walk() {
+        let mut tables = Tables::new(Capacities {
+            nodes: 2,
+            styles: 1,
+            variants: 1,
+            variant_slots: 1,
+            media: 1,
+            lists: 1,
+            tweens: 1,
+            keyframes: 1,
+            strings: 1,
+            string_bytes: 16,
+        });
+        tables.set_i32(NODES, protocol::nodes::PARENT, 0, 1);
+        tables.set_i32(NODES, protocol::nodes::PARENT, 1, 0);
+        tables.commit();
+
+        let mut painter = Painter::new();
+        painter.set_input_chains(
+            &tables,
+            &InputState {
+                hovered: 0,
+                ..InputState::none()
+            },
+        );
+        // Reaching here at all is the assertion. Both nodes are in the chain, which is
+        // the honest consequence of a cycle: everything reachable is an "ancestor".
+        assert_eq!(painter.style_for(&tables, 0, &InputState::none()), 0);
     }
 
     /// Tables holding one style slot, with the transform fields at their initial

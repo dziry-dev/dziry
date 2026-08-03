@@ -170,6 +170,96 @@ async function launch() {
   return { proc, url, profile };
 }
 
+/**
+ * Dispatches the pointer moves and clicks a probe asked for, if it asked for any.
+ *
+ * **Real input, because `:hover` cannot be reached any other way.** A synthesised
+ * `MouseEvent` does not set it, `element.focus()` has no pointer equivalent, and
+ * DevTools' `CSS.forcePseudoState` forces the state on *one* element — which measures
+ * the tool rather than the browser, and the question here is precisely which *other*
+ * elements come along. So the hover chain, `:active`, and anything reached by pointing
+ * at something were simply unmeasurable until this existed.
+ *
+ * The handshake is deliberately the smallest thing that works, and it reuses the title
+ * the harness already drives:
+ *
+ *   1. the page builds its DOM, fills `window.__probeMouse` with real coordinates it
+ *      read off real rects, and sets `document.title = "ready"`;
+ *   2. this dispatches each step and waits a frame between them, so the page's own
+ *      listeners observe each one separately;
+ *   3. the page's `report()` sets `done` as usual.
+ *
+ * Coordinates come from the page rather than from a flag because only the page knows
+ * where its boxes ended up, and a hardcoded pair in a script is a probe that silently
+ * stops pointing at the thing it names the day the layout changes.
+ */
+async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<void> {
+  const ready = `new Promise((res) => {
+    let waited = 0;
+    (function poll() {
+      // A probe that wants no input never sets "ready", and must not be delayed by
+      // this — so give up quickly and let the ordinary "done" wait take over.
+      if (document.title.startsWith("ready") || document.title.startsWith("done")) return res(true);
+      if (++waited > 120) return res(false);
+      requestAnimationFrame(poll);
+    })();
+  })`;
+
+  const got = await cdp.send(
+    "Runtime.evaluate",
+    { expression: ready, awaitPromise: true, returnByValue: true },
+    sessionId,
+  );
+  if (got.result?.value !== true) return;
+
+  const declared = await cdp.send(
+    "Runtime.evaluate",
+    { expression: "JSON.stringify(window.__probeMouse ?? [])", returnByValue: true },
+    sessionId,
+  );
+  const steps = JSON.parse((declared.result?.value as string) ?? "[]") as Array<{
+    x: number;
+    y: number;
+    down?: boolean;
+    up?: boolean;
+    label?: string;
+  }>;
+
+  for (const step of steps) {
+    const common = { x: step.x, y: step.y, button: "left", clickCount: 1, buttons: 0 };
+    await cdp.send("Input.dispatchMouseEvent", { ...common, type: "mouseMoved" }, sessionId);
+    if (step.down) {
+      await cdp.send(
+        "Input.dispatchMouseEvent",
+        { ...common, type: "mousePressed", buttons: 1 },
+        sessionId,
+      );
+    }
+    if (step.up) {
+      await cdp.send("Input.dispatchMouseEvent", { ...common, type: "mouseReleased" }, sessionId);
+    }
+    // One frame, so style resolution has run before the page reads it back. Two
+    // `requestAnimationFrame`s rather than one for the reason `_harness.js` already
+    // documents: the first is *before* style and layout for the frame.
+    await cdp.send(
+      "Runtime.evaluate",
+      {
+        expression: `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`,
+        awaitPromise: true,
+      },
+      sessionId,
+    );
+    void name;
+  }
+
+  // Hands control back to the page, which knows what it wanted to measure.
+  await cdp.send(
+    "Runtime.evaluate",
+    { expression: "window.__probeMouseDone && window.__probeMouseDone()", awaitPromise: true },
+    sessionId,
+  );
+}
+
 async function runOne(cdp: Cdp, origin: string, name: string) {
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
@@ -188,6 +278,8 @@ async function runOne(cdp: Cdp, origin: string, name: string) {
     sessionId,
   );
   await cdp.send("Page.navigate", { url: `${origin}/${name}.html` }, sessionId);
+
+  await driveMouse(cdp, sessionId, name);
 
   // The harness sets document.title to "done N" and fills #out. Waiting on that
   // beats a fixed sleep, and surfaces a hung probe as a timeout naming the probe.
