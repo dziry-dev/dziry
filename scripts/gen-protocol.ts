@@ -183,6 +183,18 @@ const interpCode = (f: Field): number => INTERP_CODE[f.interp ?? "none"];
 
 const SCHEMA_HASH = schemaHash();
 
+/**
+ * The style fields the compiler has a row for, in schema order.
+ *
+ * A field opts out by declaring `ir: null`, which today means `lineClamp` — on the
+ * wire for SkParagraph's `maxLines` before the compiler writes it. Reading the
+ * exception off the row rather than keeping a list of names here is the same reason
+ * `ir` exists at all.
+ */
+const IR_STYLE_FIELDS: Field[] = (TABLES.find((t) => t.name === "styles")?.fields ?? []).filter(
+  (f) => f.ir !== null,
+);
+
 /** The widest table, so a (table, field) index needs no hand-written stride. */
 const MAX_FIELD_COUNT = Math.max(...TABLES.map((t) => t.fields.length));
 
@@ -481,6 +493,46 @@ ${views}
 ${FLAG_GROUPS.map(([, name, bits]) => `export const ${name} = {\n${flagBodyTs(bits)}\n} as const;`).join("\n\n")}
 
 ${ENUMS.map(tsEnum).join("\n\n")}
+
+/**
+ * Style fields as the compiler sees them: [IR name, view constructor, inherited,
+ * affectsLayout].
+ *
+ * \`ir.ts\` used to declare this by hand beside the schema's own list, and the two
+ * restated each other four ways: the name twice in two spellings, the view
+ * constructor as a second encoding of \`type\`, and \`affectsLayout\` as a second
+ * encoding of \`affects\`. \`schema.test.ts\` existed to assert they agreed and said
+ * so outright — "nothing but this file makes them agree". Two of the four columns
+ * were already derivable with zero mismatches when this was generated; the other
+ * two are now named on the schema row as \`ir\` and \`inherited\`.
+ *
+ * \`lineClamp\` is absent because it has no IR row: it is on the wire for
+ * SkParagraph's \`maxLines\` and the compiler does not write it yet.
+ *
+ * Order is the schema's. It used to be the order this list happened to be written
+ * in, which had drifted — \`justifyItems\` and \`justifySelf\` were appended here and
+ * inserted mid-table there. Nothing indexes these arrays positionally across the
+ * boundary (the artifact's style table is keyed by name and \`upload.ts\` maps by
+ * name), so adopting one order moved no value.
+ */
+export const STYLE_FIELDS = [
+${IR_STYLE_FIELDS.map(
+    (f) => `  ["${f.ir ?? f.name}", "${ELEM_VIEW[f.type]}", ${!!f.inherited}, ${f.affects !== "paint"}],`,
+  ).join("\n")}
+] as const;
+
+/**
+ * Each style field the compiler emits, paired with where it lands in the schema.
+ *
+ * The spellings differ deliberately — the wire name is read by someone debugging a
+ * byte offset, the IR name is read a hundred times in the property expander — and
+ * the *encodings* were chosen to match, so \`direction\`, \`justify\` and \`align\` need
+ * no translation beyond the rename. That was not luck: the schema's enums were
+ * written from the IR's.
+ */
+export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[number][0]]> = [
+${IR_STYLE_FIELDS.map((f) => `  ["${f.name}", "${f.ir ?? f.name}"],`).join("\n")}
+];
 `;
 }
 

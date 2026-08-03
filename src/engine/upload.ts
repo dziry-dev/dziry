@@ -23,92 +23,23 @@
  * row of a 2000-item list on every keystroke would not be.
  */
 import { findRow, INITIAL_STYLE, type CompiledUi, type StyleField } from "../ir.ts";
-import { F, NodeFlags, type SharedTables } from "../protocol/generated.ts";
+import { F, NodeFlags, NUMBER_FIELDS, type SharedTables } from "../protocol/generated.ts";
 import type { Engine } from "./host.ts";
 
 /**
  * Style fields the compiler emits, paired with where they land in the schema.
+ *
+ * Generated from `protocol/schema.ts`, where each row names its IR spelling. This
+ * was 73 pairs written by hand, and schema.test.ts existed to assert they matched
+ * `ir.ts`'s own list — its header said `nothing but this file makes them agree`.
+ * Now one list generates both and that test is gone.
  *
  * Names differ (`padT` vs `padTop`) because the schema spells CSS out; the
  * *encodings* were chosen to match, so `direction`, `justify` and `align` need no
  * translation beyond the rename. That was not luck — the schema's enums were
  * written from the IR's.
  */
-export const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
-  ["bg", "bg"],
-  ["fg", "fg"],
-  ["borderColor", "borderColor"],
-  ["borderWidth", "borderWidth"],
-  ["radiusTopLeft", "radTL"],
-  ["radiusTopRight", "radTR"],
-  ["radiusBottomRight", "radBR"],
-  ["radiusBottomLeft", "radBL"],
-  ["padTop", "padT"],
-  ["padRight", "padR"],
-  ["padBottom", "padB"],
-  ["padLeft", "padL"],
-  ["marginTop", "marT"],
-  ["marginRight", "marR"],
-  ["marginBottom", "marB"],
-  ["marginLeft", "marL"],
-  ["display", "display"],
-  ["flexDirection", "direction"],
-  ["flexWrap", "wrap"],
-  ["justifyContent", "justify"],
-  ["alignItems", "align"],
-  ["alignSelf", "alignSelf"],
-  ["justifyItems", "justifyItems"],
-  ["justifySelf", "justifySelf"],
-  ["flexGrow", "grow"],
-  ["flexShrink", "shrink"],
-  ["flexBasis", "basis"],
-  ["gapRow", "gapRow"],
-  ["gapColumn", "gapCol"],
-  ["gridColumns", "gridCols"],
-  ["gridRows", "gridRows"],
-  ["gridColumnStart", "gridColStart"],
-  ["gridColumnSpan", "gridColSpan"],
-  ["gridRowStart", "gridRowStart"],
-  ["gridRowSpan", "gridRowSpan"],
-  ["width", "width"],
-  ["height", "height"],
-  ["minWidth", "minW"],
-  ["maxWidth", "maxW"],
-  ["minHeight", "minH"],
-  ["maxHeight", "maxH"],
-  ["aspectRatio", "aspectRatio"],
-  ["position", "position"],
-  ["insetTop", "insetT"],
-  ["insetRight", "insetR"],
-  ["insetBottom", "insetB"],
-  ["insetLeft", "insetL"],
-  ["fontSize", "fontSize"],
-  ["fontWeight", "fontWeight"],
-  ["overflowX", "overflowX"],
-  ["overflowY", "overflowY"],
-  ["scrollbarWidth", "scrollbarWidth"],
-  ["scrollbarThumb", "scrollbarThumb"],
-  ["scrollbarTrack", "scrollbarTrack"],
-  ["accentColor", "accentColor"],
-  ["caretColor", "caretColor"],
-  ["appearance", "appearance"],
-  ["opacity", "opacity"],
-  ["translateX", "translateX"],
-  ["translateY", "translateY"],
-  ["translatePercentX", "translatePctX"],
-  ["translatePercentY", "translatePctY"],
-  ["rotate", "rotate"],
-  ["scaleX", "scaleX"],
-  ["scaleY", "scaleY"],
-  ["skewX", "skewX"],
-  ["skewY", "skewY"],
-  ["transformOriginPercentX", "originPctX"],
-  ["transformOriginPercentY", "originPctY"],
-  ["transformOriginX", "originPxX"],
-  ["transformOriginY", "originPxY"],
-  ["transition", "transition"],
-  ["animation", "animation"],
-];
+export { NUMBER_FIELDS };
 
 /**
  * The `node` a spare controls row claims: none, and larger than any real one.

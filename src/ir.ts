@@ -24,7 +24,30 @@ import {
   StepPosition as SchemaStepPosition,
   ControlKind as SchemaControlKind,
   ControlFlags as SchemaControlFlags,
+  STYLE_FIELDS,
 } from "./protocol/generated.ts";
+
+/**
+ * Style fields in emit order: [name, typed-array constructor, inherited,
+ * affectsLayout].
+ *
+ * Generated from `protocol/schema.ts`, not written here. It used to be written
+ * here, and the schema carried the same 73 rows with the same four facts under
+ * different spellings — `padT` against `padTop`, `"Float32Array"` against `f32`,
+ * `affectsLayout` against `affects`. Two of those four columns turned out to be
+ * derivable with zero mismatches; the other two are now named on the schema row
+ * as `ir` and `inherited`.
+ *
+ * `affectsLayout` matters for dynamic styling: a change that is paint-only can
+ * skip the measure/arrange passes entirely and just repaint, which is the
+ * difference between a cheap state update and a full relayout.
+ *
+ * Adding a CSS property is now a schema row, `bun run gen:protocol`, and a case in
+ * the property expander. It was six edits across five files, two of them enforced
+ * by nothing but `schema.test.ts` — which asserted the two lists agreed and has
+ * been deleted, because there is one list.
+ */
+export { STYLE_FIELDS };
 
 /**
  * Encodings are **derived** from the generated protocol, never restated.
@@ -116,176 +139,6 @@ export function maskBits(mask: number): number[] {
   }
   return bits;
 }
-
-/**
- * Style fields in emit order: [name, typed-array constructor, inherited,
- * affectsLayout].
- *
- * `affectsLayout` matters for dynamic styling: a change that is paint-only can
- * skip the measure/arrange passes entirely and just repaint, which is the
- * difference between a cheap state update and a full relayout.
- *
- * Adding a CSS property means adding a row here plus a case in the property
- * expander; emit and the style table adapt automatically.
- */
-export const STYLE_FIELDS = [
-  // paint
-  ["bg", "Uint32Array", false, false],
-  ["fg", "Uint32Array", true, false],
-  ["borderColor", "Uint32Array", false, false],
-  // Width changes the box — the engine reserves the border like padding — so a
-  // toggle that only changes a border width still needs a relayout. Kept in the
-  // paint block because it is interned next to `borderColor`, which is paint-only;
-  // the fourth column, not the grouping, is what decides.
-  ["borderWidth", "Float32Array", false, true],
-  // Four corners rather than one radius: CSS has four longhands and a shorthand
-  // over them, and `rounded-t-lg` — most of what Tailwind's radius utilities are —
-  // cannot be said with one field.
-  ["radTL", "Float32Array", false, false],
-  ["radTR", "Float32Array", false, false],
-  ["radBR", "Float32Array", false, false],
-  ["radBL", "Float32Array", false, false],
-  // box
-  ["padT", "Float32Array", false, true],
-  ["padR", "Float32Array", false, true],
-  ["padB", "Float32Array", false, true],
-  ["padL", "Float32Array", false, true],
-  ["marT", "Float32Array", false, true],
-  ["marR", "Float32Array", false, true],
-  ["marB", "Float32Array", false, true],
-  ["marL", "Float32Array", false, true],
-  // layout mode
-  ["display", "Uint8Array", false, true],
-  // flex
-  ["direction", "Uint8Array", false, true],
-  ["wrap", "Uint8Array", false, true],
-  ["justify", "Uint8Array", false, true],
-  ["align", "Uint8Array", false, true],
-  ["alignSelf", "Uint8Array", false, true],
-  ["grow", "Float32Array", false, true],
-  ["shrink", "Float32Array", false, true],
-  ["basis", "Float32Array", false, true],
-  // `gap` is one CSS shorthand over two axes, and grid needs them apart.
-  ["gapRow", "Float32Array", false, true],
-  ["gapCol", "Float32Array", false, true],
-  // grid — explicit tracks and spans only; no subgrid, no auto-fit
-  ["gridCols", "Uint16Array", false, true],
-  ["gridRows", "Uint16Array", false, true],
-  ["gridColStart", "Int16Array", false, true],
-  ["gridColSpan", "Int16Array", false, true],
-  ["gridRowStart", "Int16Array", false, true],
-  ["gridRowSpan", "Int16Array", false, true],
-  ["justifyItems", "Uint8Array", false, true],
-  ["justifySelf", "Uint8Array", false, true],
-  // sizing
-  ["width", "Float32Array", false, true],
-  ["height", "Float32Array", false, true],
-  ["minW", "Float32Array", false, true],
-  ["maxW", "Float32Array", false, true],
-  ["minH", "Float32Array", false, true],
-  ["maxH", "Float32Array", false, true],
-  ["aspectRatio", "Float32Array", false, true],
-  // out-of-flow
-  ["position", "Uint8Array", false, true],
-  ["insetT", "Float32Array", false, true],
-  ["insetR", "Float32Array", false, true],
-  ["insetB", "Float32Array", false, true],
-  ["insetL", "Float32Array", false, true],
-  // text — both change measured advance width
-  ["fontSize", "Float32Array", true, true],
-  ["fontWeight", "Uint16Array", true, true],
-  // Layout, not paint, even though its most visible effect is clipping: a scroll
-  // container's automatic minimum size is 0 rather than its content, so whether a
-  // node scrolls changes where its *siblings* end up.
-  //
-  // Per axis, because the case that matters is asymmetric — a column that scrolls
-  // vertically and never horizontally.
-  ["overflowX", "Uint8Array", false, true],
-  ["overflowY", "Uint8Array", false, true],
-  // The two standard scrollbar properties, and they disagree about inheritance —
-  // measured, and confirmed against `mdn-data`. `scrollbar-color` inherits;
-  // `scrollbar-width` does not. Easy to get wrong in one breath because they are
-  // always described together, so the asymmetry is written down here where the
-  // cascade reads it.
-  //
-  // Paint-only, both of them, and only because the gutter is not reserved: dziri's
-  // bars are overlay, so their thickness changes what is covered rather than what
-  // fits. `scrollbarWidth` moves to `affects: "layout"` the day a gutter exists.
-  ["scrollbarWidth", "Uint8Array", false, false],
-  ["scrollbarThumb", "Uint32Array", true, false],
-  ["scrollbarTrack", "Uint32Array", true, false],
-  // The three CSS properties a form control needs that nothing else does. Paint-only
-  // — none of them changes a box — and the two colours *inherit*, which is the part
-  // worth stating rather than assuming: `accent-color` and `caret-color` are both
-  // inherited per spec, so setting one on a form styles every control inside it,
-  // which is exactly how people use them.
-  //
-  // `appearance` does not inherit, and that asymmetry is also the spec's. It is a
-  // statement about one element's own rendering, and inheriting it would mean a
-  // `appearance: none` on a fieldset silently stripped every control in it.
-  ["accentColor", "Uint32Array", true, false],
-  ["caretColor", "Uint32Array", true, false],
-  ["appearance", "Uint8Array", false, false],
-  // Transform, stored **decomposed** — never as a matrix. Measured, not assumed:
-  // `rotate(0deg)` and `rotate(360deg)` have identical matrices, so a
-  // componentwise matrix lerp cannot animate between them, yet Chromium is at
-  // 180° halfway. `rotate(0) -> rotate(720deg)` is at 180° a quarter of the way
-  // through, so the angle is not normalised to one turn either. Decomposed
-  // scalars reproduce both; six matrix floats cannot. See BROWSER-FACTS.md.
-  //
-  // It is also already the shape of the `translate`/`rotate`/`scale` properties
-  // and of what Tailwind emits, and the two agree: `translate:10px 20px;
-  // rotate:30deg; scale:2 3` lands on the same rect as the equivalent one-line
-  // `transform`. The cost is that one canonical order — translate, rotate, skew,
-  // scale — is all this can hold, so a list written in another order is refused
-  // by the parser rather than quietly reordered.
-  //
-  // All paint-only, and that is measured too rather than assumed: parent height
-  // and sibling position are untouched by translate, scale and rotate alike.
-  ["opacity", "Float32Array", false, false],
-  // Two fields per axis because CSS allows both and Tailwind uses both:
-  // `translate-x-4` is px and `-translate-x-1/2` is a percentage of the node's
-  // *own* border box — which layout knows and the compiler does not, so the
-  // percentage cannot be folded here and travels to the engine unresolved.
-  ["translateX", "Float32Array", false, false],
-  ["translateY", "Float32Array", false, false],
-  ["translatePctX", "Float32Array", false, false],
-  ["translatePctY", "Float32Array", false, false],
-  // Degrees, deliberately *not* wrapped to 0..360: the winding is meaningful, and
-  // normalising here would silently turn a full spin into a no-op.
-  ["rotate", "Float32Array", false, false],
-  ["scaleX", "Float32Array", false, false],
-  ["scaleY", "Float32Array", false, false],
-  ["skewX", "Float32Array", false, false],
-  ["skewY", "Float32Array", false, false],
-  // `transform-origin`, same px/percentage split and for the same reason. The
-  // initial value is a percentage — `50% 50%` — so unlike every other field here
-  // the *default* is the one that needs the laid-out box.
-  ["originPctX", "Float32Array", false, false],
-  ["originPctY", "Float32Array", false, false],
-  ["originPxX", "Float32Array", false, false],
-  ["originPxY", "Float32Array", false, false],
-  // `transition` and `animation`, each a row in the tween table **plus one** —
-  // zero is "nothing here", and a style table starts out zeroed.
-  //
-  // A reference rather than sixteen more columns, because a transition is a mask
-  // over 25 animatable fields, a duration, a delay and four bezier control
-  // points, and every node wearing one `.btn` class has the identical set. Two
-  // `u16`s and one interned row is the same information.
-  //
-  // Neither inherits. CSS says so for both, and the reason is worth stating: an
-  // inherited `transition` would make every descendant of a `transition-colors`
-  // card animate its own colours whenever the cascade moved them, which is not
-  // what the author asked for and is a per-frame cost they never opted into.
-  //
-  // Paint-only, and that is the boundary the whole feature sits inside: the
-  // engine interpolates in paint, so only a paint-only field can be tweened. A
-  // `transition-property` naming `width` is refused by name in the expander
-  // rather than becoming a mask bit that would ease a colour while the geometry
-  // jumped.
-  ["transition", "Uint16Array", false, false],
-  ["animation", "Uint16Array", false, false],
-] as const;
 
 export type StyleField = (typeof STYLE_FIELDS)[number][0];
 export type ComputedStyle = Record<StyleField, number>;

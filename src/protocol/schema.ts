@@ -93,6 +93,39 @@ export type Field = {
   doc?: string;
   affects?: Affects;
   interp?: Interp;
+  /**
+   * What the compiler calls this field, when that differs from the wire name.
+   *
+   * The schema spells CSS out (`padTop`) and the IR abbreviates (`padT`), and both
+   * are deliberate: the wire name is read by someone debugging a byte offset, the IR
+   * name is read a hundred times in the expander. What was not deliberate is that
+   * the mapping was written a third time by hand, in `upload.ts`, and a fourth as
+   * `STYLE_FIELDS` in `ir.ts` — with `affectsLayout` restating `affects` beside it.
+   * `schema.test.ts` existed to assert the two agreed, and said so in its header:
+   * "nothing but this file makes them agree."
+   *
+   * Naming it here makes both generated instead. Absent means the names match.
+   *
+   * `null` means the opposite: on the wire, with no IR row at all, because the
+   * compiler does not write it yet. Stated rather than inferred so that the next
+   * such field has to say so, instead of the generator carrying a list of names to
+   * skip — which is the shape of the problem this whole field exists to remove.
+   *
+   * Deliberately outside `schemaHash`. The hash catches the two *sides* disagreeing,
+   * and Rust never sees this — so there is no disagreement it could catch, and
+   * including it would bump `PROTOCOL_VERSION` for a rename that moves no bytes.
+   */
+  ir?: string | null;
+  /**
+   * Whether the value inherits, for the one table where that is a CSS question.
+   *
+   * A compiler fact rather than a wire one: inheritance is resolved before anything
+   * is written, so the engine has no use for it. It lives here because the row is
+   * the only place that knows everything about a field, and splitting it out is what
+   * produced two lists to keep in step. Outside `schemaHash` for the same reason as
+   * {@link Field.ir}.
+   */
+  inherited?: true;
 };
 
 export type Table = {
@@ -174,7 +207,7 @@ const STYLES: Table = {
   fields: [
     // paint
     { name: "bg", type: "u32", affects: "paint", interp: "color" },
-    { name: "fg", type: "u32", affects: "paint", interp: "color" },
+    { name: "fg", type: "u32", affects: "paint", interp: "color", inherited: true },
     { name: "borderColor", type: "u32", affects: "paint", interp: "color" },
     // Layout, not paint: the engine reserves the border in Taffy's box, so a
     // width change moves the content. `borderColor` above stays paint-only.
@@ -184,52 +217,52 @@ const STYLES: Table = {
     // not express `rounded-t-lg`, which is most of what Tailwind's radius
     // utilities are. `paint.rs` already built its border ring from two round
     // rects specifically so this could grow without changing how borders draw.
-    { name: "radiusTopLeft", type: "f32", affects: "paint", interp: "number" },
-    { name: "radiusTopRight", type: "f32", affects: "paint", interp: "number" },
-    { name: "radiusBottomRight", type: "f32", affects: "paint", interp: "number" },
-    { name: "radiusBottomLeft", type: "f32", affects: "paint", interp: "number" },
+    { name: "radiusTopLeft", type: "f32", affects: "paint", interp: "number", ir: "radTL" },
+    { name: "radiusTopRight", type: "f32", affects: "paint", interp: "number", ir: "radTR" },
+    { name: "radiusBottomRight", type: "f32", affects: "paint", interp: "number", ir: "radBR" },
+    { name: "radiusBottomLeft", type: "f32", affects: "paint", interp: "number", ir: "radBL" },
     // box
-    { name: "padTop", type: "f32", affects: "layout" },
-    { name: "padRight", type: "f32", affects: "layout" },
-    { name: "padBottom", type: "f32", affects: "layout" },
-    { name: "padLeft", type: "f32", affects: "layout" },
-    { name: "marginTop", type: "f32", affects: "layout" },
-    { name: "marginRight", type: "f32", affects: "layout" },
-    { name: "marginBottom", type: "f32", affects: "layout" },
-    { name: "marginLeft", type: "f32", affects: "layout" },
+    { name: "padTop", type: "f32", affects: "layout", ir: "padT" },
+    { name: "padRight", type: "f32", affects: "layout", ir: "padR" },
+    { name: "padBottom", type: "f32", affects: "layout", ir: "padB" },
+    { name: "padLeft", type: "f32", affects: "layout", ir: "padL" },
+    { name: "marginTop", type: "f32", affects: "layout", ir: "marT" },
+    { name: "marginRight", type: "f32", affects: "layout", ir: "marR" },
+    { name: "marginBottom", type: "f32", affects: "layout", ir: "marB" },
+    { name: "marginLeft", type: "f32", affects: "layout", ir: "marL" },
     // flex + grid
     { name: "display", type: "u8", affects: "layout", doc: "0 flex, 1 grid, 2 block, 3 none" },
-    { name: "flexDirection", type: "u8", affects: "layout" },
-    { name: "flexWrap", type: "u8", affects: "layout" },
-    { name: "justifyContent", type: "u8", affects: "layout" },
-    { name: "alignItems", type: "u8", affects: "layout" },
+    { name: "flexDirection", type: "u8", affects: "layout", ir: "direction" },
+    { name: "flexWrap", type: "u8", affects: "layout", ir: "wrap" },
+    { name: "justifyContent", type: "u8", affects: "layout", ir: "justify" },
+    { name: "alignItems", type: "u8", affects: "layout", ir: "align" },
     { name: "alignSelf", type: "u8", affects: "layout" },
     { name: "justifyItems", type: "u8", affects: "layout", doc: "Grid only" },
     { name: "justifySelf", type: "u8", affects: "layout", doc: "Grid only" },
-    { name: "flexGrow", type: "f32", affects: "layout" },
-    { name: "flexShrink", type: "f32", affects: "layout" },
-    { name: "flexBasis", type: "f32", affects: "layout" },
+    { name: "flexGrow", type: "f32", affects: "layout", ir: "grow" },
+    { name: "flexShrink", type: "f32", affects: "layout", ir: "shrink" },
+    { name: "flexBasis", type: "f32", affects: "layout", ir: "basis" },
     { name: "gapRow", type: "f32", affects: "layout" },
-    { name: "gapColumn", type: "f32", affects: "layout" },
-    { name: "gridColumns", type: "u16", affects: "layout", doc: "repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N" },
+    { name: "gapColumn", type: "f32", affects: "layout", ir: "gapCol" },
+    { name: "gridColumns", type: "u16", affects: "layout", doc: "repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N", ir: "gridCols" },
     { name: "gridRows", type: "u16", affects: "layout" },
-    { name: "gridColumnStart", type: "i16", affects: "layout" },
-    { name: "gridColumnSpan", type: "i16", affects: "layout" },
+    { name: "gridColumnStart", type: "i16", affects: "layout", ir: "gridColStart" },
+    { name: "gridColumnSpan", type: "i16", affects: "layout", ir: "gridColSpan" },
     { name: "gridRowStart", type: "i16", affects: "layout" },
     { name: "gridRowSpan", type: "i16", affects: "layout" },
     // sizing — NaN means auto
     { name: "width", type: "f32", affects: "layout" },
     { name: "height", type: "f32", affects: "layout" },
-    { name: "minWidth", type: "f32", affects: "layout" },
-    { name: "minHeight", type: "f32", affects: "layout" },
-    { name: "maxWidth", type: "f32", affects: "layout" },
-    { name: "maxHeight", type: "f32", affects: "layout" },
+    { name: "minWidth", type: "f32", affects: "layout", ir: "minW" },
+    { name: "minHeight", type: "f32", affects: "layout", ir: "minH" },
+    { name: "maxWidth", type: "f32", affects: "layout", ir: "maxW" },
+    { name: "maxHeight", type: "f32", affects: "layout", ir: "maxH" },
     { name: "aspectRatio", type: "f32", affects: "layout" },
     { name: "position", type: "u8", affects: "layout", doc: "0 relative, 1 absolute" },
-    { name: "insetTop", type: "f32", affects: "layout" },
-    { name: "insetRight", type: "f32", affects: "layout" },
-    { name: "insetBottom", type: "f32", affects: "layout" },
-    { name: "insetLeft", type: "f32", affects: "layout" },
+    { name: "insetTop", type: "f32", affects: "layout", ir: "insetT" },
+    { name: "insetRight", type: "f32", affects: "layout", ir: "insetR" },
+    { name: "insetBottom", type: "f32", affects: "layout", ir: "insetB" },
+    { name: "insetLeft", type: "f32", affects: "layout", ir: "insetL" },
     // text
     //
     // `layout`, and not for the obvious reason: neither appears in Taffy's
@@ -238,9 +271,16 @@ const STYLES: Table = {
     // fields where "the resolved Taffy style is unchanged" and "the laid-out
     // size is unchanged" come apart — which is why `apply_style` must not be
     // guarded by comparing styles for equality. See `LayoutTree::apply_style`.
-    { name: "fontSize", type: "f32", affects: "layout" },
-    { name: "fontWeight", type: "u16", affects: "layout" },
-    { name: "lineClamp", type: "u16", affects: "layout", doc: "0 = unlimited; drives SkParagraph maxLines" },
+    { name: "fontSize", type: "f32", affects: "layout", inherited: true },
+    { name: "fontWeight", type: "u16", affects: "layout", inherited: true },
+    {
+      name: "lineClamp",
+      type: "u16",
+      affects: "layout",
+      doc: "0 = unlimited; drives SkParagraph maxLines",
+      // On the wire ahead of the compiler: A2 wires this when SkParagraph lands.
+      ir: null,
+    },
     // Per axis, because the common case is asymmetric: a column that scrolls
     // vertically and must not scroll horizontally. One field would make
     // `overflow-y: auto` either a lie about the other axis or unexpressible.
@@ -254,8 +294,8 @@ const STYLES: Table = {
     // means "not specified" — the same convention `borderColor` uses — so `auto`
     // needs no separate field. See css.ts `scrollbarColor` for the one divergence
     // that costs.
-    { name: "scrollbarThumb", type: "u32", affects: "paint", interp: "color" },
-    { name: "scrollbarTrack", type: "u32", affects: "paint", interp: "color" },
+    { name: "scrollbarThumb", type: "u32", affects: "paint", interp: "color", inherited: true },
+    { name: "scrollbarTrack", type: "u32", affects: "paint", interp: "color", inherited: true },
     // The form-control trio. Reserved here before anything draws a control,
     // because they are ordinary compile-time fields — the cascade resolves them
     // like any colour or keyword — and the alternative is discovering at A3 that
@@ -267,8 +307,8 @@ const STYLES: Table = {
     //
     // Alpha 0 is `auto` for both colours, the convention `borderColor` and
     // `scrollbar-color` already use — so neither needs a companion flag field.
-    { name: "accentColor", type: "u32", affects: "paint", interp: "color" },
-    { name: "caretColor", type: "u32", affects: "paint", interp: "color" },
+    { name: "accentColor", type: "u32", affects: "paint", interp: "color", inherited: true },
+    { name: "caretColor", type: "u32", affects: "paint", interp: "color", inherited: true },
     { name: "appearance", type: "u8", affects: "paint", doc: "0 none, 1 auto" },
     // `opacity` and `transform`, and every one of them is `paint` — measured,
     // not assumed. A transformed box does not move its parent's height or its
@@ -288,8 +328,8 @@ const STYLES: Table = {
     // ships both spellings.
     { name: "translateX", type: "f32", affects: "paint", interp: "number" },
     { name: "translateY", type: "f32", affects: "paint", interp: "number" },
-    { name: "translatePercentX", type: "f32", affects: "paint", interp: "number", doc: "fraction of own border-box width" },
-    { name: "translatePercentY", type: "f32", affects: "paint", interp: "number", doc: "fraction of own border-box height" },
+    { name: "translatePercentX", type: "f32", affects: "paint", interp: "number", doc: "fraction of own border-box width", ir: "translatePctX" },
+    { name: "translatePercentY", type: "f32", affects: "paint", interp: "number", doc: "fraction of own border-box height", ir: "translatePctY" },
     // Degrees, and deliberately not wrapped to one turn — see above.
     { name: "rotate", type: "f32", affects: "paint", interp: "number", doc: "degrees, unnormalised" },
     { name: "scaleX", type: "f32", affects: "paint", interp: "number", doc: "initial 1" },
@@ -299,10 +339,10 @@ const STYLES: Table = {
     // `transform-origin`. The initial value is `50% 50%`, so the percentage pair
     // is the one that carries the default and a node that never mentions the
     // property still needs its laid-out size to find its own centre.
-    { name: "transformOriginPercentX", type: "f32", affects: "paint", interp: "number", doc: "initial 0.5" },
-    { name: "transformOriginPercentY", type: "f32", affects: "paint", interp: "number", doc: "initial 0.5" },
-    { name: "transformOriginX", type: "f32", affects: "paint", interp: "number", doc: "px, added to the percentage" },
-    { name: "transformOriginY", type: "f32", affects: "paint", interp: "number", doc: "px, added to the percentage" },
+    { name: "transformOriginPercentX", type: "f32", affects: "paint", interp: "number", doc: "initial 0.5", ir: "originPctX" },
+    { name: "transformOriginPercentY", type: "f32", affects: "paint", interp: "number", doc: "initial 0.5", ir: "originPctY" },
+    { name: "transformOriginX", type: "f32", affects: "paint", interp: "number", doc: "px, added to the percentage", ir: "originPxX" },
+    { name: "transformOriginY", type: "f32", affects: "paint", interp: "number", doc: "px, added to the percentage", ir: "originPxY" },
     // `transition` and `animation`, as one `u16` each into the `tweens` table.
     //
     // A reference rather than a spelt-out spec, and that is the whole design.

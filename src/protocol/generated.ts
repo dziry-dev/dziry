@@ -647,3 +647,185 @@ export const Status = {
   POISONED: -9,
 } as const;
 export type Status = (typeof Status)[keyof typeof Status];
+
+/**
+ * Style fields as the compiler sees them: [IR name, view constructor, inherited,
+ * affectsLayout].
+ *
+ * `ir.ts` used to declare this by hand beside the schema's own list, and the two
+ * restated each other four ways: the name twice in two spellings, the view
+ * constructor as a second encoding of `type`, and `affectsLayout` as a second
+ * encoding of `affects`. `schema.test.ts` existed to assert they agreed and said
+ * so outright — "nothing but this file makes them agree". Two of the four columns
+ * were already derivable with zero mismatches when this was generated; the other
+ * two are now named on the schema row as `ir` and `inherited`.
+ *
+ * `lineClamp` is absent because it has no IR row: it is on the wire for
+ * SkParagraph's `maxLines` and the compiler does not write it yet.
+ *
+ * Order is the schema's. It used to be the order this list happened to be written
+ * in, which had drifted — `justifyItems` and `justifySelf` were appended here and
+ * inserted mid-table there. Nothing indexes these arrays positionally across the
+ * boundary (the artifact's style table is keyed by name and `upload.ts` maps by
+ * name), so adopting one order moved no value.
+ */
+export const STYLE_FIELDS = [
+  ["bg", "Uint32Array", false, false],
+  ["fg", "Uint32Array", true, false],
+  ["borderColor", "Uint32Array", false, false],
+  ["borderWidth", "Float32Array", false, true],
+  ["radTL", "Float32Array", false, false],
+  ["radTR", "Float32Array", false, false],
+  ["radBR", "Float32Array", false, false],
+  ["radBL", "Float32Array", false, false],
+  ["padT", "Float32Array", false, true],
+  ["padR", "Float32Array", false, true],
+  ["padB", "Float32Array", false, true],
+  ["padL", "Float32Array", false, true],
+  ["marT", "Float32Array", false, true],
+  ["marR", "Float32Array", false, true],
+  ["marB", "Float32Array", false, true],
+  ["marL", "Float32Array", false, true],
+  ["display", "Uint8Array", false, true],
+  ["direction", "Uint8Array", false, true],
+  ["wrap", "Uint8Array", false, true],
+  ["justify", "Uint8Array", false, true],
+  ["align", "Uint8Array", false, true],
+  ["alignSelf", "Uint8Array", false, true],
+  ["justifyItems", "Uint8Array", false, true],
+  ["justifySelf", "Uint8Array", false, true],
+  ["grow", "Float32Array", false, true],
+  ["shrink", "Float32Array", false, true],
+  ["basis", "Float32Array", false, true],
+  ["gapRow", "Float32Array", false, true],
+  ["gapCol", "Float32Array", false, true],
+  ["gridCols", "Uint16Array", false, true],
+  ["gridRows", "Uint16Array", false, true],
+  ["gridColStart", "Int16Array", false, true],
+  ["gridColSpan", "Int16Array", false, true],
+  ["gridRowStart", "Int16Array", false, true],
+  ["gridRowSpan", "Int16Array", false, true],
+  ["width", "Float32Array", false, true],
+  ["height", "Float32Array", false, true],
+  ["minW", "Float32Array", false, true],
+  ["minH", "Float32Array", false, true],
+  ["maxW", "Float32Array", false, true],
+  ["maxH", "Float32Array", false, true],
+  ["aspectRatio", "Float32Array", false, true],
+  ["position", "Uint8Array", false, true],
+  ["insetT", "Float32Array", false, true],
+  ["insetR", "Float32Array", false, true],
+  ["insetB", "Float32Array", false, true],
+  ["insetL", "Float32Array", false, true],
+  ["fontSize", "Float32Array", true, true],
+  ["fontWeight", "Uint16Array", true, true],
+  ["overflowX", "Uint8Array", false, true],
+  ["overflowY", "Uint8Array", false, true],
+  ["scrollbarWidth", "Uint8Array", false, false],
+  ["scrollbarThumb", "Uint32Array", true, false],
+  ["scrollbarTrack", "Uint32Array", true, false],
+  ["accentColor", "Uint32Array", true, false],
+  ["caretColor", "Uint32Array", true, false],
+  ["appearance", "Uint8Array", false, false],
+  ["opacity", "Float32Array", false, false],
+  ["translateX", "Float32Array", false, false],
+  ["translateY", "Float32Array", false, false],
+  ["translatePctX", "Float32Array", false, false],
+  ["translatePctY", "Float32Array", false, false],
+  ["rotate", "Float32Array", false, false],
+  ["scaleX", "Float32Array", false, false],
+  ["scaleY", "Float32Array", false, false],
+  ["skewX", "Float32Array", false, false],
+  ["skewY", "Float32Array", false, false],
+  ["originPctX", "Float32Array", false, false],
+  ["originPctY", "Float32Array", false, false],
+  ["originPxX", "Float32Array", false, false],
+  ["originPxY", "Float32Array", false, false],
+  ["transition", "Uint16Array", false, false],
+  ["animation", "Uint16Array", false, false],
+] as const;
+
+/**
+ * Each style field the compiler emits, paired with where it lands in the schema.
+ *
+ * The spellings differ deliberately — the wire name is read by someone debugging a
+ * byte offset, the IR name is read a hundred times in the property expander — and
+ * the *encodings* were chosen to match, so `direction`, `justify` and `align` need
+ * no translation beyond the rename. That was not luck: the schema's enums were
+ * written from the IR's.
+ */
+export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[number][0]]> = [
+  ["bg", "bg"],
+  ["fg", "fg"],
+  ["borderColor", "borderColor"],
+  ["borderWidth", "borderWidth"],
+  ["radiusTopLeft", "radTL"],
+  ["radiusTopRight", "radTR"],
+  ["radiusBottomRight", "radBR"],
+  ["radiusBottomLeft", "radBL"],
+  ["padTop", "padT"],
+  ["padRight", "padR"],
+  ["padBottom", "padB"],
+  ["padLeft", "padL"],
+  ["marginTop", "marT"],
+  ["marginRight", "marR"],
+  ["marginBottom", "marB"],
+  ["marginLeft", "marL"],
+  ["display", "display"],
+  ["flexDirection", "direction"],
+  ["flexWrap", "wrap"],
+  ["justifyContent", "justify"],
+  ["alignItems", "align"],
+  ["alignSelf", "alignSelf"],
+  ["justifyItems", "justifyItems"],
+  ["justifySelf", "justifySelf"],
+  ["flexGrow", "grow"],
+  ["flexShrink", "shrink"],
+  ["flexBasis", "basis"],
+  ["gapRow", "gapRow"],
+  ["gapColumn", "gapCol"],
+  ["gridColumns", "gridCols"],
+  ["gridRows", "gridRows"],
+  ["gridColumnStart", "gridColStart"],
+  ["gridColumnSpan", "gridColSpan"],
+  ["gridRowStart", "gridRowStart"],
+  ["gridRowSpan", "gridRowSpan"],
+  ["width", "width"],
+  ["height", "height"],
+  ["minWidth", "minW"],
+  ["minHeight", "minH"],
+  ["maxWidth", "maxW"],
+  ["maxHeight", "maxH"],
+  ["aspectRatio", "aspectRatio"],
+  ["position", "position"],
+  ["insetTop", "insetT"],
+  ["insetRight", "insetR"],
+  ["insetBottom", "insetB"],
+  ["insetLeft", "insetL"],
+  ["fontSize", "fontSize"],
+  ["fontWeight", "fontWeight"],
+  ["overflowX", "overflowX"],
+  ["overflowY", "overflowY"],
+  ["scrollbarWidth", "scrollbarWidth"],
+  ["scrollbarThumb", "scrollbarThumb"],
+  ["scrollbarTrack", "scrollbarTrack"],
+  ["accentColor", "accentColor"],
+  ["caretColor", "caretColor"],
+  ["appearance", "appearance"],
+  ["opacity", "opacity"],
+  ["translateX", "translateX"],
+  ["translateY", "translateY"],
+  ["translatePercentX", "translatePctX"],
+  ["translatePercentY", "translatePctY"],
+  ["rotate", "rotate"],
+  ["scaleX", "scaleX"],
+  ["scaleY", "scaleY"],
+  ["skewX", "skewX"],
+  ["skewY", "skewY"],
+  ["transformOriginPercentX", "originPctX"],
+  ["transformOriginPercentY", "originPctY"],
+  ["transformOriginX", "originPxX"],
+  ["transformOriginY", "originPxY"],
+  ["transition", "transition"],
+  ["animation", "animation"],
+];
