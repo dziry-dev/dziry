@@ -1536,15 +1536,24 @@ pub fn hit_test(
             continue;
         }
 
+        let [bx, by, w, h] = geometry.bounds[node];
+        let (x, y) = (bx - sx, by - sy);
+
         // Undone before this node's own box is tested, matching paint, which
         // concats before the node draws itself. A transform that cannot be
         // inverted is degenerate — a zero scale, so the node occupies no area —
         // and the whole subtree is correctly unhittable.
-        if let Some(m) = transform_of(
-            tables,
-            painter.style_for(tables, node, state),
-            geometry.bounds[node],
-        ) {
+        //
+        // **Built from the scroll-adjusted rect, not the layout one.** The pointer
+        // is in window coordinates and `bounds` are unscrolled, so a matrix whose
+        // origin came from `bounds` would turn the point about a centre displaced
+        // by however far the page had scrolled. Translation survived that — it is
+        // origin-independent — which is exactly why the bug hid: `hover:scale-110`
+        // on a scrolled page lost its own hover while `hover:-translate-y-1` beside
+        // it worked, and the golden could not see it because a 1500px-tall
+        // screenshot never scrolls.
+        if let Some(m) = transform_of(tables, painter.style_for(tables, node, state), [x, y, w, h])
+        {
             match m.invert() {
                 Some(inv) => {
                     let p = inv.map_point((px, py));
@@ -1555,8 +1564,6 @@ pub fn hit_test(
             }
         }
 
-        let [bx, by, w, h] = geometry.bounds[node];
-        let (x, y) = (bx - sx, by - sy);
         if px < x || py < y || px >= x + w || py >= y + h {
             // A child can still overflow its parent's box, but the TypeScript
             // runtime pruned here too and nothing in the corpus relies on it.

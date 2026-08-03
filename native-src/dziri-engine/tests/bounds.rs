@@ -1144,6 +1144,72 @@ fn a_scrolled_child_is_hit_where_it_now_appears() {
     assert_eq!(bound(&engine, 2)[1], 80.0);
 }
 
+#[test]
+fn a_scaled_node_is_hit_where_it_appears_after_scrolling() {
+    // The two features that broke each other. `hit_test` compares the pointer, which
+    // is in window coordinates, against `bounds` minus the ancestors' scroll — so the
+    // transform's origin has to be in that same space. Built from the raw layout rect
+    // it turned the point about a centre displaced by however far the page had
+    // scrolled, and `hover:scale-110` on a long page lost its own hover.
+    //
+    // Translation hid it: a translate is origin-independent, so the neighbouring
+    // `hover:-translate-y-1` kept working, which made it look like a scale bug rather
+    // than a coordinate-space one. A golden could not see it either — a screenshot
+    // tall enough to show the whole page never scrolls.
+    let mut engine = Engine::new(&config(3, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        t.set_u8(STYLES, styles::OVERFLOW_Y, 0, protocol::overflow::SCROLL);
+
+        for node in [1usize, 2] {
+            t.set_f32(STYLES, styles::HEIGHT, node, 80.0);
+            t.set_f32(STYLES, styles::FLEX_SHRINK, node, 0.0);
+        }
+        // Node 2 doubles about its own centre, which is the case that only works if
+        // the centre is computed in the space the pointer is in.
+        t.set_f32(STYLES, styles::SCALE_X, 2, 2.0);
+        t.set_f32(STYLES, styles::SCALE_Y, 2, 2.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 2);
+        t.set_u8(NODES, nodes::FLAGS, 2, protocol::flags::INTERACTIVE);
+        link(t, 0, &[1, 2]);
+    }
+    engine.tick().expect("tick");
+
+    // Unscrolled first, so a failure here is a plain transform bug rather than a
+    // scroll interaction. Node 2 is laid out at y = 80..160 and scaled 2x about its
+    // centre at y=120, so it is drawn over y = 40..200 — and y=50 is inside the
+    // drawn box while being outside the layout box.
+    assert_eq!(
+        engine.hit_test(10.0, 50.0),
+        2,
+        "inside the scaled box, unscrolled"
+    );
+
+    // Now scroll 60px. Node 2's unscaled box moves to y = 20..100, and scaling about
+    // its new centre at y=60 draws it over y = -20..140.
+    assert!(engine.scroll_at(10.0, 50.0, 0.0, 60.0));
+    engine.advance_scrolls(1.0);
+
+    // y=85, which has to be inside the container to be reachable at all — the
+    // container is the scroll box, so a point past y=100 is pruned at the root and
+    // would test nothing about transforms.
+    //
+    // It is the discriminating point. Turning about the scrolled centre (y=60) maps
+    // it to 72.5, inside the box. Turning about the *layout* centre (y=120), as the
+    // bug did, maps it to 102.5 — outside, and the hover is lost.
+    assert_eq!(
+        engine.hit_test(10.0, 85.0),
+        2,
+        "inside the scaled box, scrolled"
+    );
+}
+
 /// The page scrolls when the document is taller than the window.
 ///
 /// The shape `app.css` uses, and what a browser does: the root keeps its children at
