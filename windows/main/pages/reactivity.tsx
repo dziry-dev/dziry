@@ -60,17 +60,6 @@ function LangRow({ badge, name, kind }: Props & { badge: string; name: string; k
     );
 }
 
-function ChatGptTest() {
-    const person = signal({
-        name: 'sam'
-    });
-    return (
-        <div className="flex-col">
-            <p>chatgpt test</p>
-            <div>{person.name}</div>
-        </div>
-    );
-}
 /**
  * State that belongs to one component, declared where it is used.
  *
@@ -101,9 +90,6 @@ function LocalCounter() {
 export default function Reactivity() {
     return (
         <div className="flex flex-col gap-5">
-            <div className={CARD}>
-                <ChatGptTest />
-            </div>
             <div className={CARD}>
                 <div className="flex flex-row items-center justify-between">
                     <div className="flex flex-col gap-1">
