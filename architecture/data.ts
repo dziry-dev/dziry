@@ -53,7 +53,6 @@ export const LAYERS: Layer[] = [
       "src/compile.ts",
       "src/compile-window.ts",
       "src/ir.ts",
-      "src/variants.ts",
       "src/routes.ts",
       "src/route-chain.test.ts",
       "src/index.ts",
@@ -79,7 +78,6 @@ export const LAYERS: Layer[] = [
       "src/engine/",
       // The host: the engine thread, the app Worker, and the lock between them.
       "src/host/",
-      "src/window-host.ts",
       "native-src/dziri-engine/src/protocol.rs",
       "native-src/dziri-engine/src/tables.rs",
       "native-src/dziri-engine/src/lib.rs",
@@ -220,7 +218,7 @@ export const STAGES: Stage[] = [
         "`(field, slot)` cannot both be correct, because the result would depend on apply order " +
         "rather than on specificity. The compiler exits non-zero rather than shipping it.",
     ],
-    files: ["src/compiler/variants.ts", "src/compiler/variant-compile.ts", "src/variants.ts"],
+    files: ["src/compiler/variant-compile.ts"],
     invariant:
       "Patch the style table per (field, slot). Do not 'simplify' to swapping per-node style pointers — conflict detection and the predicate-mask table both depend on it.",
   },

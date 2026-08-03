@@ -64,7 +64,6 @@
     "routes": "bun run src/routes.ts",
     "window": "bun run src/compile-window.ts",
     "dev": "bun run src/cli/index.ts dev",
-    "variants": "bun run src/variants.ts",
     "shot": "bun run src/cli/index.ts dev -- --screenshot engine-demo.png",
     "tw": "bun run dev",
     "tw:shot": "bun run src/cli/index.ts dev -- --screenshot windows/main/shot.png",

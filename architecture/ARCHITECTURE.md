@@ -10,7 +10,7 @@ A UI framework that resolves CSS, the cascade and every interaction state before
 - **Authoring** — What a person writes: JSX, a stylesheet, and module-level signals. None of it ships — the compiler evaluates it and keeps the result.
   <br>`windows/`
 - **Compiler** — Selector matching, specificity, cascade, inheritance, shorthand expansion, unit resolution and interning — all of it at build time, ending in integer arrays.
-  <br>`src/compiler/`, `src/compile.ts`, `src/compile-window.ts`, `src/ir.ts`, `src/variants.ts`, `src/routes.ts`, `src/route-chain.test.ts`, `src/index.ts`, `src/cli/`
+  <br>`src/compiler/`, `src/compile.ts`, `src/compile-window.ts`, `src/ir.ts`, `src/routes.ts`, `src/route-chain.test.ts`, `src/index.ts`, `src/cli/`
 - **Runtime** — The only code that survives to run time: signals, and the three things they drive — text bindings, style patches, list arenas. No parser, no cascade, no diff of a tree.
   <br>`src/runtime/`
 - **Protocol & host** — The boundary. One schema generates both sides' field identities; the engine reports byte offsets at run time. Everything else is a direct write into shared memory.
@@ -85,7 +85,7 @@ A conditional class is not resolved at run time. The compiler runs one extra ful
 That interning is what makes conflict detection possible: two toggles writing the same `(field, slot)` cannot both be correct, because the result would depend on apply order rather than on specificity. The compiler exits non-zero rather than shipping it.
 
 
-`src/compiler/variants.ts`, `src/compiler/variant-compile.ts`, `src/variants.ts`
+`src/compiler/variant-compile.ts`
 
 > **Do not undo.** Patch the style table per (field, slot). Do not 'simplify' to swapping per-node style pointers — conflict detection and the predicate-mask table both depend on it.
 
