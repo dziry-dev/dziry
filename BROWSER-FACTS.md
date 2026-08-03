@@ -754,3 +754,41 @@ about it. At 13px, from the screenshot:
 
 These are proportions read off an image rather than numbers reported by an API, and they are
 recorded as approximate on purpose.
+
+## What counts as a child for `:first-child` / `:last-child`, and whether the root does
+
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/structural-pseudo-root.html`,
+run twice with identical output.** Asked because `space-y-*` and `divide-*` are emitted as
+`:where(.space-y-4 > :not(:last-child))`, so implementing them meant deciding three edge cases
+the compiler cannot avoid: what the root element answers, and whether the two kinds of
+non-element child that dziri's IR *does* give a node — text runs and generated boxes — join
+the count.
+
+| | matched |
+|---|---|
+| `html:first-child`, `:last-child`, `:only-child` | all **true** |
+| `html:first-of-type`, `html:nth-child(1)` | true |
+| first element with a text run before it, `:first-child` | true |
+| last element with a text run after it, `:last-child` | true |
+| sole element child with `::before` *and* `::after`, `:only-child` | true |
+
+So an element with **no parent still matches all three** — Selectors 4's "first among its
+inclusive siblings" wording, not Selectors 3's "first child of some other element" — and
+neither text nodes nor generated boxes are counted.
+
+All three matter to dziri and all three are now what `positionOf` in `compile.ts` implements.
+The text-node row is the one that would have been silently wrong: a container written across
+several lines has a text run after its final element, so counting *nodes* would mean nothing is
+ever the last child, and `space-y-4` would have put a trailing margin on every row including
+the last. The `::before` row is the same hazard from the other side, because dziri gives a
+generated box a real IR node with a real position in its parent's child array.
+
+The end-to-end shape, on the same page, to check the three answers compose into the behaviour
+the utility is for — three `<p>` in a `:where(.sp > :not(:last-child)){margin-block-end:16px}`
+container:
+
+| | `margin-bottom` |
+|---|---|
+| `p1` | 16px |
+| `p2` | 16px |
+| `p3`, the last child | 12px — the UA `margin-block: 1em`, so the rule did not reach it |

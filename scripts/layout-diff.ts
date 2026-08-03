@@ -247,6 +247,90 @@ const CORPUS: Scenario[] = [
 .field { flex-grow: 1; flex-basis: 0; border: 1px solid #333; padding: 9px 12px }
 .btn { border: 1px solid #333; padding: 8px 14px }`,
   },
+
+  /**
+   * The `space-y-*` shape, which is where the child combinator, `:not()` and
+   * `:last-child` all have to be right *at once* — and geometry is the only place
+   * that shows it: getting `:last-child` wrong moves one box by 16px and computes
+   * every declaration correctly on the way.
+   *
+   * Written without the `:where()` Tailwind wraps it in, and that is about this
+   * harness rather than about the utility. Tailwind's real sheet works because its
+   * preflight is `*, ::before, ::after` at specificity (0,0,0), so a (0,0,0)
+   * utility ties and later source order wins. `RESET` is `body, body *`, which is
+   * (0,0,1) — it would beat a `:where()` rule *in Chrome only*, and the phantom
+   * `DIFFER` would be the harness's. `:where()` contributing nothing is a cascade
+   * question and is tested as one, in `cascade.test.ts`.
+   */
+  {
+    name: "space-y-margins-all-but-last",
+    asks: "a child + :not(:last-child) rule margins every row except the final one",
+    width: 400,
+    height: 300,
+    html:
+      `<body><div class="sp">` +
+      `<div class="row"></div><div class="row"></div><div class="row"></div>` +
+      `</div><div class="after"></div></body>`,
+    css: `.sp { width: 200px }
+.row { height: 20px }
+.after { height: 10px }
+.sp > :not(:last-child) { margin-block-end: 16px }`,
+  },
+
+  // The inline axis of the same mechanism. Separate because it is a different
+  // property pair reached through a different logical-to-physical mapping, and a
+  // row lays out along the axis the margin is on.
+  {
+    name: "space-x-margins-all-but-last",
+    asks: "the same rule on the inline axis spaces a row without a trailing gap",
+    width: 400,
+    height: 200,
+    html:
+      `<body><div class="sp">` +
+      `<div class="cell"></div><div class="cell"></div><div class="cell"></div>` +
+      `</div></body>`,
+    css: `.sp { flex-direction: row; width: 300px }
+.cell { width: 40px; height: 20px }
+.sp > :not(:last-child) { margin-inline-end: 8px }`,
+  },
+
+  /**
+   * `inset` as a shorthand, which is a geometry question and not a value one.
+   * `conformance` already pins that each of the four longhands computes correctly;
+   * what it cannot see is whether they were assigned to the right *sides*, because
+   * a t/r/b/l order swapped for t/b/r/l computes four correct lengths and puts the
+   * box somewhere else. Two boxes, so a swap moves one of them.
+   */
+  {
+    name: "inset-shorthand-places-the-box",
+    asks: "`inset: 1px 2px 3px 4px` assigns top/right/bottom/left in that order",
+    width: 400,
+    height: 300,
+    html:
+      `<body><div class="rel">` +
+      `<div class="all"></div><div class="sides"></div>` +
+      `</div></body>`,
+    css: `.rel { position: relative; width: 200px; height: 160px }
+.all { position: absolute; inset: 10px 20px 30px 40px }
+.sides { position: absolute; inset-inline: 5px 15px; inset-block: 25px 35px }`,
+  },
+
+  // A child combinator that has to *not* match, which is the failure the old
+  // refusal existed to prevent: `>` silently widening into a descendant would give
+  // the nested box the margin too and shift everything below it.
+  {
+    name: "child-combinator-skips-a-grandchild",
+    asks: "a `>` rule reaches the direct child and not the one a level deeper",
+    width: 400,
+    height: 300,
+    html:
+      `<body><div class="sp">` +
+      `<div class="direct"></div><div class="mid"><div class="deep"></div></div>` +
+      `</div></body>`,
+    css: `.sp { width: 200px }
+.direct, .deep { height: 20px }
+.sp > div { margin-block-start: 24px }`,
+  },
 ];
 
 // ── the walk both sides produce ──────────────────────────────────────────────

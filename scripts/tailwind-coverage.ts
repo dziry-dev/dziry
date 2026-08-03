@@ -20,6 +20,7 @@
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import cssProperties from "mdn-data/css/properties.json";
+import { CssError, parseSelector, splitSelectorList } from "../src/compiler/css.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const TMP = join(ROOT, ".tw-tmp");
@@ -94,17 +95,87 @@ async function compileAll(classes: string[]): Promise<string> {
  * `@media` and `@supports`, and a flat regex either misses those or swallows
  * whole layers as one "rule".
  */
+/**
+ * Every reason `parseSelector` refused one of the sheet's selectors, per class.
+ *
+ * This exists because the tool had a blind spot exactly the shape of the two it
+ * already documents below, and it cost a build. Everything else here is measured
+ * over *declarations* — the property names and the value text — so a class whose
+ * property and value were both supported counted as working even when the
+ * compiler refused its **selector** and threw a fatal `CssError`.
+ *
+ * `space-y-*` and `divide-*` are the case. Tailwind emits them as
+ * `:where(.space-y-4 > :not(:last-child))`, whose declarations are an ordinary
+ * `margin-block-end`; all 450 of them were reported as working while
+ * `bun run dev` failed to compile the sheet at all. A selector is as much a
+ * parser feature as a value is, and a fatal error is the loudest possible failure
+ * to have been counting as a pass.
+ */
+function selectorBlockers(css: string, known: Set<string>): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  let selStart = 0;
+  const stack: string[] = [];
+
+  for (let i = 0; i < css.length; i++) {
+    const ch = css[i];
+    if (ch === "{") {
+      const raw = css.slice(selStart, i);
+      const cut = Math.max(raw.lastIndexOf(";"), raw.lastIndexOf("}"));
+      stack.push(raw.slice(cut + 1).trim());
+      selStart = i + 1;
+      continue;
+    }
+    if (ch !== "}") continue;
+
+    const body = css.slice(selStart, i);
+    const selector = stack.pop() ?? "";
+    selStart = i + 1;
+    // A container's own prelude is not a selector, and an at-rule never is.
+    if (body.includes("{") || !selector || selector.startsWith("@")) continue;
+
+    for (const part of splitSelectorList(selector)) {
+      if (!part.text) continue;
+      let why: string;
+      try {
+        parseSelector(part.text);
+        continue;
+      } catch (e) {
+        if (!(e instanceof CssError)) throw e;
+        // The first line only. The messages carry a paragraph of guidance, which
+        // is right in a build error and would be unreadable in a ranked table.
+        why = `selector: ${e.message.split("\n")[0]!.trim()}`;
+      }
+      // Attributed to the nearest enclosing selector that names a class, exactly
+      // as the declarations are — `.divide-y` wraps a `:where(& > …)` whose own
+      // text names nothing.
+      for (const scope of [part.text, ...[...stack].reverse()]) {
+        const names = classNamesIn(scope).filter((n) => known.has(n));
+        if (!names.length) continue;
+        for (const n of names) {
+          let set = out.get(n);
+          if (set === undefined) out.set(n, (set = new Set()));
+          set.add(why);
+        }
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** `.p-4`, `.p-0\.5`, `.w-1\/2`, `.hover\:bg-blue-500:hover` */
+function classNamesIn(selector: string): string[] {
+  const names: string[] = [];
+  for (const m of selector.matchAll(/\.((?:[\w-]|\\.)+)/g)) names.push(m[1]!.replace(/\\(.)/g, "$1"));
+  return names;
+}
+
 function rulesByClass(css: string, known: Set<string>): Map<string, { props: Set<string>; values: string }> {
   const out = new Map<string, { props: Set<string>; values: string }>();
   let selStart = 0;
   const stack: string[] = [];
 
-  /** `.p-4`, `.p-0\.5`, `.w-1\/2`, `.hover\:bg-blue-500:hover` */
-  const classesIn = (selector: string): string[] => {
-    const names: string[] = [];
-    for (const m of selector.matchAll(/\.((?:[\w-]|\\.)+)/g)) names.push(m[1]!.replace(/\\(.)/g, "$1"));
-    return names;
-  };
+  const classesIn = classNamesIn;
 
   for (let i = 0; i < css.length; i++) {
     const c = css[i];
@@ -243,6 +314,8 @@ const allProps = new Set<string>();
 for (const { props } of rules.values()) for (const p of props) if (!p.startsWith("--")) allProps.add(p);
 
 /** class -> the reasons it cannot work today */
+const selectorWhy = selectorBlockers(css, new Set(classes));
+
 const blockers = new Map<string, Set<string>>();
 let clean = 0;
 
@@ -257,6 +330,7 @@ for (const [name, { props, values }] of rules) {
     if (!supported.has(p)) why.add(`property: ${p}`);
   }
   for (const f of VALUE_FEATURES) if (f.test.test(values)) why.add(f.name);
+  for (const s of selectorWhy.get(name) ?? []) why.add(s);
   if (why.size) blockers.set(name, why);
   else clean++;
 }

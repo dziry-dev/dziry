@@ -1,0 +1,58 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>structural-pseudo-root</title>
+<style>body{font:12px ui-monospace,monospace;padding:16px}#out{white-space:pre;line-height:1.5}</style>
+<h3>Does the root element match :first-child / :last-child / :only-child, and do text nodes and generated boxes count as children?</h3>
+<script type="module">
+  import { log, mount, frame, report } from "./_harness.js";
+
+  const hits = (sel) => document.documentElement.matches(sel);
+
+  log("=== the root element (<html>), which has no parent ===");
+  log("html:first-child        " + hits(":first-child"));
+  log("html:last-child         " + hits(":last-child"));
+  log("html:only-child         " + hits(":only-child"));
+  log("html:first-of-type      " + hits(":first-of-type"));
+  log("html:nth-child(1)       " + hits(":nth-child(1)"));
+  log("");
+
+  // dziri resolves `:last-child` off its own tree, where a container written with
+  // newlines between its tags has a text run after the final element. If a text
+  // node counted, nothing would ever be the last child and `space-y-*` would put a
+  // trailing margin on every row.
+  log("=== do text nodes count as children? ===");
+  mount("<div id=a>\n  <i id=one></i>\n  <i id=two></i>\n</div>");
+  await frame();
+  const one = document.getElementById("one");
+  const two = document.getElementById("two");
+  log("first element, text before it, :first-child   " + one.matches(":first-child"));
+  log("last element, text after it, :last-child      " + two.matches(":last-child"));
+  log("");
+
+  // The other half of the same question: dziri gives ::before and ::after real
+  // nodes in the IR, so it has to know whether CSS counts them.
+  log("=== do ::before / ::after count as children? ===");
+  mount('<style>#b::before{content:"x"}#b::after{content:"y"}</style><div id=b><i id=solo></i></div>');
+  await frame();
+  const solo = document.getElementById("solo");
+  log("only element child, ::before and ::after present:");
+  log("  :first-child          " + solo.matches(":first-child"));
+  log("  :last-child           " + solo.matches(":last-child"));
+  log("  :only-child           " + solo.matches(":only-child"));
+  log("");
+
+  // What `space-y-*` actually depends on, measured end to end rather than inferred
+  // from the three answers above.
+  log("=== :where(.sp > :not(:last-child)) margin, the space-y-4 shape ===");
+  mount(
+    '<style>:where(.sp > :not(:last-child)){margin-block-end:16px}</style>' +
+      '<div class="sp">\n  <p id=p1>a</p>\n  <p id=p2>b</p>\n  <p id=p3>c</p>\n</div>',
+  );
+  await frame();
+  for (const id of ["p1", "p2", "p3"]) {
+    const el = document.getElementById(id);
+    log(`  ${id} margin-bottom   ` + getComputedStyle(el).marginBottom);
+  }
+
+  report();
+</script>

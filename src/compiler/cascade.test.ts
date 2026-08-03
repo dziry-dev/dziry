@@ -14,6 +14,7 @@ import { compile, compileTree, dump, emit, toCompiledUi } from "./compile.ts";
 import { compileVariants, findToggles } from "./variant-compile.ts";
 import { parseHtml } from "./html.ts";
 import {
+  Align,
   compactBits,
   Display,
   INITIAL_STYLE,
@@ -493,7 +494,10 @@ test("an unsupported selector is refused, not silently rewritten", () => {
     // *shape* of the original bug: a bracketed construct the scanner must not
     // quietly drop the way it once dropped `[type="text"]` down to `text`.
     [`input[type="text"i] extra] { width: 1px }`, "malformed attribute selector was swallowed"],
-    [`div > span { width: 1px }`, "child combinator became a descendant one"],
+    // `div > span` was here and is now supported — the whole reason the child
+    // combinator was built, since `space-y-*` compiles to
+    // `:where(.space-y-4 > :not(:last-child))`. The sibling one stays: it asks
+    // about siblings rather than ancestors, which the matcher cannot answer.
     [`div + span { width: 1px }`, "sibling combinator became a descendant one"],
     [`* { width: 1px }`, "universal selector matched nothing"],
   ];
@@ -501,6 +505,86 @@ test("an unsupported selector is refused, not silently rewritten", () => {
   for (const [css, why] of cases) {
     expect(() => compile(`<body><div></div></body>`, css), why).toThrow();
   }
+});
+
+/**
+ * The child combinator has to *mean* child, which is the half of the old refusal
+ * that mattered: `div > span` parsing as `div span` is the failure that made
+ * refusing it correct in the first place, so the test that replaces the refusal is
+ * the one where the two would disagree.
+ */
+test("a child combinator does not match a grandchild", () => {
+  const html = `<body><div class="a"><span class="direct"></span><i><span class="deep"></span></i></div></body>`;
+  const ui = toCompiledUi(
+    compile(html, `.a > span { width: 7px } .a span { height: 3px }`),
+  );
+  const styles = ui.styles as unknown as Record<string, ArrayLike<number>>;
+  // 0 body, 1 .a, 2 span.direct, 3 i, 4 span.deep
+  const widthOf = (n: number) => styles.width![ui.nodes.style[n]!]!;
+  const heightOf = (n: number) => styles.height![ui.nodes.style[n]!]!;
+
+  expect(widthOf(2)).toBe(7);
+  expect(heightOf(2)).toBe(3);
+  // The descendant rule reaches the nested span; the child rule must not.
+  expect(heightOf(4)).toBe(3);
+  expect(widthOf(4)).not.toBe(7);
+});
+
+/**
+ * `:where()` is the wrapper every Tailwind `space-*` and `divide-*` utility is
+ * emitted inside, and its whole job is to weigh nothing — so the test is a
+ * specificity comparison, not a match.
+ */
+test(":where() matches its argument and contributes no specificity", () => {
+  const html = `<body><div class="a b"></div></body>`;
+  // On specificity alone `.a:where(.b)` is (0,1,0) and `.a` is (0,1,0) too, so
+  // source order decides and the *earlier* `.a` must lose. If `:where()` counted
+  // its argument it would be (0,2,0) and win regardless of order — which is the
+  // failure this pins.
+  const ui = toCompiledUi(compile(html, `.a:where(.b) { width: 1px } .a { width: 9px }`));
+  const styles = ui.styles as unknown as Record<string, ArrayLike<number>>;
+  expect(styles.width![ui.nodes.style[1]!]).toBe(9);
+
+  // `:is()` does count it, so the same pair resolves the other way.
+  const withIs = toCompiledUi(compile(html, `.a:is(.b) { width: 1px } .a { width: 9px }`));
+  const isStyles = withIs.styles as unknown as Record<string, ArrayLike<number>>;
+  expect(isStyles.width![withIs.nodes.style[1]!]).toBe(1);
+});
+
+/**
+ * The structural pseudo-classes, which is what makes `space-y-*` produce a
+ * *different* style for the last child rather than the same one everywhere.
+ */
+test(":first-child, :last-child and :only-child resolve off the tree", () => {
+  const html = `<body><div><i class="x"></i><i class="y"></i><i class="z"></i></div></body>`;
+  const ui = toCompiledUi(
+    compile(html, `i:first-child { width: 1px } i:last-child { width: 2px } i:only-child { width: 3px }`),
+  );
+  const styles = ui.styles as unknown as Record<string, ArrayLike<number>>;
+  const widthOf = (n: number) => styles.width![ui.nodes.style[n]!]!;
+  // 0 body, 1 div, 2 .x, 3 .y, 4 .z
+  expect(widthOf(2)).toBe(1);
+  expect(widthOf(4)).toBe(2);
+  expect(widthOf(3)).not.toBe(1);
+  expect(widthOf(3)).not.toBe(2);
+
+  const lone = toCompiledUi(compile(`<body><div><i></i></div></body>`, `i:only-child { width: 3px }`));
+  const loneStyles = lone.styles as unknown as Record<string, ArrayLike<number>>;
+  expect(loneStyles.width![lone.nodes.style[2]!]).toBe(3);
+});
+
+/**
+ * Text between elements must not count. `:last-child` counts *elements*, and a
+ * tree written with newlines between its tags has a text run after the final one —
+ * so counting nodes rather than elements would make nothing the last child, and
+ * `space-y-*` would put a trailing margin on every row.
+ */
+test("a trailing text run does not displace :last-child", () => {
+  const html = `<body><div>\n  <i class="x"></i>\n  <i class="y"></i>\n</div></body>`;
+  const ui = toCompiledUi(compile(html, `i:last-child { width: 2px }`));
+  const styles = ui.styles as unknown as Record<string, ArrayLike<number>>;
+  const yNode = ui.nodes.style.findIndex((_, n) => styles.width![ui.nodes.style[n]!] === 2);
+  expect(yNode).toBeGreaterThan(0);
 });
 
 test("align-items defaults to stretch, as CSS's `normal` does", () => {
@@ -646,4 +730,106 @@ test("an unset min-size is auto, not zero", () => {
   // A declared one still wins, including an explicit zero.
   expect(styleOf(html, `.a { min-height: 0 }`, "minH")).toBe(0);
   expect(styleOf(html, `.a { min-height: 24px }`, "minH")).toBe(24);
+});
+
+/**
+ * The shorthands and aliases that needed no new style field — `inset`, the logical
+ * sizing properties and the two `place-*` forms all write fields the longhands were
+ * already writing, which is why they were the cheapest thing left in Tailwind's
+ * blocker list.
+ *
+ * `conformance` checks each against Chrome's computed value and `layout-diff`
+ * checks that `inset`'s four values land on the right sides. These are here for
+ * what neither of those covers: that the *expansion* is what it claims, read
+ * straight off the field.
+ */
+test("inset expands to four sides, and its axis forms to two", () => {
+  const box = `<body><div class="a"></div></body>`;
+  const at = (css: string, field: "insetT" | "insetR" | "insetB" | "insetL") =>
+    styleOf(box, `.a { position: absolute; ${css} }`, field);
+
+  // One value reaches all four.
+  for (const f of ["insetT", "insetR", "insetB", "insetL"] as const) {
+    expect(at("inset: 6px", f)).toBe(6);
+  }
+
+  // Four values are top/right/bottom/left, in that order. The two the CSS puts
+  // last are the ones a wrong order gets wrong.
+  expect(at("inset: 1px 2px 3px 4px", "insetT")).toBe(1);
+  expect(at("inset: 1px 2px 3px 4px", "insetR")).toBe(2);
+  expect(at("inset: 1px 2px 3px 4px", "insetB")).toBe(3);
+  expect(at("inset: 1px 2px 3px 4px", "insetL")).toBe(4);
+
+  // The axis forms are start-then-end, and neither touches the other axis.
+  expect(at("inset-inline: 2px 8px", "insetL")).toBe(2);
+  expect(at("inset-inline: 2px 8px", "insetR")).toBe(8);
+  expect(at("inset-inline: 5px", "insetL")).toBe(5);
+  expect(at("inset-block: 3px 9px", "insetT")).toBe(3);
+  expect(at("inset-block: 3px 9px", "insetB")).toBe(9);
+
+  // `auto` is the sentinel Taffy resolves, not a length. Untestable in
+  // `conformance` — Chrome reports a used value there — so it is asserted here.
+  expect(at("inset: auto", "insetT")).toBeNaN();
+});
+
+test("the logical sizing properties are aliases of the physical ones", () => {
+  const box = `<body><div class="a"></div></body>`;
+  const at = (css: string, field: "width" | "height" | "minW" | "maxW" | "minH" | "maxH") =>
+    styleOf(box, `.a { ${css} }`, field);
+
+  expect(at("inline-size: 120px", "width")).toBe(120);
+  expect(at("block-size: 40px", "height")).toBe(40);
+  expect(at("min-inline-size: 30px", "minW")).toBe(30);
+  expect(at("max-inline-size: 300px", "maxW")).toBe(300);
+  expect(at("min-block-size: 24px", "minH")).toBe(24);
+  expect(at("max-block-size: 200px", "maxH")).toBe(200);
+
+  // `none` on either max is Infinity, the same as the physical spelling — the one
+  // place these are not a plain `parseLength` and so the one worth pinning.
+  expect(at("max-inline-size: none", "maxW")).toBe(Infinity);
+  expect(at("max-block-size: none", "maxH")).toBe(Infinity);
+});
+
+test("place-items and place-self set both axes, and `safe` binds forward", () => {
+  const box = `<body><div class="a"></div></body>`;
+  const at = (css: string, field: "align" | "justifyItems" | "alignSelf" | "justifySelf") =>
+    styleOf(box, `.a { ${css} }`, field);
+
+  // One value is both axes.
+  expect(at("place-items: center", "align")).toBe(Align.CENTER);
+  expect(at("place-items: center", "justifyItems")).toBe(Align.CENTER);
+  // Two values are block-then-inline. Swapping them would pass a one-value test.
+  expect(at("place-items: center stretch", "align")).toBe(Align.CENTER);
+  expect(at("place-items: center stretch", "justifyItems")).toBe(Align.STRETCH);
+
+  expect(at("place-self: center", "alignSelf")).toBe(Align.CENTER);
+  expect(at("place-self: center", "justifySelf")).toBe(Align.CENTER);
+  // `auto` on `place-self` defers to the parent on both axes, which is UNSET.
+  expect(at("place-self: auto", "alignSelf")).toBe(UNSET);
+  expect(at("place-self: auto", "justifySelf")).toBe(UNSET);
+
+  // The trap. `safe center` is ONE value — Box Alignment writes each half as
+  // `[safe | unsafe]? <position>` — so a whitespace split would read align as
+  // `safe` and justify as `center`, silently giving the two axes different
+  // alignments. dziri has no overflow-alignment, so it is refused; what matters is
+  // that it is refused as one bad value rather than accepted as two good ones.
+  // Tailwind emits exactly this, as `place-items-center-safe`.
+  expect(() => styleOf(box, `.a { place-items: safe center }`, "align")).toThrow(
+    /unsupported place-items "safe center"/,
+  );
+  expect(() => styleOf(box, `.a { place-self: unsafe end }`, "alignSelf")).toThrow(
+    /unsupported place-self "unsafe end"/,
+  );
+  // Three values is not a shorthand, it is a typo.
+  expect(() => styleOf(box, `.a { place-items: center start end }`, "align")).toThrow(
+    /more than two values/,
+  );
+
+  // `place-content` is left out of the switch entirely rather than written as
+  // "justify-content and drop the other half", because it needs `align-content`,
+  // which dziri does not have. So it takes the ordinary unsupported-property path —
+  // a warning, and no field touched. This asserts the *not half-applied* part: a
+  // `place-content-center` must not silently centre one axis and leave the other.
+  expect(styleOf(box, `.a { place-content: center }`, "justify")).toBe(INITIAL_STYLE.justify);
+  expect(styleOf(box, `.a { place-content: center }`, "align")).toBe(INITIAL_STYLE.align);
 });

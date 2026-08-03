@@ -180,3 +180,53 @@ test("rows splice between the anchors and reorder without disturbing them", () =
   expect(new Set(after.slice(1, -1))).toEqual(new Set(rows));
   expect(after.slice(1, -1)).not.toEqual(rows);
 });
+
+/**
+ * `:last-child` beside a dynamic list, which is the one place a structural
+ * pseudo-class has no compile-time answer.
+ *
+ * A list's length is a runtime value, so "is this the last child" is too — for the
+ * rows themselves and for any static sibling the list could come after. The guess
+ * is documented in `matchStructural`: unknown resolves to *not matching*, so
+ * `:not(:last-child)` holds and every row keeps its margin. One margin too many
+ * after the final row is a much smaller wrong answer than no spacing at all, which
+ * is what resolving it the other way would produce.
+ *
+ * The test is the guess, not the ideal. If per-row structural styles ever become
+ * runtime-resolvable, this is the test that should change.
+ */
+test("a structural pseudo-class beside a dynamic list resolves to not-matching", () => {
+  const data = signal<Item[]>([{ id: 1, title: "a" }, { id: 2, title: "b" }]);
+  setCompiling(true);
+  let doc;
+  try {
+    doc = toDocument(
+      <div className="sp">
+        <span className="before" />
+        {data.value.map((t: Item) => <span className="row">{t.title}</span>, {
+          key: (t: Item) => t.id,
+        })}
+      </div>,
+    );
+  } finally {
+    setCompiling(false);
+  }
+
+  const result = compileTree(doc, `.sp > :not(:last-child) { margin-block-end: 16px }`);
+  const ui = toCompiledUi(result);
+  const marginOf = (node: number) => result.styles[result.nodes[node]!.style]!.marB;
+
+  // `.before` could be followed by zero rows, in which case it *is* the last child
+  // and a browser would give it no margin. Unknown, so it keeps one.
+  const staticKids = result.nodes[result.lists[0]!.container]!.children;
+  expect(marginOf(staticKids[0]!)).toBe(16);
+
+  // Every row keeps its margin too, including whichever one is last at run time.
+  const list = result.lists[0]!;
+  for (let item = 0; item < list.capacity; item++) {
+    expect(marginOf(list.arenaStart + item * list.stride)).toBe(16);
+  }
+
+  // The container is not a child of `.sp` and must not have been given one.
+  expect(marginOf(ui.root)).toBe(0);
+});

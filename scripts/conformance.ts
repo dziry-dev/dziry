@@ -112,6 +112,98 @@ const CORPUS: Check[] = [
   { decl: "top: 5px; position: absolute", field: "insetT", prop: "top", kind: "px" },
   { decl: "aspect-ratio: 2", field: "aspectRatio", prop: "aspect-ratio", kind: "number" },
 
+  // `inset` and its axis forms. Four-valued rather than one-valued on purpose: a
+  // one-value case passes whether or not the expansion order is right, and the
+  // corner CSS puts *last* is the one a wrong order gets wrong. `left` is the
+  // fourth value, so reading `insetL` is what pins t/r/b/l.
+  { decl: "inset: 6px; position: absolute", field: "insetT", prop: "top", kind: "px" },
+  { decl: "inset: 1px 2px 3px 4px; position: absolute", field: "insetL", prop: "left", kind: "px" },
+  { decl: "inset: 1px 2px 3px 4px; position: absolute", field: "insetB", prop: "bottom", kind: "px" },
+  // `inset: auto` is deliberately not a case, for the same reason `accent-color:
+  // auto` is not: the two sides answer different questions. dziri stores `auto` as
+  // the `AUTO` sentinel — `NaN` — for Taffy to resolve during layout, while
+  // `getComputedStyle` on a positioned element returns the *used* value, so Chrome
+  // reports the resolved static position (`0px` here). Measured, and it is what
+  // made this comment necessary rather than a guess. The value parses and round
+  // trips correctly; there is just no comparison to make.
+  // Two values per axis form, read on the *second* half for the same reason.
+  { decl: "inset-inline: 2px 8px; position: absolute", field: "insetR", prop: "right", kind: "px" },
+  { decl: "inset-block: 3px 9px; position: absolute", field: "insetB", prop: "bottom", kind: "px" },
+
+  // The logical sizing aliases. dziri has no writing mode, so the inline axis is
+  // the horizontal one and these are exact rather than approximate — but "exact"
+  // is a claim about *Chrome's* mapping too, which is the half worth measuring:
+  // these assert that Chrome reports `inline-size` under `width`.
+  { decl: "inline-size: 120px", field: "width", prop: "width", kind: "px" },
+  { decl: "block-size: 40px", field: "height", prop: "height", kind: "px" },
+  { decl: "min-inline-size: 30px", field: "minW", prop: "min-width", kind: "px" },
+  { decl: "max-inline-size: 300px", field: "maxW", prop: "max-width", kind: "px" },
+  { decl: "min-block-size: 24px", field: "minH", prop: "min-height", kind: "px" },
+  { decl: "max-block-size: 200px", field: "maxH", prop: "max-height", kind: "px" },
+
+  /**
+   * `place-items` / `place-self`, both axes of each.
+   *
+   * Every keyword here is one CSS spells exactly one way — `center`, `stretch`,
+   * `baseline`. `end` and `start` are deliberately absent: dziri folds `end` and
+   * `flex-end` onto one enum value while Chrome's computed value keeps whichever
+   * was written, so a case on those would be asserting the normaliser's choice
+   * rather than the compiler's behaviour.
+   *
+   * The two-value case is `center stretch`, which is the pair that fails loudly if
+   * the halves are swapped — and unlike a `safe center` it cannot be mistaken for
+   * one value with a prefix.
+   */
+  {
+    decl: "place-items: center",
+    field: "align",
+    prop: "align-items",
+    kind: "keyword",
+    keywords: ["flex-start", "center", "flex-end", "stretch", "baseline"],
+  },
+  {
+    decl: "place-items: center",
+    field: "justifyItems",
+    prop: "justify-items",
+    kind: "keyword",
+    keywords: ["flex-start", "center", "flex-end", "stretch", "baseline"],
+  },
+  {
+    decl: "place-items: baseline",
+    field: "align",
+    prop: "align-items",
+    kind: "keyword",
+    keywords: ["flex-start", "center", "flex-end", "stretch", "baseline"],
+  },
+  {
+    decl: "place-items: center stretch",
+    field: "align",
+    prop: "align-items",
+    kind: "keyword",
+    keywords: ["flex-start", "center", "flex-end", "stretch", "baseline"],
+  },
+  {
+    decl: "place-items: center stretch",
+    field: "justifyItems",
+    prop: "justify-items",
+    kind: "keyword",
+    keywords: ["flex-start", "center", "flex-end", "stretch", "baseline"],
+  },
+  {
+    decl: "place-self: center",
+    field: "alignSelf",
+    prop: "align-self",
+    kind: "keyword",
+    keywords: ["flex-start", "center", "flex-end", "stretch", "baseline"],
+  },
+  {
+    decl: "place-self: center",
+    field: "justifySelf",
+    prop: "justify-self",
+    kind: "keyword",
+    keywords: ["flex-start", "center", "flex-end", "stretch", "baseline"],
+  },
+
   // The form-control properties (ROADMAP C2 phase 0). Nothing draws a control
   // yet, which is exactly why these belong here: the claim being checked is that
   // the *computed value* is right, and that claim can be settled a milestone

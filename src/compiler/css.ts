@@ -110,6 +110,36 @@ export type AttrSel = {
   ci?: true;
 };
 
+/**
+ * How a compound relates to the compound on its left.
+ *
+ * Only these two, and the omission is deliberate rather than pending: a
+ * descendant or child test is answered by walking the ancestor path the compiler
+ * already carries, while `+` and `~` need the subject's *siblings*, which is a
+ * different question and a different shape of matcher. Tailwind v4 stopped
+ * needing them — `space-y-*` was `> * + *` in v3 and is `> :not(:last-child)`
+ * now — so the ones left out no longer cost coverage.
+ */
+export type Combinator = "descendant" | "child";
+
+/**
+ * A pseudo-class about an element's position among its siblings.
+ *
+ * These are a *third* axis, separate from both {@link Pseudo} and
+ * {@link PseudoElement}, and separating them is the whole point. `:hover` is a
+ * runtime fact, so it compiles to a style variant and a predicate bit;
+ * `:last-child` is a fact about the tree, which the compiler is holding in its
+ * hand — so it resolves during matching and costs the runtime nothing at all.
+ * Folding them together would have made a free question pay a per-frame price.
+ *
+ * `:nth-child()` is not here. It is the same kind of question and would resolve
+ * the same way, but it needs an An+B parser and nothing in Tailwind's output asks
+ * for it, so it is refused by name rather than half-implemented.
+ */
+export type Structural = "first-child" | "last-child" | "only-child";
+
+const SUPPORTED_STRUCTURAL = new Set<string>(["first-child", "last-child", "only-child"]);
+
 export type Compound = {
   tag: string | null;
   id: string | null;
@@ -122,6 +152,31 @@ export type Compound = {
    * it is describing. Until this existed, `input` meant all of them at once.
    */
   attrs?: AttrSel[];
+  /**
+   * How this compound relates to the one before it. Absent on the first, which
+   * has nothing to its left.
+   */
+  combinator?: Combinator;
+  /** `:first-child` and friends. Several may sit on one compound. */
+  structural?: Structural[];
+  /**
+   * `:is()` and `:where()` — one entry per functional pseudo-class written on this
+   * compound, each holding that one's argument list.
+   *
+   * Nested as a list of lists because the two levels mean different things: within
+   * one `:is()` the arguments are alternatives, but two `:is()` on the same
+   * compound both have to hold. Flattening them would turn a conjunction into a
+   * disjunction and quietly widen the selector.
+   */
+  anyOf?: Selector[][];
+  /**
+   * `:not()` arguments, flattened across every `:not()` on the compound.
+   *
+   * Flat where {@link anyOf} is nested, because negation distributes: `:not(a, b)`
+   * and `:not(a):not(b)` both mean "neither", so there is nothing for a second
+   * level to record.
+   */
+  noneOf?: Selector[];
 };
 
 export type Selector = {
@@ -680,14 +735,12 @@ function parseRuleList(
     }
     if (prelude === "") continue;
 
-    // Selectors are split on commas rather than parsed as a list, so the offset
-    // of each one is the running length of everything before it.
+    // Split on the list's *top-level* commas, which is not the same as splitting
+    // on commas: `:is(h1, h2) .x` is one selector, and cutting it at the comma
+    // hands the parser an unterminated `:is(h1` that it blames on the author.
     const selectors: Selector[] = [];
-    let at = preludeAt;
-    for (const part of prelude.split(",")) {
-      const lead = part.length - part.trimStart().length;
-      selectors.push(parseSelector(part.trim(), at + lead));
-      at += part.length + 1; // the comma
+    for (const part of splitSelectorList(prelude)) {
+      selectors.push(parseSelector(part.text, preludeAt + part.offset));
     }
 
     rules.push({
@@ -778,59 +831,48 @@ function unescapeIdent(s: string): string {
   return s.includes("\\") ? s.replace(/\\(.)/g, "$1") : s;
 }
 
-/**
- * The selector with every `[…]` test blanked out, for scans that must not see
- * inside one — the combinator check being the only caller today. Escapes and
- * quotes are respected so `.content-\[x\]` and `[title="a]b"]` both survive.
- */
-function withoutAttrs(src: string): string {
-  let out = "";
-  let depth = 0;
-  let quote: string | null = null;
-
-  for (let i = 0; i < src.length; i++) {
-    const ch = src[i]!;
-    if (quote) {
-      if (ch === "\\") i++;
-      else if (ch === quote) quote = null;
-      continue;
-    }
-    if (ch === "\\") {
-      if (depth === 0) out += ch + (src[i + 1] ?? "");
-      i++;
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (ch === "[") {
-      depth++;
-      continue;
-    }
-    if (ch === "]") {
-      depth = Math.max(0, depth - 1);
-      continue;
-    }
-    if (depth === 0) out += ch;
-  }
-  return out;
-}
+/** One compound of a complex selector, with the combinator that introduced it. */
+type SelectorPart = {
+  text: string;
+  /** How it relates to the part before it; meaningless on the first. */
+  combinator: Combinator;
+  /** Offset of the compound's first character within the selector. */
+  offset: number;
+};
 
 /**
- * Splits a complex selector into compounds on descendant whitespace.
+ * Splits a complex selector into compounds, recording each one's combinator.
  *
  * `src.split(/\s+/)` was right until attribute selectors existed and is wrong
  * now: `[title="a b"]` and `[type = checkbox]` both contain spaces that are not
  * combinators, and splitting on them turns one compound into two that match
- * nothing. So whitespace only separates when it is outside brackets and outside
- * a string — the same reason `splitTopLevel` exists for parenthesised values.
+ * nothing. So whitespace only separates when it is outside brackets, outside
+ * parentheses and outside a string — the same reason `splitTopLevel` exists for
+ * parenthesised values.
+ *
+ * Parens joined brackets on that list when functional pseudo-classes arrived:
+ * `:where(.a > .b)` holds a space *and* a combinator that belong to the argument,
+ * and splitting on either of them cuts the pseudo-class in half.
+ *
+ * `+` and `~` are refused here rather than by a scan over the whole selector.
+ * That scan could not tell the `~` in `[data-tags~="beta"]` from a sibling
+ * combinator without blanking the brackets out first — and once combinators are
+ * split for real, the depth counter answers the same question for free.
  */
-function splitCompounds(src: string): string[] {
-  const out: string[] = [];
+function splitCompounds(src: string, at: number): SelectorPart[] {
+  const out: SelectorPart[] = [];
   let current = "";
+  let start = 0;
+  let pending: Combinator = "descendant";
   let depth = 0;
   let quote: string | null = null;
+
+  const flush = () => {
+    if (current === "") return;
+    out.push({ text: current, combinator: pending, offset: start });
+    current = "";
+    pending = "descendant";
+  };
 
   for (let i = 0; i < src.length; i++) {
     const ch = src[i]!;
@@ -847,8 +889,11 @@ function splitCompounds(src: string): string[] {
     // A backslash escape makes the next character a literal ident character,
     // bracket or not. Tailwind writes `content-['x']` as the class
     // `.content-\[\'x\'\]`, so without this every arbitrary-value utility looks
-    // like an unterminated attribute selector.
+    // like an unterminated attribute selector. `space-y-(--gap)` is the same
+    // hazard one character over: it is the class `.space-y-\(--gap\)`, whose
+    // parens must not open a functional pseudo-class.
     if (ch === "\\") {
+      if (current === "") start = i;
       current += ch + (src[i + 1] ?? "");
       i++;
       continue;
@@ -859,18 +904,183 @@ function splitCompounds(src: string): string[] {
       current += ch;
       continue;
     }
-    if (ch === "[") depth++;
-    if (ch === "]") depth = Math.max(0, depth - 1);
+    if (ch === "[" || ch === "(") depth++;
+    if (ch === "]" || ch === ")") depth = Math.max(0, depth - 1);
 
-    if (depth === 0 && /\s/.test(ch)) {
-      if (current) out.push(current);
-      current = "";
-      continue;
+    if (depth === 0) {
+      if (/\s/.test(ch)) {
+        flush();
+        continue;
+      }
+      if (ch === ">") {
+        flush();
+        pending = "child";
+        continue;
+      }
+      if (ch === "+" || ch === "~") {
+        throw new CssError(
+          `the "${ch}" sibling combinator is not supported, in "${src}".\n` +
+            `  Descendant (" ") and child (">") are. A sibling combinator asks about\n` +
+            `  the subject's siblings rather than its ancestors, which is a different\n` +
+            `  matcher; Tailwind v4 no longer needs one.`,
+          at,
+        );
+      }
     }
+
+    if (current === "") start = i;
     current += ch;
   }
 
-  if (current) out.push(current);
+  flush();
+
+  // A trailing combinator has nothing to its right. Caught here because the
+  // alternative is a selector list one compound short that matches the wrong
+  // element: `.a > ` would compile to plain `.a`.
+  if (pending === "child" && out.length > 0) {
+    throw new CssError(`selector "${src}" ends in a ">" with nothing after it`, at);
+  }
+
+  return out;
+}
+
+/** One `:name(…)` written on a compound, with its argument text unparsed. */
+type FuncPseudo = { name: string; args: string; doubled: boolean; offset: number };
+
+/** The head of a functional pseudo-class: `:not(`, `::picker(`. */
+const FUNC_PSEUDO_HEAD = /^(::?)([A-Za-z][A-Za-z0-9-]*)\(/;
+
+/**
+ * Pulls every `:name(…)` out of one compound, returning the rest for tokenizing.
+ *
+ * Extracted before the attribute tests, not after, because an argument may hold
+ * one: `:not([hidden])` is a single functional pseudo-class, and lifting the
+ * `[hidden]` out first would leave `:not()` with an empty argument list and
+ * silently turn "not hidden" into "not nothing" — a selector that matches
+ * everything instead of almost everything.
+ *
+ * Scanned rather than matched with a regex for the same reason `extractAttrs` is:
+ * the argument nests. `:not(:is(.a, .b))` has two closing parens and only the
+ * second ends the outer call.
+ */
+function extractFuncPseudos(part: string, at: number): { rest: string; funcs: FuncPseudo[] } {
+  const funcs: FuncPseudo[] = [];
+  let rest = "";
+
+  for (let i = 0; i < part.length; i++) {
+    // An escaped colon or paren is an ident character, not syntax. Tailwind writes
+    // the class `space-y-(--gap)` as `.space-y-\(--gap\)` and the variant
+    // `md:flex` as `.md\:flex`, so without this a theme-variable utility reads as
+    // an unterminated functional pseudo-class and every variant loses its colon.
+    if (part[i] === "\\") {
+      rest += part[i]! + (part[i + 1] ?? "");
+      i++;
+      continue;
+    }
+
+    const head = part[i] === ":" ? FUNC_PSEUDO_HEAD.exec(part.slice(i)) : null;
+    if (head === null) {
+      rest += part[i];
+      continue;
+    }
+
+    const offset = at < 0 ? -1 : at + i;
+    const open = i + head[0].length - 1;
+    const close = matchingParen(part, open);
+    if (close === -1) {
+      throw new CssError(`unterminated ":${head[2]}(" in "${part}"`, offset);
+    }
+
+    funcs.push({
+      name: head[2]!.toLowerCase(),
+      args: part.slice(open + 1, close),
+      doubled: head[1] === "::",
+      offset,
+    });
+    i = close;
+  }
+
+  return { rest, funcs };
+}
+
+/**
+ * The index of the `)` closing the `(` at `open`, or -1.
+ *
+ * Quote- and escape-aware, so `:not([title="a)b"])` and `.w-\(x\)` inside an
+ * argument both end where they actually end.
+ */
+function matchingParen(src: string, open: number): number {
+  let depth = 0;
+  let quote: string | null = null;
+
+  for (let i = open; i < src.length; i++) {
+    const ch = src[i]!;
+    if (quote) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Splits a selector list on its top-level commas.
+ *
+ * `src.split(",")` is what the rule prelude used to do, and it was correct only
+ * for as long as no selector could contain a comma. `:is(h1, h2) .x` is one
+ * selector, and splitting it naively produces `:is(h1` — an unterminated
+ * functional pseudo-class blamed on an author who wrote valid CSS.
+ */
+export function splitSelectorList(src: string): { text: string; offset: number }[] {
+  const out: { text: string; offset: number }[] = [];
+  let depth = 0;
+  let quote: string | null = null;
+  let start = 0;
+
+  const push = (end: number) => {
+    const raw = src.slice(start, end);
+    const lead = raw.length - raw.trimStart().length;
+    out.push({ text: raw.trim(), offset: start + lead });
+  };
+
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]!;
+    if (quote) {
+      if (ch === "\\") i++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    else if (ch === "," && depth === 0) {
+      push(i);
+      start = i + 1;
+    }
+  }
+  push(src.length);
+
   return out;
 }
 
@@ -970,14 +1180,24 @@ function parseAttrSel(body: string, part: string, at: number): AttrSel {
   return ci ? { name, op: m[2] as AttrOp, value, ci } : { name, op: m[2] as AttrOp, value };
 }
 
+/**
+ * How a selector is being parsed: as a rule's own selector, or as the argument of
+ * an `:is()` / `:where()` / `:not()`.
+ *
+ * The distinction exists because two of `Selector`'s fields are not about matching
+ * at all. `pseudo` says which style *variant* a rule belongs to and `element` says
+ * which cascade it is in, and both are properties of the rule — so an argument
+ * that carried one would have nowhere to put it. Rather than drop it and match a
+ * wider selector than was written, an argument in that position is refused.
+ */
+type SelectorRole = "rule" | "argument";
+
 export function parseSelector(src: string, at = -1): Selector {
+  return parseSelectorIn(src, at, "rule");
+}
+
+function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector {
   if (!src) throw new CssError("empty selector", at);
-  // Combinators are looked for *outside* attribute tests. `[data-tags~="beta"]`
-  // contains a `~` that is an operator, not a sibling combinator, and testing the
-  // raw string refused the selector outright.
-  if (/[>+~]/.test(withoutAttrs(src))) {
-    throw new CssError(`only the descendant combinator is supported, got "${src}"`, at);
-  }
 
   // `:root` on its own, which is the only form of it that means anything here.
   // Specificity is a pseudo-class's (0,1,0), as the spec says.
@@ -999,27 +1219,38 @@ export function parseSelector(src: string, at = -1): Selector {
   let element: PseudoElement | null = null;
   const spec: [number, number, number] = [0, 0, 0];
 
-  const parts = splitCompounds(src);
+  const parts = splitCompounds(src, at);
+  if (parts.length === 0) throw new CssError(`empty selector "${src}"`, at);
+
   for (let p = 0; p < parts.length; p++) {
-    const whole = parts[p]!;
+    const whole = parts[p]!.text;
     // Where this compound starts in the source, so the caret lands on the
     // offending compound rather than on the whole selector.
-    const partAt = at < 0 ? -1 : at + src.indexOf(whole);
+    const partAt = at < 0 ? -1 : at + parts[p]!.offset;
     const compound: Compound = { tag: null, id: null, classes: [] };
+    if (p > 0 && parts[p]!.combinator === "child") compound.combinator = "child";
 
-    // Attribute tests come out first, and the rest is tokenized as before.
+    // Functional pseudo-classes come out first, then attribute tests, then the
+    // rest is tokenized.
     //
-    // They have to: `[` and `]` are not ident characters, so leaving them in
-    // would fail the coverage check below and refuse the whole selector — which
-    // is exactly what `input[type=checkbox]` used to do.
-    const { rest: part, attrs } = extractAttrs(whole, partAt);
+    // The order is forced: `:not([hidden])` holds an attribute test that belongs
+    // to the argument, so lifting attributes first would leave `:not()` selecting
+    // everything. And both have to come out before tokenizing at all, because
+    // `(`, `)`, `[` and `]` are not ident characters — leaving either in fails the
+    // coverage check below and refuses the whole selector, which is exactly what
+    // `input[type=checkbox]` used to do.
+    const { rest: afterFuncs, funcs } = extractFuncPseudos(whole, partAt);
+    const { rest: part, attrs } = extractAttrs(afterFuncs, partAt);
     if (attrs.length) {
       compound.attrs = attrs;
       // An attribute selector weighs the same as a class, per the spec.
       spec[1] += attrs.length;
     }
-    // `[type=checkbox]` on its own is a whole compound; there is nothing left to
-    // tokenize and that is legal CSS, not a parse failure.
+
+    for (const func of funcs) applyFuncPseudo(compound, func, spec, src);
+
+    // `[type=checkbox]` and `:not(:last-child)` are each a whole compound; there
+    // is nothing left to tokenize and both are legal CSS, not a parse failure.
     if (part === "") {
       compounds.push(compound);
       continue;
@@ -1101,6 +1332,14 @@ export function parseSelector(src: string, at = -1): Selector {
               partAt,
             );
           }
+          if (role === "argument") {
+            throw new CssError(
+              `"::${name}" cannot be used inside :is(), :where() or :not() — a\n` +
+                `  pseudo-element names which cascade the rule is in, which is a property\n` +
+                `  of the rule and not of one compound.`,
+              partAt,
+            );
+          }
           if (p !== parts.length - 1) {
             throw new CssError(
               `"::${name}" is only supported on the subject of a selector`,
@@ -1116,10 +1355,38 @@ export function parseSelector(src: string, at = -1): Selector {
           continue;
         }
 
+        // A structural pseudo-class is a question about the tree, so it is
+        // answered here at match time rather than compiled into a variant, and it
+        // is allowed on *any* compound rather than only on the subject. Both
+        // follow from the same fact: `.a:last-child .b` needs no runtime support,
+        // because the compiler can see whether `.a` was the last child.
+        if (SUPPORTED_STRUCTURAL.has(name)) {
+          (compound.structural ??= []).push(name as Structural);
+          spec[1]++;
+          continue;
+        }
+
         if (!SUPPORTED_PSEUDO.has(name)) {
           // `:focus-within` is deliberately absent: it propagates to ancestors,
           // which is the descendant-selector problem again.
-          throw new CssError(`unsupported pseudo-class ":${name}"`, partAt);
+          throw new CssError(
+            `unsupported pseudo-class ":${name}".\n` +
+              `  Supported: :hover, :active, :focus, :checked, :disabled, :root,\n` +
+              `  :first-child, :last-child, :only-child, :is(), :where(), :not().`,
+            partAt,
+          );
+        }
+        // An interaction pseudo-class inside `:is()`/`:not()` has nowhere to go —
+        // it names a style *variant*, which is a property of the rule and not of
+        // one compound. See `SelectorRole`.
+        if (role === "argument") {
+          throw new CssError(
+            `":${name}" cannot be used inside :is(), :where() or :not().\n` +
+              `  It selects an interaction state, which dziri compiles into a style\n` +
+              `  variant for the whole rule — so there is no way to make it hold for\n` +
+              `  only part of a selector. Write it on the rule instead.`,
+            partAt,
+          );
         }
         if (p !== parts.length - 1) {
           throw new CssError(
@@ -1150,6 +1417,84 @@ export function parseSelector(src: string, at = -1): Selector {
   }
 
   return { compounds, pseudo, element, specificity: spec };
+}
+
+/**
+ * Folds one `:is()` / `:where()` / `:not()` into the compound it was written on.
+ *
+ * All three are the same mechanism — "does this element, as the subject, match one
+ * of these selectors?" — differing only in whether the answer is negated and in
+ * what it contributes to specificity. Which is why they share a representation
+ * rather than getting a flag each: the matcher has one recursive case to handle,
+ * and the three spellings are all reachable through it.
+ */
+function applyFuncPseudo(
+  compound: Compound,
+  func: FuncPseudo,
+  spec: [number, number, number],
+  src: string,
+): void {
+  if (func.doubled) {
+    throw new CssError(
+      `unsupported pseudo-element "::${func.name}()".\n` +
+        `  Supported: ::before, ::after.\n` +
+        `  The control-specific ones (::picker(select), ::picker-icon) are the same ` +
+        `machinery and land with the controls they belong to.`,
+      func.offset,
+    );
+  }
+
+  if (func.name !== "is" && func.name !== "where" && func.name !== "not") {
+    // `:nth-child()` and `:nth-of-type()` are the ones worth naming: they are the
+    // same *kind* of question as `:first-child`, resolvable straight off the tree,
+    // and they are missing only because nothing in reach writes them. Saying so
+    // beats "unsupported pseudo-class", which reads as "and never will be".
+    const note = /^nth-|-of-type$/.test(func.name)
+      ? `\n  :first-child, :last-child and :only-child are supported; the An+B and ` +
+        `of-type\n  forms are not yet.`
+      : "";
+    throw new CssError(`unsupported functional pseudo-class ":${func.name}()"${note}`, func.offset);
+  }
+
+  const args = splitSelectorList(func.args);
+  if (args.length === 1 && args[0]!.text === "") {
+    // `:not()` with nothing in it. Empty is legal in Selectors 4 and means "match
+    // nothing to negate", so `:not()` matches everything and `:is()` matches
+    // nothing — a distinction subtle enough that writing one is almost certainly a
+    // mistake, and a silently-everything selector is the expensive kind.
+    throw new CssError(`":${func.name}()" has no arguments, in "${src}"`, func.offset);
+  }
+
+  const parsed = args.map((arg) =>
+    parseSelectorIn(arg.text, func.offset < 0 ? -1 : func.offset + arg.offset, "argument"),
+  );
+
+  if (func.name === "not") {
+    (compound.noneOf ??= []).push(...parsed);
+  } else {
+    (compound.anyOf ??= []).push(parsed);
+  }
+
+  // `:where()` contributes nothing, which is its entire reason for existing.
+  // `:is()` and `:not()` take the specificity of their most specific argument —
+  // the *argument's*, not one class each, which is why this adds a whole triple
+  // rather than bumping the class column.
+  if (func.name === "where") return;
+  const most = mostSpecific(parsed);
+  for (let k = 0; k < 3; k++) spec[k] = spec[k]! + most[k]!;
+}
+
+/** The largest of several selectors' specificities, compared column by column. */
+function mostSpecific(sels: Selector[]): [number, number, number] {
+  let best: [number, number, number] = [0, 0, 0];
+  for (const sel of sels) {
+    for (let k = 0; k < 3; k++) {
+      if (sel.specificity[k] === best[k]) continue;
+      if (sel.specificity[k]! > best[k]!) best = sel.specificity;
+      break;
+    }
+  }
+  return best;
 }
 
 /** CSS cascade order: specificity, then source order. */
@@ -2757,6 +3102,45 @@ const ALIGN_KEYWORDS: Record<string, number> = {
 /** `align-self: auto` means "defer to the parent", which is what UNSET encodes. */
 const SELF_KEYWORDS: Record<string, number> = { ...ALIGN_KEYWORDS, auto: UNSET };
 
+/** The overflow-alignment prefixes, which bind to the keyword *after* them. */
+const OVERFLOW_POSITION = new Set(["safe", "unsafe"]);
+
+/**
+ * Splits a `place-*` shorthand into its block-axis and inline-axis halves.
+ *
+ * Not `split(/\s+/)`, and this is the one thing about these properties that is
+ * easy to get wrong in a way no test of the common case would catch. Box Alignment
+ * writes each half as `[ safe | unsafe ]? <position>`, so `place-items: safe
+ * center` is **one** value — align and justify both become `safe center`. A naive
+ * split reads it as align `safe`, justify `center`: the align half becomes a
+ * keyword that does not exist, and if it happened to, the two axes would disagree.
+ * Tailwind emits exactly this, as `place-items-center-safe`.
+ *
+ * Whether `safe` is then *supported* is a separate question this does not answer.
+ * It is not — `ALIGN_KEYWORDS` has no entry for it, so `align-items: safe center`
+ * is refused today and `place-items: safe center` is refused identically, by the
+ * caller, naming the property the author wrote. Splitting correctly is what makes
+ * that refusal land on the right value instead of on a fragment of one.
+ */
+function splitAlignPair(value: string, prop: string): [string, string] {
+  const words = value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) throw new CssError(`empty ${prop}`);
+
+  const halves: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    if (OVERFLOW_POSITION.has(words[i]!) && words[i + 1] !== undefined) {
+      halves.push(`${words[i]} ${words[i + 1]}`);
+      i++;
+      continue;
+    }
+    halves.push(words[i]!);
+  }
+
+  if (halves.length > 2) throw new CssError(`${prop}: "${value}" has more than two values`);
+  // One value sets both axes, which is what the shorthand is for.
+  return [halves[0]!, halves[1] ?? halves[0]!];
+}
+
 const DISPLAY_KEYWORDS: Record<string, number> = {
   flex: Display.FLEX,
   grid: Display.GRID,
@@ -3024,6 +3408,37 @@ export function expandDeclaration(
     case "margin-block-end":
       out.marB = parseLength(value);
       return;
+    /**
+     * `inset` and its two axis forms, which are shorthands over the four fields
+     * the four longhands below already write.
+     *
+     * They were the cheapest thing left in Tailwind's blocker list precisely
+     * because there is nothing new underneath: `insetT/R/B/L` exist, both the
+     * physical (`top`) and logical (`inset-block-start`) spellings resolve to them,
+     * and only the shorthand was unwritten — so `inset-0` failed while `top-0`
+     * worked. 125 classes each, and no field, no engine change and no protocol
+     * bump between them.
+     */
+    case "inset": {
+      const [t, r, b, l] = boxShorthand(value);
+      out.insetT = t;
+      out.insetR = r;
+      out.insetB = b;
+      out.insetL = l;
+      return;
+    }
+    case "inset-inline": {
+      const [a, b] = boxShorthand(value);
+      out.insetL = a;
+      out.insetR = b;
+      return;
+    }
+    case "inset-block": {
+      const [a, b] = boxShorthand(value);
+      out.insetT = a;
+      out.insetB = b;
+      return;
+    }
     case "inset-inline-start":
       out.insetL = parseLength(value);
       return;
@@ -3112,6 +3527,39 @@ export function expandDeclaration(
       const v = SELF_KEYWORDS[value.toLowerCase()];
       if (v === undefined) throw new CssError(`unsupported justify-self "${value}"`);
       out.justifySelf = v;
+      return;
+    }
+
+    /**
+     * `place-items` and `place-self`, which set both axes at once.
+     *
+     * `place-content` is deliberately not here even though it looks like the third
+     * of a set: it needs `align-content`, which dziri does not have. Adding it
+     * would mean writing `justify-content` and dropping the other half, so a
+     * `place-content-center` would centre one axis and silently leave the other —
+     * worse than the current honest refusal.
+     *
+     * The two halves are split by {@link splitAlignPair}, not by whitespace, and
+     * that is the whole subtlety of these two properties. See it for why.
+     */
+    case "place-items": {
+      const [a, j] = splitAlignPair(value, prop);
+      const av = ALIGN_KEYWORDS[a];
+      if (av === undefined) throw new CssError(`unsupported place-items "${value}"`);
+      const jv = ALIGN_KEYWORDS[j];
+      if (jv === undefined) throw new CssError(`unsupported place-items "${value}"`);
+      out.align = av;
+      out.justifyItems = jv;
+      return;
+    }
+    case "place-self": {
+      const [a, j] = splitAlignPair(value, prop);
+      const av = SELF_KEYWORDS[a];
+      if (av === undefined) throw new CssError(`unsupported place-self "${value}"`);
+      const jv = SELF_KEYWORDS[j];
+      if (jv === undefined) throw new CssError(`unsupported place-self "${value}"`);
+      out.alignSelf = av;
+      out.justifySelf = jv;
       return;
     }
 
@@ -3243,6 +3691,39 @@ export function expandDeclaration(
       out.minH = parseLength(value);
       return;
     case "max-height":
+      out.maxH = value.toLowerCase() === "none" ? Infinity : parseLength(value);
+      return;
+
+    /**
+     * The logical sizing properties, which are aliases and not a feature.
+     *
+     * A writing mode would make them one — `inline-size` is the *cross* dimension
+     * in `vertical-rl`, not the width. dziri has no writing mode and no plans for
+     * one, so horizontal-tb holds everywhere and the inline axis *is* the
+     * horizontal axis. Mapping them straight onto the physical fields is therefore
+     * exact rather than approximate, which is why they cost a line each.
+     *
+     * Written out rather than folded into the physical cases via a rename table,
+     * because `dziriSupported()` in `tailwind-coverage` finds supported properties
+     * by scanning this switch for `case "…":` — a property aliased anywhere else is
+     * a property the coverage number cannot see.
+     */
+    case "inline-size":
+      out.width = parseLength(value);
+      return;
+    case "block-size":
+      out.height = parseLength(value);
+      return;
+    case "min-inline-size":
+      out.minW = parseLength(value);
+      return;
+    case "max-inline-size":
+      out.maxW = value.toLowerCase() === "none" ? Infinity : parseLength(value);
+      return;
+    case "min-block-size":
+      out.minH = parseLength(value);
+      return;
+    case "max-block-size":
       out.maxH = value.toLowerCase() === "none" ? Infinity : parseLength(value);
       return;
 
@@ -3610,7 +4091,7 @@ export function parseContent(raw: string): string | null {
  */
 const warned = new Set<string>();
 
-function warnOnce(message: string): void {
+export function warnOnce(message: string): void {
   if (warned.has(message)) return;
   warned.add(message);
   console.warn(`  warn: ${message}`);

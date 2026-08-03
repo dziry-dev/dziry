@@ -59,14 +59,17 @@ test("a comment does not shift the position of a later error", () => {
   // Removing the bytes would move every later offset left by the comment's
   // length, so a stylesheet with a licence header at the top would misreport
   // every line in the file — worse than reporting nothing.
-  const src = "/* a comment\n   spanning\n   three lines */\n.a > .b { color: red }\n";
+  //
+  // The example is a sibling combinator, not `>` — that one is supported now, as
+  // of `space-y-*`, which needs `:where(.space-y-4 > :not(:last-child))`.
+  const src = "/* a comment\n   spanning\n   three lines */\n.a + .b { color: red }\n";
   const out = diagnose(src);
   expect(out).toContain("sheet.css:4:1");
-  expect(out).toContain("only the descendant combinator");
+  expect(out).toContain('the "+" sibling combinator is not supported');
 });
 
 test("a comment on the same line does not shift the column", () => {
-  const out = diagnose("/* lead */ .a > .b { color: red }\n");
+  const out = diagnose("/* lead */ .a + .b { color: red }\n");
   expect(out).toContain("sheet.css:1:12");
 });
 
@@ -77,7 +80,7 @@ test("a declaration without a colon points at the declaration", () => {
 });
 
 test("the second selector in a list is located, not the first", () => {
-  const out = diagnose(".fine, .a > .b { color: red }\n");
+  const out = diagnose(".fine, .a + .b { color: red }\n");
   expect(out).toContain("sheet.css:1:8");
 });
 
@@ -457,6 +460,113 @@ test("::before and ::after parse, and the rest are refused by name", () => {
   expect(() => parseSelector("div::before span")).toThrow(CssError);
   expect(() => parseSelector("div::before::after")).toThrow(CssError);
   expect(() => parseSelector("div::before:hover")).toThrow(CssError);
+});
+
+/**
+ * `space-y-4`, parsed. Tailwind emits it as
+ * `:where(.space-y-4 > :not(:last-child))`, so this one selector is the whole
+ * feature — the `:where()` wrapper, the child combinator, `:not()` and a
+ * structural pseudo-class, in the arrangement they actually arrive in.
+ */
+test("the space-y selector parses into what it means", () => {
+  const sel = parseSelector(":where(.space-y-4 > :not(:last-child))");
+
+  // `:where()` weighs nothing, which is what lets a `margin` utility lose to any
+  // author rule that also sets margin.
+  expect(sel.specificity).toEqual([0, 0, 0]);
+  // One compound — the `:where()` is written on it, not beside it — matching any
+  // element that also matches the argument as its subject.
+  expect(sel.compounds).toHaveLength(1);
+
+  const arg = sel.compounds[0]!.anyOf![0]![0]!;
+  expect(arg.compounds.map((c) => c.classes)).toEqual([["space-y-4"], []]);
+  expect(arg.compounds[1]!.combinator).toBe("child");
+  expect(arg.compounds[1]!.noneOf![0]!.compounds[0]!.structural).toEqual(["last-child"]);
+});
+
+test("the child combinator is recorded, and the sibling ones are refused by name", () => {
+  expect(parseSelector(".a > .b").compounds[1]!.combinator).toBe("child");
+  // No whitespace around it, which is the form that used to tokenize as one
+  // compound and match nothing.
+  expect(parseSelector(".a>.b").compounds[1]!.combinator).toBe("child");
+  // A descendant leaves it absent rather than spelling it out.
+  expect(parseSelector(".a .b").compounds[1]!.combinator).toBeUndefined();
+
+  // Named, because "unsupported syntax" reads as a parser limitation when the
+  // reason is that the matcher walks ancestors and these ask about siblings.
+  expect(() => parseSelector(".a + .b")).toThrow(/"\+" sibling combinator is not supported/);
+  expect(() => parseSelector(".a ~ .b")).toThrow(/"~" sibling combinator is not supported/);
+  // A `~` inside an attribute test is an operator, not a combinator. This is the
+  // regression the old pre-scan over the raw string caused.
+  expect(parseSelector(`[data-tags~="beta"]`).compounds[0]!.attrs).toHaveLength(1);
+  // Nothing to the right of it is a mistake, not a selector one compound shorter.
+  expect(() => parseSelector(".a > ")).toThrow(/ends in a ">"/);
+});
+
+test(":is() takes its argument's specificity and :where() takes none", () => {
+  // Both match identically; only the weight differs. Per Selectors 4, the value is
+  // the *most specific* argument's, which is why this is a whole triple and not a
+  // bump of the class column.
+  expect(parseSelector(".a:where(#id.c.d)").specificity).toEqual([0, 1, 0]);
+  expect(parseSelector(".a:is(#id.c.d)").specificity).toEqual([1, 3, 0]);
+  // `:not()` weighs like `:is()`.
+  expect(parseSelector(".a:not(#id)").specificity).toEqual([1, 1, 0]);
+  // The most specific of a list wins, not the last or the sum.
+  expect(parseSelector(":is(div, #id, .c)").specificity).toEqual([1, 0, 0]);
+
+  // Two `:is()` on one compound are a conjunction, so they stay separate entries.
+  // Flattening them would turn "both" into "either" and widen the selector.
+  const two = parseSelector(".a:is(.b, .c):is(.d)");
+  expect(two.compounds[0]!.anyOf).toHaveLength(2);
+  expect(two.compounds[0]!.anyOf![0]).toHaveLength(2);
+  // Two `:not()` are also a conjunction, but negation distributes — `:not(a):not(b)`
+  // and `:not(a, b)` mean the same thing — so one flat list is enough.
+  expect(parseSelector(".a:not(.b):not(.c)").compounds[0]!.noneOf).toHaveLength(2);
+  expect(parseSelector(".a:not(.b, .c)").compounds[0]!.noneOf).toHaveLength(2);
+});
+
+test("a functional pseudo-class does not confuse the splitters", () => {
+  // A top-level comma inside `:is()` belongs to the argument. Splitting the rule
+  // prelude on every comma handed the parser `:is(h1` and blamed the author.
+  const rules = parseCss(":is(h1, h2) .x { width: 1px }");
+  expect(rules).toHaveLength(1);
+  expect(rules[0]!.selectors).toHaveLength(1);
+
+  // Whitespace and `>` inside the argument likewise, or the pseudo-class is cut in
+  // half at its own space.
+  expect(parseSelector(":where(.a > .b)").compounds).toHaveLength(1);
+
+  // Tailwind writes `space-y-(--gap)` as the class `.space-y-\(--gap\)`. An escaped
+  // paren is an ident character, so it must not open a functional pseudo-class —
+  // otherwise every theme-variable utility reads as unterminated.
+  expect(parseSelector(":where(.space-y-\\(--gap\\) > :not(:last-child))").compounds).toHaveLength(1);
+  const inner = parseSelector(".space-y-\\(--gap\\)");
+  expect(inner.compounds[0]!.classes).toEqual(["space-y-(--gap)"]);
+
+  // An argument may contain an attribute test, which is why the functional pseudos
+  // come out *before* the attributes: lifting `[title]` first would leave
+  // `:where()` empty and match everything.
+  expect(parseSelector("abbr:where([title])").compounds[0]!.anyOf![0]![0]!.compounds[0]!.attrs)
+    .toHaveLength(1);
+
+  expect(() => parseSelector(":not()")).toThrow(/has no arguments/);
+  expect(() => parseSelector(":where(.a")).toThrow(/unterminated/);
+  // Named, and the message says these are the same kind of question rather than a
+  // different one, because they are: resolvable straight off the tree.
+  expect(() => parseSelector("li:nth-child(2)")).toThrow(/:first-child, :last-child/);
+});
+
+test("an interaction pseudo-class is refused inside :is(), :where() and :not()", () => {
+  // `:hover` names a style *variant* for the whole rule, so there is no way to make
+  // it hold for one compound of a selector. Refused rather than dropped, which
+  // would compile `:where(.a:hover)` into a rule that always applies.
+  for (const sel of [":where(.a:hover)", ".x:is(.a:focus)", ".x:not(.a:checked)"]) {
+    expect(() => parseSelector(sel), sel).toThrow(/cannot be used inside :is\(\)/);
+  }
+  expect(() => parseSelector(":where(.a::before)")).toThrow(/cannot be used inside :is\(\)/);
+
+  // On the rule itself it is still fine, including alongside a `:where()`.
+  expect(parseSelector(":where(.a).b:hover").pseudo).toBe("hover");
 });
 
 /**
