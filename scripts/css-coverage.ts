@@ -25,6 +25,7 @@
 import cssProperties from "mdn-data/css/properties.json";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { PROPERTIES } from "../src/compiler/css.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2);
@@ -74,24 +75,16 @@ const isOutOfScope = (name: string, spec: Spec) =>
   (spec.groups ?? []).some((g) => OUT_OF_SCOPE_GROUPS.includes(g.toLowerCase()));
 
 /**
- * What dziri parses today, read from the `case` labels in `expand()` rather than
- * from a hand-kept list — a hand-kept list is a second source of truth and would
- * drift the first time someone adds a property.
+ * What dziri parses today: the keys of the compiler's own property table.
+ *
+ * This used to be a regex over `css.ts`, which made the *layout* of that file's
+ * source part of its interface — indentation included. It matched `case` at any
+ * depth, so `auto`, `thin` and `none` from `scrollbar-width`'s nested switch arrived
+ * here as candidate properties; the `notAProperty` split below is what kept them out
+ * of the number, so the published figure was right and the guard was load-bearing.
+ * It is not any more: a key in the table is a property by construction.
  */
-async function supportedProperties(): Promise<Set<string>> {
-  const src = await readFile(join(ROOT, "src/compiler/css.ts"), "utf8");
-  // Scoped to expandDeclaration()'s own switch. Scanning the whole file picked up
-  // `case "px"`, `case "rem"`, `case "auto"` from the unit and keyword parsers
-  // and counted them as supported properties.
-  const start = src.search(/function expandDeclaration\b/);
-  if (start === -1) throw new Error("could not find expandDeclaration() in src/compiler/css.ts");
-  const body = src.slice(start, src.indexOf("\n}", start));
-  const out = new Set<string>();
-  for (const m of body.matchAll(/case\s+"([a-z-]+)":/g)) out.add(m[1]!);
-  return out;
-}
-
-const parsed = await supportedProperties();
+const parsed = new Set(Object.keys(PROPERTIES));
 
 /**
  * A `case` label is a property only if mdn-data knows it as one. Scoping the

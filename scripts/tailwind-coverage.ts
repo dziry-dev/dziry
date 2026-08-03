@@ -20,7 +20,7 @@
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import cssProperties from "mdn-data/css/properties.json";
-import { CssError, parseSelector, splitSelectorList } from "../src/compiler/css.ts";
+import { CssError, parseSelector, PROPERTIES, splitSelectorList } from "../src/compiler/css.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const TMP = join(ROOT, ".tw-tmp");
@@ -38,17 +38,19 @@ const SAMPLE = sampleIdx > -1 ? argv[sampleIdx + 1]! : null;
 const SPEC = cssProperties as unknown as Record<string, { initial: string | string[]; groups?: string[] }>;
 
 // ── what dziri parses ────────────────────────────────────────────────────────
-async function dziriSupported(): Promise<Set<string>> {
-  const src = await readFile(join(ROOT, "src/compiler/css.ts"), "utf8");
-  const start = src.search(/function expandDeclaration\b/);
-  if (start === -1) throw new Error("could not find expandDeclaration() in src/compiler/css.ts");
-  const body = src.slice(start, src.indexOf("\n}", start));
-
+/**
+ * What dziri parses, from the compiler's own property table.
+ *
+ * Was a regex over `css.ts`'s source. The `if (!spec) continue` below used to be
+ * load-bearing for a second reason — the regex matched `case` at any depth, so value
+ * keywords from nested switches arrived here and had to be filtered out. They no
+ * longer do; the guard now only skips properties `mdn-data` does not know.
+ */
+function dziriSupported(): Set<string> {
   const out = new Set<string>();
-  for (const m of body.matchAll(/case\s+"([a-z-]+)":/g)) {
-    const name = m[1]!;
+  for (const name of Object.keys(PROPERTIES)) {
     const spec = SPEC[name];
-    if (!spec) continue; // a value keyword from a nested switch, not a property
+    if (!spec) continue;
     out.add(name);
     // Supporting a shorthand means supporting its longhands.
     if (Array.isArray(spec.initial)) for (const long of spec.initial) out.add(long);
@@ -297,7 +299,7 @@ const VALUE_FEATURES: { name: string; test: RegExp }[] = [
   // feature that works.
 ];
 
-const supported = await dziriSupported();
+const supported = dziriSupported();
 const classes = await tailwindClasses();
 console.log(`tailwind-coverage  ${classes.length} classes from the installed tailwindcss\n`);
 
