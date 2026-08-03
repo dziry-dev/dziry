@@ -98,6 +98,8 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     handlers: m.handlers,
     lists: m.lists,
     media: m.media,
+    tweens: m.tweens,
+    keyframes: m.keyframes,
     root: m.root,
   };
 }

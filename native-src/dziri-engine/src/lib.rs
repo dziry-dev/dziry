@@ -19,6 +19,7 @@
 //! typed-array views over engine memory, so a style patch, a list relink and a
 //! hidden byte cost no FFI call at all. See [`tables`].
 
+pub mod anim;
 pub mod engine;
 pub mod error;
 pub mod layout;
@@ -546,6 +547,20 @@ pub extern "C" fn dziri_engine_set_input_state(
 ) -> i32 {
     with(handle, |engine| {
         engine.set_input_state(hovered, pressed, focused);
+        status::OK
+    })
+}
+
+/// Fixes every subsequent frame's length in seconds, or restores the wall clock.
+///
+/// A non-finite or negative `dt` restores the clock. This is what makes a frame
+/// reproducible: `dt` is a parameter all the way down through `advance_scrolls` and
+/// `advance_animations`, and a golden screenshot of an animation is a frame at an
+/// exact `t` — which a wall-clock reading cannot be twice.
+#[no_mangle]
+pub extern "C" fn dziri_engine_set_time_step(handle: Handle, dt: f32) -> i32 {
+    with(handle, |engine| {
+        engine.set_time_step(dt);
         status::OK
     })
 }

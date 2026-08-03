@@ -64,6 +64,7 @@ const SYMBOLS = {
   dziri_engine_grow: { args: [u32, PTR], returns: i32 },
   dziri_engine_resize: { args: [u32, u32, u32], returns: i32 },
   dziri_engine_set_input_state: { args: [u32, i32, i32, i32], returns: i32 },
+  dziri_engine_set_time_step: { args: [u32, f32], returns: i32 },
   dziri_engine_hit_test: { args: [u32, f32, f32, PTR], returns: i32 },
   dziri_engine_bounds: { args: [u32, u32, PTR], returns: i32 },
   dziri_engine_surface_info: { args: [u32, PTR], returns: i32 },
@@ -464,6 +465,18 @@ export class Engine {
       engine.dziri_engine_set_input_state(this.#handle, hovered, pressed, focused),
       "dziri_engine_set_input_state",
     );
+  }
+
+  /**
+   * Fixes every subsequent frame's length in seconds, or restores the wall clock.
+   *
+   * A negative `dt` restores the clock. This is what makes an animation
+   * screenshottable: `tick()` normally reads the clock, so the same scenario would be
+   * a different picture every run — and an animation golden is, by definition, a
+   * frame at an exact `t`.
+   */
+  setTimeStep(dt: number): void {
+    check(engine.dziri_engine_set_time_step(this.#handle, dt), "dziri_engine_set_time_step");
   }
 
   /**

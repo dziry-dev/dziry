@@ -1601,10 +1601,18 @@ function foldCalc(raw: string, resolve: (token: string) => number = parseLength)
   return value;
 }
 
-/** Numbers, units, operators and parens — whitespace-separated or not. */
+/**
+ * Numbers, units, operators, parens and bare identifiers — spaced or not.
+ *
+ * The identifier alternative comes last so `1px` still tokenises as one dimensioned
+ * number rather than as `1` and `px`. It exists for the numeric constants CSS math
+ * functions define, and it is not a nicety: Tailwind v4 spells `rounded-full` as
+ * `calc(infinity * 1px)`, which this rejected outright with an error naming `calc()`
+ * rather than the class. See `MATH_CONSTANTS`.
+ */
 function tokeniseCalc(src: string): string[] {
   const out: string[] = [];
-  const re = /\s*(-?\d*\.?\d+(?:e[-+]?\d+)?[a-z%]*|[()+\-*/])/giy;
+  const re = /\s*(-?\d*\.?\d+(?:e[-+]?\d+)?[a-z%]*|[()+\-*/]|[a-z][a-z0-9_-]*)/giy;
   let m: RegExpExecArray | null;
   let at = 0;
   while (at < src.length) {
@@ -1617,6 +1625,21 @@ function tokeniseCalc(src: string): string[] {
   if (src.slice(at).trim()) throw new CssError(`cannot parse calc() near "${src.slice(at).trim()}"`);
   return out;
 }
+
+/**
+ * The numeric constants a CSS math function may name, per Values 4.
+ *
+ * Dimensionless, so each multiplies a unit rather than carrying one — which is
+ * exactly how `calc(infinity * 1px)` is written and why `infinity` is not a length
+ * token. `-infinity` needs no entry: the tokeniser splits the sign off and the
+ * atom parser's unary minus does the rest.
+ */
+const MATH_CONSTANTS: Record<string, number> = {
+  infinity: Infinity,
+  nan: NaN,
+  e: Math.E,
+  pi: Math.PI,
+};
 
 /**
  * Recursive descent over `+ -` then `* /` then atoms, which is the precedence CSS
@@ -1694,6 +1717,23 @@ class CalcParser {
     if (tok === "(" || tok === ")" || tok === "*" || tok === "/") {
       throw new CssError(`unexpected "${tok}" in "${this.#whole}"`);
     }
+
+    /**
+     * The numeric constants CSS math functions define, which are *not* units.
+     *
+     * `infinity` is not a curiosity: Tailwind v4 spells `rounded-full` as
+     * `border-radius: calc(infinity * 1px)`, so without this every fully-rounded
+     * utility in the framework fails to parse. Found by rendering a page that used
+     * one — the parser had never met the value, and the error named `calc()` rather
+     * than the class.
+     *
+     * `e` and `pi` come along because they are the same clause in the spec and cost
+     * one entry each. `NaN` is included and is not a mistake: CSS defines it, and a
+     * length of `NaN` is already how dziri spells `auto`, so it lands somewhere
+     * meaningful rather than nowhere.
+     */
+    const constant = MATH_CONSTANTS[tok.toLowerCase()];
+    if (constant !== undefined) return constant;
 
     // A bare number is a scalar (a multiplier); anything else is dimensioned, and
     // the resolver this parser was built with is what decides which units it can

@@ -15,6 +15,7 @@
 use skia_safe::textlayout::TextAlign;
 use skia_safe::{Canvas, Color, Matrix, Paint, PaintStyle, Point, RRect, Rect};
 
+use crate::anim::{Anims, Blend};
 use crate::protocol::{self, display, node_kind, predicate};
 use crate::tables::Tables;
 use crate::text::Measurer;
@@ -147,17 +148,13 @@ fn thumb(track: f32, viewport: f32, extent: f32, offset: f32) -> Option<(f32, f3
 /// A hover still has to show through an authored colour, so the phase applies as a
 /// *lightening of the alpha floor* rather than a replacement: an opaque thumb stays
 /// opaque, a semi-transparent one firms up.
-fn thumb_paint(authored: u32, tables: &Tables, slot: usize, phase: BarPhase) -> u32 {
+fn thumb_paint(authored: u32, tables: &Tables, blend: &Blend, phase: BarPhase) -> u32 {
     if authored >> 24 != 0 {
         let alpha = (authored >> 24).max(u32::from(phase.alpha()));
         return (authored & 0x00ff_ffff) | (alpha.min(255) << 24);
     }
 
-    let fg = tables
-        .u32s(STYLES, protocol::styles::FG)
-        .get(slot)
-        .copied()
-        .unwrap_or(0);
+    let fg = blend.u32(tables, protocol::styles::FG);
     // The alpha is *replaced* rather than scaled: a bar over transparent text still has
     // to be visible.
     (fg & 0x00ff_ffff) | (u32::from(phase.alpha()) << 24)
@@ -340,15 +337,13 @@ enum Step {
 /// decomposed storage can express — the compiler refuses a list that needs
 /// another. Mirrors `composed()` in `css.test.ts`, which pins this exact sequence
 /// against the matrices Chromium produced.
-fn transform_of(tables: &Tables, slot: usize, bounds: [f32; 4]) -> Option<Matrix> {
+fn transform_of(tables: &Tables, blend: &Blend, bounds: [f32; 4]) -> Option<Matrix> {
     use protocol::styles as f;
-    let g = |field: usize, dflt: f32| -> f32 {
-        tables
-            .f32s(STYLES, field)
-            .get(slot)
-            .copied()
-            .unwrap_or(dflt)
-    };
+    // Every one of the fourteen fields goes through the blend, which is what makes a
+    // transform transition work at all: the whole point of storing it decomposed is
+    // that the *scalars* interpolate. `rotate(0)` and `rotate(360deg)` have identical
+    // matrices, so composing first and interpolating after could not move.
+    let g = |field: usize, dflt: f32| -> f32 { blend.f32(tables, field, dflt) };
 
     let (tx, ty) = (g(f::TRANSLATE_X, 0.0), g(f::TRANSLATE_Y, 0.0));
     let (px, py) = (
@@ -425,12 +420,8 @@ fn transform_of(tables: &Tables, slot: usize, bounds: [f32; 4]) -> Option<Matrix
 /// and its subtree composite as one, so overlapping children do not show through
 /// each other — and the only way to get that is a layer, which is expensive
 /// enough that it must not be paid by every node that never asked for it.
-fn opacity_of(tables: &Tables, slot: usize) -> Option<f32> {
-    let a = tables
-        .f32s(STYLES, protocol::styles::OPACITY)
-        .get(slot)
-        .copied()
-        .unwrap_or(1.0);
+fn opacity_of(tables: &Tables, blend: &Blend) -> Option<f32> {
+    let a = blend.f32(tables, protocol::styles::OPACITY, 1.0);
     // NaN fails every comparison, so a nonsense value falls through to opaque
     // rather than making the subtree invisible.
     if a >= 1.0 || a.is_nan() {
@@ -547,6 +538,19 @@ pub struct Painter {
     /// them between a resize and the relayout, and a resize repaints correctly
     /// even while Bun is busy.
     globals: u32,
+    /// Every transition and animation in flight.
+    ///
+    /// Here rather than on the `Engine`, because "which style row does this node
+    /// wear" is already this type's question and a tween only makes the answer two
+    /// rows and a fraction. It also keeps the borrow honest: `advance_animations`
+    /// needs `&mut` on the tween state while reading the tables, and the two are
+    /// disjoint fields.
+    ///
+    /// Engine state the app never declares, and the NOTES.md ledger says why it has
+    /// to be: a transition's progress depends on the clock, which does not exist at
+    /// build time. Everything *else* about it — the endpoints, the mask, the curve —
+    /// is compile-time and is in the tables.
+    anims: Anims,
 }
 
 impl Default for Painter {
@@ -570,105 +574,156 @@ impl Painter {
         fill.set_anti_alias(true);
         fill.set_style(PaintStyle::Fill);
 
-        Self { fill, globals: 0 }
+        Self {
+            fill,
+            globals: 0,
+            anims: Anims::new(),
+        }
     }
 
-    /// Resolves which precompiled style a node wears right now.
+    /// Rebuilds the animation watch list. Called when a commit changed the tables.
+    pub fn rescan_animations(&mut self, tables: &Tables, node_count: usize) {
+        self.anims.rescan(tables, node_count);
+    }
+
+    /// Whether any tween is still in flight, so an idle frame stays free.
+    pub fn animating(&self) -> bool {
+        self.anims.running()
+    }
+
+    /// Moves every live tween `dt` seconds forward, and starts any that should be.
     ///
-    /// The node declares a `mask` of the predicates its styling depends on and
-    /// owns a run of `1 << popcount(mask)` styles. This intersects the live
-    /// predicates with that mask, compacts the result to a run index, and reads
-    /// one `u16` — so a node styled by both `:hover` and `:focus` gets the entry
-    /// the compiler resolved for *both*, rather than whichever the old precedence
-    /// order happened to rank first.
-    ///
-    /// Still free for the nodes that do not participate: the early return means
-    /// only nodes that are actually hovered, pressed or focused — or that read a
-    /// global predicate — reach the binary search.
+    /// Returns whether anything moved, which is what decides a repaint. Called from
+    /// `tick` beside `advance_scrolls`, sharing the one `dt` that frame reads from the
+    /// wall clock — `dt` is a parameter all the way down so a golden can sample an
+    /// exact `t`.
+    pub fn advance_animations(&mut self, tables: &Tables, state: &InputState, dt: f32) -> bool {
+        // Read out of `self` before the loop, so the closure below borrows neither the
+        // painter nor its tween state — `resolve_slot` is a free function for exactly
+        // this reason, and `style_for` is now a thin wrapper over it.
+        let globals = self.globals;
+        self.anims.advance(tables, dt, |node| {
+            resolve_slot(tables, node, state, globals)
+        })
+    }
+
+    /// Resolves which precompiled style a node wears right now. See `resolve_slot`.
     pub(crate) fn style_for(&self, tables: &Tables, node: usize, state: &InputState) -> usize {
-        let base = tables
-            .u16s(NODES, protocol::nodes::STYLE)
-            .get(node)
-            .copied()
-            .unwrap_or(0) as usize;
-
-        let i = node as i32;
-
-        // Which node's input state this one reads.
-        //
-        // Itself, except for a box generated by `::before` / `::after`, which
-        // reads its parent's. `.btn:hover::before` means "the generated box of a
-        // hovered button", and the box is never `state.hovered` itself —
-        // `hit_test` only ever returns `INTERACTIVE` nodes, and a generated box is
-        // not one. Without this the compiled HOVER variant exists and nothing can
-        // ever select it, which is a rule that silently does nothing rather than
-        // a visible fault.
-        //
-        // The parent *is* the originating element by construction: the compiler
-        // emits both pseudo-elements as direct children. See `NodeFlags.GENERATED`.
-        let subject = if tables
-            .u8s(NODES, protocol::nodes::FLAGS)
-            .get(node)
-            .copied()
-            .unwrap_or(0)
-            & protocol::flags::GENERATED
-            != 0
-        {
-            tables
-                .i32s(NODES, protocol::nodes::PARENT)
-                .get(node)
-                .copied()
-                .unwrap_or(i)
-        } else {
-            i
-        };
-
-        // Which predicates hold for *this* node right now. The per-node ones come
-        // from the input state; the global ones (media queries, colour scheme)
-        // are the same for everybody and were evaluated once this frame.
-        let mut live = self.globals;
-        if subject == state.hovered {
-            live |= predicate::HOVER;
-        }
-        if subject == state.pressed {
-            live |= predicate::ACTIVE;
-        }
-        if subject == state.focused {
-            live |= predicate::FOCUS;
-        }
-
-        if live == 0 {
-            return base;
-        }
-
-        let ids = tables.i32s(VARIANTS, protocol::variants::NODE);
-        let row = match ids.binary_search(&i) {
-            Ok(r) => r,
-            Err(_) => return base,
-        };
-
-        let mask = tables.u32s(VARIANTS, protocol::variants::MASK)[row];
-        let selected = live & mask;
-        if selected == 0 {
-            // The node is conditional, but none of *its* conditions hold.
-            return base;
-        }
-
-        let run_start = tables.i32s(VARIANTS, protocol::variants::RUN_START)[row];
-        if run_start < 0 {
-            return base;
-        }
-
-        let index = compact(selected, mask) as usize;
-        let slots = tables.u16s(VARIANT_SLOTS, protocol::variant_slots::STYLE);
-
-        match slots.get(run_start as usize + index) {
-            Some(&slot) => slot as usize,
-            // A short run is a host-side bug, not a reason to stop drawing.
-            None => base,
-        }
+        resolve_slot(tables, node, state, self.globals)
     }
 
+    /// The two rows a node is between, and how far — `style_for` plus its tween.
+    ///
+    /// This is what every style read in this file goes through now. For the
+    /// overwhelming majority of nodes it is `Blend::solid`, whose accessors are the
+    /// single table read they replaced; the interpolation only exists for the handful
+    /// of nodes with a tween in flight.
+    pub(crate) fn blend_for(&self, tables: &Tables, node: usize, state: &InputState) -> Blend {
+        let slot = self.style_for(tables, node, state);
+        self.anims.blend(tables, node, slot)
+    }
+}
+
+/// Which precompiled style a node wears right now.
+///
+/// The node declares a `mask` of the predicates its styling depends on and owns a run
+/// of `1 << popcount(mask)` styles. This intersects the live predicates with that
+/// mask, compacts the result to a run index, and reads one `u16` — so a node styled
+/// by both `:hover` and `:focus` gets the entry the compiler resolved for *both*,
+/// rather than whichever the old precedence order happened to rank first.
+///
+/// Still free for the nodes that do not participate: the early return means only
+/// nodes that are actually hovered, pressed or focused — or that read a global
+/// predicate — reach the binary search.
+///
+/// A free function rather than a method, because `advance_animations` needs it while
+/// holding `&mut` on the tween state and `globals` — the only thing it ever wanted
+/// from the painter — is one `Copy` word.
+fn resolve_slot(tables: &Tables, node: usize, state: &InputState, globals: u32) -> usize {
+    let base = tables
+        .u16s(NODES, protocol::nodes::STYLE)
+        .get(node)
+        .copied()
+        .unwrap_or(0) as usize;
+
+    let i = node as i32;
+
+    // Which node's input state this one reads.
+    //
+    // Itself, except for a box generated by `::before` / `::after`, which
+    // reads its parent's. `.btn:hover::before` means "the generated box of a
+    // hovered button", and the box is never `state.hovered` itself —
+    // `hit_test` only ever returns `INTERACTIVE` nodes, and a generated box is
+    // not one. Without this the compiled HOVER variant exists and nothing can
+    // ever select it, which is a rule that silently does nothing rather than
+    // a visible fault.
+    //
+    // The parent *is* the originating element by construction: the compiler
+    // emits both pseudo-elements as direct children. See `NodeFlags.GENERATED`.
+    let subject = if tables
+        .u8s(NODES, protocol::nodes::FLAGS)
+        .get(node)
+        .copied()
+        .unwrap_or(0)
+        & protocol::flags::GENERATED
+        != 0
+    {
+        tables
+            .i32s(NODES, protocol::nodes::PARENT)
+            .get(node)
+            .copied()
+            .unwrap_or(i)
+    } else {
+        i
+    };
+
+    // Which predicates hold for *this* node right now. The per-node ones come
+    // from the input state; the global ones (media queries, colour scheme)
+    // are the same for everybody and were evaluated once this frame.
+    let mut live = globals;
+    if subject == state.hovered {
+        live |= predicate::HOVER;
+    }
+    if subject == state.pressed {
+        live |= predicate::ACTIVE;
+    }
+    if subject == state.focused {
+        live |= predicate::FOCUS;
+    }
+
+    if live == 0 {
+        return base;
+    }
+
+    let ids = tables.i32s(VARIANTS, protocol::variants::NODE);
+    let row = match ids.binary_search(&i) {
+        Ok(r) => r,
+        Err(_) => return base,
+    };
+
+    let mask = tables.u32s(VARIANTS, protocol::variants::MASK)[row];
+    let selected = live & mask;
+    if selected == 0 {
+        // The node is conditional, but none of *its* conditions hold.
+        return base;
+    }
+
+    let run_start = tables.i32s(VARIANTS, protocol::variants::RUN_START)[row];
+    if run_start < 0 {
+        return base;
+    }
+
+    let index = compact(selected, mask) as usize;
+    let slots = tables.u16s(VARIANT_SLOTS, protocol::variant_slots::STYLE);
+
+    match slots.get(run_start as usize + index) {
+        Some(&slot) => slot as usize,
+        // A short run is a host-side bug, not a reason to stop drawing.
+        None => base,
+    }
+}
+
+impl Painter {
     pub fn paint(
         &mut self,
         canvas: &Canvas,
@@ -752,8 +807,8 @@ impl Painter {
             //
             // Resolved, not base: `display` can differ per predicate, and reading
             // the live slot is the whole point of the variant machinery.
-            let slot = self.style_for(tables, node, state);
-            if display_of(tables, slot) == display::NONE {
+            let blend = self.blend_for(tables, node, state);
+            if display_of(tables, blend.to) == display::NONE {
                 continue;
             }
 
@@ -766,8 +821,8 @@ impl Painter {
             // Both are paint-only, which is measured rather than assumed: neither
             // moves a sibling or changes a parent's height, so layout has already
             // finished and its answer stands.
-            let matrix = transform_of(tables, slot, geometry.bounds[node]);
-            let alpha = opacity_of(tables, slot);
+            let matrix = transform_of(tables, &blend, geometry.bounds[node]);
+            let alpha = opacity_of(tables, &blend);
 
             if matrix.is_some() || alpha.is_some() {
                 match alpha {
@@ -823,7 +878,7 @@ impl Painter {
             };
 
             if visible {
-                self.node(canvas, tables, geometry.bounds, state, measurer, node);
+                self.node(canvas, tables, geometry.bounds, &blend, measurer, node);
             }
 
             siblings.clear();
@@ -927,19 +982,21 @@ impl Painter {
     /// vertically must *not* clip horizontally, or a focus ring or a dropdown that
     /// legitimately sticks out sideways gets cut off.
     fn clips(&self, tables: &Tables, node: usize, state: &InputState) -> (bool, bool) {
-        let slot = self.style_for(tables, node, state);
+        let blend = self.blend_for(tables, node, state);
         // `CLIP` belongs here and not in `is_scrollable`: it clips like `hidden` and
         // is deliberately *not* a scroll container, which is the whole reason CSS
         // distinguishes the two.
+        //
+        // `overflow` is discrete, so the blend reads its destination outright. That is
+        // the right answer rather than a shortcut: a box halfway through a fade must
+        // not stop clipping its content, and there is no half-clipped.
         let contains = |field: usize| {
             matches!(
-                tables.u8s(STYLES, field).get(slot).copied(),
-                Some(
-                    protocol::overflow::HIDDEN
-                        | protocol::overflow::ELLIPSIS
-                        | protocol::overflow::SCROLL
-                        | protocol::overflow::CLIP
-                )
+                blend.u8(tables, field, protocol::overflow::VISIBLE),
+                protocol::overflow::HIDDEN
+                    | protocol::overflow::ELLIPSIS
+                    | protocol::overflow::SCROLL
+                    | protocol::overflow::CLIP
             )
         };
         (
@@ -949,14 +1006,15 @@ impl Painter {
     }
 
     /// The border width, which the clip has to sit inside.
+    ///
+    /// Not interpolated even though it is a length: `borderWidth` is layout-affecting,
+    /// so it carries no `interp` and no mask can name it. That is the scope boundary
+    /// rather than an oversight — easing it here while Taffy kept the old box would
+    /// move the clip out of step with the content it clips.
     fn border_of(&self, tables: &Tables, node: usize, state: &InputState) -> f32 {
-        let slot = self.style_for(tables, node, state);
-        match tables
-            .f32s(STYLES, protocol::styles::BORDER_WIDTH)
-            .get(slot)
-            .copied()
-        {
-            Some(width) if width.is_finite() && width > 0.0 => width,
+        let blend = self.blend_for(tables, node, state);
+        match blend.f32(tables, protocol::styles::BORDER_WIDTH, 0.0) {
+            width if width.is_finite() && width > 0.0 => width,
             _ => 0.0,
         }
     }
@@ -984,12 +1042,9 @@ impl Painter {
             return;
         }
 
-        let slot = self.style_for(tables, node, state);
-        let colour =
-            |field: usize| -> u32 { tables.u32s(STYLES, field).get(slot).copied().unwrap_or(0) };
-
-        let thumb_colour = colour(protocol::styles::SCROLLBAR_THUMB);
-        let track_colour = colour(protocol::styles::SCROLLBAR_TRACK);
+        let blend = self.blend_for(tables, node, state);
+        let thumb_colour = blend.u32(tables, protocol::styles::SCROLLBAR_THUMB);
+        let track_colour = blend.u32(tables, protocol::styles::SCROLLBAR_TRACK);
 
         for bar in [bar_y, bar_x].into_iter().flatten() {
             let phase = state.bar_state(node, bar.vertical);
@@ -1004,8 +1059,12 @@ impl Painter {
                 canvas.draw_round_rect(bar.track, radius, radius, &self.fill);
             }
 
-            self.fill
-                .set_color(Color::from(thumb_paint(thumb_colour, tables, slot, phase)));
+            self.fill.set_color(Color::from(thumb_paint(
+                thumb_colour,
+                tables,
+                &blend,
+                phase,
+            )));
             // Fully round ends: the radius is half the short side, so the thumb is a
             // capsule at every thickness rather than a rect with hinted corners.
             let radius = bar.thumb.width().min(bar.thumb.height()) / 2.0;
@@ -1041,11 +1100,11 @@ impl Painter {
         // this is also what the input path asks — nothing to hover or grab. The wheel is
         // untouched, which is exactly what the property means and why it is not spelled
         // `overflow: hidden`.
-        let bar_width = tables
-            .u8s(STYLES, protocol::styles::SCROLLBAR_WIDTH)
-            .get(self.style_for(tables, node, state))
-            .copied()
-            .unwrap_or(protocol::scrollbar_width::AUTO);
+        let bar_width = self.blend_for(tables, node, state).u8(
+            tables,
+            protocol::styles::SCROLLBAR_WIDTH,
+            protocol::scrollbar_width::AUTO,
+        );
         if bar_width == protocol::scrollbar_width::NONE {
             return NONE;
         }
@@ -1155,17 +1214,18 @@ impl Painter {
         canvas: &Canvas,
         tables: &Tables,
         bounds: &[[f32; 4]],
-        state: &InputState,
+        blend: &Blend,
         measurer: &mut Measurer,
         node: usize,
     ) {
         use protocol::styles as f;
 
-        let slot = self.style_for(tables, node, state);
-        let g =
-            |field: usize| -> f32 { tables.f32s(STYLES, field).get(slot).copied().unwrap_or(0.0) };
-        let c =
-            |field: usize| -> u32 { tables.u32s(STYLES, field).get(slot).copied().unwrap_or(0) };
+        // The blend arrives from the walk rather than being resolved again here: it
+        // already cost a binary search and a tween lookup one frame-step up, and
+        // re-resolving would also risk the fill and the transform disagreeing about
+        // which two rows this node is between.
+        let g = |field: usize| -> f32 { blend.f32(tables, field, 0.0) };
+        let c = |field: usize| -> u32 { blend.u32(tables, field) };
 
         let [x, y, w, h] = bounds[node];
         // Sanitised once: both the fill and the border ring build round rects from
@@ -1173,9 +1233,17 @@ impl Painter {
         // old `radius > 0.0` test happened to reject NaN and let infinity through.
         // Sanitised per corner, in Skia's order: top-left, top-right,
         // bottom-right, bottom-left.
+        // **Clamped to half the box rather than required to be finite.** CSS clamps a
+        // radius that exceeds half the side, which is how `border-radius: 9999px`
+        // means "a capsule" — and Tailwind v4 spells `rounded-full` as
+        // `calc(infinity * 1px)`, so an `is_finite` test made the most common rounding
+        // utility in the framework draw square corners. `r > 0.0` is false for `NaN`
+        // and true for infinity, and `min` of infinity with a finite half-side is the
+        // half-side, so both nonsense and the idiom land where they should.
+        let half = (w.max(0.0) / 2.0).min(h.max(0.0) / 2.0);
         let corner = |field: usize| -> f32 {
             match g(field) {
-                r if r.is_finite() && r > 0.0 => r,
+                r if r > 0.0 && half.is_finite() => r.min(half),
                 _ => 0.0,
             }
         };
@@ -1264,11 +1332,7 @@ impl Painter {
         }
 
         let size = g(f::FONT_SIZE);
-        let weight = tables
-            .u16s(STYLES, f::FONT_WEIGHT)
-            .get(slot)
-            .copied()
-            .unwrap_or(400);
+        let weight = blend.u16(tables, f::FONT_WEIGHT, 400);
         self.fill.set_color(Color::from(c(f::FG)));
 
         let kind = tables
@@ -1552,8 +1616,13 @@ pub fn hit_test(
         // on a scrolled page lost its own hover while `hover:-translate-y-1` beside
         // it worked, and the golden could not see it because a 1500px-tall
         // screenshot never scrolls.
-        if let Some(m) = transform_of(tables, painter.style_for(tables, node, state), [x, y, w, h])
-        {
+        // The *blended* transform, so the pointer follows the pixels through a
+        // transition as well as into one. A hit test against the destination row
+        // would put the clickable area where the box is going to be rather than
+        // where it is, which is worst at exactly the moment the user is aiming at
+        // a button that is still growing under the cursor.
+        let blend = painter.blend_for(tables, node, state);
+        if let Some(m) = transform_of(tables, &blend, [x, y, w, h]) {
             match m.invert() {
                 Some(inv) => {
                     let p = inv.map_point((px, py));
@@ -1768,7 +1837,7 @@ mod tests {
         t.set_f32(s, protocol::styles::SCALE_Y, 0, 3.0);
         t.commit();
         assert_matrix(
-            transform_of(&t, 0, bounds).expect("not the identity"),
+            transform_of(&t, &Blend::solid(0), bounds).expect("not the identity"),
             [1.73205, 1.0, -1.5, 2.59808, 10.0, 20.0],
             "translate rotate scale",
         );
@@ -1781,7 +1850,7 @@ mod tests {
         t.set_f32(s, protocol::styles::SKEW_Y, 0, 5.0);
         t.commit();
         assert_matrix(
-            transform_of(&t, 0, bounds).expect("not the identity"),
+            transform_of(&t, &Blend::solid(0), bounds).expect("not the identity"),
             [1.01543, 0.0874887, 0.176327, 1.0, 0.0, 0.0],
             "skewX then skewY",
         );
@@ -1798,7 +1867,7 @@ mod tests {
         t.set_f32(s, protocol::styles::SCALE_Y, 0, 3.0);
         t.commit();
         assert_matrix(
-            transform_of(&t, 0, bounds).expect("not the identity"),
+            transform_of(&t, &Blend::solid(0), bounds).expect("not the identity"),
             [1.67128, 1.16696, -1.04189, 2.86257, 10.0, 20.0],
             "translate rotate skew scale",
         );
@@ -1812,7 +1881,7 @@ mod tests {
         let mut t = one_style();
         t.commit();
         assert!(
-            transform_of(&t, 0, [0.0, 0.0, 100.0, 50.0]).is_none(),
+            transform_of(&t, &Blend::solid(0), [0.0, 0.0, 100.0, 50.0]).is_none(),
             "a node with no transform must not pay for a matrix"
         );
 
@@ -1822,12 +1891,14 @@ mod tests {
         t.set_f32(s, protocol::styles::TRANSLATE_PERCENT_X, 0, 0.5);
         t.set_f32(s, protocol::styles::TRANSLATE_PERCENT_Y, 0, 1.0);
         t.commit();
-        let m = transform_of(&t, 0, [0.0, 0.0, 100.0, 50.0]).expect("not the identity");
+        let m =
+            transform_of(&t, &Blend::solid(0), [0.0, 0.0, 100.0, 50.0]).expect("not the identity");
         assert_matrix(m, [1.0, 0.0, 0.0, 1.0, 50.0, 50.0], "percentage translate");
 
         // The same declaration on a different box is a different matrix, which is
         // the whole point of resolving it here.
-        let m = transform_of(&t, 0, [0.0, 0.0, 40.0, 10.0]).expect("not the identity");
+        let m =
+            transform_of(&t, &Blend::solid(0), [0.0, 0.0, 40.0, 10.0]).expect("not the identity");
         assert_matrix(
             m,
             [1.0, 0.0, 0.0, 1.0, 20.0, 10.0],
@@ -1846,7 +1917,8 @@ mod tests {
         t.set_f32(s, protocol::styles::ROTATE, 0, 90.0);
         t.commit();
 
-        let m = transform_of(&t, 0, [0.0, 0.0, 100.0, 50.0]).expect("not the identity");
+        let m =
+            transform_of(&t, &Blend::solid(0), [0.0, 0.0, 100.0, 50.0]).expect("not the identity");
         let centre = m.map_point((50.0, 25.0));
         assert!(
             (centre.x - 50.0).abs() < 1e-3 && (centre.y - 25.0).abs() < 1e-3,
@@ -1869,17 +1941,17 @@ mod tests {
 
         let mut t = one_style();
         t.commit();
-        assert_eq!(opacity_of(&t, 0), None);
+        assert_eq!(opacity_of(&t, &Blend::solid(0)), None);
 
         let mut t = one_style();
         t.set_f32(s, protocol::styles::OPACITY, 0, 0.25);
         t.commit();
-        assert_eq!(opacity_of(&t, 0), Some(0.25));
+        assert_eq!(opacity_of(&t, &Blend::solid(0)), Some(0.25));
 
         // NaN must read as opaque rather than making the subtree vanish.
         let mut t = one_style();
         t.set_f32(s, protocol::styles::OPACITY, 0, f32::NAN);
         t.commit();
-        assert_eq!(opacity_of(&t, 0), None);
+        assert_eq!(opacity_of(&t, &Blend::solid(0)), None);
     }
 }

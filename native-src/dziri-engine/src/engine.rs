@@ -180,6 +180,16 @@ pub struct Engine {
     scroll_animating: bool,
     /// When `scroll` was last advanced, for a frame-rate-independent step.
     last_advance: std::time::Instant,
+    /// A fixed `dt` for every frame, replacing the wall clock.
+    ///
+    /// Not a debugging affordance. `dt` being a parameter all the way down — through
+    /// `advance_scrolls` and `advance_animations` — is only worth something if
+    /// something can actually supply one, and this is that something: a golden
+    /// screenshot of an animation is a frame at an *exact* `t`, and a wall-clock
+    /// reading would make the same scenario a different picture every run.
+    ///
+    /// `None` is the clock, which is what a real window uses.
+    time_step: Option<f32>,
     /// A scrollbar drag in progress.
     ///
     /// Engine state for the same reason a scroll offset is: nothing the host authored,
@@ -254,6 +264,7 @@ impl Engine {
             scroll_target: vec![[0.0; 2]; caps.nodes as usize],
             scroll_animating: false,
             last_advance: std::time::Instant::now(),
+            time_step: None,
             drag: None,
             png: Vec::new(),
         })
@@ -354,11 +365,15 @@ impl Engine {
             self.needs_paint = true;
         }
 
-        // The one place wall-clock time enters the scroll glide, and after the relayout
+        // The one place wall-clock time enters the frame, and after the relayout
         // because the clamp above can move a target this then has to chase.
-        let dt = self.last_advance.elapsed().as_secs_f32();
-        self.last_advance = std::time::Instant::now();
+        //
+        // Both advances share the one `dt`, which is the whole reason it is read here
+        // and passed down rather than sampled inside each. Two clocks would drift
+        // against each other, and neither could be driven from a test.
+        let dt = self.frame_dt();
         self.advance_scrolls(dt);
+        self.advance_animations(dt);
 
         // An idle tick is an event drain and nothing else. The window keeps the
         // last frame it was given, so not presenting is not the same as
@@ -408,9 +423,9 @@ impl Engine {
             self.needs_paint = true;
         }
 
-        let dt = self.last_advance.elapsed().as_secs_f32();
-        self.last_advance = std::time::Instant::now();
+        let dt = self.frame_dt();
         self.advance_scrolls(dt);
+        self.advance_animations(dt);
 
         if !self.needs_paint {
             self.last_frame_ms = started.elapsed().as_secs_f32() * 1000.0;
@@ -424,6 +439,57 @@ impl Engine {
         self.frame += 1;
         self.last_frame_ms = started.elapsed().as_secs_f32() * 1000.0;
         Ok(())
+    }
+
+    /// How long this frame is, and the one place wall-clock time enters.
+    ///
+    /// Both advances share it, which is why it is read once here rather than sampled
+    /// inside each: two clocks would drift against each other, and neither could be
+    /// driven from a test.
+    fn frame_dt(&mut self) -> f32 {
+        let elapsed = self.last_advance.elapsed().as_secs_f32();
+        self.last_advance = std::time::Instant::now();
+        self.time_step.unwrap_or(elapsed)
+    }
+
+    /// Fixes every subsequent frame's length, or restores the wall clock.
+    ///
+    /// A non-finite or negative `dt` means "use the clock". That is the whole
+    /// signalling convention, and it is one value rather than a pair of calls because
+    /// it crosses the FFI: a nullable float would be an out-pointer.
+    pub fn set_time_step(&mut self, dt: f32) {
+        self.time_step = if dt.is_finite() && dt >= 0.0 {
+            Some(dt)
+        } else {
+            None
+        };
+    }
+
+    /// Moves every transition and animation `dt` seconds forward.
+    ///
+    /// Returns whether anything moved, which is what decides the repaint — the same
+    /// two-answers-not-one split `advance_scrolls` documents, and for the same reason:
+    /// the last frame of a tween moves the pixels and then stops, so conflating
+    /// "moved" with "still running" either drops that frame or animates forever.
+    ///
+    /// `dt` is a parameter rather than read from the clock here, so a frame is
+    /// reproducible and a golden can be screenshot at an exact `t`. `tick` stays the
+    /// one place wall-clock time enters.
+    pub fn advance_animations(&mut self, dt: f32) -> bool {
+        // Two disjoint fields of `self`, which is what lets the painter hold `&mut` on
+        // its tween state while reading the tables.
+        let moved = self
+            .painter
+            .advance_animations(&self.tables, &self.state, dt);
+        if moved {
+            self.needs_paint = true;
+        }
+        moved
+    }
+
+    /// Whether any tween is in flight, so a host can tell an idle frame from a live one.
+    pub fn animating(&self) -> bool {
+        self.painter.animating()
     }
 
     /// Which global predicates the current surface satisfies.
@@ -580,6 +646,20 @@ impl Engine {
     /// `TaffyTree` with a leaf per node and pushed a style per node, over table
     /// capacity, for one appended list row.
     fn resync(&mut self, diff: &Diff) -> Result<(), EngineError> {
+        // Which nodes could ever animate is a property of the tables, so it is
+        // recomputed exactly when they change rather than once per frame — and it has
+        // to be, because a node's transition may live only in its `:hover` variant and
+        // the watch list is what makes the hover noticeable in the first place.
+        //
+        // Live tweens are dropped here too: a commit that repointed a node at a
+        // different style row is precisely the case where continuing to interpolate
+        // towards a remembered row would be interpolating towards someone else's
+        // colour.
+        if self.fresh || diff.any {
+            let nodes = self.tables.capacities().nodes as usize;
+            self.painter.rescan_animations(&self.tables, nodes);
+        }
+
         if self.fresh || self.tree.node_count() != self.tables.capacities().nodes as usize {
             self.tree.rebuild(&self.tables, self.root)?;
             self.tree.apply_all_styles(&self.tables)?;

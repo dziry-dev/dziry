@@ -89,7 +89,7 @@ const SCENARIOS: Scenario[] = [
   /**
    * A transform that lives in a variant slot, which nothing else covers.
    *
-   * Node 808 is the `hover:scale-110` button. It matters because the transform is
+   * Node 900 is the `hover:scale-110` button. It matters because the transform is
    * only reachable through the *resolved* style — and because hit-testing has to
    * agree, or the pointer leaves the box the moment it grows.
    *
@@ -99,7 +99,43 @@ const SCENARIOS: Scenario[] = [
    */
   {
     name: "transform-hover",
-    args: ["--route", "transforms", "--hover", "808", "--size", "1040x1500"],
+    args: ["--route", "transforms", "--hover", "900", "--size", "1040x1500"],
+  },
+
+  /**
+   * Transitions and `@keyframes`, sampled at an exact `t`.
+   *
+   * **`--advance` is not optional on this route, it is what makes a golden possible.**
+   * `tick()` normally reads the wall clock, so a plain screenshot of an animating page
+   * is a different fraction of the way through on every run — the scenario would be
+   * flaky in the one way a visual test must not be. `--advance` fixes the frame length
+   * instead, so `0.25` means exactly a quarter of a second and the picture is the same
+   * picture forever.
+   *
+   * Three samples, because each covers something the others cannot:
+   *
+   *   - `0` is every animation at its first keyframe and every transition at rest. It
+   *     is the frame that would be *wrong* if the implicit `from` of a `@keyframes`
+   *     with no `0%` were a synthesised value rather than the element's own row —
+   *     `animate-spin` and `animate-ping` are both that shape.
+   *   - `0.25` has all four of Tailwind's animations and both hand-written `drift`
+   *     boxes mid-flight, at four different durations and on five different curves.
+   *     A wrong bezier solve, a wrong segment boundary or a mask that lost a field
+   *     all move a box here.
+   *   - the hover one is a transition caught *halfway*: 150 ms of a 300 ms
+   *     `transition-colors`, which is the frame no other scenario can produce. Node
+   *     72 is the `scale-110` button in the transform block, chosen because a
+   *     transform in a variant slot is only reachable through the resolved style and
+   *     hit-testing has to follow it.
+   */
+  { name: "animations", args: ["--route", "animations", "--size", "1040x1700", "--advance", "0"] },
+  {
+    name: "animations-quarter",
+    args: ["--route", "animations", "--size", "1040x1700", "--advance", "0.25"],
+  },
+  {
+    name: "animation-hover",
+    args: ["--route", "animations", "--size", "1040x1700", "--hover", "72", "--advance", "0.15"],
   },
 
   /**

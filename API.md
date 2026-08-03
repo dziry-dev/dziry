@@ -268,9 +268,17 @@ canonical order, so this only bites hand-written lists.
 | `transform: matrix()`, any 3D function | **refused by name** — a matrix would have to be decomposed back, and the decomposition is lossy for exactly the cases transitions care about | — |
 | a `transform` list outside translate · rotate · skew · scale | **refused by name** — the two orders are genuinely different matrices, measured, so reordering would render what no browser does | — |
 | `calc()` mixing a length and a percentage in one transform value | **refused by name** — the percentage needs the laid-out box and the length does not, and one field cannot hold both | — |
-| `transition-*` | planned — the endpoints are already two rows of the style table the compiler resolved; what is left is the clock | B3 |
-| `@keyframes`, `animate()` timeline | planned — transitions first; see ROADMAP B3 | B3 |
-| `prefers-reduced-motion` | planned — **disables** animation rather than slowing it | B3 |
+| `transition-*` — property, duration, delay, timing function | **done** — one interned `tweens` row and a `u16` on the style row, protocol v12 | B3 |
+| `@keyframes` and the `animation` shorthand | **done** — the *same* tween row, with the endpoints coming from a keyframe list instead of two style rows | B3 |
+| per-keyframe `animation-timing-function` | **done** — it governs the segment *leaving* the keyframe, measured; a column on the keyframe row, which is what makes Tailwind's `bounce` expressible | B3 |
+| easing — keywords, `cubic-bezier()`, `steps()` | **done** — solved by Newton with a bisection fallback, checked against the measured progress table | B3 |
+| interrupting a transition | **done** — a reversal is the same pair of rows *rewound*, so it takes the distance still to travel and starts from the value already reached, measured | B3 |
+| `transition` on a layout-affecting property | **refused by name**, with a build warning naming the property — only paint reads an interpolated value, so honouring it would ease a colour while the geometry jumped | — |
+| per-property timing — `transition: opacity 1s, transform 2s` | **warned by name** — CSS really does compute two durations, measured; dziri carries one timing per node and uses the first entry's. Tailwind never emits this shape | — |
+| `animation-direction: alternate`, `animation-fill-mode`, two animations on one element | **warned by name** — each runs forwards, once through, one at a time | — |
+| a transition retargeted mid-flight to a *third* row | approximated, and said so here: it restarts from the row it was heading to, which is exact whenever the previous tween had settled (hover then press) and jumps by the residual when it had not. The value it is leaving is an interpolation, and there is no interned row holding one | — |
+| `prefers-reduced-motion` | planned — **disables** animation rather than slowing it, and it wants a global predicate bit rather than a media *threshold*, which is what the `media` table currently holds | B3 |
+| `transition-behavior: allow-discrete` | parsed and ignored — it only governs properties dziri refuses to transition anyway, so honouring it would change nothing | — |
 
 `@property` came with this and was not optional. Tailwind compiles `translate-x-4` to
 `--tw-translate-x: 1rem; translate: var(--tw-translate-x) var(--tw-translate-y)` and never sets
@@ -280,13 +288,49 @@ and every Tailwind transform utility compiled cleanly while rendering nothing. `
 honoured too, and also load-bearing: without it a translated card would shift a translated badge
 inside it by its own offset.
 
-Worth stating because it shapes B3: dziri already resolves *both endpoints of a transition at
-compile time*. A node with `:hover` carries a predicate mask and a run of fully-resolved style
-slots — base and hover, both interned. A transition is interpolation between two rows the compiler
-already computed, so what stays at runtime is the clock and the current `t`, and nothing else.
+### What a transition costs, and why it is that little
+
+dziri resolves *both endpoints of a transition at compile time*. A node with `:hover` carries a
+predicate mask and a run of fully-resolved style slots — base and hover, both interned — and
+`style_for` already picks one per frame. So a transition is interpolation between two rows the
+compiler already computed, and what stays at runtime is the clock and the current `t`.
+
+`@keyframes` is the same thing with the rows named differently: a keyframe block is a fixed set of
+style rows at fixed offsets, each one the element's own computed style with the keyframe's
+declarations over it, so interpolating between two of *those* is the identical operation. One
+`tweens` table serves both, and `firstSegment < 0` is the only thing that tells them apart.
+
+What that buys, in numbers rather than adjectives:
+
+- **Two style fields**, not sixteen. A transition is a mask over 25 animatable fields plus a
+  duration, a delay and four bezier control points. Interned it is one 39-byte row and a `u16`;
+  spelt out per style row it would be a sixth of the style table again to say something identical
+  on every node wearing one class.
+- **Zero runtime bytes.** `runtime-surface` reads 7333 bytes before and after. Nothing in
+  `src/runtime/` knows animation exists — the clock, the tween state, the easing and the
+  interpolation are all engine-side.
+- **One FFI call per frame**, which is the `engine.tick()` the host was already making. No JS
+  closure runs per frame, no style object is allocated per frame, and no colour or curve is decided
+  in TypeScript.
+- **No allocation per frame** on the engine side either. The live-tween vector changes when a
+  *predicate* changes, not when a frame passes, and a finished tween is dropped rather than kept.
+
+The one thing not free is the scope boundary itself: paint is the only stage that reads an
+interpolated value, so only paint-only fields are animatable. A `transition` on `width` is a Taffy
+pass per frame that nothing here is wired for, and it is refused by name. That still covers every
+transition and animation utility Tailwind ships, all of which are transform and opacity — which is
+why they were the right slice.
+
+`dt` is a **parameter** everywhere rather than read from a clock: `tick` samples it once and passes
+it to both `advance_scrolls` and `advance_animations`. That is what makes a frame reproducible, and
+`--advance 0.25` plus `dziri_engine_set_time_step` is what turns "an animation" into a golden
+screenshot at an exact `t`. Without it the same scenario is a different picture every run — measured
+the hard way, three renders and three files.
 
 Transform is also a coverage lever rather than only an animation prerequisite: it moved Tailwind
-from 41.2% to 43.0% on its own, and `property: translate` left the blocker list entirely.
+from 41.2% to 43.0% on its own, and `property: translate` left the blocker list entirely. The
+transition and animation utilities added another 34 classes on top, to 43.1%, and four properties to
+the CSS corpus — 61.1% to 64.3%.
 
 One caveat on that figure, recorded because it cuts against the number. `tailwind-coverage` had an
 `@property` blocker whose pattern was matched against declaration *values* while describing a

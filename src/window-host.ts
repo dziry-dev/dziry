@@ -353,6 +353,37 @@ export async function run(registry: WindowRegistry, options: RunOptions = {}): P
       }
     }
 
+    /**
+     * `--advance 0.075` renders a frame that far into whatever is animating.
+     *
+     * Two ticks, and the split is the whole mechanism. The first runs with the input
+     * state the page opens in and a frame length of zero, which lets the engine record
+     * every node's resting style row without moving anything. Then the hover — or
+     * whatever `--hover` asks for — is applied and one frame of *exactly* the given
+     * length runs: the retarget inside `advance_animations` starts the tween and the
+     * same call advances it, so the picture is the animation at an exact `t`.
+     *
+     * `setTimeStep` is what makes that reproducible at all. `tick()` normally reads
+     * the wall clock, so without it the same scenario would be a different fraction of
+     * the way through the transition on every run, and a golden could not exist.
+     *
+     * A keyframe animation needs no `--hover`: it starts on the clock, so the first
+     * tick creates it at t=0 and the second samples it.
+     */
+    const advanceIndex = argv.indexOf("--advance");
+    const advance = advanceIndex !== -1 ? Number(argv[advanceIndex + 1]) : null;
+    if (advance !== null && !Number.isFinite(advance)) {
+      throw new Error(`--advance takes seconds, got "${argv[advanceIndex + 1]}"`);
+    }
+
+    if (advance !== null) {
+      engine.setTimeStep(0);
+      engine.setInputState(-1, -1, -1);
+      upload();
+      engine.tick();
+      engine.setTimeStep(advance);
+    }
+
     engine.setInputState(numberFlag("--hover"), -1, numberFlag("--focus"));
     upload();
     engine.tick();

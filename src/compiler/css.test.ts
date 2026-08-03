@@ -10,6 +10,7 @@ import { expect, test } from "bun:test";
 
 import { compile, toCompiledUi } from "./compile.ts";
 import {
+  animationFrom,
   CssError,
   expandDeclaration,
   extendVarEnv,
@@ -17,10 +18,16 @@ import {
   parseColor,
   parseContent,
   parseCss,
+  parseEasing,
   parseLength,
   parseSelector,
+  parseTime,
   substituteVars,
+  transitionFrom,
+  transitionMask,
 } from "./css.ts";
+import { Easing, StepPosition } from "../ir.ts";
+import { ANIM_ALL, ANIM_BIT } from "../protocol/generated.ts";
 
 /** Parses and returns the rendered diagnostic, or `null` if it parsed. */
 function diagnose(src: string): string | null {
@@ -1119,4 +1126,306 @@ test("opacity clamps rather than refusing, and takes a percentage", () => {
   expect(expand("opacity", "1.5")).toEqual({ opacity: 1 });
   expect(expand("opacity", "-1")).toEqual({ opacity: 0 });
   expect(() => expand("opacity", "opaque")).toThrow(/bad opacity/);
+});
+
+// ---------------------------------------------------------------------------
+// Transitions and animations
+// ---------------------------------------------------------------------------
+
+test("a CSS <time> needs a unit, and a bare number is not one", () => {
+  expect(parseTime("150ms")).toBeCloseTo(0.15, 6);
+  expect(parseTime("1s")).toBe(1);
+  expect(parseTime("0s")).toBe(0);
+  expect(parseTime(" 2S ")).toBe(2);
+  // Not a time, and this is load-bearing rather than pedantry: in the `animation`
+  // shorthand a bare number is the *iteration count*, so `animation: spin 2 1s` runs
+  // twice for one second. Accepting `2` as seconds would silently swap them.
+  expect(parseTime("2")).toBeNaN();
+  expect(parseTime("0")).toBeNaN();
+  expect(parseTime("fast")).toBeNaN();
+});
+
+test("the easing keywords carry the control points the spec gives them", () => {
+  expect(parseEasing("linear")).toEqual({ easing: Easing.LINEAR, a: 0, b: 0, c: 0, d: 0 });
+  expect(parseEasing("ease")).toEqual({
+    easing: Easing.CUBIC_BEZIER,
+    a: 0.25,
+    b: 0.1,
+    c: 0.25,
+    d: 1,
+  });
+  expect(parseEasing("ease-in")).toEqual({ easing: Easing.CUBIC_BEZIER, a: 0.42, b: 0, c: 1, d: 1 });
+  expect(parseEasing("ease-out")).toEqual({
+    easing: Easing.CUBIC_BEZIER,
+    a: 0,
+    b: 0,
+    c: 0.58,
+    d: 1,
+  });
+  // Tailwind's own `--ease-in` is `cubic-bezier(0.4, 0, 1, 1)`, which is a *different*
+  // curve wearing the same name. Both have to work, which is why the keyword table and
+  // the function parser are separate paths.
+  expect(parseEasing("cubic-bezier(0.4, 0, 1, 1)")).toEqual({
+    easing: Easing.CUBIC_BEZIER,
+    a: 0.4,
+    b: 0,
+    c: 1,
+    d: 1,
+  });
+  // The two keywords CSS itself normalises, measured.
+  expect(parseEasing("step-start")).toEqual({
+    easing: Easing.STEPS,
+    a: 1,
+    b: StepPosition.JUMP_START,
+    c: 0,
+    d: 0,
+  });
+  expect(parseEasing("step-end")?.b).toBe(StepPosition.JUMP_END);
+  expect(parseEasing("steps(4, jump-both)")).toEqual({
+    easing: Easing.STEPS,
+    a: 4,
+    b: StepPosition.JUMP_BOTH,
+    c: 0,
+    d: 0,
+  });
+});
+
+test("an easing dziri cannot express is refused rather than approximated", () => {
+  // An `x` outside 0..1 makes the curve not a function of time, and CSS rejects it.
+  expect(parseEasing("cubic-bezier(1.5, 0, 0.2, 1)")).toBe(null);
+  // `y` outside it is legal, and is how an overshoot is written.
+  expect(parseEasing("cubic-bezier(0.4, -0.5, 0.2, 1.8)")?.b).toBe(-0.5);
+  // Zero steps has no output values; `jump-none` with one step has none either.
+  expect(parseEasing("steps(0)")).toBe(null);
+  expect(parseEasing("steps(1, jump-none)")).toBe(null);
+  // An arbitrary-length stop list is a side table, not four control points, and
+  // taking the first two stops would be a different curve with the same name.
+  expect(parseEasing("linear(0, 0.25 75%, 1)")).toBe(null);
+  expect(parseEasing("bouncy")).toBe(null);
+});
+
+test("the transition longhands are folded in cascade order, not shorthand-first", () => {
+  // The shorthand *resets* all four longhands, so it cannot simply be read first.
+  // Tailwind's output triggers this: `.duration-150` sets `transition-duration`, and a
+  // `.transition` class may cascade either side of it.
+  const shorthandLast = transitionFrom([
+    ["transition-duration", "300ms"],
+    ["transition", "opacity 1s linear"],
+  ]);
+  expect(shorthandLast?.duration).toBe(1);
+
+  const longhandLast = transitionFrom([
+    ["transition", "opacity 1s linear"],
+    ["transition-duration", "300ms"],
+  ]);
+  expect(longhandLast?.duration).toBeCloseTo(0.3, 6);
+  expect(longhandLast?.easing.easing).toBe(Easing.LINEAR);
+});
+
+test("the transition shorthand is order-free, and the first time is the duration", () => {
+  // Measured: in `transition: opacity 1s 2s` the first time is the duration.
+  const spec = transitionFrom([["transition", "opacity 1s 2s ease-in"]]);
+  expect(spec?.duration).toBe(1);
+  expect(spec?.delay).toBe(2);
+  expect(spec?.properties).toEqual(["opacity"]);
+  expect(spec?.easing.a).toBe(0.42);
+
+  // Order-free, and a shorthand naming no property means `all` — that longhand's own
+  // initial value rather than "nothing".
+  expect(transitionFrom([["transition", "1s"]])?.properties).toEqual(["all"]);
+  expect(transitionFrom([["transition", "ease-out 1s opacity"]])?.duration).toBe(1);
+
+  // Nothing at all, which is the overwhelmingly common answer.
+  expect(transitionFrom([])).toBe(null);
+  expect(transitionFrom([["transition-property", "none"]])?.properties).toEqual([]);
+});
+
+test("transition-property becomes a mask, and refuses layout by name", () => {
+  const bit = (field: keyof typeof ANIM_BIT) => 1 << ANIM_BIT[field];
+  const quiet = () => {};
+
+  expect(transitionMask(["opacity"], quiet)).toBe(bit("opacity"));
+  expect(transitionMask(["background-color"], quiet)).toBe(bit("bg"));
+  // `transform` is nine fields, which is the whole reason this map exists separately
+  // from the expander: the expander is given a value, this is given only a name.
+  expect(transitionMask(["transform"], quiet)).toBe(
+    bit("translateX") |
+      bit("translateY") |
+      bit("translatePercentX") |
+      bit("translatePercentY") |
+      bit("rotate") |
+      bit("scaleX") |
+      bit("scaleY") |
+      bit("skewX") |
+      bit("skewY"),
+  );
+  expect(transitionMask(["all"], quiet)).toBe(ANIM_ALL);
+  expect(transitionMask([], quiet)).toBe(0);
+
+  // A layout-affecting property is named in a warning, because the author is about to
+  // watch a box jump and needs to know why.
+  const warned: string[] = [];
+  expect(transitionMask(["width", "opacity"], (m) => warned.push(m))).toBe(bit("opacity"));
+  expect(warned).toHaveLength(1);
+  expect(warned[0]).toContain("width");
+  expect(warned[0]).toContain("changes layout");
+
+  // A property dziri does not have at all is dropped in silence — Tailwind's default
+  // `.transition` names twenty-two of them and dziri has six, so warning would print
+  // sixteen lines per build and bury the one that matters.
+  const quietWarned: string[] = [];
+  expect(transitionMask(["filter", "fill", "box-shadow"], (m) => quietWarned.push(m))).toBe(0);
+  expect(quietWarned).toEqual([]);
+});
+
+test("the animation shorthand fills the longhands CSS says it does", () => {
+  // Every row measured against Chromium in probes/animation-semantics.html.
+  expect(animationFrom([["animation", "spin 1s linear infinite"]])).toMatchObject({
+    name: "spin",
+    duration: 1,
+    delay: 0,
+    iterations: Infinity,
+    direction: "normal",
+    fill: "none",
+  });
+  // Order-free, and the default easing is `ease` rather than `linear`.
+  expect(animationFrom([["animation", "1s spin"]])).toMatchObject({
+    name: "spin",
+    duration: 1,
+    iterations: 1,
+  });
+  expect(animationFrom([["animation", "bounce 1s infinite"]])?.easing.a).toBe(0.25);
+  // Second time is the delay; a bare number is the iteration count.
+  expect(animationFrom([["animation", "spin 1s 2s 3 reverse both"]])).toMatchObject({
+    name: "spin",
+    duration: 1,
+    delay: 2,
+    iterations: 3,
+    direction: "reverse",
+    fill: "both",
+  });
+  // A keyframes identifier is case-sensitive where a property name is not.
+  expect(animationFrom([["animation", "FadeIn 1s"]])?.name).toBe("FadeIn");
+  expect(animationFrom([["animation-name", "none"]])?.name).toBe("");
+});
+
+test("keyframe blocks are collected, with multi-offset selectors duplicated", () => {
+  const sheet = parseCss(`
+    @keyframes ping { 75%, 100% { transform: scale(2); opacity: 0 } }
+    @keyframes drift { from { opacity: 0 } to { opacity: 1 } }
+    .a { color: red }
+  `);
+  // Not rules: a keyframe's declarations apply to no element until something names the
+  // animation, so the sheet still has exactly one rule.
+  expect(sheet).toHaveLength(1);
+
+  const ping = sheet.keyframes.get("ping")!;
+  expect(ping).toHaveLength(1);
+  // Measured: `75%, 100%` is two keyframes with one set of declarations, and a list
+  // built that way reads halfway to *75%* a third of the way through.
+  expect(ping[0]!.offsets).toEqual([0.75, 1]);
+  expect(ping[0]!.decls.get("transform")).toBe("scale(2)");
+
+  // `from` and `to` fold to 0 and 1, so nothing downstream learns the keywords.
+  expect(sheet.keyframes.get("drift")!.map((b) => b.offsets)).toEqual([[0], [1]]);
+});
+
+test("an unreadable keyframe selector loses its block, not the sheet", () => {
+  // CSS invalidates a whole block on a bad selector, and an out-of-range percentage is
+  // one — clamping would silently move a keyframe written at 150% onto the end.
+  const sheet = parseCss(`
+    @keyframes bad { 150% { opacity: 0 } 50% { opacity: 1 } }
+    .after { color: red }
+  `);
+  expect(sheet.keyframes.get("bad")!.map((b) => b.offsets)).toEqual([[0.5]]);
+  // And the rule after the at-rule still parses, which a mis-skipped block breaks.
+  expect(sheet).toHaveLength(1);
+  expect(sheet[0]!.decls.get("color")).toBe("red");
+});
+
+test("a transition and an animation reach the style rows they describe", () => {
+  const result = compile(
+    `<body><div class="btn">a</div><div class="spin"></div></body>`,
+    `@keyframes spin { to { transform: rotate(360deg) } }
+     .btn { background: #111111; transition: background-color 150ms ease-in }
+     .btn:hover { background: #222222 }
+     .spin { background: #ff0000; animation: spin 1s linear infinite }`,
+  );
+
+  expect(result.warnings).toEqual([]);
+  expect(result.tweens).toHaveLength(2);
+
+  // The transition: a mask of exactly `bg`, and no keyframe span.
+  const transition = result.tweens[0]!;
+  expect(transition.mask).toBe(1 << ANIM_BIT["bg"]);
+  expect(transition.duration).toBeCloseTo(0.15, 6);
+  expect(transition.iterations).toBe(1);
+  expect(transition.firstSegment).toBe(-1);
+
+  // The animation: the same row shape, distinguished only by having segments.
+  const animation = result.tweens[1]!;
+  expect(animation.iterations).toBe(Infinity);
+  expect(animation.segmentCount).toBe(2);
+  expect(result.keyframes.map((k) => k.offset)).toEqual([0, 1]);
+
+  // Both endpoints are ordinary interned style rows, and the implicit `from` is the
+  // element's *own* row — measured, so no synthetic value is invented for it.
+  const [from, to] = result.keyframes.map((k) => result.styles[k.style]!);
+  expect(from!.bg).toBe(0xffff0000);
+  expect(to!.bg).toBe(0xffff0000);
+  expect(from!.rotate).toBe(0);
+  expect(to!.rotate).toBe(360);
+
+  // The reference is index **+ 1**, so zero can mean "none" in a zeroed table.
+  const rows = result.nodes.map((n) => result.styles[n.style]!);
+  expect(rows.some((s) => s.transition === 1)).toBe(true);
+  expect(rows.some((s) => s.animation === 2)).toBe(true);
+  expect(result.styles[0]!.transition).toBe(0);
+});
+
+test("a transition on a layout property is refused by name, once", () => {
+  const result = compile(
+    `<body><div class="a">x</div></body>`,
+    `.a { width: 100px; transition: width 1s }
+     .a:hover { width: 200px }`,
+  );
+  // One warning for one mistake, even though the declaration is resolved once per
+  // predicate combination — a `:hover` node would otherwise report it twice.
+  const refusals = result.warnings.filter((w) => w.includes("cannot transition"));
+  expect(refusals).toHaveLength(1);
+  expect(refusals[0]).toContain("width");
+  // And no tween row: a mask of nothing is a per-frame cost that cannot move a pixel.
+  expect(result.tweens).toHaveLength(0);
+});
+
+test("an animation naming no keyframes says so and emits nothing", () => {
+  const result = compile(
+    `<body><div class="a">x</div></body>`,
+    `.a { animation: nope 1s linear infinite }`,
+  );
+  expect(result.warnings.some((w) => w.includes("nope"))).toBe(true);
+  expect(result.tweens).toHaveLength(0);
+
+  // A zero duration is CSS's initial value, so a name with no duration is the ordinary
+  // case rather than an error — and must not warn on every build.
+  const silent = compile(`<body><div class="a">x</div></body>`, `.a { animation-name: nope }`);
+  expect(silent.warnings).toEqual([]);
+});
+
+test("calc() knows the numeric constants, which is what rounded-full needs", () => {
+  // Tailwind v4 spells `rounded-full` as `calc(infinity * 1px)`. Without this the most
+  // common rounding utility in the framework failed to parse, with an error naming
+  // `calc()` rather than the class — found by rendering a page that used one.
+  expect(expand("border-radius", "calc(infinity * 1px)")).toEqual({
+    radTL: Infinity,
+    radTR: Infinity,
+    radBR: Infinity,
+    radBL: Infinity,
+  });
+  // Unary minus handles the sign, so `-infinity` needs no entry of its own.
+  expect(parseLength("calc(-1 * infinity * 1px)")).toBe(-Infinity);
+  expect(parseLength("calc(pi * 1px)")).toBeCloseTo(Math.PI, 6);
+  // An identifier that is neither a constant nor a unit still fails, and now fails
+  // with the length parser's message rather than the tokeniser's.
+  expect(() => parseLength("calc(wat * 1px)")).toThrow(CssError);
 });

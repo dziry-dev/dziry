@@ -594,7 +594,16 @@ type AnimContext = {
   keyframes: ReadonlyMap<string, KeyframeBlock[]>;
   styles: StyleInterner;
   tweens: TweenInterner;
-  warn: (message: string) => void;
+  /**
+   * Records a diagnostic once per distinct *message*, located at its first site.
+   *
+   * The two arguments are separate for exactly that reason. A declaration is resolved
+   * once per predicate combination, so `transition: width` on a node with a `:hover`
+   * rule reaches here twice with `where` differing only by `:hover` — and a dedupe on
+   * the finished string reports one mistake as two. Tailwind makes it worse: the same
+   * declaration on forty buttons is forty sites for one line of CSS.
+   */
+  warn: (message: string, where: string) => void;
 };
 
 /** The `transition*` and `animation*` declarations, in cascade order, resolved. */
@@ -640,7 +649,7 @@ function resolveTiming(
   resolve: (value: string) => string | null,
   ctx: AnimContext,
 ): void {
-  const warn = (message: string) => ctx.warn(`${where}: ${message}`);
+  const warn = (message: string) => ctx.warn(message, where);
 
   const transition = transitionFrom(timingDecls(decls, "transition", resolve));
   if (transition !== null && transition.duration > 0) {
@@ -697,19 +706,21 @@ function animationRow(
 ): BuiltTween | null {
   if (spec.name === "") return null;
 
+  // The duration first, and the order matters. A zero duration is CSS's *initial*
+  // value, so `animation-name: spin` with nothing else is the ordinary "named but not
+  // started" case and warning about it would be noise on every build. Only once an
+  // author has asked for a duration is a name that resolves to nothing a mistake
+  // worth a word.
+  if (spec.duration <= 0) return null;
+
   const blocks = ctx.keyframes.get(spec.name);
   if (blocks === undefined) {
-    // CSS says an `animation-name` matching no `@keyframes` runs nothing, so this
-    // is not an error — but it is almost always a typo or a missing import, and it
-    // is invisible without a word.
+    // CSS says an `animation-name` matching no `@keyframes` runs nothing, so this is
+    // not an error — but it is almost always a typo or a missing import, and it is
+    // otherwise invisible.
     warn(`no @keyframes named "${spec.name}"`);
     return null;
   }
-
-  // A zero duration is CSS's initial value, so this is the ordinary case of
-  // `animation-name` set with no duration — nothing runs, and saying so would be
-  // noise on every build.
-  if (spec.duration <= 0) return null;
 
   if (spec.direction !== "normal") {
     warn(`animation-direction: ${spec.direction} is not supported; running forwards`);
@@ -1149,16 +1160,16 @@ export function compileTree(
   const nodes: BuiltNode[] = [];
   const warnings: string[] = [];
   const tweens = new TweenInterner();
+  /** Timing diagnostics already reported, so one mistake is one line. */
+  const timingWarned = new Set<string>();
   const anim: AnimContext = {
     keyframes: keyframeBlocks,
     styles,
     tweens,
-    // Deduplicated, because a warning here is about a *declaration* and the same
-    // declaration is resolved once per predicate combination — a `transition: width`
-    // on a node with `:hover` and `:focus` rules would otherwise be reported four
-    // times for one mistake.
-    warn: (message) => {
-      if (!warnings.includes(message)) warnings.push(message);
+    warn: (message, where) => {
+      if (timingWarned.has(message)) return;
+      timingWarned.add(message);
+      warnings.push(`${where}: ${message}`);
     },
   };
   const textBindings: BuiltTextBinding[] = [];
@@ -2294,6 +2305,17 @@ export function emit(
     return `  ${field}: ${typedArray(ctor, values)},`;
   }).join("\n");
 
+  /**
+   * The tween and keyframe rows, from whichever pass owns the style numbering.
+   *
+   * Not `result` when there are conditional classes: `compileVariants` re-interns
+   * the whole style table into slot space, so a keyframe's `style` index has to come
+   * from the same pass that produced the table it indexes. Reading it from `result`
+   * here compiled cleanly and drew every animated box in some other element's colour.
+   */
+  const tweenRows = variants ? variants.tweens : result.tweens;
+  const keyframeRows = variants ? variants.keyframes : result.keyframes;
+
   // Patches address (field, slot) pairs. Slot values are written in place, which
   // is why the style table's typed arrays are mutable and node pointers are not.
   const patchSource = (variants?.patches ?? [])
@@ -2442,18 +2464,18 @@ export const media = {
  * where the two rows come from.
  */
 export const tweens = {
-  count: ${result.tweens.length},
-  mask: ${typedArray("Uint32Array", result.tweens.map((t) => t.mask))},
-  duration: ${typedArray("Float32Array", result.tweens.map((t) => t.duration))},
-  delay: ${typedArray("Float32Array", result.tweens.map((t) => t.delay))},
-  iterations: ${typedArray("Float32Array", result.tweens.map((t) => t.iterations))},
-  firstSegment: ${typedArray("Int32Array", result.tweens.map((t) => t.firstSegment))},
-  segmentCount: ${typedArray("Uint16Array", result.tweens.map((t) => t.segmentCount))},
-  easing: ${typedArray("Uint8Array", result.tweens.map((t) => t.easing))},
-  easeA: ${typedArray("Float32Array", result.tweens.map((t) => t.easeA))},
-  easeB: ${typedArray("Float32Array", result.tweens.map((t) => t.easeB))},
-  easeC: ${typedArray("Float32Array", result.tweens.map((t) => t.easeC))},
-  easeD: ${typedArray("Float32Array", result.tweens.map((t) => t.easeD))},
+  count: ${tweenRows.length},
+  mask: ${typedArray("Uint32Array", tweenRows.map((t) => t.mask))},
+  duration: ${typedArray("Float32Array", tweenRows.map((t) => t.duration))},
+  delay: ${typedArray("Float32Array", tweenRows.map((t) => t.delay))},
+  iterations: ${typedArray("Float32Array", tweenRows.map((t) => t.iterations))},
+  firstSegment: ${typedArray("Int32Array", tweenRows.map((t) => t.firstSegment))},
+  segmentCount: ${typedArray("Uint16Array", tweenRows.map((t) => t.segmentCount))},
+  easing: ${typedArray("Uint8Array", tweenRows.map((t) => t.easing))},
+  easeA: ${typedArray("Float32Array", tweenRows.map((t) => t.easeA))},
+  easeB: ${typedArray("Float32Array", tweenRows.map((t) => t.easeB))},
+  easeC: ${typedArray("Float32Array", tweenRows.map((t) => t.easeC))},
+  easeD: ${typedArray("Float32Array", tweenRows.map((t) => t.easeD))},
 } satisfies TweenTable;
 
 /**
@@ -2464,14 +2486,14 @@ export const tweens = {
  * Tailwind's bounce needs no second concept.
  */
 export const keyframes = {
-  count: ${result.keyframes.length},
-  style: ${typedArray("Uint16Array", result.keyframes.map((k) => k.style))},
-  offset: ${typedArray("Float32Array", result.keyframes.map((k) => k.offset))},
-  easing: ${typedArray("Uint8Array", result.keyframes.map((k) => k.easing))},
-  easeA: ${typedArray("Float32Array", result.keyframes.map((k) => k.easeA))},
-  easeB: ${typedArray("Float32Array", result.keyframes.map((k) => k.easeB))},
-  easeC: ${typedArray("Float32Array", result.keyframes.map((k) => k.easeC))},
-  easeD: ${typedArray("Float32Array", result.keyframes.map((k) => k.easeD))},
+  count: ${keyframeRows.length},
+  style: ${typedArray("Uint16Array", keyframeRows.map((k) => k.style))},
+  offset: ${typedArray("Float32Array", keyframeRows.map((k) => k.offset))},
+  easing: ${typedArray("Uint8Array", keyframeRows.map((k) => k.easing))},
+  easeA: ${typedArray("Float32Array", keyframeRows.map((k) => k.easeA))},
+  easeB: ${typedArray("Float32Array", keyframeRows.map((k) => k.easeB))},
+  easeC: ${typedArray("Float32Array", keyframeRows.map((k) => k.easeC))},
+  easeD: ${typedArray("Float32Array", keyframeRows.map((k) => k.easeD))},
 } satisfies KeyframeTable;
 
 export const root: number = ${root};

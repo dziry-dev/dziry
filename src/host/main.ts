@@ -192,18 +192,54 @@ export async function runMain(options: MainOptions): Promise<void> {
 
   // --- headless ------------------------------------------------------------------
   if (screenshotPath) {
-    engine.setInputState(numberFlag("--hover"), -1, numberFlag("--focus"));
+    /**
+     * `--advance 0.15` renders a frame that far into whatever is animating.
+     *
+     * Two frames, and the split is the mechanism. The first runs with the page's
+     * resting input state and a frame length of **zero**, which lets the engine record
+     * every node's resting style row without moving anything. Then `--hover` is applied
+     * and one frame of exactly the given length runs: the retarget inside
+     * `advance_animations` starts the tween and the same call advances it, so the
+     * picture is the animation at an exact `t`.
+     *
+     * `setTimeStep` is what makes it a picture at all rather than a picture of a race.
+     * `tick()` normally reads the wall clock, so a screenshot of an animating page is a
+     * different fraction of the way through on every run — measured, not feared: the
+     * first version of this took three renders of the same scenario and got three
+     * different files.
+     *
+     * A `@keyframes` animation needs no `--hover`, because it runs on the clock rather
+     * than on a predicate: the first frame creates it at t=0 and the second samples it.
+     * That is also why `--advance 0` is not a no-op — it is the only way to get a
+     * *reproducible* t=0.
+     */
+    const advanceIndex = argv.indexOf("--advance");
+    const advance = advanceIndex !== -1 ? Number(argv[advanceIndex + 1]) : null;
+    if (advance !== null && !Number.isFinite(advance)) {
+      throw new Error(`--advance takes seconds, got "${argv[advanceIndex + 1]}"`);
+    }
 
     /* Committing here rather than trusting the loop: the app thread has published
        and released, so the lock is free and this cannot be the racing case. */
-    if (tryAcquire(flags)) {
+    const frame = () => {
+      if (!tryAcquire(flags)) return;
       takeDirty(flags);
       try {
         engine.tick();
       } finally {
         release(flags);
       }
+    };
+
+    if (advance !== null) {
+      engine.setTimeStep(0);
+      engine.setInputState(-1, -1, -1);
+      frame();
+      engine.setTimeStep(advance);
     }
+
+    engine.setInputState(numberFlag("--hover"), -1, numberFlag("--focus"));
+    frame();
 
     await Bun.write(screenshotPath, engine.readPng());
 

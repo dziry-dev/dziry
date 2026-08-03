@@ -255,3 +255,45 @@ select[disabled] button { color: #52525b; }
 [data-file$=".pdf"]     { border-color: #ef4444; color: #f87171; }
 [data-file^="draft"]    { border-color: #8b5cf6; color: #a78bfa; }
 [data-note*="x"]        { border-color: #ec4899; color: #f472b6; }
+
+/* ---------------------------------------------------------------------------
+ * An author's own `@keyframes`, so the animations page proves there is no second
+ * mechanism for one. Tailwind's `spin`, `ping`, `pulse` and `bounce` reach the
+ * engine through exactly this path; the only difference is who wrote the block.
+ *
+ * Three things here are deliberate, and each is a measured behaviour rather than
+ * a stylistic choice:
+ *
+ *   - **No `0%` keyframe.** The implicit `from` is the element's *own* computed
+ *     style, which is the interned style row the cascade already produced — so
+ *     the compiler synthesises the endpoint from that row rather than inventing a
+ *     value. Tailwind's `ping` has the same shape.
+ *   - **A multi-offset selector.** `50%, 62%` is two keyframes with one set of
+ *     declarations, which is what a browser does with it — it reads halfway to
+ *     *50%*, not to 62%, a quarter of the way through.
+ *   - **`animation-timing-function` inside a keyframe.** It governs the segment
+ *     *leaving* that keyframe, and it never reaches the element's computed style,
+ *     which is why it is a column on the keyframe row rather than a style field.
+ *     This is the row Tailwind's `bounce` needs and the reason the data model has
+ *     a per-segment curve at all.
+ * ------------------------------------------------------------------------- */
+@keyframes drift {
+    25% {
+        translate: 24px 0;
+        animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    50%, 62% {
+        translate: 24px -10px;
+        opacity: 0.4;
+        animation-timing-function: ease-in;
+    }
+    100% {
+        translate: 0 0;
+        opacity: 1;
+    }
+}
+
+.drift      { animation: drift 2s ease-out infinite }
+/* The same block at a different duration: one interned keyframe run per use site,
+   two tween rows, and nothing duplicated that did not have to be. */
+.drift-slow { animation: drift 4s linear infinite }

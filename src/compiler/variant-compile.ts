@@ -26,7 +26,12 @@ import {
   type ComputedStyle,
   type StyleField,
 } from "../ir.ts";
-import { compileTree, type CompileResult } from "./compile.ts";
+import {
+  compileTree,
+  type BuiltKeyframe,
+  type BuiltTween,
+  type CompileResult,
+} from "./compile.ts";
 import type { Element, Node } from "./html.ts";
 
 /** A conditional class discovered in the tree. */
@@ -74,6 +79,32 @@ export type VariantCompiled = {
   /** Per node, one interned slot per predicate combination. */
   runs: number[][];
   patches: TogglePatch[];
+  /**
+   * Interned transition and animation rows, carried through unchanged.
+   *
+   * Unchanged because a tween row holds no style index — only a mask, a timing and
+   * a curve — so nothing in it needs renumbering. It is here rather than left on the
+   * baseline so `emit` reads the tables from one place, which is what stopped the
+   * two from disagreeing.
+   */
+  tweens: BuiltTween[];
+  /**
+   * Keyframe rows with their `style` **remapped into slot space**.
+   *
+   * The remap is the whole reason these are here, and its absence was a bug that
+   * compiled cleanly and rendered the wrong colours. A keyframe's style is an
+   * ordinary interned row in the *baseline* numbering, and this function replaces
+   * that numbering entirely: a slot is a vector of styles across every variant, so
+   * baseline row 54 and slot 54 are unrelated. Every animated box on the page drew
+   * some other element's fill, because the indices were left pointing at a table
+   * that no longer existed.
+   *
+   * Interned through the same `internSlot` as everything else, over the keyframe's
+   * style *in each variant* — so a conditional class that recolours something a
+   * keyframe mentions patches the segment row too, and the animation follows the
+   * theme instead of freezing at the baseline's colour.
+   */
+  keyframes: BuiltKeyframe[];
   warnings: string[];
 };
 
@@ -268,6 +299,40 @@ export function compileVariants(
     runs[n] = run;
   }
 
+  /**
+   * Keyframe style rows, renumbered into slot space.
+   *
+   * **Before `slotCount` is taken**, because interning a keyframe's style can mint a
+   * new slot: a keyframe row is usually a style no node wears — `spin`'s `to` is the
+   * element rotated 360°, and nothing is ever painted that way at rest.
+   *
+   * A variant whose keyframe table has a different shape is refused rather than
+   * approximated. It means a conditional class changed which animation runs, and
+   * silently taking the baseline's rows would animate the wrong thing on toggle —
+   * one of the two ways to be wrong that leaves nothing on screen to blame.
+   */
+  const shapeMismatch = variants.find(
+    (v) => v.keyframes.length !== baseline.keyframes.length || v.tweens.length !== baseline.tweens.length,
+  );
+  if (shapeMismatch !== undefined) {
+    warnings.push(
+      "a conditional class changed which transitions or animations exist; the baseline's " +
+        "are used in every state. Declare the same `transition`/`animation` in both.",
+    );
+  }
+
+  const keyframes: BuiltKeyframe[] = baseline.keyframes.map((row, k) => ({
+    ...row,
+    style: internSlot(
+      variants.map((v) => {
+        const inVariant = v.keyframes[k];
+        const source = inVariant === undefined ? baseline : v;
+        const styleId = inVariant?.style ?? row.style;
+        return source.styles[styleId] ?? baseline.styles[row.style]!;
+      }),
+    ),
+  }));
+
   const slotCount = slotStyles.length;
 
   // Baseline table: variant 0 of each slot.
@@ -327,7 +392,17 @@ export function compileVariants(
     }
   }
 
-  return { table, slotCount, base, masks, runs, patches, warnings };
+  return {
+    table,
+    slotCount,
+    base,
+    masks,
+    runs,
+    patches,
+    tweens: baseline.tweens,
+    keyframes,
+    warnings,
+  };
 }
 
 /** Whether a node is conditionally styled at all. */

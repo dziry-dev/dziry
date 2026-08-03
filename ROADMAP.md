@@ -575,18 +575,38 @@ Native). Implement its ~8 platform methods and get collision-aware placement for
 dropdowns and popovers. We are a *better* host than a DOM shim here — `happy-dom` returns zeros
 from `getBoundingClientRect` because it has no layout. We have layout.
 
-### B3 · Animation
-- **A generic timeline is the primitive, not CSS.** `animate(node, { duration, curve, props })`.
-  CSS transitions and keyframes compile *into* it, and imperative animation uses the same system.
-  One runtime, two authoring models.
-- **Transitions before keyframes** — state A → B over time is what shadcn actually uses.
-- Compile-time precomputes endpoints and easing tables; ticking is irreducibly runtime.
-- `prefers-reduced-motion` **disables** animation rather than slowing it. Accessibility
-  requirement, not polish. Wire it before shipping animation.
-- The frame loop lives **in the engine**, which is where it belongs now that the engine owns the
-  window and paint. Bun still drives — it just calls `tick()` on a timer while animations are
-  active instead of blocking in `wait_event`. That is a much smaller change than it was when the
-  loop would have lived in TypeScript, though the architecture is still settled in A1.
+### B3 · Animation — **done for CSS**, protocol v12
+
+`transition-*` and `@keyframes` both ship. What follows is what the plan got right, what it got
+wrong, and what is left.
+
+- **"A generic timeline is the primitive, not CSS" — reached from the other end.** The plan was to
+  build a timeline and compile CSS *into* it. What actually happened is that the compiler's existing
+  output turned out to *be* the primitive: a transition is interpolation between two rows of the
+  style table the cascade already resolved, and a `@keyframes` block is a fixed set of such rows at
+  fixed offsets. So one `tweens` table serves both, and `(from, to, t)` is the unification — reached
+  by noticing what was already there rather than by building a layer above it. An imperative
+  `animate()` still fits: it would mint a tween row and two style rows, which is the same shape.
+- **Transitions before keyframes** — correct, and they turned out to be the same mechanism, so the
+  second cost a keyframe table and no new engine path.
+- **Compile-time precomputes endpoints; ticking is irreducibly runtime** — correct, and it is the
+  whole design. `runtime-surface` is unchanged at 7333 bytes: nothing in `src/runtime/` knows
+  animation exists.
+- ~~The frame loop lives in the engine … Bun calls `tick()` on a timer while animations are
+  active~~. **This was already out of date and needed no change at all.** `src/host/main.ts` runs a
+  `while (running)` loop calling `engine.tick()` every iteration; it does not block in `wait_event`,
+  and `tick` early-outs when `!needs_paint`, so an idle frame is an event drain. An animation simply
+  keeps `needs_paint` set. No timer, no loop change.
+
+Still open, and both are small:
+
+- `prefers-reduced-motion` **disables** animation rather than slowing it. Accessibility requirement,
+  not polish. It wants a *global predicate bit* rather than a media threshold, which is the one
+  thing the `media` table cannot currently express — every row there is an axis and a number.
+- Per-property transition timing (`transition: opacity 1s, transform 2s` really does compute two
+  durations, measured), `animation-direction: alternate`, `animation-fill-mode`, and more than one
+  animation per element. Each warns by name today rather than half-working. None is used by
+  Tailwind, and each wants the same thing: more than one live blend per node.
 
 ### B4 · Rich text editing — not scheduled
 Single-line input, selection, IME and clipboard moved forward to A5, because a framework that

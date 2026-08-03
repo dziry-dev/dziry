@@ -110,15 +110,15 @@ export default function Transforms() {
       </div>
 
       <div className="flex flex-col gap-3 rounded-xl bg-zinc-900 p-6">
-        <div className="text-lg font-semibold text-zinc-50">what is not here yet</div>
+        <div className="text-lg font-semibold text-zinc-50">and these all animate</div>
         <div className="text-xs text-zinc-400">
-          None of the above animates. The endpoints are already resolved — a node with
-          `hover:scale-110` carries two finished style rows and the engine picks one — so what
-          transitions still need is the clock and the current t, not the styles. That is
-          ROADMAP B3.
+          Every transform above can be transitioned, and decomposed storage is the reason: the
+          scalars interpolate, where a matrix cannot. `rotate(0)` and `rotate(360deg)` are the
+          same six floats, so a matrix lerp between them would not move — measured. See the
+          Motion tab.
         </div>
         <div className="text-xs text-zinc-500">
-          Also refused, by name rather than silently: `transform: matrix(…)`, every 3D
+          Still refused, by name rather than silently: `transform: matrix(…)`, every 3D
           function, and any list written outside the order translate · rotate · skew · scale.
         </div>
       </div>
