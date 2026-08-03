@@ -12,6 +12,7 @@ import {
   Align,
   Direction,
   Display,
+  Easing,
   Justify,
   Overflow,
   INITIAL_STYLE,
@@ -33,14 +34,22 @@ import { isParamSentinel, ParamExpressionError } from "./route-args.ts";
 import { allLocals } from "./reactive-runtime.ts";
 import { hasState, type VariantCompiled } from "./variant-compile.ts";
 import {
+  animationFrom,
   compareCascade,
+  EASE,
   expandDeclaration,
   extendVarEnv,
   parseCss,
+  parseEasing,
   Origin,
   parseContent,
   parseInlineStyle,
   substituteVars,
+  transitionFrom,
+  transitionMask,
+  type AnimationSpec,
+  type Curve,
+  type KeyframeBlock,
   type OriginValue,
   type RegisteredProperty,
   type MediaCond,
@@ -50,6 +59,7 @@ import {
   type PseudoElement,
   type Rule,
   type Selector,
+  type TransitionSpec,
   type VarEnv,
 } from "./css.ts";
 import { UA_SHEET } from "./ua-sheet.ts";
@@ -347,6 +357,7 @@ function applyDecls(
   where: string,
   vars: VarEnv = EMPTY_VARS,
   registered: ReadonlyMap<string, RegisteredProperty> = new Map(),
+  anim?: AnimContext,
 ): ComputedStyle {
   const patch: Partial<Record<StyleField, number>> = {};
 
@@ -391,7 +402,34 @@ function applyDecls(
     }
   }
 
-  return coerceOverflow({ ...base, ...patch });
+  const style = coerceOverflow({ ...base, ...patch });
+
+  // After the style is finished, because both halves need it. A transition's
+  // endpoints *are* style rows the cascade produced, and an animation's keyframes
+  // resolve against this very style — so neither can be answered from one
+  // declaration's value, which is why `expandDeclaration` does not try.
+  //
+  // Absent for the callers that have no interner: `css.test.ts` exercises the
+  // expander directly, and a transition with nowhere to intern is not a transition.
+  if (anim) resolveTiming(style, decls, where, (value) => resolveValue(value, vars, registered), anim);
+
+  return style;
+}
+
+/**
+ * One declaration's value with its `var()`s substituted, or `null` if it drops.
+ *
+ * The same two lines the expander loop above runs, named because the timing
+ * resolution needs them too and needs them *lazily* — it reads six declarations out
+ * of a map of forty, and substituting the other thirty-four twice would be the
+ * price of sharing the loop instead.
+ */
+function resolveValue(
+  value: string,
+  vars: VarEnv,
+  registered: ReadonlyMap<string, RegisteredProperty>,
+): string | null {
+  return value.includes("var(") ? substituteVars(value, vars, 0, registered) : value;
 }
 
 /**
@@ -457,6 +495,377 @@ class StyleInterner {
     this.list.push(style);
     return id;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Transitions and animations
+// ---------------------------------------------------------------------------
+
+/** One row of the tween table, as the emitter writes it. */
+export type BuiltTween = {
+  mask: number;
+  duration: number;
+  delay: number;
+  iterations: number;
+  firstSegment: number;
+  segmentCount: number;
+  easing: number;
+  easeA: number;
+  easeB: number;
+  easeC: number;
+  easeD: number;
+};
+
+/** One row of the keyframe table. */
+export type BuiltKeyframe = {
+  style: number;
+  offset: number;
+  easing: number;
+  easeA: number;
+  easeB: number;
+  easeC: number;
+  easeD: number;
+};
+
+/**
+ * Interns tween rows, and owns the keyframe rows they point at.
+ *
+ * Interned for the same reason styles are: `transition-colors duration-150` is one
+ * spec however many nodes wear it, and a page whose forty buttons share a class
+ * should cost one row. The saving is not incidental — a tween row is 39 bytes and a
+ * style row is 237, so an un-interned tween per style row would be a sixth of the
+ * style table again for information that is identical.
+ *
+ * Keyframe rows are **not** interned, and that asymmetry is deliberate: a segment's
+ * identity is its position in a tween's span, so two animations that happen to
+ * resolve to the same offsets and rows still need their own contiguous runs.
+ * `firstSegment`/`segmentCount` is a slice, and a slice cannot be shared unless the
+ * whole run matches — which is a comparison over rows rather than over a key, and
+ * worth nothing on a table with a handful of entries.
+ */
+class TweenInterner {
+  private readonly byKey = new Map<string, number>();
+  readonly tweens: BuiltTween[] = [];
+  readonly keyframes: BuiltKeyframe[] = [];
+
+  intern(row: BuiltTween): number {
+    const key = [
+      row.mask,
+      row.duration,
+      row.delay,
+      row.iterations,
+      row.firstSegment,
+      row.segmentCount,
+      row.easing,
+      row.easeA,
+      row.easeB,
+      row.easeC,
+      row.easeD,
+    ].join("|");
+
+    const existing = this.byKey.get(key);
+    if (existing !== undefined) return existing;
+
+    const id = this.tweens.length;
+    this.byKey.set(key, id);
+    this.tweens.push(row);
+    return id;
+  }
+
+  /** Appends a keyframe run and returns where it starts. */
+  addSegments(rows: BuiltKeyframe[]): number {
+    const start = this.keyframes.length;
+    this.keyframes.push(...rows);
+    return start;
+  }
+}
+
+/**
+ * What resolving a node's `transition` and `animation` needs beyond its own
+ * declarations.
+ *
+ * `styles` is here because a `@keyframes` block is resolved into *style rows* — one
+ * per keyframe, each being this element's own computed style with the keyframe's
+ * declarations on top. That is what makes an animation cost the engine nothing new,
+ * and it is also why this cannot be done in `expandDeclaration`: the answer depends
+ * on the whole finished style, not on one declaration's value.
+ */
+type AnimContext = {
+  keyframes: ReadonlyMap<string, KeyframeBlock[]>;
+  styles: StyleInterner;
+  tweens: TweenInterner;
+  warn: (message: string) => void;
+};
+
+/** The `transition*` and `animation*` declarations, in cascade order, resolved. */
+function timingDecls(
+  decls: Map<string, string>,
+  prefix: "transition" | "animation",
+  resolve: (value: string) => string | null,
+): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const [prop, value] of decls) {
+    if (prop !== prefix && !prop.startsWith(`${prefix}-`)) continue;
+    const resolved = resolve(value);
+    // A `var()` that does not resolve drops the declaration, exactly as it does
+    // for every other property. Tailwind leans on this: `transition-duration:
+    // var(--tw-duration, var(--default-transition-duration))` reaches its fallback
+    // through `@property`, and before `@property` existed the whole declaration
+    // was correctly dropped rather than half-read.
+    if (resolved === null) continue;
+    out.push([prop, resolved]);
+  }
+  return out;
+}
+
+/**
+ * Fills in `style.transition` and `style.animation`, interning what they describe.
+ *
+ * Called with the *finished* computed style, which is what both halves need. A
+ * transition's endpoints are style rows the cascade already produced, so all this
+ * has to record is which fields may move and how fast. An animation's endpoints are
+ * keyframe rows, and each is this style with the keyframe's declarations applied —
+ * so the style has to exist first.
+ *
+ * Order matters between the two lines at the end, and not for a subtle reason:
+ * `style.transition` is set *before* the segments are derived, so a `0%` keyframe
+ * with no declarations of its own interns to literally the same row as the element.
+ * `style.animation` is set after, so a segment row never carries the animation it
+ * is a frame of — a keyframe is a value, not a state that starts anything.
+ */
+function resolveTiming(
+  style: ComputedStyle,
+  decls: Map<string, string>,
+  where: string,
+  resolve: (value: string) => string | null,
+  ctx: AnimContext,
+): void {
+  const warn = (message: string) => ctx.warn(`${where}: ${message}`);
+
+  const transition = transitionFrom(timingDecls(decls, "transition", resolve));
+  if (transition !== null && transition.duration > 0) {
+    const mask = transitionMask(transition.properties, warn);
+    // A mask of zero is a transition over nothing — either `transition-property:
+    // none`, or a list naming only properties dziri cannot interpolate. Emitting a
+    // row for it would cost the engine a per-frame tween that can never move a
+    // pixel, so there is nothing to emit.
+    if (mask !== 0) {
+      style.transition = ctx.tweens.intern(tweenRow(mask, transition)) + 1;
+    }
+  }
+
+  const animation = animationFrom(timingDecls(decls, "animation", resolve));
+  if (animation !== null) {
+    const row = animationRow(style, animation, where, resolve, ctx, warn);
+    if (row !== null) style.animation = ctx.tweens.intern(row) + 1;
+  }
+}
+
+function tweenRow(mask: number, spec: TransitionSpec): BuiltTween {
+  return {
+    mask,
+    duration: spec.duration,
+    delay: spec.delay,
+    // A transition runs exactly once. It is the same column an animation's
+    // `infinite` uses, which is the whole point of one table.
+    iterations: 1,
+    firstSegment: -1,
+    segmentCount: 0,
+    easing: spec.easing.easing,
+    easeA: spec.easing.a,
+    easeB: spec.easing.b,
+    easeC: spec.easing.c,
+    easeD: spec.easing.d,
+  };
+}
+
+/**
+ * One animation as a tween row plus its keyframe run, or `null` for nothing to run.
+ *
+ * Everything the engine cannot express is refused **by name** here rather than
+ * approximated, which is the same call `appearance: base` and a reordered
+ * `transform` list already got. An `alternate` animation silently played forwards
+ * would be a bug an author cannot see the cause of.
+ */
+function animationRow(
+  style: ComputedStyle,
+  spec: AnimationSpec,
+  where: string,
+  resolve: (value: string) => string | null,
+  ctx: AnimContext,
+  warn: (message: string) => void,
+): BuiltTween | null {
+  if (spec.name === "") return null;
+
+  const blocks = ctx.keyframes.get(spec.name);
+  if (blocks === undefined) {
+    // CSS says an `animation-name` matching no `@keyframes` runs nothing, so this
+    // is not an error — but it is almost always a typo or a missing import, and it
+    // is invisible without a word.
+    warn(`no @keyframes named "${spec.name}"`);
+    return null;
+  }
+
+  // A zero duration is CSS's initial value, so this is the ordinary case of
+  // `animation-name` set with no duration — nothing runs, and saying so would be
+  // noise on every build.
+  if (spec.duration <= 0) return null;
+
+  if (spec.direction !== "normal") {
+    warn(`animation-direction: ${spec.direction} is not supported; running forwards`);
+  }
+  if (spec.fill !== "none" && Number.isFinite(spec.iterations)) {
+    warn(`animation-fill-mode: ${spec.fill} is not supported; the element returns to its own style`);
+  }
+
+  const segments = resolveKeyframes(style, blocks, spec, resolve, ctx);
+  // Two rows are the minimum for a segment to exist at all. `resolveKeyframes`
+  // always synthesises both endpoints, so this only trips if a `@keyframes` block
+  // list was empty — which the parser already refuses to record.
+  if (segments.length < 2) return null;
+
+  const first = ctx.tweens.addSegments(segments);
+  return {
+    // Which fields an animation may move is not the author's list but the
+    // keyframes' own. There is no `animation-property` in CSS for exactly this
+    // reason, and there is nothing for one to say.
+    mask: maskOfKeyframes(blocks, warn),
+    duration: spec.duration,
+    delay: spec.delay,
+    iterations: spec.iterations,
+    firstSegment: first,
+    segmentCount: segments.length,
+    easing: spec.easing.easing,
+    easeA: spec.easing.a,
+    easeB: spec.easing.b,
+    easeC: spec.easing.c,
+    easeD: spec.easing.d,
+  };
+}
+
+/**
+ * The keyframe rows for one animation, ascending, with both endpoints present.
+ *
+ * Three measured facts are built in here rather than left to the engine.
+ *
+ * A multi-offset selector is **duplicated**: `75%, 100% { … }` produces two rows.
+ * Measured — a list built that way reads halfway to *75%*, not to 100%, a third of
+ * the way through.
+ *
+ * A missing `0%` or `100%` is the element's **own computed style**, which is the row
+ * this element already interns to. Tailwind's `ping` has no `0%` at all and reads
+ * the element's `opacity: 1` there. So the synthesised endpoint needs no value
+ * invented for it.
+ *
+ * And a keyframe's `animation-timing-function` governs the segment **leaving** it,
+ * so it rides on that keyframe's own row and the last row's is never read.
+ */
+function resolveKeyframes(
+  style: ComputedStyle,
+  blocks: readonly KeyframeBlock[],
+  spec: AnimationSpec,
+  resolve: (value: string) => string | null,
+  ctx: AnimContext,
+): BuiltKeyframe[] {
+  // A keyframe row is a value, never a state: it must not carry the animation it
+  // is a frame of, or the engine would find a segment that claims to start one.
+  const canvas: ComputedStyle = { ...style, animation: 0 };
+
+  const rows: BuiltKeyframe[] = [];
+  for (const block of blocks) {
+    const patch: Partial<Record<StyleField, number>> = {};
+    for (const [prop, value] of block.decls) {
+      if (prop.startsWith("--")) continue;
+      // `animation-timing-function` inside a keyframe is the segment's easing, not
+      // a style field — measured: it never reaches the element's computed style.
+      if (prop === "animation-timing-function") continue;
+      const resolved = resolve(value);
+      if (resolved === null) continue;
+      try {
+        expandDeclaration(prop, resolved, patch);
+      } catch {
+        // A keyframe declaring something dziri cannot express is dropped, which is
+        // what CSS does with an invalid declaration inside a keyframe too. Silent
+        // because `@keyframes` in a Tailwind sheet is boilerplate the author did
+        // not write, and the fields that matter are covered by the mask.
+      }
+    }
+
+    const easing = keyframeEasing(block, resolve, spec.easing);
+    const styleId = ctx.styles.intern({ ...canvas, ...patch });
+    for (const offset of block.offsets) {
+      rows.push({
+        style: styleId,
+        offset,
+        easing: easing.easing,
+        easeA: easing.a,
+        easeB: easing.b,
+        easeC: easing.c,
+        easeD: easing.d,
+      });
+    }
+  }
+
+  // Stable, so two keyframes at the same offset keep source order and the later
+  // one wins the segment that leaves it — which is what a browser does.
+  rows.sort((a, b) => a.offset - b.offset);
+
+  const base = (offset: number): BuiltKeyframe => ({
+    style: ctx.styles.intern(canvas),
+    offset,
+    easing: spec.easing.easing,
+    easeA: spec.easing.a,
+    easeB: spec.easing.b,
+    easeC: spec.easing.c,
+    easeD: spec.easing.d,
+  });
+
+  if (rows.length === 0 || rows[0]!.offset > 0) rows.unshift(base(0));
+  if (rows[rows.length - 1]!.offset < 1) rows.push(base(1));
+  return rows;
+}
+
+/** A keyframe's own easing, or the animation's when it names none. */
+function keyframeEasing(
+  block: KeyframeBlock,
+  resolve: (value: string) => string | null,
+  fallback: Curve,
+): Curve {
+  const raw = block.decls.get("animation-timing-function");
+  if (raw === undefined) return fallback;
+  const resolved = resolve(raw);
+  if (resolved === null) return fallback;
+  return parseEasing(resolved) ?? fallback;
+}
+
+/**
+ * The fields a `@keyframes` block list may move — the properties it *mentions*.
+ *
+ * CSS has no `animation-property`, and this is why it needs none: every segment row
+ * is the same base row with some keyframe's declarations over it, so the fields the
+ * keyframes mention are exactly the fields that can differ. Deriving the mask from
+ * the declarations rather than by diffing the resolved rows also means it goes
+ * through the same `transitionMask` as a transition — so `transform: none` in a
+ * keyframe covers all nine transform fields, and a keyframe animating `width` is
+ * refused by the same named warning either syntax gets.
+ *
+ * A field in the mask whose value happens not to differ costs nothing: it
+ * interpolates from a value to itself. A field *outside* it reads the destination
+ * row, which for an animation is the base value — which is why over-inclusion is
+ * safe here and under-inclusion would freeze a property at a keyframe's value.
+ */
+function maskOfKeyframes(
+  blocks: readonly KeyframeBlock[],
+  warn: (message: string) => void,
+): number {
+  const mentioned = new Set<string>();
+  for (const block of blocks) {
+    for (const prop of block.decls.keys()) {
+      if (prop.startsWith("--") || prop === "animation-timing-function") continue;
+      mentioned.add(prop);
+    }
+  }
+  return transitionMask([...mentioned], warn);
 }
 
 // ---------------------------------------------------------------------------
@@ -634,6 +1043,10 @@ export type CompileResult = {
   lists: BuiltList[];
   /** One row per distinct media condition, in predicate-bit order. */
   media: BuiltMedia[];
+  /** Interned transition and animation specs; a style row points at one by index+1. */
+  tweens: BuiltTween[];
+  /** Keyframe runs, addressed by a tween's `firstSegment`/`segmentCount`. */
+  keyframes: BuiltKeyframe[];
   /** Diagnostics worth surfacing but not worth failing over. */
   warnings: string[];
 };
@@ -716,6 +1129,10 @@ export function compileTree(
   // everything else here has.
   const registered = new Map([...uaSheet.properties, ...authorSheet.properties]);
 
+  // `@keyframes` from both sheets, author last for the same reason: two blocks
+  // sharing a name means the later one wins, and the author's sheet is later.
+  const keyframeBlocks = new Map([...uaSheet.keyframes, ...authorSheet.keyframes]);
+
   // Assigned as conditions are met during the walk, so bit order is first-use
   // order and a sheet's unused breakpoints cost nothing.
   const media = new MediaBits();
@@ -731,6 +1148,19 @@ export function compileTree(
   const stringIds = new Map<string, number>();
   const nodes: BuiltNode[] = [];
   const warnings: string[] = [];
+  const tweens = new TweenInterner();
+  const anim: AnimContext = {
+    keyframes: keyframeBlocks,
+    styles,
+    tweens,
+    // Deduplicated, because a warning here is about a *declaration* and the same
+    // declaration is resolved once per predicate combination — a `transition: width`
+    // on a node with `:hover` and `:focus` rules would otherwise be reported four
+    // times for one mistake.
+    warn: (message) => {
+      if (!warnings.includes(message)) warnings.push(message);
+    },
+  };
   const textBindings: BuiltTextBinding[] = [];
   const handlers: BuiltHandler[] = [];
   const lists: BuiltList[] = [];
@@ -847,7 +1277,7 @@ export function compileTree(
     // registration removed — and it is built from the *cascaded* declarations, so
     // `--x` obeys specificity like everything else.
     const vars = extendVarEnv(parentVars, base, registered);
-    const style = applyDecls(inherited, base, where, vars, registered);
+    const style = applyDecls(inherited, base, where, vars, registered, anim);
 
     // Precomputed variants: the compiler emits finished styles and the runtime
     // only picks an index. Each state is resolved as a full cascade from
@@ -908,6 +1338,7 @@ export function compileTree(
         label,
         extendVarEnv(parentVars, stateDecls, registered),
         registered,
+        anim,
       );
       run[combo] = styles.intern(resolvedStyle);
     }
@@ -1302,6 +1733,8 @@ export function compileTree(
             : MediaKind.MAX_HEIGHT,
       value: cond.px,
     })),
+    tweens: tweens.tweens,
+    keyframes: tweens.keyframes,
     warnings,
   };
 }
@@ -1527,7 +1960,41 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     // using the in-memory IR, and a test that walked one would have read
     // `undefined` and quietly agreed with itself.
     lists: listTable(result.lists),
+    tweens: tweenTable(result.tweens),
+    keyframes: keyframeTable(result.keyframes),
     root: result.root,
+  };
+}
+
+function tweenTable(tweens: BuiltTween[]): CompiledUi["tweens"] {
+  const f32 = (pick: (t: BuiltTween) => number) => Float32Array.from(tweens, pick);
+  return {
+    count: tweens.length,
+    mask: Uint32Array.from(tweens, (t) => t.mask),
+    duration: f32((t) => t.duration),
+    delay: f32((t) => t.delay),
+    iterations: f32((t) => t.iterations),
+    firstSegment: Int32Array.from(tweens, (t) => t.firstSegment),
+    segmentCount: Uint16Array.from(tweens, (t) => t.segmentCount),
+    easing: Uint8Array.from(tweens, (t) => t.easing),
+    easeA: f32((t) => t.easeA),
+    easeB: f32((t) => t.easeB),
+    easeC: f32((t) => t.easeC),
+    easeD: f32((t) => t.easeD),
+  };
+}
+
+function keyframeTable(keyframes: BuiltKeyframe[]): CompiledUi["keyframes"] {
+  const f32 = (pick: (k: BuiltKeyframe) => number) => Float32Array.from(keyframes, pick);
+  return {
+    count: keyframes.length,
+    style: Uint16Array.from(keyframes, (k) => k.style),
+    offset: f32((k) => k.offset),
+    easing: Uint8Array.from(keyframes, (k) => k.easing),
+    easeA: f32((k) => k.easeA),
+    easeB: f32((k) => k.easeB),
+    easeC: f32((k) => k.easeC),
+    easeD: f32((k) => k.easeD),
   };
 }
 
@@ -1857,7 +2324,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -1964,6 +2431,48 @@ export const media = {
   kind: ${typedArray("Uint8Array", result.media.map((m) => m.kind))},
   value: ${typedArray("Float32Array", result.media.map((m) => m.value))},
 } satisfies MediaTable;
+
+/**
+ * Transitions and animations, interned. One row per distinct spec on the page.
+ *
+ * A style row points at one of these by index **+ 1**, so zero is "no tween here"
+ * and a style table that starts out zeroed says the right thing. A transition and a
+ * keyframe animation are rows of this one table, because they are the same
+ * mechanism: interpolation between two rows of the style table, differing only in
+ * where the two rows come from.
+ */
+export const tweens = {
+  count: ${result.tweens.length},
+  mask: ${typedArray("Uint32Array", result.tweens.map((t) => t.mask))},
+  duration: ${typedArray("Float32Array", result.tweens.map((t) => t.duration))},
+  delay: ${typedArray("Float32Array", result.tweens.map((t) => t.delay))},
+  iterations: ${typedArray("Float32Array", result.tweens.map((t) => t.iterations))},
+  firstSegment: ${typedArray("Int32Array", result.tweens.map((t) => t.firstSegment))},
+  segmentCount: ${typedArray("Uint16Array", result.tweens.map((t) => t.segmentCount))},
+  easing: ${typedArray("Uint8Array", result.tweens.map((t) => t.easing))},
+  easeA: ${typedArray("Float32Array", result.tweens.map((t) => t.easeA))},
+  easeB: ${typedArray("Float32Array", result.tweens.map((t) => t.easeB))},
+  easeC: ${typedArray("Float32Array", result.tweens.map((t) => t.easeC))},
+  easeD: ${typedArray("Float32Array", result.tweens.map((t) => t.easeD))},
+} satisfies TweenTable;
+
+/**
+ * Keyframes: an offset and the interned style row it resolves to.
+ *
+ * Addressed as a slice by a tween's firstSegment/segmentCount. The easing on a row
+ * is the curve of the segment *starting* at that keyframe — measured, and the reason
+ * Tailwind's bounce needs no second concept.
+ */
+export const keyframes = {
+  count: ${result.keyframes.length},
+  style: ${typedArray("Uint16Array", result.keyframes.map((k) => k.style))},
+  offset: ${typedArray("Float32Array", result.keyframes.map((k) => k.offset))},
+  easing: ${typedArray("Uint8Array", result.keyframes.map((k) => k.easing))},
+  easeA: ${typedArray("Float32Array", result.keyframes.map((k) => k.easeA))},
+  easeB: ${typedArray("Float32Array", result.keyframes.map((k) => k.easeB))},
+  easeC: ${typedArray("Float32Array", result.keyframes.map((k) => k.easeC))},
+  easeD: ${typedArray("Float32Array", result.keyframes.map((k) => k.easeD))},
+} satisfies KeyframeTable;
 
 export const root: number = ${root};
 ${routing ? routingSource(routing) : ""}`;

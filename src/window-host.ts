@@ -121,6 +121,8 @@ export async function run(registry: WindowRegistry, options: RunOptions = {}): P
     handlers: generated.handlers,
     lists: generated.lists,
     media: generated.media,
+    tweens: generated.tweens,
+    keyframes: generated.keyframes,
     root: generated.root,
   };
 

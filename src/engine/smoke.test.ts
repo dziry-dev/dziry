@@ -45,6 +45,8 @@ const engine = Engine.open({
   variantSlots: 4,
   media: 1,
   lists: 1,
+  tweens: 1,
+  keyframes: 1,
   strings: 4,
   stringBytes: 256,
   windowed: false,

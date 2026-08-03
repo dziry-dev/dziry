@@ -1,0 +1,352 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>animation-semantics</title>
+<style>
+  body{font:12px ui-monospace,monospace;padding:16px}
+  #out{white-space:pre;line-height:1.5}
+  .box{width:100px;height:50px;background:#ccc}
+</style>
+<h3>The five questions a transition/keyframe implementation cannot guess: colour space, interruption, discrete properties, per-keyframe easing, multi-offset selectors.</h3>
+<script type="module">
+  import { log, mount, report, frame } from "./_harness.js";
+
+  /**
+   * One paused CSS animation, sampled at an explicit `currentTime`.
+   *
+   * A *paused* animation rather than a live transition, for the reason
+   * `transition-sampling.html` already records: sampling a running transition
+   * races the compositor and gives a different answer every run. Everything
+   * below that can be asked this way is, and the two questions that genuinely
+   * need a live transition say so.
+   */
+  let sheet;
+  const css = (text) => {
+    sheet ??= document.head.appendChild(document.createElement("style"));
+    sheet.textContent = text;
+  };
+
+  /** The computed value of `prop` at `t` (0..1) through a named `@keyframes`. */
+  const inKeyframes = (name, prop, t, rest = "1s linear") => {
+    mount(`<div class="box" id="b" style="animation:${name} ${rest}"></div>`);
+    const el = document.getElementById("b");
+    const anim = el.getAnimations()[0];
+    if (!anim) return "(no animation)";
+    anim.pause();
+    anim.currentTime = t * 1000;
+    const v = getComputedStyle(el).getPropertyValue(prop);
+    return v;
+  };
+
+  /**
+   * Web Animations keyframes are keyed by the **camel-cased** property name.
+   * `{"background-color": …}` is silently ignored — the element then reads its
+   * stylesheet value at every t, which looks exactly like "the interpolation
+   * happens in some space that maps everything to #ccc". Cost: one wrong probe
+   * run, and it is the reason this conversion is here rather than at the call
+   * sites.
+   */
+  const camel = (p) => p.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+
+  const at = (prop, a, b, t, easing = "linear") => {
+    mount(`<div class="box" id="b"></div>`);
+    const el = document.getElementById("b");
+    const anim = el.animate([{ [camel(prop)]: a }, { [camel(prop)]: b }], {
+      duration: 1000,
+      easing,
+      fill: "both",
+    });
+    anim.pause();
+    anim.currentTime = t * 1000;
+    const v = getComputedStyle(el).getPropertyValue(prop);
+    anim.cancel();
+    return v;
+  };
+
+  // ---------------------------------------------------------------------------
+  log("=== 1. what colour space does an interpolation happen in? ===");
+  log("  sRGB midpoints:  black->white = rgb(128,128,128) · red->blue = rgb(128,0,128)");
+  log("  oklab would be visibly lighter / more purple. This is the decisive test.");
+  for (const [a, b] of [
+    ["rgb(0,0,0)", "rgb(255,255,255)"],
+    ["rgb(255,0,0)", "rgb(0,0,255)"],
+    ["#ff0000", "#00ff00"],
+    ["oklch(0.7 0.15 20)", "oklch(0.7 0.15 200)"],
+    ["rgba(255,0,0,1)", "rgba(0,0,255,0)"],
+  ]) {
+    log("  " + (a + " -> " + b).padEnd(40) + " t=0.5  " + at("background-color", a, b, 0.5));
+  }
+  log("");
+  log("  for comparison, what color-mix() says about the same pair:");
+  for (const space of ["srgb", "oklab", "oklch"]) {
+    mount(
+      `<div class="box" id="b" style="background:color-mix(in ${space}, rgb(0,0,0), rgb(255,255,255))"></div>`,
+    );
+    log(
+      "  color-mix(in " + space.padEnd(6) + ", black, white) = " +
+      getComputedStyle(document.getElementById("b")).backgroundColor,
+    );
+  }
+  log("");
+  log("  and a quarter of the way, which separates 'sRGB' from 'premultiplied anything':");
+  for (const t of [0.25, 0.75]) {
+    log("  black->white t=" + t + "  " + at("background-color", "rgb(0,0,0)", "rgb(255,255,255)", t));
+  }
+  log("");
+  log("  alpha: is it premultiplied? opaque red -> transparent blue at t=0.5");
+  log("  premultiplied gives a red-dominant colour; simple per-channel gives rgb(128,0,128,0.5)");
+  log("  " + at("background-color", "rgba(255,0,0,1)", "rgba(0,0,255,0)", 0.5));
+  log("");
+  log("  cross-check through a real CSS transition rather than el.animate(), in case");
+  log("  the two disagree — a paused animation is the measurement everywhere else here:");
+  {
+    mount(`<div class="box" id="b" style="background:rgb(0,0,0);transition:background-color 1s linear"></div>`);
+    const el = document.getElementById("b");
+    await frame();
+    el.style.background = "rgb(255,255,255)";
+    await frame();
+    const tr = el.getAnimations()[0];
+    if (tr) {
+      tr.pause();
+      tr.currentTime = 500;
+      log("  CSS transition black->white at t=0.5  " + getComputedStyle(el).backgroundColor);
+      tr.currentTime = 250;
+      log("  CSS transition black->white at t=0.25 " + getComputedStyle(el).backgroundColor);
+    } else {
+      log("  (no transition started)");
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  log("");
+  log("=== 4. animation-timing-function inside a keyframe: which segment does it govern? ===");
+  log("  `steps(1, end)` holds a segment at its start value for the whole segment.");
+  log("  On the 0% keyframe: if it governs 0->50 (the segment *leaving* it), t=0.25 reads 0.");
+  log("  If it governed the segment *entering* it (there is none), t=0.25 reads 0.25 (linear).");
+  css(`@keyframes leaving {
+         0%   { opacity: 0; animation-timing-function: steps(1, end) }
+         50%  { opacity: 0.5 }
+         100% { opacity: 1 }
+       }`);
+  for (const t of [0, 0.25, 0.49, 0.5, 0.75, 1]) {
+    log("  leaving   t=" + String(t).padEnd(5) + " opacity=" + inKeyframes("leaving", "opacity", t));
+  }
+  log("");
+  log("  the same easing on the *50%* keyframe instead — 50->100 should hold at 0.5");
+  css(`@keyframes middle {
+         0%   { opacity: 0 }
+         50%  { opacity: 0.5; animation-timing-function: steps(1, end) }
+         100% { opacity: 1 }
+       }`);
+  for (const t of [0.25, 0.5, 0.75, 0.99, 1]) {
+    log("  middle    t=" + String(t).padEnd(5) + " opacity=" + inKeyframes("middle", "opacity", t));
+  }
+  log("");
+  log("  and does the animation-level easing still apply to segments that name none?");
+  css(`@keyframes mixed {
+         0%   { opacity: 0 }
+         50%  { opacity: 0.5; animation-timing-function: linear }
+         100% { opacity: 1 }
+       }`);
+  for (const t of [0.25, 0.75]) {
+    log(
+      "  mixed(ease-in) t=" + String(t).padEnd(5) + " opacity=" +
+      inKeyframes("mixed", "opacity", t, "1s ease-in"),
+    );
+  }
+  log("  (segment 0->50 uses ease-in; 50->100 was overridden to linear)");
+  log("");
+  log("  what does a keyframe's animation-timing-function compute to on the element?");
+  mount(`<div class="box" id="b" style="animation:leaving 1s linear"></div>`);
+  log("  element animation-timing-function = " +
+      getComputedStyle(document.getElementById("b")).animationTimingFunction);
+
+  // ---------------------------------------------------------------------------
+  log("");
+  log("=== 5. multi-offset keyframe selectors: is `75%, 100%` simply duplicated? ===");
+  css(`@keyframes multi {
+         0%        { opacity: 0 }
+         75%, 100% { opacity: 1 }
+       }`);
+  for (const t of [0, 0.375, 0.75, 0.9, 1]) {
+    log("  multi     t=" + String(t).padEnd(6) + " opacity=" + inKeyframes("multi", "opacity", t));
+  }
+  log("  (0.375 halfway to 75% should read 0.5; 0.9 should already be pinned at 1)");
+  log("");
+  log("  and Tailwind's own `ping`, which is exactly that shape plus a transform:");
+  css(`@keyframes ping { 75%, 100% { transform: scale(2); opacity: 0 } }`);
+  for (const t of [0, 0.375, 0.75, 0.9]) {
+    log("  ping      t=" + String(t).padEnd(6) +
+        " opacity=" + inKeyframes("ping", "opacity", t).padEnd(8) +
+        " transform=" + inKeyframes("ping", "transform", t));
+  }
+  log("  (no 0% keyframe: the implicit `from` is the element's own value — opacity 1, transform none)");
+
+  // ---------------------------------------------------------------------------
+  log("");
+  log("=== bounce: `transform: none` as one end of a transform interpolation ===");
+  css(`@keyframes bounce {
+         0%, 100% { transform: translateY(-25%); animation-timing-function: cubic-bezier(0.8,0,1,1) }
+         50%      { transform: none; animation-timing-function: cubic-bezier(0,0,0.2,1) }
+       }`);
+  for (const t of [0, 0.25, 0.5, 0.75, 1]) {
+    log("  bounce    t=" + String(t).padEnd(5) + " transform=" + inKeyframes("bounce", "transform", t));
+  }
+  log("  (box is 100x50, so translateY(-25%) is -12.5px)");
+
+  // ---------------------------------------------------------------------------
+  log("");
+  log("=== 3. discrete properties, and transition-behavior: allow-discrete ===");
+  for (const t of [0, 0.25, 0.49, 0.5, 0.51, 0.75, 1]) {
+    log("  display  none->block  t=" + String(t).padEnd(5) + " " + at("display", "none", "block", t));
+  }
+  log("  (a discrete property flips at t=0.5 — 'interpolation' means 50% each way)");
+  log("");
+  for (const decl of [
+    "transition:opacity 1s",
+    "transition:display 1s",
+    "transition:display 1s allow-discrete",
+    "transition:all 1s allow-discrete",
+    "transition-behavior:allow-discrete",
+  ]) {
+    mount(`<div class="box" id="b" style="${decl}"></div>`);
+    const s = getComputedStyle(document.getElementById("b"));
+    log("  " + decl.padEnd(42) + " behavior=" + s.transitionBehavior.padEnd(16) +
+        " prop=" + s.transitionProperty);
+  }
+
+  // ---------------------------------------------------------------------------
+  log("");
+  log("=== the `animation` shorthand: which longhands does it fill, and in what order? ===");
+  for (const decl of [
+    "animation:spin 1s linear infinite",
+    "animation:ping 1s cubic-bezier(0, 0, 0.2, 1) infinite",
+    "animation:bounce 1s infinite",
+    "animation:1s spin",
+    "animation:spin 1s 2s 3 reverse both",
+    "animation:spin 2s",
+  ]) {
+    mount(`<div class="box" id="b" style="${decl}"></div>`);
+    const s = getComputedStyle(document.getElementById("b"));
+    log(
+      "  " + decl.padEnd(38) +
+      " name=" + s.animationName.padEnd(8) +
+      " dur=" + s.animationDuration.padEnd(4) +
+      " delay=" + s.animationDelay.padEnd(4) +
+      " iter=" + s.animationIterationCount.padEnd(9) +
+      " dir=" + s.animationDirection.padEnd(8) +
+      " fill=" + s.animationFillMode.padEnd(6) +
+      " fn=" + s.animationTimingFunction,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  log("");
+  log("=== transition-property: what does the computed value keep, and does `all` expand? ===");
+  for (const decl of [
+    "transition-property:opacity",
+    "transition-property:transform",
+    "transition-property:all",
+    "transition-property:none",
+    "transition-property:opacity, transform",
+    "transition-property:color, background-color, border-color",
+    "transition-property:nonsense-property",
+    "transition:opacity 1s, transform 2s ease-in 3s",
+  ]) {
+    mount(`<div class="box" id="b" style="${decl}"></div>`);
+    const s = getComputedStyle(document.getElementById("b"));
+    log("  " + decl.padEnd(52) + " prop=[" + s.transitionProperty + "] dur=[" +
+        s.transitionDuration + "] delay=[" + s.transitionDelay + "]");
+  }
+
+  // ---------------------------------------------------------------------------
+  // The two questions that need a *live* transition. Not sampled — the exact
+  // numbers a live sample gives are not reproducible. What is asked instead is
+  // what the transition object *says about itself*, which is deterministic.
+  log("");
+  log("=== 2. interruption and reversal: does the way back run the full duration? ===");
+  log("  Asked of the CSSTransition object rather than by sampling pixels: the spec");
+  log("  shortens the reverse via a `reversing-shortening-factor`, which shows up as");
+  log("  a shortened active duration. That is exact; a sampled pixel is not.");
+
+  const reversal = async (interruptAt) => {
+    mount(`<div class="box" id="b" style="opacity:1;transition:opacity 1s linear"></div>`);
+    const el = document.getElementById("b");
+    await frame();
+
+    // Out: 1 -> 0.
+    el.style.opacity = "0";
+    await frame();
+    const out = el.getAnimations()[0];
+    if (!out) return "no transition started";
+    out.pause();
+    out.currentTime = interruptAt * 1000;
+    const midValue = getComputedStyle(el).opacity;
+    // Let the paused transition's value become the element's current value, then
+    // reverse. Resuming first, so the reversal is a real style change and not a
+    // change to a paused animation.
+    out.play();
+    el.style.opacity = "1";
+    await frame();
+    const back = el.getAnimations()[0];
+    if (!back) return `interrupted at ${interruptAt}: reverse started no transition`;
+    const timing = back.effect.getComputedTiming();
+    return (
+      "  interrupted at t=" + interruptAt +
+      " (value " + Number(midValue).toFixed(3) + ")" +
+      "  reverse activeDuration=" + timing.activeDuration + "ms" +
+      "  endTime=" + timing.endTime + "ms"
+    );
+  };
+
+  for (const t of [0.4, 0.1, 0.9]) log(await reversal(t));
+  log("  (1000ms means the reverse runs the full duration; less means it is shortened");
+  log("   in proportion to how far the outgoing transition had got)");
+
+  log("");
+  log("  and a retarget to a *third* value, which is not a reversal — full duration?");
+  {
+    mount(`<div class="box" id="b" style="opacity:1;transition:opacity 1s linear"></div>`);
+    const el = document.getElementById("b");
+    await frame();
+    el.style.opacity = "0";
+    await frame();
+    const out = el.getAnimations()[0];
+    out.pause();
+    out.currentTime = 400;
+    out.play();
+    el.style.opacity = "0.5"; // neither endpoint of the running transition
+    await frame();
+    const third = el.getAnimations()[0];
+    const timing = third.effect.getComputedTiming();
+    log("  1 -> 0 interrupted at t=0.4, retargeted to 0.5:" +
+        " activeDuration=" + timing.activeDuration + "ms");
+    third.pause();
+    third.currentTime = 0;
+    log("  the retargeted transition at its own t=0 reads " + getComputedStyle(el).opacity);
+    log("  (1000ms plus a start value near 0.6 means only a true reversal is shortened)");
+  }
+
+  log("");
+  log("  and does the reverse start from the interrupted value or from the endpoint?");
+  {
+    mount(`<div class="box" id="b" style="opacity:1;transition:opacity 1s linear"></div>`);
+    const el = document.getElementById("b");
+    await frame();
+    el.style.opacity = "0";
+    await frame();
+    const out = el.getAnimations()[0];
+    out.pause();
+    out.currentTime = 400;
+    log("  outgoing at t=0.4 reads " + getComputedStyle(el).opacity);
+    out.play();
+    el.style.opacity = "1";
+    await frame();
+    const back = el.getAnimations()[0];
+    back.pause();
+    back.currentTime = 0;
+    log("  reversed at its own t=0 reads " + getComputedStyle(el).opacity +
+        "  (≈0.6 means it starts where the outgoing one had reached, not at 0)");
+  }
+
+  report();
+</script>

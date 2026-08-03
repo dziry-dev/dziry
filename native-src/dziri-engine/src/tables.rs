@@ -71,6 +71,8 @@ pub struct Capacities {
     pub variant_slots: u32,
     pub media: u32,
     pub lists: u32,
+    pub tweens: u32,
+    pub keyframes: u32,
     pub strings: u32,
     pub string_bytes: u32,
 }
@@ -90,6 +92,8 @@ impl Capacities {
                 "variantSlots" => self.variant_slots,
                 "media" => self.media,
                 "lists" => self.lists,
+                "tweens" => self.tweens,
+                "keyframes" => self.keyframes,
                 other => unreachable!("table {other} has no capacity rule"),
             },
         }
@@ -783,6 +787,8 @@ impl Tables {
             variant_slots: self.caps.variant_slots.max(want.variant_slots),
             media: self.caps.media.max(want.media),
             lists: self.caps.lists.max(want.lists),
+            tweens: self.caps.tweens.max(want.tweens),
+            keyframes: self.caps.keyframes.max(want.keyframes),
             strings: self.caps.strings.max(want.strings),
             string_bytes: self.caps.string_bytes.max(want.string_bytes),
         };
@@ -832,6 +838,8 @@ mod tests {
             variant_slots: 8,
             media: 2,
             lists: 1,
+            tweens: 2,
+            keyframes: 4,
             strings: 4,
             string_bytes: 64,
         }

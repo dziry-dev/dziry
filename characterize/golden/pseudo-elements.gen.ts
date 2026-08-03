@@ -6,7 +6,7 @@
 // 0 text bindings, 0 handlers.
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { HandlerBinding, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, VariantTable } from "dziri/ir.ts";
+import type { HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
 import type { EditableRef } from "dziri/runtime/bindings.ts";
 import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
 import type { StylePatchRef } from "dziri/runtime/patches.ts";
@@ -88,6 +88,8 @@ export const styles = {
   originPctY: new Float32Array(9).fill(0.5),
   originPxX: new Float32Array(9),
   originPxY: new Float32Array(9),
+  transition: new Uint16Array(9),
+  animation: new Uint16Array(9),
 } satisfies StyleTable;
 
 export const nodes = {
@@ -183,5 +185,47 @@ export const media = {
   kind: new Uint8Array([]),
   value: new Float32Array([]),
 } satisfies MediaTable;
+
+/**
+ * Transitions and animations, interned. One row per distinct spec on the page.
+ *
+ * A style row points at one of these by index **+ 1**, so zero is "no tween here"
+ * and a style table that starts out zeroed says the right thing. A transition and a
+ * keyframe animation are rows of this one table, because they are the same
+ * mechanism: interpolation between two rows of the style table, differing only in
+ * where the two rows come from.
+ */
+export const tweens = {
+  count: 0,
+  mask: new Uint32Array([]),
+  duration: new Float32Array([]),
+  delay: new Float32Array([]),
+  iterations: new Float32Array([]),
+  firstSegment: new Int32Array([]),
+  segmentCount: new Uint16Array([]),
+  easing: new Uint8Array([]),
+  easeA: new Float32Array([]),
+  easeB: new Float32Array([]),
+  easeC: new Float32Array([]),
+  easeD: new Float32Array([]),
+} satisfies TweenTable;
+
+/**
+ * Keyframes: an offset and the interned style row it resolves to.
+ *
+ * Addressed as a slice by a tween's firstSegment/segmentCount. The easing on a row
+ * is the curve of the segment *starting* at that keyframe — measured, and the reason
+ * Tailwind's bounce needs no second concept.
+ */
+export const keyframes = {
+  count: 0,
+  style: new Uint16Array([]),
+  offset: new Float32Array([]),
+  easing: new Uint8Array([]),
+  easeA: new Float32Array([]),
+  easeB: new Float32Array([]),
+  easeC: new Float32Array([]),
+  easeD: new Float32Array([]),
+} satisfies KeyframeTable;
 
 export const root: number = 0;

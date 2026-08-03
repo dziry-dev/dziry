@@ -146,6 +146,8 @@ function start(
     handlers: generated.handlers,
     lists: generated.lists,
     media: generated.media,
+    tweens: generated.tweens,
+    keyframes: generated.keyframes,
     root: generated.root,
   };
 

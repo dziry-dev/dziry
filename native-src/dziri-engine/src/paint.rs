@@ -1632,6 +1632,8 @@ mod tests {
             variant_slots: 4,
             media: 1,
             lists: 1,
+            tweens: 1,
+            keyframes: 1,
             strings: 2,
             string_bytes: 16,
         });
@@ -1700,6 +1702,8 @@ mod tests {
             variant_slots: 2,
             media: 1,
             lists: 1,
+            tweens: 1,
+            keyframes: 1,
             strings: 2,
             string_bytes: 16,
         });

@@ -106,6 +106,8 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, StyleField]> = [
   ["transformOriginPercentY", "originPctY"],
   ["transformOriginX", "originPxX"],
   ["transformOriginY", "originPxY"],
+  ["transition", "transition"],
+  ["animation", "animation"],
 ];
 
 /** How much room to leave beyond what the IR needs right now. */
@@ -120,6 +122,8 @@ export type Capacities = {
   variantSlots: number;
   media: number;
   lists: number;
+  tweens: number;
+  keyframes: number;
   strings: number;
   stringBytes: number;
 };
@@ -158,6 +162,11 @@ export function capacitiesFor(ui: CompiledUi): Capacities {
     // constant, and nothing at run time can mint another one.
     media: Math.max(ui.media.count, 1),
     lists: Math.max(ui.lists.count, 1),
+    // Fixed by the compiler for the same reason the style table is: a tween is an
+    // interned build-time constant, and nothing at run time can mint another one.
+    // The engine's per-node `t` is not a row.
+    tweens: Math.max(ui.tweens.count, 1),
+    keyframes: Math.max(ui.keyframes.count, 1),
     strings: Math.ceil(ui.strings.length * STRING_HEADROOM) + 16,
     stringBytes: arenaBytes(bytes),
   };
@@ -241,6 +250,7 @@ export class Uploader {
     this.uploadStyles();
     this.uploadVariants();
     this.uploadMedia();
+    this.uploadTweens();
     this.uploadLists();
     this.uploadNodes();
     this.uploadStrings(true);
@@ -367,6 +377,52 @@ export class Uploader {
     t.kind.set(media.kind.subarray(0, count));
     t.value.set(media.value.subarray(0, count));
     t.bit.fill(0, count);
+  }
+
+  /**
+   * Tween and keyframe rows. Uploaded once — they are compile-time constants.
+   *
+   * Spare tween rows get `duration = 0`, which is not a filler value but the CSS
+   * one: a transition with a zero duration animates nothing. So a row the compiler
+   * never wrote can only ever produce an instant jump, which is what a node
+   * pointing at it by accident should look like. Spare keyframe rows get
+   * `offset = 0` for the same reason — a zero-length segment is skipped rather
+   * than divided by.
+   *
+   * Both together, because a tween's `firstSegment` addresses the other table and
+   * uploading one without the other leaves a span pointing into rows that describe
+   * a previous build.
+   */
+  uploadTweens(): void {
+    const { tweens, keyframes } = this.#ui;
+
+    const t = this.#tables.tweens;
+    const n = Math.min(tweens.count, t.mask.length);
+    t.mask.set(tweens.mask.subarray(0, n));
+    t.duration.set(tweens.duration.subarray(0, n));
+    t.delay.set(tweens.delay.subarray(0, n));
+    t.iterations.set(tweens.iterations.subarray(0, n));
+    t.firstSegment.set(tweens.firstSegment.subarray(0, n));
+    t.segmentCount.set(tweens.segmentCount.subarray(0, n));
+    t.easing.set(tweens.easing.subarray(0, n));
+    t.easeA.set(tweens.easeA.subarray(0, n));
+    t.easeB.set(tweens.easeB.subarray(0, n));
+    t.easeC.set(tweens.easeC.subarray(0, n));
+    t.easeD.set(tweens.easeD.subarray(0, n));
+    t.duration.fill(0, n);
+    t.firstSegment.fill(-1, n);
+    t.segmentCount.fill(0, n);
+
+    const k = this.#tables.keyframes;
+    const m = Math.min(keyframes.count, k.style.length);
+    k.style.set(keyframes.style.subarray(0, m));
+    k.offset.set(keyframes.offset.subarray(0, m));
+    k.easing.set(keyframes.easing.subarray(0, m));
+    k.easeA.set(keyframes.easeA.subarray(0, m));
+    k.easeB.set(keyframes.easeB.subarray(0, m));
+    k.easeC.set(keyframes.easeC.subarray(0, m));
+    k.easeD.set(keyframes.easeD.subarray(0, m));
+    k.offset.fill(0, m);
   }
 
   uploadLists(): void {

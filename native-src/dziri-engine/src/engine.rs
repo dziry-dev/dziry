@@ -94,6 +94,10 @@ pub struct EngineConfig {
     /// Rows in the media table — atomic conditions, not `@media` blocks.
     pub media_capacity: u32,
     pub list_capacity: u32,
+    /// Rows in the tween table — interned transition and animation specs.
+    pub tween_capacity: u32,
+    /// Rows in the keyframe table, summed over every animation on the page.
+    pub keyframe_capacity: u32,
     pub string_capacity: u32,
     pub string_bytes: u32,
     pub root: u32,
@@ -213,6 +217,8 @@ impl Engine {
             variant_slots: config.variant_slot_capacity.max(1),
             media: config.media_capacity.max(1),
             lists: config.list_capacity.max(1),
+            tweens: config.tween_capacity.max(1),
+            keyframes: config.keyframe_capacity.max(1),
             strings: config.string_capacity.max(1),
             string_bytes: config.string_bytes.max(1),
         };

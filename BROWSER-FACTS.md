@@ -413,3 +413,109 @@ midpoint, which is the cheap check that an implementation's curve is the right o
 
 `transition` shorthand defaults, confirmed: timing function `ease`, delay `0s`, property `all`. In
 `transition: opacity 1s 2s` the **first** time is the duration and the second the delay.
+
+## How a transition is interrupted, and how a keyframe's easing is scoped
+
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/animation-semantics.html`, run twice
+with identical output.** Values are read from a *paused* animation at an explicit `currentTime`,
+except the two interruption cases, which ask the live `CSSTransition` object about its own timing —
+a sampled pixel mid-interruption is not reproducible, and `getComputedTiming()` is exact.
+
+### Colour interpolation happens in gamma-encoded sRGB, premultiplied
+
+| Endpoints | t | Measured | Means |
+|---|---|---|---|
+| `rgb(0,0,0)` → `rgb(255,255,255)` | 0.25 / 0.5 / 0.75 | `rgb(64,64,64)` / `rgb(128,128,128)` / `rgb(191,191,191)` | plain per-channel lerp of the **gamma-encoded** bytes, not linear-light |
+| `rgb(255,0,0)` → `rgb(0,0,255)` | 0.5 | `rgb(128,0,128)` | sRGB, not oklab |
+| `rgba(255,0,0,1)` → `rgba(0,0,255,0)` | 0.5 | `rgba(255,0,0,0.5)` | **premultiplied** — a plain per-channel lerp would give `rgba(128,0,128,0.5)` |
+| `oklch(0.7 0.15 20)` → `oklch(0.7 0.15 200)` | 0.5 | `oklab(0.7 0 0)` | a colour *authored* in a modern space interpolates in that space |
+
+`color-mix()` is the contrast that makes this worth writing down: `color-mix(in oklab, black, white)`
+is `oklab(0.5 …)`, a visibly lighter grey than `rgb(128,128,128)`. The two features do **not** share
+a space. A real CSS transition agrees with `element.animate()` on every row above.
+
+Bearing on dziri: colours are a packed `0xAARRGGBB` `u32`, so per-channel sRGB is already the
+representation, and the only thing that has to be got right is **premultiplying by alpha** — which is
+the one row a naive implementation fails. An `oklch()`-authored colour was already flattened to sRGB
+by the compiler, so it interpolates in sRGB here; that is a known divergence and the same one
+`conformance` records for oklab conversion generally.
+
+### An interruption is a rewind of the same pair, at the same rate
+
+`opacity: 1 → 0` over `1s linear`, interrupted partway and sent back:
+
+| Interrupted at | Value there | Reverse `activeDuration` | Reverse's own t=0 reads |
+|---|---|---|---|
+| t = 0.1 | 0.900 | **100 ms** | — |
+| t = 0.4 | 0.600 | **400 ms** | **0.6** |
+| t = 0.9 | 0.100 | **900 ms** | — |
+| t = 0.4, retargeted to `0.5` (a *third* value) | 0.600 | **1000 ms** | 0.6 |
+
+So a reversal covers the distance still to travel at the *same speed* as the outgoing transition —
+this is CSS's `reversing-shortening-factor` — and it starts from the value the outgoing one had
+reached, not from an endpoint. A retarget to a value that is neither endpoint gets the **full**
+duration, also starting from the current value.
+
+**This is what makes a transition cheap for dziri, and it refutes the "rewrite `from` to the current
+interpolated slot" sketch.** Both endpoints are interned style rows, and there is no row holding an
+interpolated value — but none is needed: a reversal is the *same* `(from, to)` pair traversed
+backwards from the current `t` towards 0. Value continuity and the measured 400 ms both fall out of
+"`t` moves at ±1/duration per second", with no new row and no allocation. Only the third-value
+retarget genuinely needs a row dziri does not have, and it is the one case approximated — see
+API.md.
+
+### A keyframe's `animation-timing-function` governs the segment *leaving* it
+
+`steps(1, end)` holds a segment at its start value for the segment's whole length, which makes the
+question decidable in one reading:
+
+| Where the easing sits | t=0.25 | t=0.49 | t=0.75 | t=0.99 |
+|---|---|---|---|---|
+| on `0%` (`0 → 0.5 → 1`) | **0** | **0** | 0.75 | — |
+| on `50%` | 0.25 | — | **0.5** | **0.5** |
+
+So it is the segment that *starts* at the keyframe. A segment naming no easing of its own uses the
+**animation's**: with `animation: … ease-in` and `linear` declared on the `50%` keyframe, t=0.25
+reads `0.157678`, which is `ease-in` at half of the first segment (0.3154 × 0.5), while t=0.75 reads
+exactly `0.75`.
+
+The keyframe's easing does **not** appear in the element's computed `animation-timing-function` — that
+still reads the animation-level value. It is genuinely per-segment data, so it belongs on the segment
+row rather than anywhere on the style row.
+
+Tailwind's `bounce` is the whole thing in one animation, and its numbers are the check:
+`translateY(-25%)` → `none` → `translateY(-25%)` on a 100×50 box measures `-12.5`, `-10.4906`, `0`,
+`-10.4906` at t = 0, 0.25, 0.5, 0.75. `-10.4906` is `cubic-bezier(0.8,0,1,1)` evaluated at *segment*
+progress 0.5 (≈0.1607) applied to 12.5 px — so it pins the per-segment easing and the bezier solve at
+once.
+
+### Multi-offset selectors are simply duplicated, and a missing endpoint is the element's own value
+
+`@keyframes { 0% {opacity:0} 75%, 100% {opacity:1} }` reads 0.5 at t=0.375 — halfway to 75%, not to
+100% — and 1 at t=0.9. So `75%, 100%` is two keyframes with the same declarations.
+
+Tailwind's `ping` has no `0%` at all, and at t=0 reads the element's own `opacity: 1` and
+`transform: none`. The implicit `from` is the element's computed style, which is exactly the interned
+row dziri already has: a keyframe with no `0%` needs no synthetic value, only the base slot.
+
+### `animation` shorthand and `transition-property`, confirmed
+
+| Declaration | name | dur | delay | iter | fn |
+|---|---|---|---|---|---|
+| `animation: spin 1s linear infinite` | spin | 1s | 0s | infinite | linear |
+| `animation: bounce 1s infinite` | bounce | 1s | 0s | infinite | **ease** |
+| `animation: 1s spin` | spin | 1s | 0s | 1 | ease |
+| `animation: spin 1s 2s 3 reverse both` | spin | 1s | **2s** | 3 | ease |
+
+Order within the shorthand is free — `1s spin` parses — and as with `transition`, the **first** time
+is the duration and the second the delay. Defaults are `ease`, `0s`, `1`, `normal`, `none`.
+
+`transition-property`'s computed value keeps the author's list **verbatim**: `all` does not expand,
+`none` stays `none`, and an unknown name is retained rather than dropped. The trap is that the
+longhands are *parallel lists* — `transition: opacity 1s, transform 2s ease-in 3s` computes to
+`dur=[1s, 2s] delay=[0s, 3s]` — so timing is per property, not per element. Tailwind never emits
+that shape: every one of its utilities sets one `transition-duration` for the whole list.
+
+`display` is in Tailwind's default `transition-property` list, so discrete properties are not
+hypothetical. `transition-behavior: allow-discrete` parses as measured, but `display` is
+layout-affecting in dziri and transitions there are refused by name — see API.md.

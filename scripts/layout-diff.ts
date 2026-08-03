@@ -300,6 +300,8 @@ async function dziriWalk(dir: string, s: Scenario, i: number): Promise<Row[]> {
     handlers: m.handlers,
     lists: m.lists,
     media: m.media,
+    tweens: m.tweens,
+    keyframes: m.keyframes,
     root: m.root,
   };
 

@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 11;
+pub const PROTOCOL_VERSION: u32 = 12;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,13 +15,13 @@ pub const PROTOCOL_VERSION: u32 = 11;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x2fdea2e8;
+pub const SCHEMA_HASH: u32 = 0xe9163ea4;
 
-pub const TABLE_COUNT: usize = 8;
+pub const TABLE_COUNT: usize = 10;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
-pub const MAX_FIELD_COUNT: usize = 72;
+pub const MAX_FIELD_COUNT: usize = 74;
 pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "nodes",
     "styles",
@@ -29,6 +29,8 @@ pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "variantSlots",
     "media",
     "lists",
+    "tweens",
+    "keyframes",
     "layout",
     "strings",
 ];
@@ -42,8 +44,10 @@ pub enum Table {
     VariantSlots = 3,
     Media = 4,
     Lists = 5,
-    Layout = 6,
-    Strings = 7,
+    Tweens = 6,
+    Keyframes = 7,
+    Layout = 8,
+    Strings = 9,
 }
 
 impl Table {
@@ -59,6 +63,8 @@ pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [
     variant_slots::FIELD_COUNT,
     media::FIELD_COUNT,
     lists::FIELD_COUNT,
+    tweens::FIELD_COUNT,
+    keyframes::FIELD_COUNT,
     layout::FIELD_COUNT,
     strings::FIELD_COUNT,
 ];
@@ -66,7 +72,7 @@ pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [
 /// How each table is sized, so the engine can turn a capacity request into byte
 /// spans without a hand-written mapping that could drift from the schema.
 pub const SIZED_BY: [&str; TABLE_COUNT] = [
-    "nodes", "styles", "own", "own", "own", "own", "nodes", "strings",
+    "nodes", "styles", "own", "own", "own", "own", "own", "own", "nodes", "strings",
 ];
 
 /// Element size per field, indexed by table. Empty for an unknown table.
@@ -78,8 +84,10 @@ pub fn elem_sizes(table: usize) -> &'static [usize] {
         3 => &variant_slots::ELEM_SIZES,
         4 => &media::ELEM_SIZES,
         5 => &lists::ELEM_SIZES,
-        6 => &layout::ELEM_SIZES,
-        7 => &strings::ELEM_SIZES,
+        6 => &tweens::ELEM_SIZES,
+        7 => &keyframes::ELEM_SIZES,
+        8 => &layout::ELEM_SIZES,
+        9 => &strings::ELEM_SIZES,
         _ => &[],
     }
 }
@@ -93,8 +101,10 @@ pub fn field_names(table: usize) -> &'static [&'static str] {
         3 => &variant_slots::FIELD_NAMES,
         4 => &media::FIELD_NAMES,
         5 => &lists::FIELD_NAMES,
-        6 => &layout::FIELD_NAMES,
-        7 => &strings::FIELD_NAMES,
+        6 => &tweens::FIELD_NAMES,
+        7 => &keyframes::FIELD_NAMES,
+        8 => &layout::FIELD_NAMES,
+        9 => &strings::FIELD_NAMES,
         _ => &[],
     }
 }
@@ -202,12 +212,14 @@ pub mod styles {
     pub const TRANSFORM_ORIGIN_PERCENT_Y: usize = 69;
     pub const TRANSFORM_ORIGIN_X: usize = 70;
     pub const TRANSFORM_ORIGIN_Y: usize = 71;
+    pub const TRANSITION: usize = 72;
+    pub const ANIMATION: usize = 73;
 
-    pub const FIELD_COUNT: usize = 72;
+    pub const FIELD_COUNT: usize = 74;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [
         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2,
         2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1, 4, 4,
-        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2,
     ];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
         "bg",
@@ -282,6 +294,8 @@ pub mod styles {
         "transformOriginPercentY",
         "transformOriginX",
         "transformOriginY",
+        "transition",
+        "animation",
     ];
 
     /// Whether a change to this field can move a box.
@@ -296,7 +310,39 @@ pub mod styles {
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, false, false, false, false, false, false,
         false, false, false, false, false, false, false, false, false, false, false, false, false,
-        false,
+        false, false, false,
+    ];
+
+    /// How each field is interpolated partway through a tween.
+    ///
+    /// `interp::NONE` means discrete — every enum, and the two tween references
+    /// themselves. See the `Interp` doc comment in schema.ts for why a colour is
+    /// not a number here.
+    pub const INTERP: [u8; FIELD_COUNT] = [
+        2, 2, 2, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+    ];
+
+    /// Which bit of a tween's `mask` each field owns, or 255 for "not animatable".
+    ///
+    /// Dense over the animatable fields rather than sparse over all of them, so a
+    /// mask stays one `u32` while the table grows. The numbering is derived from
+    /// field order, which is why `interp` is in `SCHEMA_HASH`: renumbering it on
+    /// one side only would animate a neighbouring property.
+    pub const ANIM_BIT: [u8; FIELD_COUNT] = [
+        0, 1, 2, 255, 3, 4, 5, 6, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 7, 8, 9, 10, 255, 11,
+        12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 255, 255,
+    ];
+
+    /// The field index each mask bit refers to, low bit first — `ANIM_BIT` inverted.
+    ///
+    /// The engine walks a mask's set bits and needs the field for each; searching
+    /// `ANIM_BIT` for a value would be a linear scan per bit per animating node.
+    pub const ANIM_FIELDS: [usize; 25] = [
+        0, 1, 2, 4, 5, 6, 7, 53, 54, 55, 56, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
     ];
 }
 
@@ -355,6 +401,56 @@ pub mod lists {
         "stride",
         "capacity",
         "active",
+    ];
+}
+
+/// Interned transition and animation timing. One row per distinct spec.
+pub mod tweens {
+    /// Field indices, in descriptor order.
+    pub const MASK: usize = 0;
+    pub const DURATION: usize = 1;
+    pub const DELAY: usize = 2;
+    pub const ITERATIONS: usize = 3;
+    pub const FIRST_SEGMENT: usize = 4;
+    pub const SEGMENT_COUNT: usize = 5;
+    pub const EASING: usize = 6;
+    pub const EASE_A: usize = 7;
+    pub const EASE_B: usize = 8;
+    pub const EASE_C: usize = 9;
+    pub const EASE_D: usize = 10;
+
+    pub const FIELD_COUNT: usize = 11;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 4, 4, 4, 4, 2, 1, 4, 4, 4, 4];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
+        "mask",
+        "duration",
+        "delay",
+        "iterations",
+        "firstSegment",
+        "segmentCount",
+        "easing",
+        "easeA",
+        "easeB",
+        "easeC",
+        "easeD",
+    ];
+}
+
+/// Per-animation keyframe list: offset, resolved style row, and segment easing.
+pub mod keyframes {
+    /// Field indices, in descriptor order.
+    pub const STYLE: usize = 0;
+    pub const OFFSET: usize = 1;
+    pub const EASING: usize = 2;
+    pub const EASE_A: usize = 3;
+    pub const EASE_B: usize = 4;
+    pub const EASE_C: usize = 5;
+    pub const EASE_D: usize = 6;
+
+    pub const FIELD_COUNT: usize = 7;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [2, 4, 1, 4, 4, 4, 4];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
+        "style", "offset", "easing", "easeA", "easeB", "easeC", "easeD",
     ];
 }
 
@@ -485,6 +581,29 @@ pub mod predicate {
     pub const CHECKED: u32 = 8;
     pub const DISABLED: u32 = 16;
     pub const FIRST_GLOBAL: u32 = 256;
+}
+
+/// `styles.INTERP`. How a field's value is found partway between two style rows. `NONE` is discrete and is what every enum gets. See the `Interp` doc comment in schema.ts for why a colour is its own kind rather than a number.
+pub mod interp {
+    pub const NONE: u8 = 0;
+    pub const NUMBER: u8 = 1;
+    pub const COLOR: u8 = 2;
+}
+
+/// `tweens.easing` and `keyframes.easing`. Which curve maps elapsed fraction to progress. The keywords are **not** normalised to `cubic-bezier()` by CSS — `ease` reads back as `ease` — but they are here, because a keyword is a bezier with fixed control points and storing five of them separately would be five ways to spell one curve. The two step keywords do normalise in CSS: `step-start` is `steps(1, start)` and `step-end` is `steps(1)`. Measured — see BROWSER-FACTS.md.
+pub mod easing {
+    pub const LINEAR: u8 = 0;
+    pub const CUBIC_BEZIER: u8 = 1;
+    pub const STEPS: u8 = 2;
+    pub const INHERIT: u8 = 255;
+}
+
+/// `keyframes.easeB` / `tweens.easeB` when the easing is `STEPS`. Which end of each step the jump happens at. `steps(4, end)` reads 0 at t=0.1 and 0.75 at t=0.9; `steps(4, start)` reads 0.25 and 1.0 — measured, and the pair that tells them apart.
+pub mod step_position {
+    pub const JUMP_END: u8 = 0;
+    pub const JUMP_START: u8 = 1;
+    pub const JUMP_BOTH: u8 = 2;
+    pub const JUMP_NONE: u8 = 3;
 }
 
 /// Engine → Bun. Drained after `tick()`; `0` means the queue is empty.

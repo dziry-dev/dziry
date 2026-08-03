@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 11;
+export const PROTOCOL_VERSION = 12;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,16 +19,18 @@ export const PROTOCOL_VERSION = 11;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x2fdea2e8;
+export const SCHEMA_HASH = 0xe9163ea4;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
   nodes: [1, 2, 4, 4, 4, 4, 2, 1, 1],
-  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4],
+  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2],
   variants: [4, 4, 4],
   variantSlots: [2],
   media: [4, 1, 4],
   lists: [4, 4, 4, 4, 4, 4, 4],
+  tweens: [4, 4, 4, 4, 4, 2, 1, 4, 4, 4, 4],
+  keyframes: [2, 4, 1, 4, 4, 4, 4],
   layout: [4, 4, 4, 4],
   strings: [4, 4],
 };
@@ -36,11 +38,13 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
 /** Field names per table, in descriptor order — used to name a mismatch. */
 export const FIELD_NAMES: Record<TableName, string[]> = {
   nodes: ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags"],
-  styles: ["bg", "fg", "borderColor", "borderWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance", "opacity", "translateX", "translateY", "translatePercentX", "translatePercentY", "rotate", "scaleX", "scaleY", "skewX", "skewY", "transformOriginPercentX", "transformOriginPercentY", "transformOriginX", "transformOriginY"],
+  styles: ["bg", "fg", "borderColor", "borderWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance", "opacity", "translateX", "translateY", "translatePercentX", "translatePercentY", "rotate", "scaleX", "scaleY", "skewX", "skewY", "transformOriginPercentX", "transformOriginPercentY", "transformOriginX", "transformOriginY", "transition", "animation"],
   variants: ["node", "mask", "runStart"],
   variantSlots: ["style"],
   media: ["bit", "kind", "value"],
   lists: ["container", "anchorPrev", "anchorNext", "arenaStart", "stride", "capacity", "active"],
+  tweens: ["mask", "duration", "delay", "iterations", "firstSegment", "segmentCount", "easing", "easeA", "easeB", "easeC", "easeD"],
+  keyframes: ["style", "offset", "easing", "easeA", "easeB", "easeC", "easeD"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
 };
@@ -53,10 +57,62 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
  * can be checked against it rather than trusted to agree.
  */
 export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
-  styles: [false, false, false, true, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
+  styles: [false, false, false, true, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
 };
 
-export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "layout", "strings"] as const;
+/**
+ * Which bit of a tween's `mask` each animatable style field owns.
+ *
+ * Only the names that *are* animatable, so a lookup miss is the answer to "can
+ * this property be transitioned at all" rather than something to compare against a
+ * sentinel. The compiler builds a `transition-property` list into a mask through
+ * this map, and refuses a property that is absent from it — which is how
+ * `transition: width` becomes a named warning rather than a mask bit nothing
+ * honours.
+ */
+export const ANIM_BIT = {
+  bg: 0,
+  fg: 1,
+  borderColor: 2,
+  radiusTopLeft: 3,
+  radiusTopRight: 4,
+  radiusBottomRight: 5,
+  radiusBottomLeft: 6,
+  scrollbarThumb: 7,
+  scrollbarTrack: 8,
+  accentColor: 9,
+  caretColor: 10,
+  opacity: 11,
+  translateX: 12,
+  translateY: 13,
+  translatePercentX: 14,
+  translatePercentY: 15,
+  rotate: 16,
+  scaleX: 17,
+  scaleY: 18,
+  skewX: 19,
+  skewY: 20,
+  transformOriginPercentX: 21,
+  transformOriginPercentY: 22,
+  transformOriginX: 23,
+  transformOriginY: 24,
+} as const;
+
+/**
+ * A style field that can be transitioned, by its **schema** name.
+ *
+ * The schema's spelling rather than the IR's — `radiusTopLeft`, not `radTL` —
+ * because a mask is what crosses the boundary and the engine indexes it with
+ * `styles::ANIM_BIT`. Naming the fields the way the wire names them means the
+ * compiler's `transition-property` map is type-checked against the schema itself,
+ * with no second list translating between the two spellings.
+ */
+export type AnimatableField = keyof typeof ANIM_BIT;
+
+/** Every animatable field's mask bit at once — what `transition-property: all` means here. */
+export const ANIM_ALL = 0x1ffffff;
+
+export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "tweens", "keyframes", "layout", "strings"] as const;
 export type TableName = (typeof TABLE_NAMES)[number];
 
 /** Field index per table, in descriptor order. */
@@ -147,6 +203,8 @@ export const F = {
     transformOriginPercentY: 69, // initial 0.5
     transformOriginX: 70, // px, added to the percentage
     transformOriginY: 71, // px, added to the percentage
+    transition: 72, // tween row + 1, or 0 for none
+    animation: 73, // tween row + 1, or 0 for none
   },
   /** Per-node predicate mask and where that node's style run begins. */
   variants: {
@@ -174,6 +232,30 @@ export const F = {
     capacity: 5,
     active: 6,
   },
+  /** Interned transition and animation timing. One row per distinct spec. */
+  tweens: {
+    mask: 0, // Animatable-field bits this tween may move; see styles::ANIM_BIT
+    duration: 1, // Seconds for one iteration; 0 disables the tween
+    delay: 2, // Seconds before it starts
+    iterations: 3, // f32::INFINITY for `infinite`; always 1 for a transition
+    firstSegment: 4, // First row in `keyframes`, or -1 when the endpoints are two style rows
+    segmentCount: 5,
+    easing: 6, // Easing
+    easeA: 7, // bezier x1, or the step count
+    easeB: 8, // bezier y1, or the StepPosition
+    easeC: 9, // bezier x2
+    easeD: 10, // bezier y2
+  },
+  /** Per-animation keyframe list: offset, resolved style row, and segment easing. */
+  keyframes: {
+    style: 0, // Interned style row this keyframe resolves to
+    offset: 1, // 0..1, ascending within a tween's span
+    easing: 2, // Easing, or Easing::INHERIT for the animation's
+    easeA: 3,
+    easeB: 4,
+    easeC: 5,
+    easeD: 6,
+  },
   /** Final bounds per node, written by the engine. */
   layout: {
     x: 0,
@@ -191,11 +273,13 @@ export const F = {
 /** Field counts, asserted against the engine's descriptor at startup. */
 export const FIELD_COUNTS: Record<TableName, number> = {
   nodes: 9,
-  styles: 72,
+  styles: 74,
   variants: 3,
   variantSlots: 1,
   media: 3,
   lists: 7,
+  tweens: 11,
+  keyframes: 7,
   layout: 4,
   strings: 2,
 };
@@ -203,11 +287,13 @@ export const FIELD_COUNTS: Record<TableName, number> = {
 /** Typed-array constructor per field, used to wrap the engine's memory. */
 export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   nodes: [Uint8Array, Uint16Array, Int32Array, Int32Array, Int32Array, Int32Array, Int16Array, Uint8Array, Uint8Array],
-  styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array],
+  styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array],
   variants: [Int32Array, Uint32Array, Int32Array],
   variantSlots: [Uint16Array],
   media: [Uint32Array, Uint8Array, Float32Array],
   lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
+  tweens: [Uint32Array, Float32Array, Float32Array, Float32Array, Int32Array, Uint16Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
+  keyframes: [Uint16Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
   layout: [Float32Array, Float32Array, Float32Array, Float32Array],
   strings: [Uint32Array, Uint32Array],
 };
@@ -298,6 +384,8 @@ export type SharedTables = {
     transformOriginPercentY: Float32Array;
     transformOriginX: Float32Array;
     transformOriginY: Float32Array;
+    transition: Uint16Array;
+    animation: Uint16Array;
   };
   variants: {
     node: Int32Array;
@@ -320,6 +408,28 @@ export type SharedTables = {
     stride: Int32Array;
     capacity: Int32Array;
     active: Int32Array;
+  };
+  tweens: {
+    mask: Uint32Array;
+    duration: Float32Array;
+    delay: Float32Array;
+    iterations: Float32Array;
+    firstSegment: Int32Array;
+    segmentCount: Uint16Array;
+    easing: Uint8Array;
+    easeA: Float32Array;
+    easeB: Float32Array;
+    easeC: Float32Array;
+    easeD: Float32Array;
+  };
+  keyframes: {
+    style: Uint16Array;
+    offset: Float32Array;
+    easing: Uint8Array;
+    easeA: Float32Array;
+    easeB: Float32Array;
+    easeC: Float32Array;
+    easeD: Float32Array;
   };
   layout: {
     x: Float32Array;
@@ -448,6 +558,32 @@ export const Predicate = {
   FIRST_GLOBAL: 256,
 } as const;
 export type Predicate = (typeof Predicate)[keyof typeof Predicate];
+
+/** `styles.INTERP`. How a field's value is found partway between two style rows. `NONE` is discrete and is what every enum gets. See the `Interp` doc comment in schema.ts for why a colour is its own kind rather than a number. */
+export const Interp = {
+  NONE: 0,
+  NUMBER: 1,
+  COLOR: 2,
+} as const;
+export type Interp = (typeof Interp)[keyof typeof Interp];
+
+/** `tweens.easing` and `keyframes.easing`. Which curve maps elapsed fraction to progress. The keywords are **not** normalised to `cubic-bezier()` by CSS — `ease` reads back as `ease` — but they are here, because a keyword is a bezier with fixed control points and storing five of them separately would be five ways to spell one curve. The two step keywords do normalise in CSS: `step-start` is `steps(1, start)` and `step-end` is `steps(1)`. Measured — see BROWSER-FACTS.md. */
+export const Easing = {
+  LINEAR: 0,
+  CUBIC_BEZIER: 1,
+  STEPS: 2,
+  INHERIT: 255,
+} as const;
+export type Easing = (typeof Easing)[keyof typeof Easing];
+
+/** `keyframes.easeB` / `tweens.easeB` when the easing is `STEPS`. Which end of each step the jump happens at. `steps(4, end)` reads 0 at t=0.1 and 0.75 at t=0.9; `steps(4, start)` reads 0.25 and 1.0 — measured, and the pair that tells them apart. */
+export const StepPosition = {
+  JUMP_END: 0,
+  JUMP_START: 1,
+  JUMP_BOTH: 2,
+  JUMP_NONE: 3,
+} as const;
+export type StepPosition = (typeof StepPosition)[keyof typeof StepPosition];
 
 /** Engine → Bun. Drained after `tick()`; `0` means the queue is empty. */
 export const EventKind = {

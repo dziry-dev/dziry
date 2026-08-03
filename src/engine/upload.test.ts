@@ -68,6 +68,8 @@ function load(): {
     handlers: generated.handlers,
     lists: generated.lists,
     media: generated.media,
+    tweens: generated.tweens,
+    keyframes: generated.keyframes,
     root: generated.root,
   };
 
@@ -395,6 +397,8 @@ test("typing does not resize the arena on every keystroke", () => {
     handlers: generated.handlers,
     lists: generated.lists,
     media: generated.media,
+    tweens: generated.tweens,
+    keyframes: generated.keyframes,
     root: generated.root,
   };
 
@@ -473,6 +477,8 @@ test("a capacity request is a power of two", () => {
     handlers: [],
     lists: generated.lists,
     media: generated.media,
+    tweens: generated.tweens,
+    keyframes: generated.keyframes,
     root: 0,
   };
   const bytes = capacitiesFor(ui).stringBytes;

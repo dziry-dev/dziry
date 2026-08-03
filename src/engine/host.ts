@@ -27,10 +27,16 @@ const { i32, u32, f32, ptr: PTR } = FFIType;
 /**
  * Matches `EngineConfig` in `engine.rs`, including the pointer's alignment padding.
  *
- * 12 `u32` (48) + two `u8` and two reserved (52) + 4 bytes of padding so the title
- * pointer lands 8-aligned at 56 (64) + a `u32` length (68) + 4 to a multiple of 8.
+ * 14 `u32` (56) + two `u8` and two reserved (60) + 4 bytes of padding so the title
+ * pointer lands 8-aligned at 64 (72) + a `u32` length (76) + 4 to a multiple of 8.
+ *
+ * The two extra `u32` over v11 are `tween_capacity` and `keyframe_capacity`, and
+ * they moved every byte after them — which is one of the reasons v12 is a version
+ * bump and not only a hash change. `dziri_protocol_version` takes no arguments, so
+ * it is still answerable by a binary of any vintage and the refusal happens before
+ * anything reads this struct.
  */
-const CONFIG_SIZE = 72;
+const CONFIG_SIZE = 80;
 /** Matches `Event` in `engine.rs`: six 4-byte fields plus 32 inline text bytes. */
 export const EVENT_SIZE = 56;
 
@@ -202,6 +208,8 @@ export type EngineOptions = {
   variantSlots: number;
   media: number;
   lists: number;
+  tweens: number;
+  keyframes: number;
   strings: number;
   stringBytes: number;
   root?: number;
@@ -281,14 +289,16 @@ export class Engine {
     u32v[6] = options.variantSlots;
     u32v[7] = options.media;
     u32v[8] = options.lists;
-    u32v[9] = options.strings;
-    u32v[10] = options.stringBytes;
-    u32v[11] = options.root ?? 0;
-    u8v[48] = options.windowed === false ? 0 : 1;
-    u8v[49] = options.decorated === false ? 0 : 1;
-    /* The title pointer sits at byte 56, not 52: `#[repr(C)]` aligns it to 8. */
-    u64v[7] = BigInt(ptr(title));
-    u32v[16] = title.length;
+    u32v[9] = options.tweens;
+    u32v[10] = options.keyframes;
+    u32v[11] = options.strings;
+    u32v[12] = options.stringBytes;
+    u32v[13] = options.root ?? 0;
+    u8v[56] = options.windowed === false ? 0 : 1;
+    u8v[57] = options.decorated === false ? 0 : 1;
+    /* The title pointer sits at byte 64, not 60: `#[repr(C)]` aligns it to 8. */
+    u64v[8] = BigInt(ptr(title));
+    u32v[18] = title.length;
 
     // One `u32`, not a pointer-sized slot: the handle is a table token.
     const out = new Uint32Array(1);
@@ -463,26 +473,19 @@ export class Engine {
    * dangling and has been replaced — the caller must re-read `tables` and
    * re-upload everything.
    */
-  grow(caps: {
-    nodes: number;
-    styles: number;
-    variants: number;
-    variantSlots: number;
-    media: number;
-    lists: number;
-    strings: number;
-    stringBytes: number;
-  }): boolean {
-    /* Matches `Capacities` in `tables.rs`: eight `u32`, no padding, same order. */
-    const buf = new Uint32Array(8);
+  grow(caps: Capacities): boolean {
+    /* Matches `Capacities` in `tables.rs`: ten `u32`, no padding, same order. */
+    const buf = new Uint32Array(10);
     buf[0] = caps.nodes;
     buf[1] = caps.styles;
     buf[2] = caps.variants;
     buf[3] = caps.variantSlots;
     buf[4] = caps.media;
     buf[5] = caps.lists;
-    buf[6] = caps.strings;
-    buf[7] = caps.stringBytes;
+    buf[6] = caps.tweens;
+    buf[7] = caps.keyframes;
+    buf[8] = caps.strings;
+    buf[9] = caps.stringBytes;
 
     check(engine.dziri_engine_grow(this.#handle, ptr(buf) as Pointer), "dziri_engine_grow");
 

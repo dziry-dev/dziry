@@ -17,14 +17,17 @@ import {
   AUTO,
   Direction,
   Display,
+  Easing,
   FlexWrap,
   Justify,
   Overflow,
   Position,
   ScrollbarWidth,
+  StepPosition,
   UNSET,
   type StyleField,
 } from "../ir.ts";
+import { ANIM_ALL, ANIM_BIT, type AnimatableField } from "../protocol/generated.ts";
 
 export type Pseudo = "none" | "hover" | "active" | "focus" | "checked" | "disabled";
 
@@ -292,29 +295,75 @@ const ROOT_DECL_GROUPS = new Set(["@theme"]);
 export type RegisteredProperty = { initial: string; inherits: boolean };
 
 /**
- * What `parseCss` returns: the rules, plus the `@property` registrations found
- * alongside them.
+ * One block inside a `@keyframes`, with its selector already turned into offsets.
+ *
+ * `offsets` is a list because `75%, 100% { … }` is legal and Tailwind's `ping` uses
+ * it. Measured: it is simply two keyframes with the same declarations — a keyframe
+ * list built from `{ 0% {opacity:0} 75%, 100% {opacity:1} }` reads 0.5 at t=0.375,
+ * halfway to *75%* rather than to 100%. So expanding one block into two rows is not
+ * an approximation, it is what the browser does.
+ *
+ * `from` and `to` are folded to 0 and 1 here, because nothing downstream benefits
+ * from knowing which spelling the author used.
+ */
+export type KeyframeBlock = { offsets: number[]; decls: Map<string, string> };
+
+/**
+ * What `parseCss` returns: the rules, plus the `@property` registrations and
+ * `@keyframes` blocks found alongside them.
  *
  * Hung off the array rather than changing the return type, because every caller
- * but one uses this as a plain `Rule[]` and a registration is not a rule — it has
- * no selector and contributes no declaration to any element. The compiler reads
- * `.properties`; the tests carry on indexing.
+ * but one uses this as a plain `Rule[]` and neither of the two extras is a rule —
+ * a registration has no selector, and a keyframe's declarations apply to no
+ * element until something names the animation. The compiler reads `.properties`
+ * and `.keyframes`; the tests carry on indexing.
  */
-export type RuleList = Rule[] & { properties: Map<string, RegisteredProperty> };
+export type RuleList = Rule[] & {
+  properties: Map<string, RegisteredProperty>;
+  /** Animation name (case-preserved, as CSS identifiers are) to its blocks. */
+  keyframes: Map<string, KeyframeBlock[]>;
+};
 
 export function parseCss(src: string, origin: OriginValue = Origin.AUTHOR): RuleList {
   const text = stripComments(src);
   const rules: Rule[] = [];
   const registered = new Map<string, RegisteredProperty>();
+  const keyframes = new Map<string, KeyframeBlock[]>();
   const order = { n: 0 };
-  parseRuleList(text, 0, text.length, rules, order, registered);
+  parseRuleList(text, 0, text.length, rules, order, registered, keyframes);
   // Stamped after the walk rather than threaded through it: `order` is per-call,
   // so UA and author rules can share numbers, and only origin keeps them apart.
   if (origin !== Origin.AUTHOR) for (const r of rules) r.origin = origin;
 
   const out = rules as RuleList;
   out.properties = registered;
+  out.keyframes = keyframes;
   return out;
+}
+
+/**
+ * A `@keyframes` block's selector as a list of offsets, or `null` if unreadable.
+ *
+ * `from` is 0 and `to` is 1 — CSS says so, and the alternative of carrying the
+ * keyword to the engine would be two spellings of one number crossing the
+ * boundary. Percentages outside 0–100 are dropped rather than clamped: CSS says an
+ * out-of-range keyframe selector makes the *whole block* invalid, and clamping
+ * would silently move a keyframe somebody wrote at 150% onto the end of the
+ * animation.
+ */
+function parseKeyframeSelector(src: string): number[] | null {
+  const out: number[] = [];
+  for (const raw of src.split(",")) {
+    const part = raw.trim().toLowerCase();
+    if (part === "from") out.push(0);
+    else if (part === "to") out.push(1);
+    else if (part.endsWith("%")) {
+      const pct = Number(part.slice(0, -1));
+      if (!Number.isFinite(pct) || pct < 0 || pct > 100) return null;
+      out.push(pct / 100);
+    } else return null;
+  }
+  return out.length > 0 ? out : null;
 }
 
 /**
@@ -460,6 +509,7 @@ function parseRuleList(
   rules: Rule[],
   order: { n: number },
   registered: Map<string, RegisteredProperty>,
+  keyframes: Map<string, KeyframeBlock[]>,
 ): void {
   let i = from;
 
@@ -501,7 +551,7 @@ function parseRuleList(
         // A prelude with no block of its own — `@layer a, b;` — has already been
         // consumed as an empty body by the scan above; recursing over it is a
         // no-op, which is the right outcome.
-        parseRuleList(text, bodyFrom, bodyTo, rules, order, registered);
+        parseRuleList(text, bodyFrom, bodyTo, rules, order, registered, keyframes);
         continue;
       }
 
@@ -524,7 +574,7 @@ function parseRuleList(
         // media query — a symptom nowhere near its cause. dziri renders into an SDL
         // window with a mouse; `(hover: hover)` and `(pointer: fine)` hold, and
         // pretending otherwise is the wrong answer to a question we can answer.
-        parseRuleList(text, bodyFrom, bodyTo, rules, order, registered);
+        parseRuleList(text, bodyFrom, bodyTo, rules, order, registered, keyframes);
         continue;
       }
 
@@ -540,7 +590,7 @@ function parseRuleList(
           continue;
         }
         const inner: Rule[] = [];
-        parseRuleList(text, bodyFrom, bodyTo, inner, order, registered);
+        parseRuleList(text, bodyFrom, bodyTo, inner, order, registered, keyframes);
         for (const rule of inner) {
           // Nested `@media` intersects: the inner block's conditions are added to
           // whatever the outer one already required.
@@ -579,7 +629,51 @@ function parseRuleList(
         continue;
       }
 
-      // Everything else — `@font-face`, `@keyframes` — is skipped, but skipped
+      /**
+       * `@keyframes` is a *list of styles at offsets*, not a rule either.
+       *
+       * Its blocks have keyframe selectors rather than element selectors, so they
+       * cannot go in `rules` — nothing they say applies to any element until an
+       * `animation` names them. They are collected here and resolved per use site,
+       * because a keyframe's style is "the element's own computed style with these
+       * declarations on top", which depends on which element is animating.
+       *
+       * Nested blocks are parsed with the same brace matcher the rest of this
+       * function uses, so a `@keyframes` containing an unbalanced brace fails the
+       * same way a rule does rather than swallowing the sheet after it.
+       */
+      if (keyword === "@keyframes") {
+        const name = prelude.slice("@keyframes".length).trim();
+        if (name !== "") {
+          const blocks: KeyframeBlock[] = [];
+          let j = bodyFrom;
+          while (j < bodyTo) {
+            const blockOpen = text.indexOf("{", j);
+            if (blockOpen === -1 || blockOpen >= bodyTo) break;
+            const blockClose = matchingBrace(text, blockOpen);
+            if (blockClose === -1 || blockClose > bodyTo) {
+              throw new CssError(`unclosed keyframe block in @keyframes ${name}`, blockOpen);
+            }
+            const offsets = parseKeyframeSelector(text.slice(j, blockOpen));
+            if (offsets === null) {
+              // CSS invalidates the whole block on a bad selector, and so does
+              // this — a keyframe at an unreadable offset has no place to go.
+              warnOnce(`ignoring keyframe "${text.slice(j, blockOpen).trim()}" in @keyframes ${name}`);
+            } else {
+              blocks.push({
+                offsets,
+                decls: parseDeclarations(text.slice(blockOpen + 1, blockClose), blockOpen + 1),
+              });
+            }
+            j = blockClose + 1;
+          }
+          // Last definition wins, as CSS says of two `@keyframes` sharing a name.
+          if (blocks.length > 0) keyframes.set(name, blocks);
+        }
+        continue;
+      }
+
+      // Everything else — `@font-face`, `@supports` — is skipped, but skipped
       // *correctly*: the whole block goes, and the sheet after it still parses.
       warnOnce(`ignoring at-rule "${keyword}"`);
       continue;
@@ -1736,6 +1830,569 @@ function percentAtom(raw: string): number {
   return n;
 }
 
+// ---------------------------------------------------------------------------
+// Transitions and animations
+// ---------------------------------------------------------------------------
+
+/**
+ * Seconds, from a CSS `<time>`. `NaN` when the value is not one.
+ *
+ * `NaN` rather than a throw because the shorthand grammar is order-free: parsing
+ * `transition: opacity 1s ease-in` means asking of every token "is this a time?",
+ * and two of the three answers are legitimately no.
+ *
+ * A unitless number is **not** a time in CSS, `0` included — and that matters here
+ * rather than being pedantry, because in the `animation` shorthand a bare number is
+ * the iteration count. `animation: spin 2 1s` is two iterations, not two seconds.
+ */
+export function parseTime(raw: string): number {
+  const v = raw.trim().toLowerCase();
+  if (v.endsWith("ms")) {
+    const n = Number(v.slice(0, -2));
+    return Number.isFinite(n) ? n / 1000 : NaN;
+  }
+  if (v.endsWith("s")) {
+    const n = Number(v.slice(0, -1));
+    return Number.isFinite(n) ? n : NaN;
+  }
+  return NaN;
+}
+
+/**
+ * An easing curve, in exactly the columns the wire carries.
+ *
+ * Flat rather than a discriminated union because it is written straight into four
+ * `f32` columns and a `u8`, and a union would be converted to this shape at every
+ * one of the three places that store one — a transition, an animation, and a
+ * keyframe segment.
+ */
+export type Curve = { easing: number; a: number; b: number; c: number; d: number };
+
+const bezier = (a: number, b: number, c: number, d: number): Curve => ({
+  easing: Easing.CUBIC_BEZIER,
+  a,
+  b,
+  c,
+  d,
+});
+
+/**
+ * The keyword curves, with the control points the spec gives them.
+ *
+ * Keywords do **not** normalise to `cubic-bezier()` in a browser's computed value —
+ * `ease` reads back as `ease` — but they do here: a keyword *is* a bezier with
+ * fixed points, and keeping the distinction would mean five spellings of one curve
+ * crossing the boundary and five arms in the engine's evaluator.
+ *
+ * The measured progress table in BROWSER-FACTS.md is what these are checked
+ * against, and it is a real check rather than a formality: `ease-in` is
+ * `(0.42, 0, 1, 1)` and Tailwind's `--ease-in` is `(0.4, 0, 1, 1)`, which are
+ * different curves with the same name in two different places.
+ */
+const EASING_KEYWORDS: Record<string, Curve> = {
+  linear: { easing: Easing.LINEAR, a: 0, b: 0, c: 0, d: 0 },
+  ease: bezier(0.25, 0.1, 0.25, 1),
+  "ease-in": bezier(0.42, 0, 1, 1),
+  "ease-out": bezier(0, 0, 0.58, 1),
+  "ease-in-out": bezier(0.42, 0, 0.58, 1),
+  // Measured: these two are the keywords that *do* normalise, and CSS says to
+  // exactly these expansions.
+  "step-start": { easing: Easing.STEPS, a: 1, b: StepPosition.JUMP_START, c: 0, d: 0 },
+  "step-end": { easing: Easing.STEPS, a: 1, b: StepPosition.JUMP_END, c: 0, d: 0 },
+};
+
+/** CSS's initial `transition-timing-function` and `animation-timing-function`. */
+export const EASE: Curve = EASING_KEYWORDS["ease"]!;
+
+const STEP_POSITIONS: Record<string, number> = {
+  end: StepPosition.JUMP_END,
+  "jump-end": StepPosition.JUMP_END,
+  start: StepPosition.JUMP_START,
+  "jump-start": StepPosition.JUMP_START,
+  "jump-both": StepPosition.JUMP_BOTH,
+  "jump-none": StepPosition.JUMP_NONE,
+};
+
+/**
+ * One easing function, or `null` when the value is not one.
+ *
+ * `null` rather than a throw for the same reason `parseTime` returns `NaN`: this is
+ * asked of every token in an order-free shorthand.
+ *
+ * `linear()` — the multi-stop linear easing from Easing Functions 2 — is
+ * deliberately not accepted. It is an arbitrary-length list of stops, which is a
+ * side table rather than four control points, and taking the first two stops would
+ * be a different curve wearing the same name.
+ */
+export function parseEasing(raw: string): Curve | null {
+  const v = raw.trim().toLowerCase();
+  const keyword = EASING_KEYWORDS[v];
+  if (keyword) return keyword;
+
+  const cubic = v.match(/^cubic-bezier\(([^)]*)\)$/);
+  if (cubic) {
+    const parts = splitTopLevelCommas(cubic[1]!).map((p) => Number(p.trim()));
+    if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+    const [x1, y1, x2, y2] = parts as [number, number, number, number];
+    // CSS requires both x coordinates in 0..1 — the curve has to be a function of
+    // time — and rejects the declaration otherwise. `y` is unbounded, which is what
+    // makes an overshooting "bounce" curve expressible.
+    if (x1 < 0 || x1 > 1 || x2 < 0 || x2 > 1) return null;
+    return bezier(x1, y1, x2, y2);
+  }
+
+  const steps = v.match(/^steps\(([^)]*)\)$/);
+  if (steps) {
+    const parts = splitTopLevelCommas(steps[1]!).map((p) => p.trim());
+    const count = Number(parts[0]);
+    if (!Number.isInteger(count) || count < 1) return null;
+    const position = parts.length > 1 ? STEP_POSITIONS[parts[1]!] : StepPosition.JUMP_END;
+    if (position === undefined) return null;
+    // `jump-none` with one step has no output values at all, and CSS says the
+    // declaration is invalid rather than the animation being a no-op.
+    if (position === StepPosition.JUMP_NONE && count < 2) return null;
+    return { easing: Easing.STEPS, a: count, b: position, c: 0, d: 0 };
+  }
+
+  return null;
+}
+
+/**
+ * Which style fields each transitionable CSS property moves.
+ *
+ * The mapping exists separately from `expandDeclaration` because the two ask
+ * opposite questions. The expander is given a property *and a value* and produces
+ * numbers; `transition-property` names a property with no value at all, and what it
+ * needs is the set of fields that property is spelt with. `transform` is nine
+ * fields here and one `case` there.
+ *
+ * A property absent from this map cannot be transitioned, and the compiler
+ * distinguishes two reasons why — see `maskFor`. Deliberately *not* including any
+ * layout-affecting property: paint is the only stage that reads an interpolated
+ * value, so `transition: width` would ease a colour while the geometry jumped.
+ */
+export const TRANSITIONABLE: Record<string, AnimatableField[]> = {
+  color: ["fg"],
+  "background-color": ["bg"],
+  background: ["bg"],
+  "border-color": ["borderColor"],
+  "border-radius": ["radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft"],
+  "border-top-left-radius": ["radiusTopLeft"],
+  "border-top-right-radius": ["radiusTopRight"],
+  "border-bottom-right-radius": ["radiusBottomRight"],
+  "border-bottom-left-radius": ["radiusBottomLeft"],
+  opacity: ["opacity"],
+  // The four ways CSS lets a transform be written, and they overlap on purpose:
+  // `transition-transform` in Tailwind names `transform, translate, scale, rotate`
+  // all four, and a node using the individual properties must transition too.
+  transform: [
+    "translateX",
+    "translateY",
+    "translatePercentX",
+    "translatePercentY",
+    "rotate",
+    "scaleX",
+    "scaleY",
+    "skewX",
+    "skewY",
+  ],
+  translate: ["translateX", "translateY", "translatePercentX", "translatePercentY"],
+  rotate: ["rotate"],
+  scale: ["scaleX", "scaleY"],
+  "transform-origin": [
+    "transformOriginPercentX",
+    "transformOriginPercentY",
+    "transformOriginX",
+    "transformOriginY",
+  ],
+  "accent-color": ["accentColor"],
+  "caret-color": ["caretColor"],
+  "scrollbar-color": ["scrollbarThumb", "scrollbarTrack"],
+};
+
+/**
+ * Properties dziri implements but cannot transition, so the refusal can name them.
+ *
+ * The distinction this draws is the whole reason it exists. `transition: width` is
+ * a request dziri understands and declines — worth a warning, because the author
+ * will otherwise watch a box jump and have nothing to read. `transition: filter` is
+ * a property dziri does not have at all, and warning about it would print a line
+ * for six of the twenty-two entries in Tailwind's default `transition` list on
+ * every build, burying the one that matters.
+ *
+ * Derived from `LAYOUT_FIELDS` rather than listed, so a property that becomes
+ * paint-only stops appearing here without anyone editing this.
+ */
+function refusedTransitionReason(prop: string): string | null {
+  const fields = LAYOUT_TRANSITIONABLE[prop];
+  if (fields === undefined) return null;
+  return `it changes layout (${fields.join(", ")}), and only paint reads an interpolated value`;
+}
+
+/**
+ * The layout-affecting properties worth naming in a refusal.
+ *
+ * Every entry maps to at least one field in `LAYOUT_FIELDS`, which is what makes
+ * them refusable rather than merely unsupported.
+ */
+const LAYOUT_TRANSITIONABLE: Record<string, StyleField[]> = {
+  width: ["width"],
+  height: ["height"],
+  "min-width": ["minW"],
+  "min-height": ["minH"],
+  "max-width": ["maxW"],
+  "max-height": ["maxH"],
+  padding: ["padT", "padR", "padB", "padL"],
+  margin: ["marT", "marR", "marB", "marL"],
+  "border-width": ["borderWidth"],
+  "font-size": ["fontSize"],
+  "font-weight": ["fontWeight"],
+  gap: ["gapRow", "gapCol"],
+  top: ["insetT"],
+  right: ["insetR"],
+  bottom: ["insetB"],
+  left: ["insetL"],
+  inset: ["insetT", "insetR", "insetB", "insetL"],
+  "flex-grow": ["grow"],
+  "flex-shrink": ["shrink"],
+  "flex-basis": ["basis"],
+};
+
+/**
+ * The mask of animatable fields a `transition-property` list asks for.
+ *
+ * Three outcomes per name, and keeping them apart is what makes the warnings
+ * readable. A property in `TRANSITIONABLE` contributes its bits. A property dziri
+ * implements but cannot interpolate is **named** in a warning, because the author
+ * is about to watch a box jump and needs to know why. Anything else is dropped in
+ * silence: Tailwind's default `.transition` names twenty-two properties and dziri
+ * has six of them, so warning about the rest would print sixteen lines per build
+ * and bury the one that matters.
+ *
+ * `all` is every animatable field, which is what it means once the properties dziri
+ * does not have are taken out of the question.
+ */
+export function transitionMask(properties: readonly string[], warn: (m: string) => void): number {
+  let mask = 0;
+
+  for (const prop of properties) {
+    if (prop === "all") {
+      mask |= ANIM_ALL;
+      continue;
+    }
+    const fields = TRANSITIONABLE[prop];
+    if (fields) {
+      for (const field of fields) {
+        const bit = ANIM_BIT[field];
+        // A field in `TRANSITIONABLE` that has no mask bit means the two lists have
+        // drifted — the schema stopped marking it `interp` and this map did not
+        // follow. Silence here would be a transition that compiles and never moves.
+        if (bit === undefined) {
+          throw new CssError(`"${prop}" maps to style field "${field}", which is not animatable`);
+        }
+        mask |= 1 << bit;
+      }
+      continue;
+    }
+    const refused = refusedTransitionReason(prop);
+    if (refused) warn(`cannot transition "${prop}": ${refused}. It will change instantly.`);
+  }
+
+  return mask >>> 0;
+}
+
+/**
+ * A transition, as one timing over a set of fields.
+ *
+ * `properties` holds the author's names rather than the resolved mask, so the
+ * caller can warn about each one it drops with the word the author wrote.
+ */
+export type TransitionSpec = {
+  /** Author-written property names, or `["all"]`. Empty means `none`. */
+  properties: string[];
+  /** Seconds. Zero means nothing animates, which is CSS's initial value. */
+  duration: number;
+  delay: number;
+  easing: Curve;
+};
+
+export type AnimationSpec = {
+  /** `@keyframes` name, or `""` for `none`. */
+  name: string;
+  duration: number;
+  delay: number;
+  /** `Infinity` for `infinite`. */
+  iterations: number;
+  easing: Curve;
+  /** Kept so the compiler can refuse the values it does not implement, by name. */
+  direction: string;
+  fill: string;
+};
+
+const INITIAL_TRANSITION: TransitionSpec = {
+  properties: ["all"],
+  duration: 0,
+  delay: 0,
+  easing: EASE,
+};
+
+const ANIMATION_DIRECTIONS = new Set(["normal", "reverse", "alternate", "alternate-reverse"]);
+const ANIMATION_FILLS = new Set(["none", "forwards", "backwards", "both"]);
+const ANIMATION_PLAY_STATES = new Set(["running", "paused"]);
+
+/**
+ * Folds the `transition*` declarations, in cascade order, into one spec.
+ *
+ * In *order*, which is what makes `transition: opacity 1s` followed by
+ * `transition-duration: 300ms` come out at 300ms and the reverse come out at 1s.
+ * The shorthand resets all four longhands, so it cannot simply be read first —
+ * which is exactly the bug a "read the shorthand, then the longhands" version has,
+ * and Tailwind's output triggers it: `.duration-150` sets `--tw-duration` *and*
+ * `transition-duration`, and a `.transition` class may cascade either side of it.
+ *
+ * `null` when nothing here animates, which is the overwhelmingly common answer.
+ */
+export function transitionFrom(ordered: Array<[string, string]>): TransitionSpec | null {
+  let spec: TransitionSpec | null = null;
+  const own = () => (spec ??= { ...INITIAL_TRANSITION });
+
+  for (const [prop, raw] of ordered) {
+    const value = raw.trim();
+    switch (prop) {
+      case "transition": {
+        const entries = splitTopLevelCommas(value).map((e) => e.trim()).filter(Boolean);
+        if (entries.length === 0) break;
+        const parsed = entries.map(parseTransitionEntry);
+        const first = parsed[0]!;
+        const s = own();
+        s.duration = first.duration;
+        s.delay = first.delay;
+        s.easing = first.easing;
+        s.properties = parsed.flatMap((p) => p.properties);
+        // Measured: CSS really does give each entry its own timing —
+        // `transition: opacity 1s, transform 2s` computes to `duration: [1s, 2s]`.
+        // dziri carries one timing per node, so a list that asks for two is
+        // approximated and said so. Tailwind never emits this shape.
+        for (const p of parsed.slice(1)) {
+          if (p.duration !== first.duration || p.delay !== first.delay) {
+            warnOnce(
+              `per-property transition timing is not supported ("${value}"); ` +
+                `using ${first.duration}s/${first.delay}s for every property in the list`,
+            );
+            break;
+          }
+        }
+        break;
+      }
+      case "transition-property": {
+        const list = splitTopLevelCommas(value).map((p) => p.trim().toLowerCase()).filter(Boolean);
+        own().properties = list.length === 1 && list[0] === "none" ? [] : list;
+        break;
+      }
+      // Each of these is a *list* parallel to `transition-property`, and dziri
+      // takes the first entry — the same one-timing-per-node limitation the
+      // shorthand arm warns about, reached from the longhand side.
+      case "transition-duration": {
+        const t = parseTime(splitTopLevelCommas(value)[0] ?? "");
+        if (Number.isFinite(t)) own().duration = t;
+        break;
+      }
+      case "transition-delay": {
+        const t = parseTime(splitTopLevelCommas(value)[0] ?? "");
+        if (Number.isFinite(t)) own().delay = t;
+        break;
+      }
+      case "transition-timing-function": {
+        const curve = parseEasing(splitTopLevelCommas(value)[0] ?? "");
+        if (curve) own().easing = curve;
+        break;
+      }
+      // Parsed and ignored: `allow-discrete` only matters for properties dziri
+      // refuses to transition anyway, so honouring it would change nothing.
+      case "transition-behavior":
+        break;
+      default:
+        break;
+    }
+  }
+
+  return spec;
+}
+
+/** One entry of a `transition` shorthand — order-free, first time wins as duration. */
+function parseTransitionEntry(entry: string): TransitionSpec {
+  const out: TransitionSpec = { properties: [], duration: 0, delay: 0, easing: EASE };
+  let times = 0;
+
+  for (const token of splitTopLevel(entry)) {
+    const lower = token.toLowerCase();
+    const time = parseTime(token);
+    if (Number.isFinite(time)) {
+      if (times === 0) out.duration = time;
+      else if (times === 1) out.delay = time;
+      times++;
+      continue;
+    }
+    const curve = parseEasing(token);
+    if (curve) {
+      out.easing = curve;
+      continue;
+    }
+    if (lower === "normal" || lower === "allow-discrete") continue;
+    if (lower === "none") continue;
+    out.properties.push(lower);
+  }
+
+  // `transition: 1s` with no property named means `all`, which is the shorthand's
+  // initial value for that longhand rather than "nothing".
+  if (out.properties.length === 0 && times > 0) out.properties.push("all");
+  return out;
+}
+
+/** Folds the `animation*` declarations, in cascade order, into one spec. */
+export function animationFrom(ordered: Array<[string, string]>): AnimationSpec | null {
+  let spec: AnimationSpec | null = null;
+  const own = () =>
+    (spec ??= {
+      name: "",
+      duration: 0,
+      delay: 0,
+      iterations: 1,
+      easing: EASE,
+      direction: "normal",
+      fill: "none",
+    });
+
+  for (const [prop, raw] of ordered) {
+    const value = raw.trim();
+    switch (prop) {
+      case "animation": {
+        // A comma-separated list is several animations at once. dziri runs one per
+        // node, so the first is taken and the rest named in a warning.
+        const entries = splitTopLevelCommas(value).map((e) => e.trim()).filter(Boolean);
+        if (entries.length === 0) break;
+        if (entries.length > 1) {
+          warnOnce(`only one animation per element is supported; ignoring all but "${entries[0]}"`);
+        }
+        const parsed = parseAnimationEntry(entries[0]!);
+        const s = own();
+        Object.assign(s, parsed);
+        break;
+      }
+      case "animation-name": {
+        const first = (splitTopLevelCommas(value)[0] ?? "").trim();
+        own().name = first.toLowerCase() === "none" ? "" : first;
+        break;
+      }
+      case "animation-duration": {
+        const t = parseTime(splitTopLevelCommas(value)[0] ?? "");
+        if (Number.isFinite(t)) own().duration = t;
+        break;
+      }
+      case "animation-delay": {
+        const t = parseTime(splitTopLevelCommas(value)[0] ?? "");
+        if (Number.isFinite(t)) own().delay = t;
+        break;
+      }
+      case "animation-timing-function": {
+        const curve = parseEasing(splitTopLevelCommas(value)[0] ?? "");
+        if (curve) own().easing = curve;
+        break;
+      }
+      case "animation-iteration-count": {
+        const first = (splitTopLevelCommas(value)[0] ?? "").trim().toLowerCase();
+        if (first === "infinite") own().iterations = Infinity;
+        else {
+          const n = Number(first);
+          if (Number.isFinite(n) && n >= 0) own().iterations = n;
+        }
+        break;
+      }
+      case "animation-direction":
+        own().direction = (splitTopLevelCommas(value)[0] ?? "").trim().toLowerCase();
+        break;
+      case "animation-fill-mode":
+        own().fill = (splitTopLevelCommas(value)[0] ?? "").trim().toLowerCase();
+        break;
+      default:
+        break;
+    }
+  }
+
+  return spec;
+}
+
+/**
+ * One entry of an `animation` shorthand.
+ *
+ * Order-free, and the two ambiguities are resolved the way the grammar says.
+ * A bare number is the **iteration count**, never a time — `animation: spin 2 1s`
+ * runs twice for one second — which is why `parseTime` refuses a unitless value.
+ * And a keyword that could be either a fill mode or the animation's name goes to
+ * whichever longhand has not been filled yet, name last.
+ */
+function parseAnimationEntry(entry: string): AnimationSpec {
+  const out: AnimationSpec = {
+    name: "",
+    duration: 0,
+    delay: 0,
+    iterations: 1,
+    easing: EASE,
+    direction: "normal",
+    fill: "none",
+  };
+  let times = 0;
+  let sawDirection = false;
+  let sawFill = false;
+
+  for (const token of splitTopLevel(entry)) {
+    const lower = token.toLowerCase();
+
+    const time = parseTime(token);
+    if (Number.isFinite(time)) {
+      if (times === 0) out.duration = time;
+      else if (times === 1) out.delay = time;
+      times++;
+      continue;
+    }
+
+    if (lower === "infinite") {
+      out.iterations = Infinity;
+      continue;
+    }
+    const count = Number(lower);
+    if (lower !== "" && Number.isFinite(count) && count >= 0) {
+      out.iterations = count;
+      continue;
+    }
+
+    const curve = parseEasing(token);
+    if (curve) {
+      out.easing = curve;
+      continue;
+    }
+
+    if (!sawDirection && ANIMATION_DIRECTIONS.has(lower) && lower !== "normal") {
+      out.direction = lower;
+      sawDirection = true;
+      continue;
+    }
+    if (!sawFill && ANIMATION_FILLS.has(lower) && lower !== "none") {
+      out.fill = lower;
+      sawFill = true;
+      continue;
+    }
+    if (ANIMATION_PLAY_STATES.has(lower)) continue;
+    if (lower === "normal" || lower === "none") continue;
+
+    // Whatever is left is the name, and it keeps its case: a `@keyframes`
+    // identifier is case-sensitive where a property name is not.
+    if (out.name === "") out.name = token;
+  }
+
+  return out;
+}
+
 type Patch = Partial<Record<StyleField, number>>;
 type LengthPct = { px: number; pct: number };
 
@@ -2784,6 +3441,40 @@ export function expandDeclaration(
 
     case "display":
       return; // handled by the caller
+
+    /**
+     * Transitions and animations, also handled by the caller — and here for the
+     * same reason `display` is: so this switch stays the one honest answer to "which
+     * CSS properties does dziri support", which is what `css-coverage` and
+     * `tailwind-coverage` read it as.
+     *
+     * They cannot be expanded here because neither is a value. `transition-property`
+     * is a comma-separated *list* where every style field is one number, and the
+     * timing has to be resolved as a unit across six declarations and then
+     * interned — so the answer is an index into a side table, which this function
+     * has no way to mint. `animation` is worse: it names a `@keyframes` block, whose
+     * style rows are the *element's own computed style* with the keyframe's
+     * declarations over it, and that is not knowable until the cascade has finished.
+     *
+     * So `resolveTiming` in the compiler does both, from the merged declaration map
+     * where the whole set is visible at once. See `applyDecls`.
+     */
+    case "transition":
+    case "transition-property":
+    case "transition-duration":
+    case "transition-delay":
+    case "transition-timing-function":
+    case "transition-behavior":
+    case "animation":
+    case "animation-name":
+    case "animation-duration":
+    case "animation-delay":
+    case "animation-timing-function":
+    case "animation-iteration-count":
+    case "animation-direction":
+    case "animation-fill-mode":
+    case "animation-play-state":
+      return;
 
     default:
       warnOnce(`ignoring unsupported property "${prop}"`);

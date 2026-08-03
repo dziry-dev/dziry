@@ -164,6 +164,8 @@ if (LIVE) {
       handlers: ui.handlers,
       lists: ui.lists,
       media: ui.media,
+      tweens: ui.tweens,
+      keyframes: ui.keyframes,
       root: ui.root,
     };
 

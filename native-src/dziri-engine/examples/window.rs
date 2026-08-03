@@ -143,6 +143,8 @@ fn main() {
         variant_slot_capacity: 8,
         media_capacity: 1,
         list_capacity: 1,
+        tween_capacity: 1,
+        keyframe_capacity: 1,
         string_capacity: 4,
         string_bytes: 256,
         root: 0,

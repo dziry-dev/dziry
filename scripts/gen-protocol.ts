@@ -14,13 +14,16 @@
  */
 import { join } from "node:path";
 import {
+  ANIMATABLE_FIELDS,
   ELEM_SIZE,
   ELEM_VIEW,
   ENUMS,
+  INTERP_CODE,
   NodeFlags,
   PROTOCOL_VERSION,
   TABLES,
   type EnumDef,
+  type Field,
   type Table,
 } from "../src/protocol/schema.ts";
 
@@ -75,8 +78,15 @@ function schemaHash(): number {
     // fingerprint. It is in, because the two sides disagreeing about it means
     // the engine skips a relayout the compiler expected — a stale frame with no
     // write to blame, which is the same class of failure the hash exists for.
+    //
+    // `interp` is in for the same reason, one step worse: it decides which mask
+    // bit a field owns, so two sides disagreeing about a single field's `interp`
+    // renumbers every bit above it. Every transition on the page then animates a
+    // neighbouring property.
     for (const field of table.fields) {
-      feed(`,${field.name}:${field.type}${field.affects ? `:${field.affects}` : ""}`);
+      const affects = field.affects ? `:${field.affects}` : "";
+      const interp = field.interp ? `:${field.interp}` : "";
+      feed(`,${field.name}:${field.type}${affects}${interp}`);
     }
   }
   return h >>> 0;
@@ -110,6 +120,50 @@ function classifiedTables(): Table[] {
 }
 
 const CLASSIFIED = classifiedTables();
+
+/**
+ * Which fields can be interpolated, and the bit each one owns in a tween's mask.
+ *
+ * Two rules, both checked here rather than trusted, because both fail silently.
+ *
+ * A mask is a `u32`, so **33 animatable fields would wrap** — bit 32 becomes bit
+ * 0, and a transition asked to move `translateX` would move `bg` instead. That is
+ * a wrong-looking frame with nothing in the compiler to blame, and the moment to
+ * catch it is the moment somebody adds the field.
+ *
+ * And an animatable field must be **paint-only**. A layout-affecting field
+ * interpolated in paint alone would give a box whose colour eases while its width
+ * jumps, because nothing on the layout side reads a blend. The compiler refuses
+ * such a transition by name; this makes it impossible to reach that refusal by
+ * mislabelling the schema instead.
+ */
+function animBits(): Map<string, number> {
+  const bits = new Map<string, number>();
+  ANIMATABLE_FIELDS.forEach((f, i) => bits.set(f.name, i));
+
+  if (bits.size > 32) {
+    throw new Error(
+      `${bits.size} style fields are marked \`interp\`, and a tween mask is a u32.\n` +
+        `  A 33rd bit wraps onto bit 0 and animates the wrong property.\n` +
+        `  Widen \`tweens.mask\` to a pair of u32s — and teach both sides — or drop one.`,
+    );
+  }
+
+  const misfiled = ANIMATABLE_FIELDS.filter((f) => f.affects !== "paint").map((f) => f.name);
+  if (misfiled.length > 0) {
+    throw new Error(
+      `styles fields marked \`interp\` but not \`affects: "paint"\`: ${misfiled.join(", ")}.\n` +
+        `  Only paint reads an interpolated value, so a layout-affecting field would ease\n` +
+        `  its colour and jump its geometry. See the \`Interp\` doc comment in schema.ts.`,
+    );
+  }
+  return bits;
+}
+
+const ANIM_BITS = animBits();
+
+/** `INTERP` codes, from the one table the `Interp` enum is also built from. */
+const interpCode = (f: Field): number => INTERP_CODE[f.interp ?? "none"];
 
 const SCHEMA_HASH = schemaHash();
 
@@ -156,6 +210,38 @@ function rustTable(table: Table): string {
       .join(", ")}];`
     : "";
 
+  // Only the styles table has an interpolation story, and emitting these two
+  // arrays unconditionally would put a 9-entry `ANIM_BIT` of nothing but 255 on
+  // every other table.
+  const interpolation = table.fields.some((f) => f.interp)
+    ? `
+
+    /// How each field is interpolated partway through a tween.
+    ///
+    /// \`interp::NONE\` means discrete — every enum, and the two tween references
+    /// themselves. See the \`Interp\` doc comment in schema.ts for why a colour is
+    /// not a number here.
+    pub const INTERP: [u8; FIELD_COUNT] = [${table.fields.map(interpCode).join(", ")}];
+
+    /// Which bit of a tween's \`mask\` each field owns, or 255 for "not animatable".
+    ///
+    /// Dense over the animatable fields rather than sparse over all of them, so a
+    /// mask stays one \`u32\` while the table grows. The numbering is derived from
+    /// field order, which is why \`interp\` is in \`SCHEMA_HASH\`: renumbering it on
+    /// one side only would animate a neighbouring property.
+    pub const ANIM_BIT: [u8; FIELD_COUNT] = [${table.fields
+      .map((f) => ANIM_BITS.get(f.name) ?? 255)
+      .join(", ")}];
+
+    /// The field index each mask bit refers to, low bit first — \`ANIM_BIT\` inverted.
+    ///
+    /// The engine walks a mask's set bits and needs the field for each; searching
+    /// \`ANIM_BIT\` for a value would be a linear scan per bit per animating node.
+    pub const ANIM_FIELDS: [usize; ${ANIMATABLE_FIELDS.length}] = [${ANIMATABLE_FIELDS.map(
+      (f) => table.fields.findIndex((g) => g.name === f.name),
+    ).join(", ")}];`
+    : "";
+
   return `/// ${table.doc}
 pub mod ${snake(table.name)} {
     /// Field indices, in descriptor order.
@@ -163,7 +249,7 @@ ${consts}
 
     pub const FIELD_COUNT: usize = ${table.fields.length};
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [${sizes}];
-    pub const FIELD_NAMES: [&str; FIELD_COUNT] = [${names}];${classification}
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = [${names}];${classification}${interpolation}
 }`;
 }
 
@@ -325,6 +411,36 @@ ${CLASSIFIED.map(
   (t) => `  ${t.name}: [${t.fields.map((f) => (f.affects === "paint" ? "false" : "true")).join(", ")}],`,
 ).join("\n")}
 };
+
+/**
+ * Which bit of a tween's \`mask\` each animatable style field owns.
+ *
+ * Only the names that *are* animatable, so a lookup miss is the answer to "can
+ * this property be transitioned at all" rather than something to compare against a
+ * sentinel. The compiler builds a \`transition-property\` list into a mask through
+ * this map, and refuses a property that is absent from it — which is how
+ * \`transition: width\` becomes a named warning rather than a mask bit nothing
+ * honours.
+ */
+export const ANIM_BIT = {
+${ANIMATABLE_FIELDS.map((f, i) => `  ${f.name}: ${i},`).join("\n")}
+} as const;
+
+/**
+ * A style field that can be transitioned, by its **schema** name.
+ *
+ * The schema's spelling rather than the IR's — \`radiusTopLeft\`, not \`radTL\` —
+ * because a mask is what crosses the boundary and the engine indexes it with
+ * \`styles::ANIM_BIT\`. Naming the fields the way the wire names them means the
+ * compiler's \`transition-property\` map is type-checked against the schema itself,
+ * with no second list translating between the two spellings.
+ */
+export type AnimatableField = keyof typeof ANIM_BIT;
+
+/** Every animatable field's mask bit at once — what \`transition-property: all\` means here. */
+export const ANIM_ALL = ${
+    ANIMATABLE_FIELDS.length === 32 ? "0xffffffff" : `0x${((2 ** ANIMATABLE_FIELDS.length - 1) >>> 0).toString(16)}`
+  };
 
 export const TABLE_NAMES = [${TABLES.map((t) => `"${t.name}"`).join(", ")}] as const;
 export type TableName = (typeof TABLE_NAMES)[number];

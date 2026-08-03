@@ -20,6 +20,8 @@ import {
   Predicate as SchemaPredicate,
   ScrollbarWidth as SchemaScrollbarWidth,
   Appearance as SchemaAppearance,
+  Easing as SchemaEasing,
+  StepPosition as SchemaStepPosition,
 } from "./protocol/generated.ts";
 
 /**
@@ -61,6 +63,8 @@ export const Position = SchemaPosition;
 export const Overflow = SchemaOverflow;
 export const ScrollbarWidth = SchemaScrollbarWidth;
 export const Appearance = SchemaAppearance;
+export const Easing = SchemaEasing;
+export const StepPosition = SchemaStepPosition;
 
 /**
  * "The author said nothing" for an enum field.
@@ -256,6 +260,26 @@ export const STYLE_FIELDS = [
   ["originPctY", "Float32Array", false, false],
   ["originPxX", "Float32Array", false, false],
   ["originPxY", "Float32Array", false, false],
+  // `transition` and `animation`, each a row in the tween table **plus one** —
+  // zero is "nothing here", and a style table starts out zeroed.
+  //
+  // A reference rather than sixteen more columns, because a transition is a mask
+  // over 25 animatable fields, a duration, a delay and four bezier control
+  // points, and every node wearing one `.btn` class has the identical set. Two
+  // `u16`s and one interned row is the same information.
+  //
+  // Neither inherits. CSS says so for both, and the reason is worth stating: an
+  // inherited `transition` would make every descendant of a `transition-colors`
+  // card animate its own colours whenever the cascade moved them, which is not
+  // what the author asked for and is a per-frame cost they never opted into.
+  //
+  // Paint-only, and that is the boundary the whole feature sits inside: the
+  // engine interpolates in paint, so only a paint-only field can be tweened. A
+  // `transition-property` naming `width` is refused by name in the expander
+  // rather than becoming a mask bit that would ease a colour while the geometry
+  // jumped.
+  ["transition", "Uint16Array", false, false],
+  ["animation", "Uint16Array", false, false],
 ] as const;
 
 export type StyleField = (typeof STYLE_FIELDS)[number][0];
@@ -369,6 +393,12 @@ export const INITIAL_STYLE: ComputedStyle = {
   originPctY: 0.5,
   originPxX: 0,
   originPxY: 0,
+  // `transition-property: all` is CSS's initial value, but with a
+  // `transition-duration` of `0s` it animates nothing — so "no tween row" is the
+  // faithful encoding of the initial state, not an approximation of it. Same for
+  // `animation-name: none`.
+  transition: 0,
+  animation: 0,
 };
 
 /** Shape of the generated module, so the runtime can type its import. */
@@ -544,6 +574,8 @@ export type CompiledUi = {
   generated: Int32Array;
   lists: ListTable;
   media: MediaTable;
+  tweens: TweenTable;
+  keyframes: KeyframeTable;
   root: number;
 };
 
@@ -645,6 +677,99 @@ export type WindowRow = {
   firstRoute: number;
   routeCount: number;
 };
+
+/**
+ * Interned transition and animation timing — the one mechanism both reduce to.
+ *
+ * A transition is interpolation between two rows of the style table the compiler
+ * already resolved. A `@keyframes` block is a fixed set of such rows at fixed
+ * offsets, so interpolating between two *of those* is the same operation. Hence
+ * one row shape, and `firstSegment < 0` is the only thing that distinguishes them:
+ * a transition's endpoints are whichever two style rows the node moved between,
+ * and an animation's come from {@link KeyframeTable}.
+ *
+ * Nothing here is per-node. What is per-node is the current `t`, and it lives in
+ * the engine — never on the wire, never in a table, never allocated per frame.
+ */
+export type TweenTable = {
+  count: number;
+  /** Animatable-field bits this tween may move; see the generated `ANIM_BIT`. */
+  mask: Uint32Array;
+  /** Seconds for one iteration. Zero means the tween does nothing, as CSS says. */
+  duration: Float32Array;
+  delay: Float32Array;
+  /** `Infinity` for `infinite`; always 1 for a transition. */
+  iterations: Float32Array;
+  /** First row of this tween's span in the keyframe table, or -1. */
+  firstSegment: Int32Array;
+  segmentCount: Uint16Array;
+  /** `Easing`. */
+  easing: Uint8Array;
+  /** Bezier control points, or `(step count, StepPosition)` in the first two. */
+  easeA: Float32Array;
+  easeB: Float32Array;
+  easeC: Float32Array;
+  easeD: Float32Array;
+};
+
+export function emptyTweenTable(): TweenTable {
+  return {
+    count: 0,
+    mask: new Uint32Array(0),
+    duration: new Float32Array(0),
+    delay: new Float32Array(0),
+    iterations: new Float32Array(0),
+    firstSegment: new Int32Array(0),
+    segmentCount: new Uint16Array(0),
+    easing: new Uint8Array(0),
+    easeA: new Float32Array(0),
+    easeB: new Float32Array(0),
+    easeC: new Float32Array(0),
+    easeD: new Float32Array(0),
+  };
+}
+
+/**
+ * One keyframe: an offset, and the interned style row it resolves to.
+ *
+ * The row is resolved as "this element's own computed style, with the keyframe's
+ * declarations applied on top" — which is why keyframes cost the engine nothing it
+ * did not already have, and why a missing `0%` needs no synthetic value. Measured:
+ * the implicit `from` *is* the element's computed style, which is the base slot.
+ *
+ * Ascending by `offset` within a tween's span, and both `0` and `1` are always
+ * present — the compiler synthesises the missing endpoint from the base row so the
+ * engine's segment search never meets a hole.
+ *
+ * `easing` is the curve of the segment **starting** here, which is measured rather
+ * than assumed: a keyframe's `animation-timing-function` governs the segment
+ * leaving it, and never reaches the element's computed style at all. That is why
+ * it is a column here instead of a style field.
+ */
+export type KeyframeTable = {
+  count: number;
+  style: Uint16Array;
+  offset: Float32Array;
+  /** `Easing`, or `Easing.INHERIT` for "whatever the animation says". */
+  easing: Uint8Array;
+  easeA: Float32Array;
+  easeB: Float32Array;
+  easeC: Float32Array;
+  easeD: Float32Array;
+};
+
+export function emptyKeyframeTable(): KeyframeTable {
+  return {
+    count: 0,
+    style: new Uint16Array(0),
+    offset: new Float32Array(0),
+    easing: new Uint8Array(0),
+    easeA: new Float32Array(0),
+    easeB: new Float32Array(0),
+    easeC: new Float32Array(0),
+    easeD: new Float32Array(0),
+  };
+}
 
 /**
  * Media conditions, as thresholds the engine tests against the surface.
