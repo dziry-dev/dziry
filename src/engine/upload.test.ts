@@ -1,19 +1,34 @@
 /**
  * The compiled window, through the engine, asserted on.
  *
- * These replace the nine hand-computed layout tests that retired with
- * `layout.ts`. They are deliberately *not* a port: the interesting surface has
- * moved. Layout correctness is Taffy's and is covered by the engine's own Rust
- * tests; what only these can cover is the path from the compiler's IR, through
- * the field mapping, into shared memory, and back out as bounds.
+ * These replace the nine hand-computed layout tests that retired with `layout.ts`.
+ * They are deliberately *not* a port: the interesting surface has moved. Layout
+ * correctness is Taffy's and is covered by the engine's own Rust tests; what only
+ * these can cover is the path from the compiler's IR, through the field mapping, into
+ * shared memory, and back out as bounds.
  *
- * Nodes are found by what they *are* — the node with four grid tracks, the ones
- * with `position: absolute` — rather than by id, so editing the page renumbers
- * everything without breaking a single assertion. That held when the demo became
- * a route inside a window and every node id shifted.
+ * # What belongs here, and what does not
  *
- * The window's other five routes are in this tree too, resident and `hidden`, so
- * they are excluded from layout exactly as they are at run time.
+ * The demo is the fixture on purpose. The claim is about *real emitter output* making
+ * the round trip, and a synthetic tree cannot exercise that — the same reason a
+ * compiler is tested on real programs.
+ *
+ * What does **not** belong here is a claim about what CSS means. Five tests had drifted
+ * into exactly that — that `align-self` beats `align-items`, that `aspect-ratio` squares
+ * a box, that a grid places four tracks — and they lived here only because the demo
+ * happened to contain an example of each. They are now in
+ * `native-src/dziri-engine/tests/bounds.rs`, against fixtures those tests own, which is
+ * what the paragraph above always said should happen.
+ *
+ * The move was not tidying. Nodes here are found by what they *are* rather than by id,
+ * which survives renumbering but not the page *growing*: `wrap === WRAP` matched two
+ * nodes when it was written and four once the demo's navigation gained `flex-wrap`, and
+ * the test took the first — so it silently began measuring the navigation bar and kept
+ * passing, because a wrapped nav also wraps onto two lines. `exactly` exists to make
+ * that class of drift loud, and it caught a second instance the moment it was added.
+ *
+ * The window's other routes are in this tree too, resident and `hidden`, so they are
+ * excluded from layout exactly as they are at run time.
  */
 import { expect, test } from "bun:test";
 import { Align, Display, FlexWrap, Position } from "../protocol/generated.ts";
@@ -109,6 +124,14 @@ function load(): {
  *
  * Skipping hidden subtrees restores the property and is what the tests meant all
  * along: they assert about what is on screen.
+ *
+ * **Use {@link exactly} whenever the count is known.** A predicate is a query against a
+ * page that keeps growing, and the failure mode of taking `[0]` from an ambiguous one
+ * is not a broken test — it is a test that quietly measures something else. That is
+ * not hypothetical: `wrap === WRAP` matched two nodes when it was written and four
+ * after the demo's navigation gained `flex-wrap`, and the assertion — "wraps onto more
+ * than one line, and nothing escapes its container" — was true of the navigation bar
+ * as well, so it went on passing while measuring the wrong element.
  */
 function nodesWhere(ui: CompiledUi, pred: (get: (f: StyleField) => number) => boolean): number[] {
   const styles: Record<StyleField, ArrayLike<number>> = ui.styles;
@@ -131,6 +154,36 @@ function nodesWhere(ui: CompiledUi, pred: (get: (f: StyleField) => number) => bo
   return out;
 }
 
+/**
+ * Exactly `count` nodes matching `pred`, or a failure naming what was found.
+ *
+ * The count *is* an assertion, and it is the one that was missing. `what` is quoted
+ * back because the useful diagnostic is "the thing you meant is no longer the only one
+ * of its kind" — which a bare length comparison does not convey, and which is what
+ * distinguishes a test that should narrow its query from one that should own a fixture.
+ *
+ * It has already earned itself twice. Converting `text is measured` to use it reported
+ * *four* matches for a query whose comment named one element, so that test had been
+ * measuring the demo's page title rather than the heading it claimed.
+ */
+function exactly(
+  ui: CompiledUi,
+  what: string,
+  count: number,
+  pred: (get: (f: StyleField) => number) => boolean,
+): number[] {
+  const found = nodesWhere(ui, pred);
+  if (found.length !== count) {
+    throw new Error(
+      `expected exactly ${count} node(s) for "${what}" on the visible route, ` +
+        `found ${found.length}${found.length > 0 ? ` (${found.join(", ")})` : ""}.\n` +
+        `  Either the page gained one, or this test should be asserting on a fixture it ` +
+        `owns rather than on the demo — see the note on nodesWhere.`,
+    );
+  }
+  return found;
+}
+
 function childrenOf(ui: CompiledUi, node: number): number[] {
   const out: number[] = [];
   for (let c = ui.nodes.firstChild[node]!; c !== -1; c = ui.nodes.nextSibling[c]!) out.push(c);
@@ -142,38 +195,6 @@ function childrenOf(ui: CompiledUi, node: number): number[] {
 test("the root receives the window rect", () => {
   const { engine, ui } = load();
   expect(engine.bounds(ui.root)).toEqual([0, 0, WIDTH, HEIGHT]);
-  engine.close();
-});
-
-test("grid places explicit tracks, and a span covers two of them", () => {
-  const { engine, ui } = load();
-
-  const [grid] = nodesWhere(ui, (g) => g("display") === Display.GRID && g("gridCols") === 4);
-  expect(grid).toBeDefined();
-
-  const cells = childrenOf(ui, grid!);
-  expect(cells.length).toBe(3);
-
-  const [wide, a, b] = cells.map((c) => engine.bounds(c));
-
-  // Four equal tracks over the grid's width. The spanning cell covers two of
-  // them plus the gap that would have separated them.
-  //
-  // Within a pixel, because Taffy rounds final layout to whole pixels — an
-  // exact quarter of 950 is not an integer, and the rounding is what stops
-  // adjacent cells landing on half-pixel edges.
-  const track = (engine.bounds(grid!)[2] - 3 * 10) / 4; // 3 gaps of 10px
-  expect(Math.abs(wide![2] - (track * 2 + 10))).toBeLessThanOrEqual(1);
-  expect(Math.abs(a![2] - track)).toBeLessThanOrEqual(1);
-  expect(Math.abs(b![2] - track)).toBeLessThanOrEqual(1);
-
-  // One row: all three share a y.
-  expect(a![1]).toBe(wide![1]);
-  expect(b![1]).toBe(wide![1]);
-  // And they run left to right without overlapping.
-  expect(a![0]).toBeGreaterThanOrEqual(wide![0] + wide![2]);
-  expect(b![0]).toBeGreaterThanOrEqual(a![0] + a![2]);
-
   engine.close();
 });
 
@@ -211,99 +232,6 @@ test("a list row stretches to its container", () => {
   engine.close();
 });
 
-test("flex-wrap starts a second line when the first runs out", () => {
-  const { engine, ui } = load();
-
-  const [chips] = nodesWhere(ui, (g) => g("wrap") === FlexWrap.WRAP);
-  expect(chips).toBeDefined();
-
-  const boxes = childrenOf(ui, chips!).map((c) => engine.bounds(c));
-  const rows = new Set(boxes.map((b) => b[1]));
-  expect(rows.size).toBeGreaterThan(1);
-
-  // Nothing escapes the container it wrapped inside.
-  const box = engine.bounds(chips!);
-  for (const b of boxes) expect(b[0] + b[2]).toBeLessThanOrEqual(box[0] + box[2] + 0.5);
-
-  engine.close();
-});
-
-test("align-self overrides the parent's align-items per item", () => {
-  const { engine, ui } = load();
-
-  // The row holding the swatches, found through them rather than by guessing at
-  // its own style.
-  const swatches = nodesWhere(ui, (g) => g("width") === 32);
-  expect(swatches.length).toBeGreaterThan(0);
-  const row = ui.nodes.parent[swatches[0]!]!;
-
-  const kids = childrenOf(ui, row);
-  const boxes = kids.map((k) => engine.bounds(k));
-  const container = engine.bounds(row);
-
-  const [start, mid, end, stretch] = boxes;
-  expect(start![1]).toBeCloseTo(container[1], 0);
-  expect(mid![1]).toBeGreaterThan(start![1]);
-  expect(end![1] + end![3]).toBeCloseTo(container[1] + container[3], 0);
-  // `stretch` fills the cross axis, so it is taller than the square ones.
-  expect(stretch![3]).toBeGreaterThan(start![3]);
-
-  engine.close();
-});
-
-test("aspect-ratio squares a box from its width alone", () => {
-  const { engine, ui } = load();
-  const [swatch] = nodesWhere(ui, (g) => g("aspectRatio") === 1 && g("width") === 32);
-  expect(swatch).toBeDefined();
-
-  const [, , w, h] = engine.bounds(swatch!);
-  expect(w).toBe(32);
-  expect(h).toBe(32);
-  engine.close();
-});
-
-test("absolute children are placed against their parent, out of flow", () => {
-  const { engine, ui } = load();
-  const styles: Record<StyleField, ArrayLike<number>> = ui.styles;
-
-  const absolutes = nodesWhere(ui, (g) => g("position") === Position.ABSOLUTE);
-  expect(absolutes.length).toBeGreaterThan(0);
-
-  for (const node of absolutes) {
-    const parent = ui.nodes.parent[node]!;
-    const box = engine.bounds(parent);
-    const [x, y, w, h] = engine.bounds(node);
-    const slot = ui.nodes.style[node]!;
-
-    // An inset is measured from the containing block's *padding* box, so a
-    // bordered parent moves its absolute children in by the border width. The
-    // bounds the engine publishes are border boxes, hence this term. It was
-    // absent while `borderWidth` was excluded from layout, which is why this
-    // assertion is what caught that fix reaching Taffy.
-    const border = styles.borderWidth[ui.nodes.style[parent]!]!;
-    const inner = [box[0] + border, box[1] + border, box[2] - border * 2, box[3] - border * 2];
-
-    // Each inset is checked only when the author set one, so editing the CSS
-    // from `top` to `bottom` changes what is asserted rather than breaking it.
-    const inset = (f: StyleField) => styles[f][slot]!;
-
-    if (!Number.isNaN(inset("insetT"))) expect(y).toBeCloseTo(inner[1]! + inset("insetT"), 0);
-    if (!Number.isNaN(inset("insetL"))) expect(x).toBeCloseTo(inner[0]! + inset("insetL"), 0);
-    if (!Number.isNaN(inset("insetR"))) {
-      expect(x + w).toBeCloseTo(inner[0]! + inner[2]! - inset("insetR"), 0);
-    }
-    if (!Number.isNaN(inset("insetB"))) {
-      expect(y + h).toBeCloseTo(inner[1]! + inner[3]! - inset("insetB"), 0);
-    }
-
-    // Out of flow: it sits inside its parent rather than after its siblings.
-    expect(x).toBeGreaterThanOrEqual(box[0]);
-    expect(y).toBeGreaterThanOrEqual(box[1]);
-  }
-
-  engine.close();
-});
-
 test("inline styles beat every selector", () => {
   const { engine, ui } = load();
   const styles: Record<StyleField, ArrayLike<number>> = ui.styles;
@@ -312,11 +240,12 @@ test("inline styles beat every selector", () => {
   // a string, one from an object — which is the precedence a browser gives an
   // inline declaration.
   const BTN_BG = 0xff27272a; // bg-zinc-800
-  const inline = nodesWhere(
+  const inline = exactly(
     ui,
+    "the two inline-styled buttons",
+    2,
     (g) => g("bg") === 0xffb91c1c || g("bg") === 0xff15803d,
   );
-  expect(inline.length).toBe(2);
 
   for (const node of inline) {
     expect(styles.bg[ui.nodes.style[node]!]).not.toBe(BTN_BG);
@@ -338,13 +267,27 @@ test("inline styles beat every selector", () => {
 
 test("text is measured, not guessed", () => {
   const { engine, ui } = load();
-  // The features heading, at 18px/600 — text-lg font-semibold.
-  const [title] = nodesWhere(ui, (g) => g("fontSize") === 18 && g("fontWeight") === 600);
-  expect(title).toBeDefined();
 
-  const [, , w, h] = engine.bounds(title!);
-  expect(w).toBeGreaterThan(0);
-  expect(h).toBeGreaterThan(18);
+  // Every 18px/600 heading on the route, not the first one.
+  //
+  // This test named "the features heading" and took `[0]`, and `only` reported the
+  // query matching four nodes — so it had in fact been measuring the demo's page
+  // title all along. The fix is not a narrower query: the claim here is that *any*
+  // text run gets a real advance width from Skia rather than a guess, which is true
+  // of all four, and asserting it over the whole set is both stronger and immune to
+  // the page gaining a fifth.
+  //
+  // It stays on the demo rather than moving to a fixture because a measured advance
+  // needs a real string in a real font, which is exactly what a synthetic tree lacks.
+  const titles = nodesWhere(ui, (g) => g("fontSize") === 18 && g("fontWeight") === 600);
+  expect(titles.length).toBeGreaterThan(0);
+
+  for (const title of titles) {
+    const [, , w, h] = engine.bounds(title);
+    expect(w).toBeGreaterThan(0);
+    // Taller than the font size, because a line box is not a glyph box.
+    expect(h).toBeGreaterThan(18);
+  }
   engine.close();
 });
 

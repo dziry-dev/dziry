@@ -1361,3 +1361,260 @@ fn a_media_query_relays_out_rather_than_only_repainting() {
     );
     assert_eq!(side_by_side.1[1], side_by_side.0[1], "and on the same row");
 }
+
+// ---------------------------------------------------------------------------
+// Field mapping into Taffy
+//
+// Five claims that used to live in `src/engine/upload.test.ts`, asserted against
+// the *demo page* — "the node with four grid tracks", "the ones with width 32".
+// They moved here because they are not claims about dziri's plumbing at all; they
+// are claims that one style field reaches the corresponding Taffy input, and that
+// file's own header already says layout correctness belongs to the engine's Rust
+// tests.
+//
+// The move is not tidying. Those queries were unique in the demo when they were
+// written and stopped being so as the page grew: adding `flex-wrap` to the demo's
+// navigation made the wrap query match four nodes instead of two, and the test —
+// which took the first — silently began measuring the navigation bar and kept
+// passing, because a wrapped nav also wraps onto two lines and also stays inside
+// its container. A test that quietly changes what it measures is worse than one
+// that breaks. A fixture the test owns cannot drift.
+// ---------------------------------------------------------------------------
+
+/// Four explicit tracks, and a cell spanning two of them covers the gap between.
+#[test]
+fn grid_places_explicit_tracks_and_a_span_covers_the_gap() {
+    let mut engine = Engine::new(&config(4, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        // 0: the grid — four tracks with 10px gaps, filling the 200px window.
+        t.set_u8(STYLES, styles::DISPLAY, 0, display::GRID);
+        t.set_u16(STYLES, styles::GRID_COLUMNS, 0, 4);
+        t.set_f32(STYLES, styles::GAP_COLUMN, 0, 10.0);
+        // 1: a cell spanning two tracks. 2: an ordinary cell, used by both others.
+        t.set_i16(STYLES, styles::GRID_COLUMN_SPAN, 1, 2);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 2);
+        leaf(t, 3, 2);
+        link(t, 0, &[1, 2, 3]);
+    }
+    engine.tick().expect("tick");
+
+    let grid = bound(&engine, 0);
+    let track = (grid[2] - 3.0 * 10.0) / 4.0;
+    let (wide, a, b) = (bound(&engine, 1), bound(&engine, 2), bound(&engine, 3));
+
+    // Taffy rounds final layout to whole pixels, and a quarter of the grid is not
+    // an integer — the rounding is what keeps adjacent cells off half-pixel edges.
+    assert!(
+        (wide[2] - (track * 2.0 + 10.0)).abs() <= 1.0,
+        "a spanning cell covers two tracks plus the gap: {wide:?}, track {track}"
+    );
+    assert!((a[2] - track).abs() <= 1.0, "{a:?} vs track {track}");
+    assert!((b[2] - track).abs() <= 1.0, "{b:?} vs track {track}");
+
+    assert_eq!(a[1], wide[1], "one row, so every cell shares a y");
+    assert_eq!(b[1], wide[1]);
+    assert!(a[0] >= wide[0] + wide[2], "left to right, no overlap");
+    assert!(b[0] >= a[0] + a[2]);
+}
+
+/// `flex-wrap: wrap` starts a second line, and nothing escapes sideways.
+#[test]
+fn flex_wrap_starts_a_second_line_when_the_first_runs_out() {
+    let mut engine = Engine::new(&config(4, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        // A 200px window holding three 80px children that refuse to shrink: two fit
+        // and the third cannot. Forced by arithmetic rather than by text, so the
+        // assertion does not depend on a font.
+        t.set_u8(STYLES, styles::FLEX_DIRECTION, 0, flex_direction::ROW);
+        t.set_u8(STYLES, styles::FLEX_WRAP, 0, protocol::flex_wrap::WRAP);
+        t.set_f32(STYLES, styles::WIDTH, 1, 80.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+        t.set_f32(STYLES, styles::FLEX_SHRINK, 1, 0.0);
+
+        leaf(t, 0, 0);
+        for child in 1..4 {
+            leaf(t, child, 1);
+        }
+        link(t, 0, &[1, 2, 3]);
+    }
+    engine.tick().expect("tick");
+
+    let row = bound(&engine, 0);
+    let boxes = [bound(&engine, 1), bound(&engine, 2), bound(&engine, 3)];
+
+    assert_eq!(boxes[0][1], boxes[1][1], "the first two share a line");
+    assert!(
+        boxes[2][1] > boxes[0][1],
+        "and the third starts a second one: {boxes:?}"
+    );
+
+    for b in boxes {
+        assert!(
+            b[0] + b[2] <= row[0] + row[2] + 0.5,
+            "nothing escapes the container it wrapped inside: {b:?} in {row:?}"
+        );
+    }
+}
+
+/// `align-self` beats the parent's `align-items`, per item.
+#[test]
+fn align_self_overrides_the_parents_align_items() {
+    let mut engine = Engine::new(&config(5, 5)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..5 {
+            init_style(t, slot);
+        }
+        // A 60px-tall row whose own default is `center`, holding one child per
+        // `align-self` value so all four are compared in one layout.
+        t.set_u8(STYLES, styles::FLEX_DIRECTION, 0, flex_direction::ROW);
+        t.set_u8(STYLES, styles::ALIGN_ITEMS, 0, align::CENTER);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 60.0);
+
+        for (slot, value) in [
+            (1usize, align::FLEX_START),
+            (2, align::CENTER),
+            (3, align::FLEX_END),
+            (4, align::STRETCH),
+        ] {
+            t.set_u8(STYLES, styles::ALIGN_SELF, slot, value);
+            t.set_f32(STYLES, styles::WIDTH, slot, 20.0);
+            // Every child but `stretch` is a fixed square, so a height difference
+            // can only have come from the cross-axis stretch.
+            if value != align::STRETCH {
+                t.set_f32(STYLES, styles::HEIGHT, slot, 20.0);
+            }
+        }
+
+        leaf(t, 0, 0);
+        for child in 1..5 {
+            leaf(t, child, child);
+        }
+        link(t, 0, &[1, 2, 3, 4]);
+    }
+    engine.tick().expect("tick");
+
+    let row = bound(&engine, 0);
+    let (start, mid, end, stretch) = (
+        bound(&engine, 1),
+        bound(&engine, 2),
+        bound(&engine, 3),
+        bound(&engine, 4),
+    );
+
+    assert!(
+        close(start[1], row[1]),
+        "flex-start hugs the top: {start:?}"
+    );
+    assert!(mid[1] > start[1], "center sits below it: {mid:?}");
+    assert!(
+        close(end[1] + end[3], row[1] + row[3]),
+        "flex-end hugs the bottom: {end:?} in {row:?}"
+    );
+    assert!(
+        stretch[3] > start[3],
+        "stretch fills the cross axis, so it is taller than a square: {stretch:?}"
+    );
+}
+
+/// `aspect-ratio` gives a box its height from its width alone.
+#[test]
+fn aspect_ratio_squares_a_box_from_its_width_alone() {
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        // Width only. No height anywhere and no content, so a square can only have
+        // come from the ratio.
+        t.set_f32(STYLES, styles::WIDTH, 1, 32.0);
+        t.set_f32(STYLES, styles::ASPECT_RATIO, 1, 1.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+    }
+    engine.tick().expect("tick");
+
+    let [_, _, w, h] = bound(&engine, 1);
+    assert_eq!(w, 32.0);
+    assert_eq!(h, 32.0, "height came from the ratio, not from content");
+}
+
+/// An absolute child insets from its parent's **padding** box, not its border box.
+///
+/// The border term is the point of the test, and it is a dziri claim rather than a
+/// Taffy one: it is what caught `borderWidth` reaching Taffy as a layout input. The
+/// bounds the engine publishes are border boxes, so a bordered parent moves its
+/// absolute children in by the border width — and a 4px border with a 9px inset
+/// distinguishes the two, where a border of 0 could not.
+#[test]
+fn an_absolute_child_insets_from_its_parents_padding_box() {
+    let mut engine = Engine::new(&config(3, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        t.set_f32(STYLES, styles::WIDTH, 0, 100.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 60.0);
+        t.set_f32(STYLES, styles::BORDER_WIDTH, 0, 4.0);
+        for pad in [
+            styles::PAD_TOP,
+            styles::PAD_RIGHT,
+            styles::PAD_BOTTOM,
+            styles::PAD_LEFT,
+        ] {
+            t.set_f32(STYLES, pad, 0, 5.0);
+        }
+
+        // 1: absolute, inset from the top and left. 2: an ordinary in-flow sibling,
+        // present so "out of flow" is asserted rather than assumed.
+        t.set_u8(STYLES, styles::POSITION, 1, protocol::position::ABSOLUTE);
+        t.set_f32(STYLES, styles::INSET_TOP, 1, 7.0);
+        t.set_f32(STYLES, styles::INSET_LEFT, 1, 9.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 10.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 10.0);
+
+        t.set_f32(STYLES, styles::WIDTH, 2, 10.0);
+        t.set_f32(STYLES, styles::HEIGHT, 2, 10.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 2);
+        link(t, 0, &[1, 2]);
+    }
+    engine.tick().expect("tick");
+
+    let parent = bound(&engine, 0);
+    let abs = bound(&engine, 1);
+    let flow = bound(&engine, 2);
+
+    // The padding box starts one border in on every side.
+    let inner = [parent[0] + 4.0, parent[1] + 4.0];
+    assert!(
+        close(abs[0], inner[0] + 9.0),
+        "left inset is from the padding box: {abs:?}, which starts at {inner:?}"
+    );
+    assert!(
+        close(abs[1], inner[1] + 7.0),
+        "top inset is from the padding box: {abs:?}"
+    );
+
+    // Out of flow: the in-flow sibling is placed as though the absolute one were
+    // not there, so it sits at the top of the content box rather than below it.
+    assert!(
+        close(flow[1], parent[1] + 4.0 + 5.0),
+        "the in-flow sibling ignores the absolute one: {flow:?} in {parent:?}"
+    );
+}
