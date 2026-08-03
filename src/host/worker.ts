@@ -1,7 +1,7 @@
 /**
  * The app thread: signals, handlers, bindings, and the writes they produce.
  *
- * Everything that used to be in `window-host.ts`'s loop except the engine. This
+ * Everything in a run except the engine. This
  * side never holds the engine handle — the registry pins it to the thread that
  * created it, because SDL pins its window and event pump there — so it cannot
  * tick, cannot drain events and cannot grow. What it *can* do is write the
@@ -25,7 +25,7 @@
  * a list splice halfway through and describe a chain that loops. See
  * `channel.ts`.
  */
-import { routeChain, type CompiledUi } from "../ir.ts";
+import { routeChain } from "../ir.ts";
 import { bindSpans, type Bound, type Span } from "../engine/bind.ts";
 import { Uploader, type TableHost } from "../engine/upload.ts";
 import { EventKind } from "../protocol/generated.ts";
@@ -37,6 +37,7 @@ import type { Signal } from "../runtime/signal.ts";
 import { updateLists, subscribeLists, dispatchItem } from "../runtime/list-runtime.ts";
 import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
+import { buildUi, indexOfRoute, requireRoute, showRoute } from "./window-state.ts";
 
 /** SDL keycodes. Two constants is cheaper than binding the whole keysym table. */
 const KEY_BACKSPACE = 8;
@@ -61,9 +62,13 @@ const scope = globalThis as unknown as {
  * The feature this whole file exists for is not directly observable: "the window
  * did not freeze" leaves no trace. So it is made observable — this blocks the app
  * thread for real, the way a slow handler or a large computation would, and the
- * engine thread's frame counter says what happened during it. Run the same
- * argument through `--single` and the counter collapses, which is the measurement
- * that justifies the split.
+ * engine thread's frame counter says what happened during it. Paired with
+ * `--run-ms`, that counter is the measurement which justifies the split: 190
+ * frames rendered over 3 s with the app thread wedged for 2 s of it, against 62
+ * on the single-threaded path this replaced. That baseline is recorded in
+ * `ROADMAP.md` rather than reproducible: the single-threaded path has been deleted,
+ * because keeping it meant maintaining a second implementation of everything in
+ * this file by hand.
  *
  * A blocking `Atomics.wait` rather than a spin loop: a spin would also occupy a
  * core, and the claim being tested is about the *thread* being unavailable, not
@@ -134,48 +139,16 @@ function start(
   const post = (message: ToMain) => scope.postMessage(message);
 
   const generated = pickWindow(registry, argv);
-
-  const ui: CompiledUi = {
-    strings: generated.strings,
-    styles: generated.styles,
-    nodes: generated.nodes,
-    variants: generated.variants,
-    interactive: generated.interactive,
-    generated: generated.generated,
-    textBindings: generated.textBindings,
-    handlers: generated.handlers,
-    lists: generated.lists,
-    media: generated.media,
-    tweens: generated.tweens,
-    keyframes: generated.keyframes,
-    controls: generated.controls,
-    root: generated.root,
-  };
+  const ui = buildUi(generated);
 
   const { stylePatches, listBindings, editables } = generated;
   const { routeNodes, initialRoute, windowConfig, windowId } = generated;
 
-  function showRoute(index: number): void {
-    const chain = routeChain(routeNodes, index);
-    for (const [i, route] of routeNodes.entries()) {
-      const hide = chain.has(i) ? 0 : 1;
-      for (const node of route.roots) ui.nodes.hidden[node] = hide;
-    }
-  }
-
-  const indexOf = (path: string) => routeNodes.findIndex((r) => r.path === path);
-
+  /** `--route routing`, for starting somewhere other than the initial route. */
   const requested = (() => {
     const i = argv.indexOf("--route");
     const wanted = i !== -1 ? argv[i + 1] : null;
-    if (!wanted) return initialRoute;
-
-    const found = indexOf(wanted);
-    if (found === -1) {
-      const paths = routeNodes.map((r) => r.path).join(", ");
-      throw new Error(`no route "${wanted}" in window ${windowId}. Routes are ${paths}.`);
-    }
-    return found;
+    return wanted ? requireRoute(routeNodes, wanted, windowId) : initialRoute;
   })();
 
   let active = requested;
@@ -213,7 +186,7 @@ function start(
   applyTextBindings(ui, changedNodes);
   updateLists(ui, listBindings);
   applyStylePatches(ui, stylePatches);
-  showRoute(active);
+  showRoute(ui, routeNodes, active);
 
   post({
     t: "ready",
@@ -260,10 +233,10 @@ function start(
 
   if (routeSignal) {
     routeSignal.subscribe(() => {
-      const next = indexOf(routeSignal.value);
+      const next = indexOfRoute(routeNodes, routeSignal.value);
       if (next === -1 || next === active) return;
       active = next;
-      showRoute(active);
+      showRoute(ui, routeNodes, active);
       dirty = true;
       schedule();
     });

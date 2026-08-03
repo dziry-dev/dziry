@@ -12,17 +12,11 @@
  *
  * Flags the CLI does not recognise go to the app, which is what makes
  * `dziri dev --route products/new --size 400x600` mean what it looks like. The
- * host's own flags are documented in `window-host.ts`.
+ * host's own flags are documented in `host/main.ts` and `host/worker.ts`.
  */
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import {
-  compileProject,
-  describe,
-  formatBuildError,
-  ENTRY_FILE,
-  SINGLE_FILE,
-} from "../compiler/build.ts";
+import { compileProject, describe, formatBuildError, ENTRY_FILE } from "../compiler/build.ts";
 import { PACKAGE } from "../compiler/compile.ts";
 import { buildApp } from "./build.ts";
 
@@ -38,7 +32,6 @@ options
   --out <dir>                   build: where the executable goes (default: dist)
   --name <name>                 build: the executable's name (default: the folder's)
   --keep-scratch                build: leave the generated wrapper entry in place
-  --single                      dev: run both halves in one thread (the pre-Worker path)
   --console                     build: keep the console window (Windows; needed to see output)
   --no-minify                   build: leave the bundled JavaScript readable
   -h, --help                    this
@@ -63,7 +56,6 @@ const TAKES_VALUE = new Set(["--out", "--name"]);
 const STANDALONE = new Set([
   "--dump",
   "--keep-scratch",
-  "--single",
   "--console",
   "--no-minify",
   "-h",
@@ -184,7 +176,7 @@ switch (command) {
         "bun",
         "--preload",
         `${PACKAGE}/compiler/reactive-preload.ts`,
-        join(projectDir, flags.has("--single") ? SINGLE_FILE : ENTRY_FILE),
+        join(projectDir, ENTRY_FILE),
         ...theirs,
       ],
       { cwd: projectDir, stdio: ["inherit", "inherit", "inherit"] },

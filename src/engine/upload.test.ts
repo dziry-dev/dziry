@@ -32,39 +32,17 @@
  */
 import { expect, test } from "bun:test";
 import { Align, Display, FlexWrap, Position } from "../protocol/generated.ts";
-import { INITIAL_STYLE, routeChain, type CompiledUi, type StyleField } from "../ir.ts";
+import { INITIAL_STYLE, type CompiledUi, type StyleField } from "../ir.ts";
 import { Engine } from "./host.ts";
 import { NUMBER_FIELDS, Uploader, capacitiesFor } from "./upload.ts";
 import { applyTextBindings } from "../runtime/bindings.ts";
 import { updateLists, type ListBindingRef } from "../runtime/list-runtime.ts";
 import { applyStylePatches, type StylePatchRef } from "../runtime/patches.ts";
+import { buildUi, requireRoute, showRoute } from "../host/window-state.ts";
 import * as generated from "../../windows/main/ui.gen.ts";
 
 const WIDTH = 1040;
 const HEIGHT = 560;
-
-/**
- * Shows one route, the way the host does.
- *
- * The window opens on its overview and everything these tests assert about — the
- * grid, the list, the absolute children — lives on the `features` route, which
- * ships `hidden`. Without this every assertion measures a `display: none` subtree
- * and reads zero, which is a correct frame and a useless test.
- *
- * Deliberately the same `routeChain` the emitter and the host use, so a change to
- * what "visible together" means cannot leave the tests measuring something the
- * application never shows.
- */
-function showRoute(path: string): void {
-  const routes = generated.routeNodes;
-  const target = routes.findIndex((r) => r.path === path);
-  if (target === -1) throw new Error(`no route "${path}" — routes are ${routes.map((r) => r.path).join(", ")}`);
-
-  const chain = routeChain(routes, target);
-  for (const [i, route] of routes.entries()) {
-    for (const node of route.roots) generated.nodes.hidden[node] = chain.has(i) ? 0 : 1;
-  }
-}
 
 function load(): {
   ui: CompiledUi;
@@ -72,26 +50,19 @@ function load(): {
   uploader: Uploader;
   patches: StylePatchRef[];
 } {
-  const ui: CompiledUi = {
-    strings: [...generated.strings],
-    styles: generated.styles,
-    nodes: generated.nodes,
-    variants: generated.variants,
-    interactive: generated.interactive,
-    generated: generated.generated,
-    textBindings: generated.textBindings,
-    handlers: generated.handlers,
-    lists: generated.lists,
-    media: generated.media,
-    tweens: generated.tweens,
-    keyframes: generated.keyframes,
-    controls: generated.controls,
-    root: generated.root,
-  };
-
+  const ui = buildUi(generated);
   const patches: StylePatchRef[] = generated.stylePatches;
 
-  showRoute("features");
+  // The window opens on its overview and everything these tests assert about — the
+  // grid, the list, the absolute children — lives on the `features` route, which
+  // ships `hidden`. Without this every assertion measures a `display: none` subtree
+  // and reads zero, which is a correct frame and a useless test.
+  //
+  // The host's own `showRoute`, not a copy of it, so a change to what "visible
+  // together" means cannot leave the tests measuring something the application
+  // never shows.
+  const routes = generated.routeNodes;
+  showRoute(ui, routes, requireRoute(routes, "features", generated.windowId));
 
   applyTextBindings(ui, []);
   updateLists(ui, generated.listBindings satisfies ListBindingRef[]);
@@ -330,22 +301,7 @@ test("typing does not resize the arena on every keystroke", () => {
   // the whole Taffy tree. An exact capacity request moves by 12 bytes per
   // character, so holding a key down did all of that once per character — and
   // since `grow` never shrinks, deleting the text did not give it back.
-  const ui: CompiledUi = {
-    strings: [...generated.strings],
-    styles: generated.styles,
-    nodes: generated.nodes,
-    variants: generated.variants,
-    interactive: generated.interactive,
-    generated: generated.generated,
-    textBindings: generated.textBindings,
-    handlers: generated.handlers,
-    lists: generated.lists,
-    media: generated.media,
-    tweens: generated.tweens,
-    keyframes: generated.keyframes,
-    controls: generated.controls,
-    root: generated.root,
-  };
+  const ui = buildUi(generated);
 
   const slot = ui.strings.findIndex((s) => s === "");
   expect(slot).toBeGreaterThanOrEqual(0);

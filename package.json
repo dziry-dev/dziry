@@ -28,7 +28,6 @@
     "./compiler/*": "./src/compiler/*",
     "./engine/*": "./src/engine/*",
     "./protocol/*": "./src/protocol/*",
-    "./host": "./src/window-host.ts",
     "./host/*": "./src/host/*",
     "./package.json": "./package.json"
   },
