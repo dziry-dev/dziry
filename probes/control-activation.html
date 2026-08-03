@@ -1,0 +1,182 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>control-activation</title>
+<style>
+  body{font:12px ui-monospace,monospace;padding:16px;margin:0}
+  #out{white-space:pre;line-height:1.5}
+  .row{display:flex;align-items:center;gap:24px;margin:14px 0}
+  label{padding:6px 10px;background:#eee;border:1px solid #ccc}
+  label span{background:#dde;padding:2px 6px}
+  form{display:contents}
+</style>
+<h3>What activates a control, what a label forwards, and when in the press does the state actually flip?</h3>
+
+<div class="row">
+  <!-- A wrapping label: the control is a descendant, so there is no `for` and the
+       forwarding has to come from containment. Three separate targets in one box. -->
+  <label id="lw"><input type="checkbox" id="cbw"> wrapping <span id="spanw">nested span</span></label>
+</div>
+
+<div class="row">
+  <input type="checkbox" id="cbf">
+  <label for="cbf" id="lf">for= label</label>
+</div>
+
+<div class="row">
+  <input type="checkbox" id="cbd" disabled>
+  <label for="cbd" id="ld">label of a disabled box</label>
+</div>
+
+<div class="row">
+  <input type="checkbox" id="cbh">
+  <input type="checkbox" id="cbdrag">
+</div>
+
+<div class="row">
+  <!-- No form owner: grouped by tree scope. -->
+  <input type="radio" name="plan" id="r1">
+  <input type="radio" name="plan" id="r2">
+  <!-- Same `name`, but each inside its own form. If a group is scoped to its form
+       owner, these are two more groups rather than members of the first. -->
+  <form><input type="radio" name="plan" id="r3"></form>
+  <form><input type="radio" name="plan" id="r4"></form>
+</div>
+
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  const ALL = ["cbw", "cbf", "cbd", "cbh", "cbdrag", "r1", "r2", "r3", "r4"];
+  const el = (id) => document.getElementById(id);
+
+  /** Which elements a selector matches, by id — the same measurement the hover probe
+   *  makes, and for the same reason: it reports the *set*, which is the question. */
+  const matching = (sel) =>
+    [...document.querySelectorAll(sel)].map((e) => e.id || e.tagName.toLowerCase()).join(" ");
+
+  /** The checkedness of every control at once, as `id=0|1`, which reads as a row. */
+  const flags = () => ALL.map((id) => id + "=" + (el(id).checked ? 1 : 0)).join(" ");
+
+  const centre = (id) => {
+    const r = el(id).getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  };
+  /**
+   * The label's own padding — the one point inside a wrapping label that is the *label*
+   * rather than any descendant of it.
+   *
+   * Worth aiming at separately, because it is the case that discriminates two candidate
+   * rules for how `:hover` reaches a label's control: "the label is the hit target" or
+   * "the control is not a descendant of it". Hitting the nested span cannot tell them
+   * apart, and a first run that only did that produced a contradiction.
+   */
+  const paddingOf = (id) => {
+    const r = el(id).getBoundingClientRect();
+    return { x: Math.round(r.left + 3), y: Math.round(r.top + r.height / 2) };
+  };
+
+  const plan = [
+    ["the input inside a wrapping label", { ...centre("cbw"), down: 1, up: 1 }],
+    ["the wrapping label's own padding", { ...paddingOf("lw"), down: 1, up: 1 }],
+    ["a nested span inside that label", { ...centre("spanw"), down: 1, up: 1 }],
+    ["a for= label", { ...centre("lf"), down: 1, up: 1 }],
+    ["a disabled input, directly", { ...centre("cbd"), down: 1, up: 1 }],
+    ["the label of a disabled input", { ...centre("ld"), down: 1, up: 1 }],
+    ["radio r1 (no form owner)", { ...centre("r1"), down: 1, up: 1 }],
+    ["radio r2 (same name, no form)", { ...centre("r2"), down: 1, up: 1 }],
+    ["radio r2 again, already checked", { ...centre("r2"), down: 1, up: 1 }],
+    ["radio r3, inside its own form", { ...centre("r3"), down: 1, up: 1 }],
+    ["radio r4, inside another form", { ...centre("r4"), down: 1, up: 1 }],
+    ["press cbh and hold", { ...centre("cbh"), down: 1 }],
+    ["release, still on cbh", { ...centre("cbh"), up: 1 }],
+    ["press cbdrag", { ...centre("cbdrag"), down: 1 }],
+    ["drag off it", { x: 700, y: 40 }],
+    ["release somewhere else", { x: 700, y: 40, up: 1 }],
+  ];
+
+  window.__probeMouse = plan.map(([, p]) => ({
+    x: p.x,
+    y: p.y,
+    down: p.down === 1,
+    up: p.up === 1,
+  }));
+
+  const labels = plan.map(([l]) => l);
+  const rows = [];
+  let step = 0;
+  /** Latched on the move rather than read from a counter the move has advanced — the
+   *  hover probe got this wrong twice in opposite directions. */
+  let current = labels[0];
+
+  /**
+   * `:hover` is recorded beside `:active` because the two are *not* the same here and
+   * guessing which way would be a coin flip. `:active` demonstrably reaches a label's
+   * control even when that control is a sibling rather than a descendant; whether
+   * `:hover` does the same is the question this column answers.
+   */
+  const record = (when) =>
+    rows.push([current, when, flags(), matching(":checked"), matching(":hover"), matching(":active"), matching(":focus")]);
+
+  addEventListener("mousemove", () => {
+    current = labels[Math.min(step, labels.length - 1)] ?? "?";
+    step++;
+  }, true);
+
+  /**
+   * Three moments per press, because *which* of them flips the bit is the question a
+   * reimplementation has to answer and it is not guessable: pre-click activation
+   * behaviour sets checkedness *before* the click event is dispatched, so a `click`
+   * listener sees the new value while a `mouseup` listener sees the old one.
+   */
+  addEventListener("mousedown", () => record("press"), true);
+  addEventListener("mouseup", () => record("release"), true);
+  addEventListener("click", () => record("after click"), false);
+
+  // Every activation-related event, in dispatch order, with its target. A label click
+  // forwards a *second* click to the control, and only a trace shows that.
+  const trace = [];
+  for (const id of ALL.concat(["lw", "lf", "ld", "spanw"])) {
+    for (const name of ["click", "change", "input"]) {
+      el(id).addEventListener(name, (e) => {
+        trace.push(`${labels[Math.min(step - 1, labels.length - 1)]} · ${name} on ${e.currentTarget.id}` +
+          (e.target.id !== e.currentTarget.id ? ` (target ${e.target.id})` : ""));
+      });
+    }
+  }
+
+  window.__probeMouseDone = () => {
+    log("=== state after each pointer step ===");
+    log("  (`checked` is the IDL property on every control; then the selector sets)");
+    log("");
+    let last = null;
+    for (const [label, when, f, checked, hover, active, focus] of rows) {
+      if (label !== last) { log("  " + label); last = label; }
+      log("      " + when.padEnd(12) + f);
+      log("      " + "".padEnd(12) + ":checked " + (checked || "(none)") +
+        "  ·  :focus " + (focus || "(none)"));
+      log("      " + "".padEnd(12) + ":hover   " + (hover || "(none)"));
+      log("      " + "".padEnd(12) + ":active  " + (active || "(none)"));
+    }
+
+    log("");
+    log("=== event trace, in dispatch order ===");
+    for (const line of trace) log("  " + line);
+
+    log("");
+    log("=== disabled, as selectors ===");
+    log("  :disabled      " + (matching(":disabled") || "(none)"));
+    log("  :enabled       " + (matching(":enabled") || "(none)"));
+    log("  :indeterminate " + (matching(":indeterminate") || "(none)"));
+
+    log("");
+    log("=== what a label points at, as the DOM reports it ===");
+    for (const id of ["lw", "lf", "ld"]) {
+      log("  " + id.padEnd(4) + " control=" + (el(id).control?.id ?? "(none)") +
+        "  htmlFor=" + JSON.stringify(el(id).htmlFor));
+    }
+    log("  labels of cbw: " + [...el("cbw").labels].map((l) => l.id).join(" "));
+
+    report();
+  };
+
+  document.title = "ready";
+</script>

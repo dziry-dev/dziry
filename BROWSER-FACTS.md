@@ -574,3 +574,183 @@ unhittable, and every chain dziri can produce is geometric as well as structural
 because the two stop agreeing the moment that pruning is relaxed, and then this row is the
 specification.
 
+
+## What activates a form control, and when in the press the bit actually flips
+
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/control-activation.html`, driven by a
+real pointer through `Input.dispatchMouseEvent`.** Asked before writing any of it, because "a click
+toggles a checkbox" hides at least five decisions, and four of them are guessable in the wrong
+direction.
+
+### The bit flips during the click, not on the release
+
+| moment | `cbw.checked` | `:checked` matches |
+|---|---|---|
+| `mousedown` listener | 0 | — |
+| `mouseup` listener | 0 | — |
+| `click` listener | **1** | `cbw` |
+
+So checkedness is set by the *pre-click activation behaviour*, which runs after `mouseup` and
+before the `click` event is dispatched. A `mouseup` handler still sees the old value. This is the
+one that decides *where* in an engine's press handling the flip belongs: beside the code that
+decides a click happened, not beside the code that handles the release.
+
+### A disabled control receives no button events at all
+
+Pointing at `<input type="checkbox" disabled>` and pressing produced **no `mousedown`, no
+`mouseup` and no `click`** — not a click that was ignored, no events. `mousemove` still arrived
+(the step counter advanced), and the control never took focus.
+
+Its *label* is different, and the difference is worth stating:
+
+| pressed | `:active` matched | fired | toggled |
+|---|---|---|---|
+| the disabled input itself | (nothing) | nothing at all | no |
+| the label of a disabled input | `html body div cbd ld` | `click` on `ld` only | no |
+
+So `cbd` joins the `:active` chain through its label while remaining unclickable, and the label's
+click is **not** forwarded to it.
+
+### A label's click is a second, synthetic click on the control
+
+| pressed | events, in dispatch order |
+|---|---|
+| the input, inside a wrapping `<label>` | `click` on `cbw`, then `click` on `lw` (bubbling, `target` still `cbw`) |
+| the wrapping label's own padding | `click` on `lw`, **then a fresh `click` on `cbw`** |
+| a nested `<span>` in that label | `click` on `spanw` → `lw`, **then a fresh `click` on `cbw`** |
+| a `for=` label | `click` on `lf`, **then a fresh `click` on `cbf`** |
+
+One toggle in every row. The forwarded click is dispatched *after* the label's own, and it is
+skipped exactly when the original target already is the labelled control — which is what stops a
+wrapping label from toggling twice. It is also skipped when the control is disabled.
+
+### `:active` follows a label to its control from anywhere in the chain; `:hover` only from the label itself
+
+The second asymmetry in this file between these two, after the earlier one against `:focus` — and
+this one is *between* the pair that the other finding showed to be identical sets. Both were
+recorded because assuming either way would have been a coin flip.
+
+| pointer on | `:hover` matched | `:active` matched, while held |
+|---|---|---|
+| the input inside the wrapping label | `html body div lw cbw` | `html body div lw cbw` |
+| **the wrapping label's own padding** | `html body div lw` **`cbw`** | `html body div lw cbw` |
+| **a nested `<span>` in that label** | `html body div lw spanw` — **no `cbw`** | `html body div lw` **`cbw`** `spanw` |
+| a `for=` label | `html body div cbf lf` | `html body div cbf lf` |
+| the label of a *disabled* input | `html body div cbd ld` | `html body div cbd ld` |
+
+Read the two middle rows together: they are the same label and the same control, differing only in
+whether the pointer landed on the label or on a descendant of it. So
+
+- `:hover` reaches the control when the label **is the hit node**, and not when the hit node is a
+  descendant of the label;
+- `:active` reaches it in **both** cases, i.e. from any label in the chain.
+
+The `for=` rows also confirm the forwarding is not containment: `cbf` is a *sibling* of `lf`, not an
+ancestor or a descendant. And the last row shows there is no disabled guard on either — a disabled
+control still joins both chains through its label, while still receiving no events of its own.
+
+One asymmetry looks like a spec requirement and the other like an implementation artifact, but both
+are what Chromium does, so both are what dziri does. The difference is one line each in
+`FrameState::set_input`.
+
+### Focus is the default action of the press, and a label never keeps it
+
+Focus moved to the control between the `mousedown` and `mouseup` listeners — a `mousedown` handler
+sees the old focus. For a label click, `:focus` was empty on release and became the *control* after
+the forwarded click; the label itself never held focus. Pressing a control and releasing away from
+it **focused it without toggling it**.
+
+### A radio cannot be unchecked by pointer, and its group is the form
+
+Clicking an already-checked radio fired `click` and neither `input` nor `change`, and it stayed
+checked.
+
+| radio | `name` | form owner | end state |
+|---|---|---|---|
+| `r1` | `plan` | none | 0 |
+| `r2` | `plan` | none | 1 |
+| `r3` | `plan` | form A | 1 |
+| `r4` | `plan` | form B | 1 |
+
+Three radios named `plan` checked at once. The group is scoped to the **form owner**, not to the
+name alone — so a compiler interning group ids has to key on `(form, name)`, and radios with no
+form owner form their own group per name in tree scope.
+
+`:indeterminate` matched nothing; it is unreachable without script.
+
+## What box each form control gets from the UA sheet
+
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/control-metrics.html`,** every
+`type` HTML defines, read from `getComputedStyle` with nothing authored but the attribute. A 16px
+root and the platform default fonts.
+
+`font-size` is **13.3333px on every input type** and `font-family` is Arial — a control does not
+inherit the page's font, which is why an unstyled form looks nothing like the text around it. The
+date/time family gets `monospace` instead. `accent-color` computes to `auto` everywhere, so the
+blue is not readable from the DOM at all.
+
+| type | width × height | box-sizing | border | padding | margin |
+|---|---|---|---|---|---|
+| `hidden` | `display: none` | | | | |
+| `text` `tel` `url` `email` `password` `number` | 169 × 15 → **177 × 21** | content | 2px inset | 1px 2px | 0 |
+| `search` | 177 × 21 | **border** | 2px inset | 1px 2px | 0 |
+| `date` | 111.328 × 17.3281 → 116 × 21 | content | 2px inset | 0 1px | 0 |
+| `month` | 139.328 → 144 × 21 | content | 2px inset | 0 1px | 0 |
+| `week` | 131.328 → 136 × 21 | content | 2px inset | 0 1px | 0 |
+| `time` | 93 × 20 → 98 × 24 | content | 2px inset | 0 1px | 0 |
+| `datetime-local` | 183.328 → 188 × 21 | content | 2px inset | 0 1px | 0 |
+| `range` | 129 × 16 | content | none | 0 | 2px |
+| `color` | 50 × 27 | border | 1px solid | 1px 2px | 0 |
+| `checkbox` | **13 × 13** | border | none | 0 | 3px |
+| `radio` | **13 × 13** | border | none | 0 | 3px, `margin-bottom: 0` |
+| `file` | 253 × 21 | content | none | 0 | 0 |
+| `submit` | 57.5 × 21 | border | 2px outset | 1px 6px | 0 |
+| `reset` | 50.8281 × 21 | border | 2px outset | 1px 6px | 0 |
+| `button` | 16 × 21 | border | 2px outset | 1px 6px | 0 |
+| `image` | 0 × 0 | content | none | 0 | 0 |
+
+Backgrounds: transparent for `checkbox` `radio` `file` `image` `hidden`; white for the text and
+date families and for `range`; `#f0f0f0` for `color` `submit` `reset` `button`. `cursor` is `text`
+for the text family, `pointer` for `image`, `default` for everything else. An **unknown `type`
+falls back to `text`** metrics exactly.
+
+### A text field's width is a character count, and a value never changes it
+
+The default is `size="20"`, so the px figure is a function of the font and cannot be written into a
+sheet as a constant. Measured content width against `size`:
+
+| `size` | 1 | 2 | 5 | 10 | 20 | 40 |
+|---|---|---|---|---|---|---|
+| width | 36 | 43 | 64 | 99 | **169** | 309 |
+
+Exactly `29 + 7 × size` px at 13.3333px Arial — linear, with a 29px fixed part.
+
+**A 30-character value gives the same 169px as an empty field.** An input that grows or shrinks with
+its content is not what a browser does; the box is set by `size` and stays.
+
+### The other form elements
+
+| element | width × height | border | padding |
+|---|---|---|---|
+| `select` (empty) | 22 × 19 border-box | 1px | 0 |
+| `select[multiple]` | 17 × 66 | 1px | 0, radius 2px |
+| `textarea` | 162 × 30 → 168 × 36 | 1px | 2px |
+| `button` | 16 × 6 | 2px outset | 1px 6px |
+| `progress` | 120 × 12 | none | 0 |
+| `meter` | 60 × 12 | none | 0 |
+| `fieldset` | → 22 × 16 | 2px | 4.2px 9px, margin-inline 2px |
+| `label` `output` | `auto`, no box of their own | | |
+
+### The tick and the dot have no DOM, so they were read off pixels
+
+`probes/control-metrics.html` renders unchecked and checked checkbox and radio at `zoom: 8` for
+exactly this reason: a UA-drawn tick is not an element and `getComputedStyle` has nothing to say
+about it. At 13px, from the screenshot:
+
+- checkbox: ~2px corner radius, ~2px grey border unchecked; checked fills with the accent blue and
+  draws a white tick roughly 60% of the box.
+- radio: a full circle, ~1px grey border unchecked; checked draws a ~2px accent ring and a solid
+  centre dot roughly **45–50% of the box diameter** — a proportion, not a fixed size.
+
+These are proportions read off an image rather than numbers reported by an API, and they are
+recorded as approximate on purpose.

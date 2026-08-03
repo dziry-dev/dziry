@@ -1,0 +1,153 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>control-metrics</title>
+<style>
+  body{font:12px ui-monospace,monospace;padding:16px;margin:0;background:#fff}
+  #out{white-space:pre;line-height:1.5}
+  #bed{position:absolute;left:-4000px;top:0}
+  /* The zoomed strip is for the screenshot, not for the numbers — a UA-drawn tick or
+     dot has no DOM to measure, so its proportions have to be read off pixels. */
+  #zoom{display:grid;grid-template-columns:repeat(2,26px);gap:8px;zoom:8;margin:8px 0 8px 4px}
+</style>
+<h3>What box does each control get when nothing is styled, and how big is the part the UA draws inside it?</h3>
+
+<div id="zoom">
+  <input type="checkbox">
+  <input type="checkbox" checked>
+  <input type="radio">
+  <input type="radio" checked>
+</div>
+
+<div id="bed"></div>
+
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /** Every `type` HTML defines for `input`, in the order the spec lists them. */
+  const TYPES = [
+    "hidden", "text", "search", "tel", "url", "email", "password",
+    "date", "month", "week", "time", "datetime-local",
+    "number", "range", "color", "checkbox", "radio",
+    "file", "submit", "image", "reset", "button",
+  ];
+
+  const bed = document.getElementById("bed");
+
+  /**
+   * The properties that decide how much room a control takes and what shape it is.
+   *
+   * `width`/`height` are read from the *computed* style rather than from a rect, because
+   * the question is what the UA sheet says — a rect would also fold in whatever the
+   * containing block did. `offsetWidth` is reported beside them precisely so a
+   * disagreement between the two is visible rather than averaged away.
+   */
+  const PROPS = [
+    "display", "appearance", "width", "height", "box-sizing",
+    "border-top-width", "border-top-style", "border-radius",
+    "padding-top", "padding-right", "padding-bottom", "padding-left",
+    "margin-top", "margin-right", "margin-bottom", "margin-left",
+    "font-size", "font-family", "background-color", "color",
+    "accent-color", "caret-color", "cursor", "writing-mode",
+  ];
+
+  const read = (node) => {
+    bed.replaceChildren(node);
+    const cs = getComputedStyle(node);
+    const out = {};
+    for (const p of PROPS) out[p] = cs.getPropertyValue(p);
+    out["offsetWidth"] = node.offsetWidth + "px";
+    out["offsetHeight"] = node.offsetHeight + "px";
+    return out;
+  };
+
+  const input = (attrs) => {
+    const n = document.createElement("input");
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    return n;
+  };
+
+  /** One compact line per control: the numbers that differ between types are the point,
+   *  so the shared ones go in a separate block below rather than repeating 22 times. */
+  const SHORT = ["width", "height", "offsetWidth", "offsetHeight", "box-sizing",
+    "border-top-width", "border-radius", "padding-top", "padding-left", "margin-left", "appearance"];
+
+  log("=== input, by type — nothing styled, no attributes but `type` ===");
+  log("  " + "type".padEnd(15) + SHORT.map((p) => p.replace("border-top-width", "border").replace("offsetW", "offW").replace("offsetH", "offH").padEnd(11)).join(""));
+  const byType = {};
+  for (const t of TYPES) {
+    const m = read(input({ type: t }));
+    byType[t] = m;
+    log("  " + t.padEnd(15) + SHORT.map((p) => String(m[p]).padEnd(11)).join(""));
+  }
+
+  log("");
+  log("=== an unknown type falls back to which? ===");
+  const bogus = read(input({ type: "not-a-real-type" }));
+  log("  type=not-a-real-type  width=" + bogus.width + " height=" + bogus.height +
+    "  (text is " + byType.text.width + " x " + byType.text.height + ")");
+
+  log("");
+  log("=== what sets a text field's width ===");
+  log("  the default is a `size` of 20 characters, so this is the number a UA sheet cannot state in px");
+  for (const size of [1, 2, 5, 10, 20, 40]) {
+    const m = read(input({ type: "text", size: String(size) }));
+    log("  size=" + String(size).padEnd(4) + " width=" + String(m.width).padEnd(12) + " offsetWidth=" + m.offsetWidth);
+  }
+  log("  and with a value, which must not change it:");
+  const filled = input({ type: "text", value: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" });
+  log("  value=30 chars   width=" + read(filled).width);
+  const empty = input({ type: "text" });
+  log("  empty            width=" + read(empty).width);
+
+  log("");
+  log("=== the other form elements ===");
+  const others = {
+    "select": document.createElement("select"),
+    "select[multiple]": Object.assign(document.createElement("select"), { multiple: true }),
+    "textarea": document.createElement("textarea"),
+    "button": document.createElement("button"),
+    "progress": document.createElement("progress"),
+    "meter": document.createElement("meter"),
+    "fieldset": document.createElement("fieldset"),
+    "legend": document.createElement("legend"),
+    "label": document.createElement("label"),
+    "output": document.createElement("output"),
+  };
+  for (const [name, node] of Object.entries(others)) {
+    const m = read(node);
+    log("  " + name.padEnd(18) + SHORT.map((p) => String(m[p]).padEnd(11)).join(""));
+  }
+
+  log("");
+  log("=== properties that are the same across every input type ===");
+  const same = PROPS.filter((p) => !SHORT.includes(p) && TYPES.every((t) => byType[t][p] === byType.text[p]));
+  for (const p of same) log("  " + p.padEnd(20) + byType.text[p]);
+  log("");
+  log("=== and the ones that differ, spelled out ===");
+  for (const p of PROPS) {
+    if (SHORT.includes(p) || same.includes(p)) continue;
+    const groups = new Map();
+    for (const t of TYPES) {
+      const v = byType[t][p];
+      groups.set(v, (groups.get(v) ?? []).concat(t));
+    }
+    log("  " + p);
+    for (const [v, ts] of groups) log("      " + String(v).padEnd(28) + ts.join(" "));
+  }
+
+  log("");
+  log("=== the zoomed strip at the top of the page is unchecked/checked checkbox, then radio ===");
+  log("  at zoom 8, so the tick and the dot can be measured off the screenshot:");
+  log("    bun run probe control-metrics --shot control-metrics.png");
+  const strip = document.getElementById("zoom").getBoundingClientRect();
+  log("  strip rect: x=" + Math.round(strip.x) + " y=" + Math.round(strip.y) +
+    " w=" + Math.round(strip.width) + " h=" + Math.round(strip.height));
+  for (const node of document.getElementById("zoom").children) {
+    const r = node.getBoundingClientRect();
+    log("    " + (node.type + (node.checked ? "[checked]" : "")).padEnd(18) +
+      "x=" + Math.round(r.x) + " y=" + Math.round(r.y) +
+      " w=" + Math.round(r.width) + " h=" + Math.round(r.height));
+  }
+
+  report();
+</script>
