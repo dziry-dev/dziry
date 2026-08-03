@@ -28,7 +28,7 @@ import { loadStylesheet, SheetMap, StylesheetError, type CssSource } from "./sty
 import { buildRefIndex, resolveRefs, RefError, type RefSource } from "./resolve-refs.ts";
 import { compileVariants, findToggles, type VariantCompiled } from "./variant-compile.ts";
 import { toDocument } from "./jsx-runtime.ts";
-import { RouteError, scanWindows, type WindowDef } from "./routes.ts";
+import { emitRoutes, RouteError, scanWindows, type WindowDef } from "./routes.ts";
 import { withPage, withWindowRoute } from "./route.ts";
 import { configOf, routeSignalOf, WindowError } from "./window.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./window-tree.ts";
@@ -44,6 +44,17 @@ export const REGISTRY_FILE = "windows/windows.gen.ts";
 export const ENTRY_FILE = "windows/entry.gen.ts";
 /** The app thread, spawned by the entry. Holds the whole application. */
 export const WORKER_FILE = "windows/worker.gen.ts";
+
+/**
+ * Every window's routes as concrete paths, so navigation is typed.
+ *
+ * `emitRoutes` and `hrefUnion` were written, tested and then never wired: the only
+ * thing that produced this file was `bun run routes`, which nobody ran, so the file
+ * did not exist and `Href` typed nothing. Meanwhile the hosts' own comments say a
+ * dead link "is meant to be a *build* error" — and navigation took a bare `string`,
+ * so it was not one. Writing it here alongside the other three makes the union real.
+ */
+export const ROUTES_FILE = "windows/routes.gen.ts";
 
 export type CompileOptions = {
   /** The app's root — the directory holding `windows/`. */
@@ -537,6 +548,13 @@ export async function compileProject(options: CompileOptions): Promise<Compiled[
     await Bun.write(join(projectDir, REGISTRY_FILE), registrySource(all));
     await Bun.write(join(projectDir, ENTRY_FILE), entrySource());
     await Bun.write(join(projectDir, WORKER_FILE), workerSource());
+    // `typesFrom` is the package name rather than a relative path, because this
+    // lands in the *project* and resolves dziri the same way every other generated
+    // file there does.
+    await Bun.write(
+      join(projectDir, ROUTES_FILE),
+      emitRoutes(all, { from: "windows", typesFrom: PACKAGE }),
+    );
   }
 
   return compiled;

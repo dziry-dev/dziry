@@ -17,6 +17,7 @@
  * visible and honest rather than hidden behind something that does not work yet.
  */
 import { computed, signal } from "dziri";
+import type { Href } from "../routes.gen.ts";
 
 export const route = signal("/");
 
@@ -44,11 +45,29 @@ export const onNewProduct = computed(() => route === "products/new");
 export const onProductDetail = computed(() => route === "products/$id");
 
 /** The previous route, for `back()`. History is one entry deep, by decision. */
-let previous = "/";
+let previous: Href = "/";
 
-function go(path: string): void {
+/**
+ * Navigate, with the destination checked against the routes that exist.
+ *
+ * `Href` is generated from the filesystem scan, so `go("prodcuts/new")` is a build
+ * error rather than a click that silently does nothing. That was the intent all
+ * along — the host ignores an unknown path precisely because "a dead link is meant
+ * to be a *build* error" — but the union was generated into a file nothing wrote and
+ * this took a bare `string`.
+ *
+ * A parameter route is `products/${string}`, so a concrete `products/1` checks and a
+ * misspelt segment does not.
+ */
+function go(path: Href): void {
   if (path === route) return;
-  previous = route;
+  // `Signal<Widen<T>>` widens every string literal to `string`, deliberately — a
+  // signal of `"/"` that could never hold another path would be useless. So the
+  // signal's type cannot carry `Href`, and reading the current route back out gives
+  // `string`. The cast is sound because `go` is the only writer and it takes `Href`.
+  // The version of this that needs no cast is a framework `navigate()` owning both
+  // the signal and the union, which is where routing is headed.
+  previous = route as Href;
   route.set(path);
 }
 

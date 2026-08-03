@@ -10,8 +10,9 @@
  * derived from file paths, so this runs and is checkable before a single page has
  * been compiled into nodes.
  */
-import { join, relative, resolve, dirname } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { RouteError, scanWindows, emitRoutes } from "./compiler/routes.ts";
+import { PACKAGE } from "./compiler/compile.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2);
@@ -65,10 +66,17 @@ if (flags.has("--list")) {
   process.exit(0);
 }
 
-const typesFrom = relative(dirname(outPath), join(ROOT, "src")).replaceAll("\\", "/");
+/**
+ * The package name, not a path relative to the output.
+ *
+ * `compileProject` writes this same file on every compile, and a relative `../src`
+ * only resolves in *this* repository — in a scaffolded project there is no `src/` to
+ * point at. Both writers naming the package means running this after a compile
+ * rewrites the file identically instead of quietly making it unresolvable.
+ */
 const source = emitRoutes(windows, {
   from: rel(join(projectDir, "windows")),
-  typesFrom: typesFrom || ".",
+  typesFrom: PACKAGE,
 });
 
 await Bun.write(outPath, source);
