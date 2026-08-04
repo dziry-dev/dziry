@@ -338,22 +338,88 @@ enum Step {
 /// decomposed storage can express — the compiler refuses a list that needs
 /// another. Mirrors `composed()` in `css.test.ts`, which pins this exact sequence
 /// against the matrices Chromium produced.
-fn transform_of(tables: &Tables, blend: &Blend, bounds: [f32; 4]) -> Option<Matrix> {
+/// The style columns the per-node transform and opacity reads need, resolved once.
+///
+/// `Tables::f32s` looks like a field access and is not: it resolves a span plan
+/// through two dependent loads, matches on which arena the span lives in,
+/// bounds-checks a byte range and casts it to a slice. Cheap once per frame; ten
+/// times per node it was most of what paint cost. Deciding that a node has *no*
+/// transform — the answer for very nearly every node — took nine of those resolutions
+/// before this existed, and `paint` was already hoisting the node table's columns the
+/// same way twenty lines above where it wasn't hoisting these.
+///
+/// Measured at 8000 nodes: paint 0.729 -> 0.560 ms/frame, and 0.195 -> 0.166 at 1000.
+/// Worth being exact that this is a quarter of the cost and not all of it — paint is
+/// still ~76% above the recorded baseline at 8000 nodes, so something else in the
+/// commits since it is spending the rest.
+struct StyleCols<'a> {
+    opacity: &'a [f32],
+    translate_x: &'a [f32],
+    translate_y: &'a [f32],
+    translate_pct_x: &'a [f32],
+    translate_pct_y: &'a [f32],
+    rotate: &'a [f32],
+    scale_x: &'a [f32],
+    scale_y: &'a [f32],
+    skew_x: &'a [f32],
+    skew_y: &'a [f32],
+    origin_pct_x: &'a [f32],
+    origin_pct_y: &'a [f32],
+    origin_x: &'a [f32],
+    origin_y: &'a [f32],
+}
+
+impl<'a> StyleCols<'a> {
+    fn of(tables: &'a Tables) -> Self {
+        use protocol::styles as f;
+        let c = |field: usize| tables.f32s(STYLES, field);
+        Self {
+            opacity: c(f::OPACITY),
+            translate_x: c(f::TRANSLATE_X),
+            translate_y: c(f::TRANSLATE_Y),
+            translate_pct_x: c(f::TRANSLATE_PERCENT_X),
+            translate_pct_y: c(f::TRANSLATE_PERCENT_Y),
+            rotate: c(f::ROTATE),
+            scale_x: c(f::SCALE_X),
+            scale_y: c(f::SCALE_Y),
+            skew_x: c(f::SKEW_X),
+            skew_y: c(f::SKEW_Y),
+            origin_pct_x: c(f::TRANSFORM_ORIGIN_PERCENT_X),
+            origin_pct_y: c(f::TRANSFORM_ORIGIN_PERCENT_Y),
+            origin_x: c(f::TRANSFORM_ORIGIN_X),
+            origin_y: c(f::TRANSFORM_ORIGIN_Y),
+        }
+    }
+}
+
+fn transform_of(cols: &StyleCols, blend: &Blend, bounds: [f32; 4]) -> Option<Matrix> {
     use protocol::styles as f;
     // Every one of the fourteen fields goes through the blend, which is what makes a
     // transform transition work at all: the whole point of storing it decomposed is
     // that the *scalars* interpolate. `rotate(0)` and `rotate(360deg)` have identical
     // matrices, so composing first and interpolating after could not move.
-    let g = |field: usize, dflt: f32| -> f32 { blend.f32(tables, field, dflt) };
+    //
+    // The field index is still passed alongside the column because the blend needs it
+    // to answer whether *this* field is one the mask moves.
+    let g = |column: &[f32], field: usize, dflt: f32| -> f32 { blend.f32_at(column, field, dflt) };
 
-    let (tx, ty) = (g(f::TRANSLATE_X, 0.0), g(f::TRANSLATE_Y, 0.0));
-    let (px, py) = (
-        g(f::TRANSLATE_PERCENT_X, 0.0),
-        g(f::TRANSLATE_PERCENT_Y, 0.0),
+    let (tx, ty) = (
+        g(cols.translate_x, f::TRANSLATE_X, 0.0),
+        g(cols.translate_y, f::TRANSLATE_Y, 0.0),
     );
-    let rotate = g(f::ROTATE, 0.0);
-    let (sx, sy) = (g(f::SCALE_X, 1.0), g(f::SCALE_Y, 1.0));
-    let (kx, ky) = (g(f::SKEW_X, 0.0), g(f::SKEW_Y, 0.0));
+    let (px, py) = (
+        g(cols.translate_pct_x, f::TRANSLATE_PERCENT_X, 0.0),
+        g(cols.translate_pct_y, f::TRANSLATE_PERCENT_Y, 0.0),
+    );
+    let rotate = g(cols.rotate, f::ROTATE, 0.0);
+    let (sx, sy) = (
+        g(cols.scale_x, f::SCALE_X, 1.0),
+        g(cols.scale_y, f::SCALE_Y, 1.0),
+    );
+    let (kx, ky) = (
+        g(cols.skew_x, f::SKEW_X, 0.0),
+        g(cols.skew_y, f::SKEW_Y, 0.0),
+    );
 
     // The early-out that keeps this free for the overwhelming majority of nodes.
     // Checked before the origin is read, because the origin is meaningless — and
@@ -382,8 +448,12 @@ fn transform_of(tables: &Tables, blend: &Blend, bounds: [f32; 4]) -> Option<Matr
     // The origin is relative to the box, so it has to be offset by where the box
     // actually is: the matrix is composed in the same space the node is painted
     // in, which is layout coordinates rather than node-local ones.
-    let ox = x + g(f::TRANSFORM_ORIGIN_PERCENT_X, 0.5) * w + g(f::TRANSFORM_ORIGIN_X, 0.0);
-    let oy = y + g(f::TRANSFORM_ORIGIN_PERCENT_Y, 0.5) * h + g(f::TRANSFORM_ORIGIN_Y, 0.0);
+    let ox = x
+        + g(cols.origin_pct_x, f::TRANSFORM_ORIGIN_PERCENT_X, 0.5) * w
+        + g(cols.origin_x, f::TRANSFORM_ORIGIN_X, 0.0);
+    let oy = y
+        + g(cols.origin_pct_y, f::TRANSFORM_ORIGIN_PERCENT_Y, 0.5) * h
+        + g(cols.origin_y, f::TRANSFORM_ORIGIN_Y, 0.0);
 
     // Move the origin to zero, apply, move it back — which is what makes
     // `transform-origin` mean anything at all.
@@ -421,8 +491,8 @@ fn transform_of(tables: &Tables, blend: &Blend, bounds: [f32; 4]) -> Option<Matr
 /// and its subtree composite as one, so overlapping children do not show through
 /// each other — and the only way to get that is a layer, which is expensive
 /// enough that it must not be paid by every node that never asked for it.
-fn opacity_of(tables: &Tables, blend: &Blend) -> Option<f32> {
-    let a = blend.f32(tables, protocol::styles::OPACITY, 1.0);
+fn opacity_of(cols: &StyleCols, blend: &Blend) -> Option<f32> {
+    let a = blend.f32_at(cols.opacity, protocol::styles::OPACITY, 1.0);
     // NaN fails every comparison, so a nonsense value falls through to opaque
     // rather than making the subtree invisible.
     if a >= 1.0 || a.is_nan() {
@@ -917,6 +987,9 @@ impl Painter {
         let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
         let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
         let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
+        // For the same reason as the three above, and it was the one missing: the
+        // per-node transform and opacity reads are fourteen more style columns.
+        let cols = StyleCols::of(tables);
 
         // What is visible on screen, asked once per frame rather than per node:
         // `local_clip_bounds` inverts the canvas matrix, and this loop runs over
@@ -1001,8 +1074,8 @@ impl Painter {
             // Both are paint-only, which is measured rather than assumed: neither
             // moves a sibling or changes a parent's height, so layout has already
             // finished and its answer stands.
-            let matrix = transform_of(tables, &blend, geometry.bounds[node]);
-            let alpha = opacity_of(tables, &blend);
+            let matrix = transform_of(&cols, &blend, geometry.bounds[node]);
+            let alpha = opacity_of(&cols, &blend);
 
             if matrix.is_some() || alpha.is_some() {
                 match alpha {
@@ -1758,6 +1831,7 @@ pub fn hit_test(
     let flags = tables.u8s(NODES, protocol::nodes::FLAGS);
     let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
     let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
+    let cols = StyleCols::of(tables);
 
     let mut hit = -1i32;
     // Each entry carries how far its ancestors have scrolled, and the pointer as
@@ -1802,7 +1876,7 @@ pub fn hit_test(
         // where it is, which is worst at exactly the moment the user is aiming at
         // a button that is still growing under the cursor.
         let blend = painter.blend_for(tables, node, state);
-        if let Some(m) = transform_of(tables, &blend, [x, y, w, h]) {
+        if let Some(m) = transform_of(&cols, &blend, [x, y, w, h]) {
             match m.invert() {
                 Some(inv) => {
                     let p = inv.map_point((px, py));
@@ -2223,7 +2297,7 @@ mod tests {
         t.set_f32(s, protocol::styles::SCALE_Y, 0, 3.0);
         t.commit();
         assert_matrix(
-            transform_of(&t, &Blend::solid(0), bounds).expect("not the identity"),
+            transform_of(&StyleCols::of(&t), &Blend::solid(0), bounds).expect("not the identity"),
             [1.73205, 1.0, -1.5, 2.59808, 10.0, 20.0],
             "translate rotate scale",
         );
@@ -2236,7 +2310,7 @@ mod tests {
         t.set_f32(s, protocol::styles::SKEW_Y, 0, 5.0);
         t.commit();
         assert_matrix(
-            transform_of(&t, &Blend::solid(0), bounds).expect("not the identity"),
+            transform_of(&StyleCols::of(&t), &Blend::solid(0), bounds).expect("not the identity"),
             [1.01543, 0.0874887, 0.176327, 1.0, 0.0, 0.0],
             "skewX then skewY",
         );
@@ -2253,7 +2327,7 @@ mod tests {
         t.set_f32(s, protocol::styles::SCALE_Y, 0, 3.0);
         t.commit();
         assert_matrix(
-            transform_of(&t, &Blend::solid(0), bounds).expect("not the identity"),
+            transform_of(&StyleCols::of(&t), &Blend::solid(0), bounds).expect("not the identity"),
             [1.67128, 1.16696, -1.04189, 2.86257, 10.0, 20.0],
             "translate rotate skew scale",
         );
@@ -2267,7 +2341,12 @@ mod tests {
         let mut t = one_style();
         t.commit();
         assert!(
-            transform_of(&t, &Blend::solid(0), [0.0, 0.0, 100.0, 50.0]).is_none(),
+            transform_of(
+                &StyleCols::of(&t),
+                &Blend::solid(0),
+                [0.0, 0.0, 100.0, 50.0]
+            )
+            .is_none(),
             "a node with no transform must not pay for a matrix"
         );
 
@@ -2277,14 +2356,18 @@ mod tests {
         t.set_f32(s, protocol::styles::TRANSLATE_PERCENT_X, 0, 0.5);
         t.set_f32(s, protocol::styles::TRANSLATE_PERCENT_Y, 0, 1.0);
         t.commit();
-        let m =
-            transform_of(&t, &Blend::solid(0), [0.0, 0.0, 100.0, 50.0]).expect("not the identity");
+        let m = transform_of(
+            &StyleCols::of(&t),
+            &Blend::solid(0),
+            [0.0, 0.0, 100.0, 50.0],
+        )
+        .expect("not the identity");
         assert_matrix(m, [1.0, 0.0, 0.0, 1.0, 50.0, 50.0], "percentage translate");
 
         // The same declaration on a different box is a different matrix, which is
         // the whole point of resolving it here.
-        let m =
-            transform_of(&t, &Blend::solid(0), [0.0, 0.0, 40.0, 10.0]).expect("not the identity");
+        let m = transform_of(&StyleCols::of(&t), &Blend::solid(0), [0.0, 0.0, 40.0, 10.0])
+            .expect("not the identity");
         assert_matrix(
             m,
             [1.0, 0.0, 0.0, 1.0, 20.0, 10.0],
@@ -2303,8 +2386,12 @@ mod tests {
         t.set_f32(s, protocol::styles::ROTATE, 0, 90.0);
         t.commit();
 
-        let m =
-            transform_of(&t, &Blend::solid(0), [0.0, 0.0, 100.0, 50.0]).expect("not the identity");
+        let m = transform_of(
+            &StyleCols::of(&t),
+            &Blend::solid(0),
+            [0.0, 0.0, 100.0, 50.0],
+        )
+        .expect("not the identity");
         let centre = m.map_point((50.0, 25.0));
         assert!(
             (centre.x - 50.0).abs() < 1e-3 && (centre.y - 25.0).abs() < 1e-3,
@@ -2327,17 +2414,17 @@ mod tests {
 
         let mut t = one_style();
         t.commit();
-        assert_eq!(opacity_of(&t, &Blend::solid(0)), None);
+        assert_eq!(opacity_of(&StyleCols::of(&t), &Blend::solid(0)), None);
 
         let mut t = one_style();
         t.set_f32(s, protocol::styles::OPACITY, 0, 0.25);
         t.commit();
-        assert_eq!(opacity_of(&t, &Blend::solid(0)), Some(0.25));
+        assert_eq!(opacity_of(&StyleCols::of(&t), &Blend::solid(0)), Some(0.25));
 
         // NaN must read as opaque rather than making the subtree vanish.
         let mut t = one_style();
         t.set_f32(s, protocol::styles::OPACITY, 0, f32::NAN);
         t.commit();
-        assert_eq!(opacity_of(&t, &Blend::solid(0)), None);
+        assert_eq!(opacity_of(&StyleCols::of(&t), &Blend::solid(0)), None);
     }
 }

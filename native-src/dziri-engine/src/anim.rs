@@ -231,7 +231,17 @@ impl Blend {
 
     /// An `f32` field, interpolated when this blend moves it.
     pub fn f32(&self, tables: &Tables, field: usize, dflt: f32) -> f32 {
-        let column = tables.f32s(STYLES, field);
+        self.f32_at(tables.f32s(STYLES, field), field, dflt)
+    }
+
+    /// The same, from a column the caller already resolved.
+    ///
+    /// `Tables::f32s` is not a field access — it resolves a span plan through two
+    /// dependent loads, matches the arena, bounds-checks a byte range and casts it —
+    /// so a caller reading many fields off one node should pay that once per column
+    /// per frame rather than once per field per node. `paint` does exactly that for
+    /// the node table already; this is what lets it do the same for the style table.
+    pub fn f32_at(&self, column: &[f32], field: usize, dflt: f32) -> f32 {
         let to = column.get(self.to).copied().unwrap_or(dflt);
         if !self.moves(field) {
             return to;
