@@ -6,7 +6,7 @@
 // 0 text bindings, 0 handlers.
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
+import type { ControlTable, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
 import type { EditableRef } from "dziri/runtime/bindings.ts";
 import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
 import type { StylePatchRef } from "dziri/runtime/patches.ts";
@@ -39,6 +39,8 @@ export const styles = {
   justify: new Uint8Array(6),
   align: new Uint8Array(6).fill(255),
   alignSelf: new Uint8Array(6).fill(255),
+  justifyItems: new Uint8Array(6).fill(255),
+  justifySelf: new Uint8Array(6).fill(255),
   grow: new Float32Array(6),
   shrink: new Float32Array(6).fill(1),
   basis: new Float32Array(6).fill(NaN),
@@ -50,13 +52,11 @@ export const styles = {
   gridColSpan: new Int16Array(6),
   gridRowStart: new Int16Array(6),
   gridRowSpan: new Int16Array(6),
-  justifyItems: new Uint8Array(6).fill(255),
-  justifySelf: new Uint8Array(6).fill(255),
   width: new Float32Array(6).fill(NaN),
   height: new Float32Array(6).fill(NaN),
   minW: new Float32Array(6).fill(NaN),
-  maxW: new Float32Array(6).fill(Infinity),
   minH: new Float32Array(6).fill(NaN),
+  maxW: new Float32Array(6).fill(Infinity),
   maxH: new Float32Array(6).fill(Infinity),
   aspectRatio: new Float32Array(6).fill(NaN),
   position: new Uint8Array(6),
@@ -102,6 +102,7 @@ export const nodes = {
   nextSibling: new Int32Array([-1,6,4,-1,-1,-1,-1,-1,-1]),
   list: new Int16Array(9).fill(-1),
   hidden: new Uint8Array(9),
+  activates: new Int32Array(9).fill(-1),
 } satisfies NodeTable;
 
 /**
@@ -227,5 +228,21 @@ export const keyframes = {
   easeC: new Float32Array([]),
   easeD: new Float32Array([]),
 } satisfies KeyframeTable;
+
+/**
+ * Form controls, sparse and sorted by node.
+ *
+ * The flags column is the state each control was *authored* in, and is read exactly
+ * once — to seed the engine's own state. The engine owns it after that, so this
+ * table stays constant while a checkbox is being ticked and a republish caused by
+ * some unrelated signal cannot un-tick it.
+ */
+export const controls = {
+  count: 0,
+  node: new Int32Array([]),
+  kind: new Uint8Array([]),
+  group: new Int32Array([]),
+  flags: new Uint8Array([]),
+} satisfies ControlTable;
 
 export const root: number = 0;
