@@ -41,6 +41,7 @@ import {
   type ComputedStyle,
   type StyleField,
 } from "../ir.ts";
+import type { KeyframeBlock } from "./css.ts";
 import {
   animationFrom,
   EMPTY_VARS,
@@ -50,11 +51,10 @@ import {
   transitionMask,
   type AnimationSpec,
   type Curve,
-  type KeyframeBlock,
   type RegisteredProperty,
   type TransitionSpec,
   type VarEnv,
-} from "./css.ts";
+} from "./values.ts";
 import { expandDeclaration } from "./properties.ts";
 
 const DISPLAY_VALUES: Record<string, number> = {

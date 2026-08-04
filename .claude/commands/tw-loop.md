@@ -109,19 +109,24 @@ read the ranked list with masks removed: `bun run tailwind-coverage --what-if "c
 
 ## Hard constraints
 
-- **Never add a `case` that does not implement the property.** `dziriSupported()`
-  (`scripts/tailwind-coverage.ts:40-58`) detects support by scanning for `case "name":` inside
-  `expandDeclaration()`. An empty case, or one that parses a value and drops it, raises the
-  coverage number while changing nothing on screen. This is the one way to make this tool lie, it
-  is a single line, and it is never acceptable.
+- **Never add a row that does not implement the property.** `dziriSupported()`
+  (`scripts/tailwind-coverage.ts:51-59`) detects support by reading `Object.keys(PROPERTIES)` from
+  `src/compiler/properties.ts`. A row whose `parse` drops the value, or a `handledByCaller` entry
+  added for a property no caller actually expands, raises the coverage number while changing
+  nothing on screen. This is the one way to make this tool lie, it is a single line, and it is
+  never acceptable.
+
+  (It used to scan for `case "name":` inside `expandDeclaration()`, which made that function's
+  *indentation* part of its interface — `scrollbar-width`'s nested value switch leaked `auto`,
+  `thin` and `none` in as candidate properties. The table replaced the switch and the scrape.)
 - **Check what the value parsers do with the values Tailwind actually emits, before adding the
-  `case`.** Support is measured per *property*, but `parseLength` and `parseColor` reject whole
-  classes of *value*. Adding a `case` for a property whose values dziri cannot parse converts
-  "warned and ignored" (`css.ts:1705`) into a fatal build error, because `compile.ts:290` rethrows
-  `CssError` — and the coverage number goes *up* while the class goes from silently inert to
-  breaking the build. `parseLength` throws on every percentage (`css.ts:1044`), which is why
-  `inset` is not the free +125 it looks like: `inset-1/2` is `inset: 50%`. Run the value through
-  the parser in a scratch script first.
+  row.** Support is measured per *property*, but `parseLength` and `parseColor` reject whole
+  classes of *value*. Adding a row for a property whose values dziri cannot parse converts
+  "warned and ignored" (`properties.ts:1177`) into a fatal build error, because
+  `src/compile.ts:111` rethrows `CssError` — and the coverage number goes *up* while the class
+  goes from silently inert to breaking the build. `parseLength` throws on every percentage
+  (`values.ts:618`), which is why `inset` is not the free +125 it looks like: `inset-1/2` is
+  `inset: 50%`. Run the value through the parser in a scratch script first.
 - **Never delete or widen a `VALUE_FEATURES` entry to move the number.** When `var()` and foldable
   `calc()` landed, the `calc()` entry was *narrowed* to the part that genuinely cannot be folded
   (`scripts/tailwind-coverage.ts:145-152`) rather than removed. The number moves because the

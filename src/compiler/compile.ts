@@ -27,16 +27,8 @@ import { isItemSentinel, ItemExpressionError } from "./item-path.ts";
 import { isParamSentinel, ParamExpressionError } from "./route-args.ts";
 import { allLocals } from "./reactive-runtime.ts";
 import { type VariantCompiled } from "./variant-compile.ts";
-import {
-  EMPTY_VARS,
-  extendVarEnv,
-  parseCss,
-  Origin,
-  substituteVars,
-  type Pseudo,
-  type PseudoElement,
-  type VarEnv,
-} from "./css.ts";
+import { parseCss, Origin, type Pseudo, type PseudoElement } from "./css.ts";
+import { EMPTY_VARS, extendVarEnv, substituteVars, type VarEnv } from "./values.ts";
 import { parseContent, parseInlineStyle } from "./properties.ts";
 import { UA_SHEET } from "./ua-sheet.ts";
 import { uaChildren } from "./ua-structure.ts";

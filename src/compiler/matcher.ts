@@ -21,9 +21,9 @@
 import { Predicate } from "../ir.ts";
 import type { Element } from "./html.ts";
 import { uaChildren } from "./ua-structure.ts";
+import { warnOnce } from "./diagnostics.ts";
 import {
   compareCascade,
-  warnOnce,
   type AttrSel,
   type Compound,
   type MediaCond,

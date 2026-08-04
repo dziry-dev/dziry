@@ -27,7 +27,7 @@
  * reproduces `@tailwindcss/cli`'s output for `windows/main` byte for byte.
  */
 import { dirname, isAbsolute, resolve } from "node:path";
-import { CssError, formatCssError } from "./css.ts";
+import { CssError, formatCssError } from "./diagnostics.ts";
 
 /** One stylesheet's flattened text, and where it came from. */
 export type CssSource = {

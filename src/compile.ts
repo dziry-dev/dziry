@@ -17,7 +17,7 @@ import { join, relative, extname, resolve, dirname, isAbsolute } from "node:path
 import { pathToFileURL } from "node:url";
 import { existsSync } from "node:fs";
 import { compileTree, emit, dump } from "./compiler/compile.ts";
-import { CssError } from "./compiler/css.ts";
+import { CssError } from "./compiler/diagnostics.ts";
 import { installCssGraph, stylesheetsFor } from "./compiler/css-imports.ts";
 import { loadStylesheet, SheetMap, type CssSource } from "./compiler/stylesheet.ts";
 import { extractStyleElements } from "./compiler/style-element.ts";

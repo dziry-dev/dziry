@@ -40,15 +40,14 @@ import {
   type StyleField,
 } from "../ir.ts";
 import {
-  CssError,
   lengthPercent,
   parseAngle,
   parseColor,
   parseLength,
   splitTopLevel,
   splitTopLevelCommas,
-  warnOnce,
-} from "./css.ts";
+} from "./values.ts";
+import { CssError, warnOnce } from "./diagnostics.ts";
 
 /**
  * `<compat-auto>` — `appearance` keywords that are all synonyms for `auto`.

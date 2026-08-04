@@ -9,22 +9,20 @@
 import { expect, test } from "bun:test";
 
 import { compile, toCompiledUi } from "./compile.ts";
+import { parseCss, parseSelector } from "./css.ts";
 import {
   animationFrom,
-  CssError,
   extendVarEnv,
-  formatCssError,
   parseColor,
-  parseCss,
   parseEasing,
   parseLength,
-  parseSelector,
   parseTime,
   substituteVars,
   transitionFrom,
   transitionMask,
-} from "./css.ts";
+} from "./values.ts";
 import { expandDeclaration, parseContent } from "./properties.ts";
+import { CssError, formatCssError } from "./diagnostics.ts";
 import { Easing, StepPosition } from "../ir.ts";
 import { ANIM_ALL, ANIM_BIT } from "../protocol/generated.ts";
 
@@ -664,7 +662,7 @@ test("custom property names keep their case, unlike every other property", () =>
 });
 
 test("substituteVars handles fallbacks, nesting and cycles", async () => {
-  const { substituteVars } = await import("./css.ts");
+  const { substituteVars } = await import("./values.ts");
   const env = new Map([
     ["--a", "4px"],
     ["--b", "var(--a)"],

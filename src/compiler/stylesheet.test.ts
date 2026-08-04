@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { loadStylesheet, usesTailwind, SheetMap, StylesheetError } from "./stylesheet.ts";
 import { extractStyleElements } from "./style-element.ts";
 import { parseHtml, type Element } from "./html.ts";
-import { CssError } from "./css.ts";
+import { CssError } from "./diagnostics.ts";
 
 const ROOT = process.cwd();
 

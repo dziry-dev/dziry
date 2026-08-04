@@ -22,7 +22,7 @@ import { join, relative, dirname, isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { existsSync, readdirSync } from "node:fs";
 import { compileTree, emit, dump, PACKAGE, type EmittedRouting } from "./compile.ts";
-import { CssError } from "./css.ts";
+import { CssError } from "./diagnostics.ts";
 import { installCssGraph, stylesheetsFor } from "./css-imports.ts";
 import { loadStylesheet, SheetMap, StylesheetError, type CssSource } from "./stylesheet.ts";
 import { buildRefIndex, resolveRefs, RefError, type RefSource } from "./resolve-refs.ts";
