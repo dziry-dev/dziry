@@ -25,7 +25,7 @@
 import cssProperties from "mdn-data/css/properties.json";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { PROPERTIES } from "../src/compiler/css.ts";
+import { PROPERTIES } from "../src/compiler/properties.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2);

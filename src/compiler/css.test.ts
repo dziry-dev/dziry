@@ -12,11 +12,9 @@ import { compile, toCompiledUi } from "./compile.ts";
 import {
   animationFrom,
   CssError,
-  expandDeclaration,
   extendVarEnv,
   formatCssError,
   parseColor,
-  parseContent,
   parseCss,
   parseEasing,
   parseLength,
@@ -26,6 +24,7 @@ import {
   transitionFrom,
   transitionMask,
 } from "./css.ts";
+import { expandDeclaration, parseContent } from "./properties.ts";
 import { Easing, StepPosition } from "../ir.ts";
 import { ANIM_ALL, ANIM_BIT } from "../protocol/generated.ts";
 

@@ -44,7 +44,6 @@ import {
 import {
   animationFrom,
   EMPTY_VARS,
-  expandDeclaration,
   parseEasing,
   substituteVars,
   transitionFrom,
@@ -56,6 +55,7 @@ import {
   type TransitionSpec,
   type VarEnv,
 } from "./css.ts";
+import { expandDeclaration } from "./properties.ts";
 
 const DISPLAY_VALUES: Record<string, number> = {
   flex: Display.FLEX,

@@ -20,7 +20,8 @@
 import { readFile, writeFile, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import cssProperties from "mdn-data/css/properties.json";
-import { CssError, parseSelector, PROPERTIES, splitSelectorList } from "../src/compiler/css.ts";
+import { CssError, parseSelector, splitSelectorList } from "../src/compiler/css.ts";
+import { PROPERTIES } from "../src/compiler/properties.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const TMP = join(ROOT, ".tw-tmp");

@@ -32,13 +32,12 @@ import {
   extendVarEnv,
   parseCss,
   Origin,
-  parseContent,
-  parseInlineStyle,
   substituteVars,
   type Pseudo,
   type PseudoElement,
   type VarEnv,
 } from "./css.ts";
+import { parseContent, parseInlineStyle } from "./properties.ts";
 import { UA_SHEET } from "./ua-sheet.ts";
 import { uaChildren } from "./ua-structure.ts";
 import {
