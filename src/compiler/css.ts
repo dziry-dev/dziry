@@ -1789,6 +1789,16 @@ export function splitTopLevel(value: string): string[] {
  */
 export type VarEnv = ReadonlyMap<string, string>;
 
+/**
+ * The environment at the root, before any `--*` declaration has been seen.
+ *
+ * Here rather than in a compiler module because both of them want it — the cascade
+ * takes it as a default and the tree walk passes it as the root's parent environment
+ * — and a shared empty value belongs beside the type it is an instance of rather than
+ * in whichever caller happened to need it first.
+ */
+export const EMPTY_VARS: VarEnv = new Map<string, string>();
+
 /** How deep `var()` referring to `var()` may go before it is called a cycle. */
 const VAR_DEPTH_LIMIT = 32;
 

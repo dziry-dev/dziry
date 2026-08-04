@@ -26,12 +26,8 @@ import {
   type ComputedStyle,
   type StyleField,
 } from "../ir.ts";
-import {
-  compileTree,
-  type BuiltKeyframe,
-  type BuiltTween,
-  type CompileResult,
-} from "./compile.ts";
+import { compileTree, type CompileResult } from "./compile.ts";
+import type { BuiltKeyframe, BuiltTween } from "./computed.ts";
 import type { Element, Node } from "./html.ts";
 
 /** A conditional class discovered in the tree. */
