@@ -44,6 +44,8 @@ import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { SCENARIOS } from "./lib/scenarios.ts";
+import { compileSnippet } from "../src/compiler/single.ts";
+import { emit } from "../src/compiler/compile.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const BASE = join(ROOT, ".baseline");
@@ -167,24 +169,26 @@ async function emitArtifacts(): Promise<string[]> {
   }
   names.push("window-main");
 
+  // The fixture cases compile in this process. `.html` only, which is what they all
+  // are — the JSX front-end has to `import()` its input and is a driver rather than a
+  // function, so `compileSnippet` deliberately does not cover it.
   const cases = join(ROOT, "characterize", "cases");
   if (existsSync(cases)) {
     for (const f of (await readdir(cases)).sort()) {
-      if (!f.endsWith(".html") && !f.endsWith(".tsx") && !f.endsWith(".jsx")) continue;
-      const name = f.replace(/\.(html|tsx|jsx)$/, "");
-      const css = existsSync(join(cases, `${name}.css`))
+      if (!f.endsWith(".html")) continue;
+      const name = f.replace(/\.html$/, "");
+      const cssPath = existsSync(join(cases, `${name}.css`))
         ? join(cases, `${name}.css`)
         : join(cases, "_empty.css");
-      const out = join(into, `${name}.gen.ts`);
-      const p = Bun.spawn(["bun", "run", "src/compile.ts", join(cases, f), css, "-o", out], {
-        cwd: ROOT,
-        stdout: "pipe",
-        stderr: "pipe",
+      const { result } = compileSnippet({
+        html: await readFile(join(cases, f), "utf8"),
+        css: existsSync(cssPath) ? await readFile(cssPath, "utf8") : "",
+        label: `characterize/cases/${f}`,
       });
-      if ((await p.exited) !== 0) {
-        console.log(`FAILED to emit ${name}:\n` + (await new Response(p.stderr).text()).trim());
-        process.exit(1);
-      }
+      await writeFile(
+        join(into, `${name}.gen.ts`),
+        emit(result, { html: `characterize/cases/${f}`, css: `characterize/cases/${name}.css` }),
+      );
       names.push(name);
     }
   }

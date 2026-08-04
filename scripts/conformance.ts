@@ -22,10 +22,10 @@
  * incidental plumbing — and each is deliberately strict rather than forgiving,
  * because a lenient normaliser turns a real bug into a pass.
  */
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromeSession } from "./cdp.ts";
+import { compileSnippet } from "../src/compiler/single.ts";
+import { toCompiledUi } from "../src/compiler/compile.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2);
@@ -285,25 +285,18 @@ const sheet = (decl: string) =>
   `.probe { ${decl} }\n`;
 
 // ── dziri side ───────────────────────────────────────────────────────────────
-async function dziriValue(dir: string, c: Check, i: number): Promise<number | null> {
-  const html = join(dir, `c${i}.html`);
-  const css = join(dir, `c${i}.css`);
-  const out = join(dir, `c${i}.gen.ts`);
-  await writeFile(html, `<body><div class="probe">x</div></body>`);
-  await writeFile(css, sheet(c.decl));
-
-  const proc = Bun.spawn(["bun", "run", "src/compile.ts", html, css, "-o", out], {
-    cwd: ROOT,
-    stdout: "ignore",
-    stderr: "pipe",
+function dziriValue(c: Check, i: number): number | null {
+  const { result } = compileSnippet({
+    html: `<body><div class="probe">x</div></body>`,
+    css: sheet(c.decl),
+    label: `check ${i}`,
   });
-  if ((await proc.exited) !== 0) throw new Error((await new Response(proc.stderr).text()).trim().split("\n")[0]);
+  const ui = toCompiledUi(result);
 
-  const mod = await import(`${out}?t=${Date.now()}`);
   // The probe is the only element inside <body>, so it is node 1 (0 is body).
-  const slot = mod.nodes.style[1];
-  const arr = mod.styles[c.field];
-  if (!arr) throw new Error(`no field "${c.field}" in the emitted style table`);
+  const slot = ui.nodes.style[1]!;
+  const arr = (ui.styles as unknown as Record<string, ArrayLike<number> | undefined>)[c.field];
+  if (!arr) throw new Error(`no field "${c.field}" in the style table`);
   return arr[slot] ?? null;
 }
 
@@ -361,8 +354,10 @@ function normalise(c: Check, chrome: string, dziri: number): [string, string] {
   }
 }
 
-const dir = await mkdtemp(join(tmpdir(), "dziri-conf-"));
-// No server needed here: each case is a single rule in one sheet, so inline
+// No temp directory: the dziri side compiles in this process now, so there are no
+// paths to hand a subprocess and nothing to clean up.
+//
+// No server needed here either: each case is a single rule in one sheet, so inline
 // <style> via Page.setDocumentContent is equivalent and avoids a navigation per
 // case. Probes that ask about *sheet* interaction (origins, @layer, @import) do
 // need the server — that is what `browser-oracle` is for.
@@ -406,7 +401,7 @@ try {
   for (const [i, c] of cases.entries()) {
     let dz: number | null;
     try {
-      dz = await dziriValue(dir, c, i);
+      dz = dziriValue(c, i);
     } catch (e) {
       errors.push(`${c.decl.padEnd(34)} dziri: ${(e as Error).message}`);
       continue;
@@ -434,7 +429,6 @@ try {
   }
 } finally {
   await session.close();
-  await rm(dir, { recursive: true, force: true });
 }
 
 for (const f of fails) console.log(`FAIL  ${f}`);

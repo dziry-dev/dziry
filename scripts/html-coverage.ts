@@ -20,11 +20,12 @@
  * it — those are the ~10 missing properties HTML-ELEMENT-COVERAGE-RESEARCH.md
  * names, surfaced per element instead of as a list.
  */
-import { mkdtemp, rm, writeFile, readdir, readFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromeSession } from "./cdp.ts";
 import { Display } from "../src/ir.ts";
+import { compileSnippet } from "../src/compiler/single.ts";
+import { toCompiledUi } from "../src/compiler/compile.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const MDN = join(ROOT, "vendor/mdn/files/en-us/web/html/reference/elements");
@@ -114,34 +115,25 @@ const ATTRS: Record<string, string> = {
 const SHEET = "body { margin: 0; padding: 0; font-size: 16px; font-weight: 400; color: #000 }";
 
 // ── dziri ────────────────────────────────────────────────────────────────────
-async function dziriRow(dir: string, el: string): Promise<Record<string, number> | string> {
-  const html = join(dir, `${el}.html`);
-  const css = join(dir, `${el}.css`);
-  const out = join(dir, `${el}.gen.ts`);
-  await writeFile(html, `<body>${markup(el)}</body>`);
-  await writeFile(css, SHEET);
-
-  const p = Bun.spawn(["bun", "run", "src/compile.ts", html, css, "-o", out], {
-    cwd: ROOT,
-    stdout: "ignore",
-    stderr: "pipe",
-  });
-  if ((await p.exited) !== 0) {
-    // Not `split("\n")[0]`: Bun prints a source excerpt before the message, so the
-    // first line is the compiler's own source (`167 | if (…) continue;`) and says
-    // nothing about what went wrong. The message is the line starting `error:`.
-    // Matching /Error/ instead is the same trap one step further along — the
-    // excerpt frequently *is* a `throw new Error(...)` line.
-    const err = (await new Response(p.stderr).text()).trim();
-    const line = err.split("\n").find((l) => l.trimStart().startsWith("error:"));
-    const message = line ? line.trimStart().slice("error:".length) : (err.split("\n").pop() ?? "");
-    return message.trim() || "compile failed";
+function dziriRow(el: string): Record<string, number> | string {
+  // In this process, so a compile failure is an exception with a message rather
+  // than a subprocess's stderr to be mined. The parsing this replaced is worth
+  // remembering: Bun prints a source excerpt before a thrown message, so
+  // `split("\n")[0]` was the *compiler's own source* (`167 | if (…) continue;`) and
+  // said nothing about the element. Matching /Error/ was the same trap one step on,
+  // since the excerpt frequently *is* a `throw new Error(...)` line. The message was
+  // the line starting `error:`, and none of that is needed to read `e.message`.
+  let ui;
+  try {
+    ui = toCompiledUi(compileSnippet({ html: `<body>${markup(el)}</body>`, css: SHEET, label: `<${el}>` }).result);
+  } catch (e) {
+    return (e as Error).message || "compile failed";
   }
-  const mod = await import(`${out}?t=${Date.now()}`);
-  if (mod.nodes.count < 2) return "produced no node";
-  const slot = mod.nodes.style[1];
+  if (ui.nodes.count < 2) return "produced no node";
+  const slot = ui.nodes.style[1]!;
+  const styles = ui.styles as unknown as Record<string, ArrayLike<number> | undefined>;
   const row: Record<string, number> = {};
-  for (const { field } of PROPS) if (field) row[field] = mod.styles[field]?.[slot];
+  for (const { field } of PROPS) if (field) row[field] = styles[field]?.[slot] as number;
   return row;
 }
 
@@ -238,7 +230,8 @@ function differs(kind: string, chrome: string, dziri: number): boolean {
   return true;
 }
 
-const dir = await mkdtemp(join(tmpdir(), "dziri-htmlcov-"));
+// No temp directory: the dziri side compiles in this process, so there are no paths
+// to hand a subprocess and nothing to clean up.
 const session = await chromeSession();
 
 type Row = { el: string; diffs: string[]; missing: string[]; known: string[] };
@@ -264,7 +257,7 @@ try {
       continue;
     }
 
-    const dz = await dziriRow(dir, el);
+    const dz = dziriRow(el);
     if (typeof dz === "string") {
       broke.push(`${el}: ${dz}`);
       continue;
@@ -329,7 +322,6 @@ try {
   }
 } finally {
   await session.close();
-  await rm(dir, { recursive: true, force: true });
 }
 
 for (const r of rows) {

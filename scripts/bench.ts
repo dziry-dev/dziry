@@ -79,6 +79,29 @@ function scene(n: number): { html: string; css: string } {
   return { html: `<body><div class="wrap">${rows.join("")}</div></body>`, css };
 }
 
+/**
+ * A subprocess, and this is the one harness where that is right rather than legacy.
+ *
+ * `compileSnippet` (`src/compiler/single.ts`) exists so a harness can compile in this
+ * process, and `conformance`, `layout-diff` and `html-coverage` all moved to it. This
+ * one tried and moved back, because the isolation is part of the measurement:
+ * compiling an 8000-node tree in this process leaves that much garbage on Bun's heap,
+ * and what this file measures at 8000 nodes is *cache behaviour* — the whole reason
+ * `SIZES` was extended past 1000 is Taffy's ~950 B/node working set leaving cache.
+ *
+ * Measured rather than assumed, three runs at 8000 nodes:
+ *
+ *   subprocess (this)                    paint 0.562-0.571   layout 8.2-8.7
+ *   in-process, 8000 alone               paint 0.571         layout 8.672
+ *   in-process, after 1000/2000/4000     paint 0.621-0.695   layout 8.8-10.3
+ *
+ * The last row is the harness measuring its own heap. It degrades with each *earlier*
+ * size compiled, which is why `8000 alone` recovers and why this is not thermal drift.
+ * A benchmark that perturbs the cache it is measuring is worse than a slow one.
+ *
+ * So: do not "finish the migration" here. The other three harnesses read integers out
+ * of a style table and do not care what else is resident; this one does.
+ */
 async function compile(dir: string, n: number): Promise<CompiledUi> {
   const { html, css } = scene(n);
   const h = join(dir, `n${n}.html`);

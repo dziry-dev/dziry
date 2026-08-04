@@ -20,7 +20,7 @@ import { compileTree, emit, dump } from "./compiler/compile.ts";
 import { CssError } from "./compiler/diagnostics.ts";
 import { installCssGraph, stylesheetsFor } from "./compiler/css-imports.ts";
 import { loadStylesheet, SheetMap, type CssSource } from "./compiler/stylesheet.ts";
-import { extractStyleElements } from "./compiler/style-element.ts";
+import { compileSnippet } from "./compiler/single.ts";
 import { buildRefIndex, resolveRefs, type RefSource } from "./compiler/resolve-refs.ts";
 import {
   compileVariants,
@@ -200,27 +200,17 @@ if (isJsx) {
 
   ({ imports } = resolveRefs(result, buildRefIndex(sources), variants));
 } else {
-  const html = await Bun.file(inputPath).text();
-  const doc = parseHtml(html);
-
-  /**
-   * `<style>` is how an `.html` document carries its own CSS.
-   *
-   * It exists for this front-end and not for JSX, which has `import`. A document
-   * has no import statement at all, so without it a single self-contained file
-   * cannot be styled — and self-contained is the whole reason the HTML path is
-   * still here, since every probe and characterization case is one file.
-   *
-   * Last in the sheet: the rules written inside the document beat the stylesheet
-   * handed to the command, the same way a browser resolves two sources by order.
-   */
-  const blocks = extractStyleElements(doc).map((block) => ({
-    path: `${rel(inputPath)} ${block.label}`,
-    text: block.text,
-  }));
-
-  sheet = new SheetMap([...named, ...blocks]);
-  result = reportCssErrors(() => compileTree(doc, sheet!.text));
+  // The whole of this branch is `compileSnippet`, which exists so the harnesses can
+  // run it in this process instead of spawning this file. The reporter is the one
+  // thing they do not want: it renders a `CssError` against the assembled sheet and
+  // exits, where a harness wants the exception.
+  ({ sheet, result } = compileSnippet(
+    { html: await Bun.file(inputPath).text(), sheets: named, label: rel(inputPath) },
+    (assembled, run) => {
+      sheet = assembled;
+      return reportCssErrors(run);
+    },
+  ));
 }
 
 const elapsed = performance.now() - started;

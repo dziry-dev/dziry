@@ -45,13 +45,13 @@
  * scenario. Comparing geometry across trees that are not the same tree produces
  * confident nonsense.
  */
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { chromeSession } from "./cdp.ts";
 import type { CompiledUi } from "../src/ir.ts";
 import { Engine } from "../src/engine/host.ts";
 import { Uploader, capacitiesFor } from "../src/engine/upload.ts";
+import { compileSnippet } from "../src/compiler/single.ts";
+import { toCompiledUi } from "../src/compiler/compile.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const argv = process.argv.slice(2);
@@ -350,45 +350,15 @@ type Row = {
 const isText = (r: Row) => r.label === "#text";
 
 // ── dziri side ───────────────────────────────────────────────────────────────
-async function dziriWalk(dir: string, s: Scenario, i: number): Promise<Row[]> {
-  const html = join(dir, `s${i}.html`);
-  const css = join(dir, `s${i}.css`);
-  const out = join(dir, `s${i}.gen.ts`);
-  await writeFile(html, s.html);
-  await writeFile(css, s.css);
-
-  const proc = Bun.spawn(["bun", "run", "src/compile.ts", html, css, "-o", out], {
-    cwd: ROOT,
-    stdout: "ignore",
-    stderr: "pipe",
-  });
-  if ((await proc.exited) !== 0) {
-    // The whole of stderr, not its first line: Bun prints a source excerpt first,
-    // so `split("\n")[0]` reports `162 |` and hides the actual message.
-    const err = (await new Response(proc.stderr).text()).trim();
-    // `^error:` and not /error/i — the excerpt Bun prints usually contains the
-    // literal text `throw new Error(...)`, which matches and says nothing.
-    const message = err.split("\n").find((l) => l.trimStart().startsWith("error:")) ?? err.split("\n").pop();
-    throw new Error((message ?? "compile failed").trim());
-  }
-
-  const m = await import(`${out}?t=${Date.now()}`);
-  const ui: CompiledUi = {
-    strings: m.strings,
-    styles: m.styles,
-    nodes: m.nodes,
-    variants: m.variants,
-    interactive: m.interactive,
-    generated: m.generated,
-    textBindings: m.textBindings,
-    handlers: m.handlers,
-    lists: m.lists,
-    media: m.media,
-    tweens: m.tweens,
-    keyframes: m.keyframes,
-    controls: m.controls,
-    root: m.root,
-  };
+function dziriWalk(s: Scenario, i: number): Row[] {
+  // In this process. What this replaced was a subprocess plus two workarounds for
+  // reading its stderr, both correct and both only necessary because the seam was a
+  // process: Bun prints a source excerpt first, so `split("\n")[0]` reported `162 |`
+  // and hid the message, and matching /error/i instead caught the excerpt's own
+  // `throw new Error(...)` text. An exception has the message on it.
+  const ui: CompiledUi = toCompiledUi(
+    compileSnippet({ html: s.html, css: s.css, label: `scenario ${i}` }).result,
+  );
 
   const engine = Engine.open({
     ...capacitiesFor(ui),
@@ -478,7 +448,8 @@ function shapeMismatch(dz: Row[], ch: Row[]): string | null {
   return null;
 }
 
-const dir = await mkdtemp(join(tmpdir(), "dziri-layout-"));
+// No temp directory: the dziri side compiles in this process, so there are no paths
+// to hand a subprocess and nothing to clean up.
 const session = await chromeSession();
 
 /** A fresh target per scenario, so no scenario inherits another's viewport. */
@@ -518,7 +489,6 @@ const list = ONLY ? CORPUS.filter((s) => s.name.includes(ONLY)) : CORPUS;
 if (!list.length) {
   console.log(`no scenario matches "${ONLY}". known: ${CORPUS.map((s) => s.name).join(", ")}`);
   await session.close();
-  await rm(dir, { recursive: true, force: true });
   process.exit(1);
 }
 
@@ -554,7 +524,7 @@ try {
     let dz: Row[];
     let ch: Row[];
     try {
-      [dz, ch] = [await dziriWalk(dir, s, i), await chromeWalk(s)];
+      [dz, ch] = [dziriWalk(s, i), await chromeWalk(s)];
     } catch (e) {
       broke++;
       console.log(`BROKE  ${s.name} — ${(e as Error).message}`);
@@ -606,7 +576,6 @@ try {
   }
 } finally {
   await session.close();
-  await rm(dir, { recursive: true, force: true });
 }
 
 const total = list.length;
