@@ -20,8 +20,8 @@
  *
  * The three claims under test are the engine's own, not invented for this file:
  *
- *  1. **An idle tick skips layout and paint.** `engine.rs:355` returns early on
- *     `!needs_paint` -- "an idle tick is an event drain and nothing else".
+ *  1. **An idle tick skips layout and paint.** `engine.rs:391` returns early on
+ *     `!needs_paint` -- "an idle tick is an event drain and nothing else" (`engine.rs:388`).
  *  2. **A paint-only change does not relayout.** `tables.rs` `classify()` exists to
  *     name "the narrowest consequence", and notes that two arms used to be wrong in
  *     the expensive direction. If a `bg` write ever costs what a `height` write
@@ -33,7 +33,9 @@
  *
  * Claim 3 is why there is no "idle must be O(1)" gate. It would be false, and a gate
  * that asserts something false is worse than no gate: someone eventually "fixes" the
- * code to satisfy it.
+ * code to satisfy it. It is also why the gate that *does* exist checks the slope rather
+ * than the level: idle may grow linearly with the tree, and only faster-than-linear
+ * growth is evidence of anything.
  */
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -49,7 +51,15 @@ const flag = (name: string): string | null => {
   const i = argv.indexOf(name);
   return i > -1 ? (argv[i + 1] ?? null) : null;
 };
-const SIZES = (flag("--sizes") ?? "10,100,1000").split(",").map((s) => Number(s.trim()));
+/**
+ * Up to 8000 because that is where the interesting thing happens: layout is flat at
+ * ~0.60 us/node to 4000 and then the per-node constant rises (0.93 at 8000, 1.18 at
+ * 16000) as Taffy's ~950 B/node working set leaves cache. Stopping at 1000 -- as this
+ * did -- put the whole curve inside the flat region, so the cliff was invisible and
+ * NOTES.md carried a virtualization threshold that was 4x too low. 16000 is left out of
+ * the default only because it adds ~4 s for a point the shape is already clear at.
+ */
+const SIZES = (flag("--sizes") ?? "10,100,1000,2000,4000,8000").split(",").map((s) => Number(s.trim()));
 const REPS = Number(flag("--reps") ?? 200);
 const BASELINE = join(ROOT, "bench", "baseline.json");
 
@@ -238,8 +248,6 @@ if (notMeasuring.length) {
 
 // ── the gates ────────────────────────────────────────────────────────────────
 const failures: string[] = [];
-const biggest = rows[rows.length - 1]!;
-const smallest = rows[0]!;
 
 // Claim 1: an idle tick skips layout and paint, so it must be a fraction of a tick
 // that does both. Threshold is deliberately loose -- this is here to catch the early
@@ -271,18 +279,52 @@ for (const r of rows) {
   }
 }
 
-// Claim 3: idle is memcmp-bound, so it may grow with the tables -- but it must grow
-// far slower than the node count, or something in the idle path is walking the tree.
-if (rows.length > 1) {
-  const nodeGrowth = biggest.nodes / smallest.nodes;
-  const idleGrowth = biggest.idle.min / smallest.idle.min;
-  if (idleGrowth > nodeGrowth * 0.5) {
+// Claim 3: idle is memcmp-bound, so it must not grow *faster* than the node count.
+//
+// `commit()` compares every shared span, and the spans sized by `nodes` grow with the
+// tree -- so idle growing **linearly is correct**, not a regression. This gate used to
+// demand `idleGrowth <= nodeGrowth * 0.5`, i.e. sublinear growth, which a memcmp over
+// node-sized spans cannot deliver and which claim 3 in the header says it should not
+// have to. It passed only because the sizes stopped at 1000, where fixed overhead still
+// masks the linear term (10 -> 1000 is 100x tree for 3.6x idle). Extending to 8000 made
+// it fail on entirely correct behaviour -- exactly the "gate that asserts something
+// false" this file's header warns about. What distinguishes a memcmp from real work is
+// the per-node *constant*, and that is gate 1's job, not this one's.
+//
+// Compared over adjacent pairs rather than endpoint to endpoint. Across a wide range the
+// small end is all fixed cost (10 -> 8000 is 800x tree for 28x idle), so an endpoint
+// ratio is loose enough to pass anything at all; adjacent pairs measure the local slope,
+// which is where a superlinear term actually shows up.
+const IDLE_SLOPE_TOLERANCE = 1.5;
+/**
+ * Below this, idle is sub-microsecond and dominated by `Instant` granularity rather than
+ * by the memcmp, so a ratio between two such rows measures the clock. Skipped rather than
+ * gated -- and reported as skipped, because a gate that quietly evaluates nothing is the
+ * same hazard as one that asserts something false.
+ */
+const IDLE_NOISE_FLOOR_MS = 0.002;
+const slopePairs = rows
+  .slice(1)
+  .map((r, i) => [rows[i]!, r] as const)
+  .filter(([a, b]) => a.idle.min >= IDLE_NOISE_FLOOR_MS && b.idle.min >= IDLE_NOISE_FLOOR_MS);
+
+for (const [a, b] of slopePairs) {
+  const nodeGrowth = b.nodes / a.nodes;
+  const idleGrowth = b.idle.min / a.idle.min;
+  if (idleGrowth > nodeGrowth * IDLE_SLOPE_TOLERANCE) {
     failures.push(
-      `idle cost grew ${idleGrowth.toFixed(1)}x while the tree grew ${nodeGrowth}x.\n` +
-        `    The idle path should be bounded by commit()'s memcmp, not by node count.\n` +
-        `    Growing in step with the tree means something now walks it every tick.`,
+      `idle grew ${idleGrowth.toFixed(1)}x from ${a.nodes} to ${b.nodes} nodes, ` +
+        `where the tree grew ${nodeGrowth}x.\n` +
+        `    commit()'s memcmp is O(nodes), so linear growth is expected and fine. Growing\n` +
+        `    faster than the tree means something worse than a linear scan runs every tick.`,
     );
   }
+}
+if (!slopePairs.length && rows.length > 1) {
+  console.log(
+    `note  idle-slope gate inactive: no adjacent pair with both idle >= ` +
+      `${IDLE_NOISE_FLOOR_MS} ms. Raise --sizes to measure it.\n`,
+  );
 }
 
 // ── the numbers, tracked but never gating ────────────────────────────────────
