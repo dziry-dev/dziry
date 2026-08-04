@@ -24,6 +24,12 @@ engine-demo.png
 engine-demo-light.png
 *.out.png
 
+# `bun run neutral --save`: renders and emitted IR from a few minutes ago, kept to
+# compare a refactor against. Deliberately *not* tracked — the whole point is that
+# it is a baseline you took yourself rather than a reference the repo asserts, and a
+# tracked one would drift into being a second, worse set of goldens.
+.baseline/
+
 # The generated IR is a build artifact of `bun run window`. Tracked would mean
 # every style change shows up as a 22 KB diff of integer arrays.
 #

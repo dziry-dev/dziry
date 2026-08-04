@@ -3,7 +3,10 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "workspaces": ["docs", "packages/*"],
+  "workspaces": [
+    "docs",
+    "packages/*"
+  ],
   "bin": {
     "dziri": "./src/cli/index.ts"
   },
@@ -42,6 +45,7 @@
     "protocol-guard": "bun run scripts/protocol-guard.ts",
     "characterize": "bun run scripts/characterize.ts",
     "golden": "bun run scripts/golden.ts",
+    "neutral": "bun run scripts/neutrality.ts",
     "conformance": "bun run scripts/conformance.ts",
     "spec-audit": "bun run scripts/spec-audit.ts",
     "coverage:snapshot": "bun run scripts/coverage-snapshot.ts",
