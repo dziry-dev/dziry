@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 15;
+pub const PROTOCOL_VERSION: u32 = 16;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,13 +15,13 @@ pub const PROTOCOL_VERSION: u32 = 15;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x2a14f46d;
+pub const SCHEMA_HASH: u32 = 0xbbe19d0e;
 
 pub const TABLE_COUNT: usize = 11;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
-pub const MAX_FIELD_COUNT: usize = 74;
+pub const MAX_FIELD_COUNT: usize = 80;
 pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "nodes",
     "styles",
@@ -155,78 +155,84 @@ pub mod styles {
     pub const RADIUS_TOP_RIGHT: usize = 5;
     pub const RADIUS_BOTTOM_RIGHT: usize = 6;
     pub const RADIUS_BOTTOM_LEFT: usize = 7;
-    pub const PAD_TOP: usize = 8;
-    pub const PAD_RIGHT: usize = 9;
-    pub const PAD_BOTTOM: usize = 10;
-    pub const PAD_LEFT: usize = 11;
-    pub const MARGIN_TOP: usize = 12;
-    pub const MARGIN_RIGHT: usize = 13;
-    pub const MARGIN_BOTTOM: usize = 14;
-    pub const MARGIN_LEFT: usize = 15;
-    pub const DISPLAY: usize = 16;
-    pub const FLEX_DIRECTION: usize = 17;
-    pub const FLEX_WRAP: usize = 18;
-    pub const JUSTIFY_CONTENT: usize = 19;
-    pub const ALIGN_ITEMS: usize = 20;
-    pub const ALIGN_SELF: usize = 21;
-    pub const JUSTIFY_ITEMS: usize = 22;
-    pub const JUSTIFY_SELF: usize = 23;
-    pub const FLEX_GROW: usize = 24;
-    pub const FLEX_SHRINK: usize = 25;
-    pub const FLEX_BASIS: usize = 26;
-    pub const GAP_ROW: usize = 27;
-    pub const GAP_COLUMN: usize = 28;
-    pub const GRID_COLUMNS: usize = 29;
-    pub const GRID_ROWS: usize = 30;
-    pub const GRID_COLUMN_START: usize = 31;
-    pub const GRID_COLUMN_SPAN: usize = 32;
-    pub const GRID_ROW_START: usize = 33;
-    pub const GRID_ROW_SPAN: usize = 34;
-    pub const WIDTH: usize = 35;
-    pub const HEIGHT: usize = 36;
-    pub const MIN_WIDTH: usize = 37;
-    pub const MIN_HEIGHT: usize = 38;
-    pub const MAX_WIDTH: usize = 39;
-    pub const MAX_HEIGHT: usize = 40;
-    pub const ASPECT_RATIO: usize = 41;
-    pub const POSITION: usize = 42;
-    pub const INSET_TOP: usize = 43;
-    pub const INSET_RIGHT: usize = 44;
-    pub const INSET_BOTTOM: usize = 45;
-    pub const INSET_LEFT: usize = 46;
-    pub const FONT_SIZE: usize = 47;
-    pub const FONT_WEIGHT: usize = 48;
-    pub const LINE_CLAMP: usize = 49;
-    pub const OVERFLOW_X: usize = 50;
-    pub const OVERFLOW_Y: usize = 51;
-    pub const SCROLLBAR_WIDTH: usize = 52;
-    pub const SCROLLBAR_THUMB: usize = 53;
-    pub const SCROLLBAR_TRACK: usize = 54;
-    pub const ACCENT_COLOR: usize = 55;
-    pub const CARET_COLOR: usize = 56;
-    pub const APPEARANCE: usize = 57;
-    pub const OPACITY: usize = 58;
-    pub const TRANSLATE_X: usize = 59;
-    pub const TRANSLATE_Y: usize = 60;
-    pub const TRANSLATE_PERCENT_X: usize = 61;
-    pub const TRANSLATE_PERCENT_Y: usize = 62;
-    pub const ROTATE: usize = 63;
-    pub const SCALE_X: usize = 64;
-    pub const SCALE_Y: usize = 65;
-    pub const SKEW_X: usize = 66;
-    pub const SKEW_Y: usize = 67;
-    pub const TRANSFORM_ORIGIN_PERCENT_X: usize = 68;
-    pub const TRANSFORM_ORIGIN_PERCENT_Y: usize = 69;
-    pub const TRANSFORM_ORIGIN_X: usize = 70;
-    pub const TRANSFORM_ORIGIN_Y: usize = 71;
-    pub const TRANSITION: usize = 72;
-    pub const ANIMATION: usize = 73;
+    pub const RING_OUTER_WIDTH: usize = 8;
+    pub const RING_OUTER_COLOR: usize = 9;
+    pub const RING_INNER_WIDTH: usize = 10;
+    pub const RING_INNER_COLOR: usize = 11;
+    pub const RING_INSET_WIDTH: usize = 12;
+    pub const RING_INSET_COLOR: usize = 13;
+    pub const PAD_TOP: usize = 14;
+    pub const PAD_RIGHT: usize = 15;
+    pub const PAD_BOTTOM: usize = 16;
+    pub const PAD_LEFT: usize = 17;
+    pub const MARGIN_TOP: usize = 18;
+    pub const MARGIN_RIGHT: usize = 19;
+    pub const MARGIN_BOTTOM: usize = 20;
+    pub const MARGIN_LEFT: usize = 21;
+    pub const DISPLAY: usize = 22;
+    pub const FLEX_DIRECTION: usize = 23;
+    pub const FLEX_WRAP: usize = 24;
+    pub const JUSTIFY_CONTENT: usize = 25;
+    pub const ALIGN_ITEMS: usize = 26;
+    pub const ALIGN_SELF: usize = 27;
+    pub const JUSTIFY_ITEMS: usize = 28;
+    pub const JUSTIFY_SELF: usize = 29;
+    pub const FLEX_GROW: usize = 30;
+    pub const FLEX_SHRINK: usize = 31;
+    pub const FLEX_BASIS: usize = 32;
+    pub const GAP_ROW: usize = 33;
+    pub const GAP_COLUMN: usize = 34;
+    pub const GRID_COLUMNS: usize = 35;
+    pub const GRID_ROWS: usize = 36;
+    pub const GRID_COLUMN_START: usize = 37;
+    pub const GRID_COLUMN_SPAN: usize = 38;
+    pub const GRID_ROW_START: usize = 39;
+    pub const GRID_ROW_SPAN: usize = 40;
+    pub const WIDTH: usize = 41;
+    pub const HEIGHT: usize = 42;
+    pub const MIN_WIDTH: usize = 43;
+    pub const MIN_HEIGHT: usize = 44;
+    pub const MAX_WIDTH: usize = 45;
+    pub const MAX_HEIGHT: usize = 46;
+    pub const ASPECT_RATIO: usize = 47;
+    pub const POSITION: usize = 48;
+    pub const INSET_TOP: usize = 49;
+    pub const INSET_RIGHT: usize = 50;
+    pub const INSET_BOTTOM: usize = 51;
+    pub const INSET_LEFT: usize = 52;
+    pub const FONT_SIZE: usize = 53;
+    pub const FONT_WEIGHT: usize = 54;
+    pub const LINE_CLAMP: usize = 55;
+    pub const OVERFLOW_X: usize = 56;
+    pub const OVERFLOW_Y: usize = 57;
+    pub const SCROLLBAR_WIDTH: usize = 58;
+    pub const SCROLLBAR_THUMB: usize = 59;
+    pub const SCROLLBAR_TRACK: usize = 60;
+    pub const ACCENT_COLOR: usize = 61;
+    pub const CARET_COLOR: usize = 62;
+    pub const APPEARANCE: usize = 63;
+    pub const OPACITY: usize = 64;
+    pub const TRANSLATE_X: usize = 65;
+    pub const TRANSLATE_Y: usize = 66;
+    pub const TRANSLATE_PERCENT_X: usize = 67;
+    pub const TRANSLATE_PERCENT_Y: usize = 68;
+    pub const ROTATE: usize = 69;
+    pub const SCALE_X: usize = 70;
+    pub const SCALE_Y: usize = 71;
+    pub const SKEW_X: usize = 72;
+    pub const SKEW_Y: usize = 73;
+    pub const TRANSFORM_ORIGIN_PERCENT_X: usize = 74;
+    pub const TRANSFORM_ORIGIN_PERCENT_Y: usize = 75;
+    pub const TRANSFORM_ORIGIN_X: usize = 76;
+    pub const TRANSFORM_ORIGIN_Y: usize = 77;
+    pub const TRANSITION: usize = 78;
+    pub const ANIMATION: usize = 79;
 
-    pub const FIELD_COUNT: usize = 74;
+    pub const FIELD_COUNT: usize = 80;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [
-        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2,
-        2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1, 4, 4,
-        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2,
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1,
+        4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4,
+        4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2,
     ];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
         "bg",
@@ -237,6 +243,12 @@ pub mod styles {
         "radiusTopRight",
         "radiusBottomRight",
         "radiusBottomLeft",
+        "ringOuterWidth",
+        "ringOuterColor",
+        "ringInnerWidth",
+        "ringInnerColor",
+        "ringInsetWidth",
+        "ringInsetColor",
         "padTop",
         "padRight",
         "padBottom",
@@ -312,12 +324,12 @@ pub mod styles {
     /// every non-empty commit schedules is the entire response. A colour-only
     /// theme patch is the case this exists for.
     pub const LAYOUT_AFFECTING: [bool; FIELD_COUNT] = [
-        false, false, false, true, false, false, false, false, true, true, true, true, true, true,
+        false, false, false, true, false, false, false, false, false, false, false, false, false,
+        false, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
-        true, true, true, true, true, true, true, true, false, false, false, false, false, false,
         false, false, false, false, false, false, false, false, false, false, false, false, false,
-        false, false, false,
+        false, false, false, false, false, false, false, false, false,
     ];
 
     /// How each field is interpolated partway through a tween.
@@ -327,8 +339,8 @@ pub mod styles {
     /// not a number here.
     pub const INTERP: [u8; FIELD_COUNT] = [
         2, 2, 2, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 0, 1, 1,
-        1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+        2, 2, 2, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
     ];
 
     /// Which bit of a tween's `mask` each field owns, or 255 for "not animatable".
@@ -340,8 +352,9 @@ pub mod styles {
     pub const ANIM_BIT: [u8; FIELD_COUNT] = [
         0, 1, 2, 255, 3, 4, 5, 6, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
         255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-        255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 7, 8, 9, 10, 255, 11,
-        12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 255, 255,
+        255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        255, 255, 7, 8, 9, 10, 255, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 255,
+        255,
     ];
 
     /// The field index each mask bit refers to, low bit first — `ANIM_BIT` inverted.
@@ -349,7 +362,7 @@ pub mod styles {
     /// The engine walks a mask's set bits and needs the field for each; searching
     /// `ANIM_BIT` for a value would be a linear scan per bit per animating node.
     pub const ANIM_FIELDS: [usize; 25] = [
-        0, 1, 2, 4, 5, 6, 7, 53, 54, 55, 56, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71,
+        0, 1, 2, 4, 5, 6, 7, 59, 60, 61, 62, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77,
     ];
 }
 

@@ -1710,6 +1710,57 @@ impl Painter {
                 Point::new(radii[3], radii[3]),
             ]
         };
+        // The border box grown (or, for a negative `d`, shrunk) by `d`, with the corner
+        // radii CSS gives a shadow of that spread.
+        //
+        // A zero radius stays zero: css-backgrounds-3 §7.1.1 adjusts a corner radius by the
+        // spread *only when the radius is greater than zero*, so a square-cornered box casts
+        // a square-cornered ring however wide the ring is. Adding the spread
+        // unconditionally would round every square box the moment it gained a focus ring.
+        let spread = |d: f32| -> RRect {
+            let adjusted = radii.map(|r| if r > 0.0 { (r + d).max(0.0) } else { 0.0 });
+            RRect::new_rect_radii(
+                Rect::from_xywh(x - d, y - d, w + d * 2.0, h + d * 2.0),
+                &points(adjusted),
+            )
+        };
+
+        // A band between two of those, in `colour`. `draw_drrect` is undefined on an empty
+        // or inverted inner rect, so a band that swallows what it surrounds fills the outer
+        // shape instead — the same accommodation the border ring below makes.
+        let band = |fill: &mut Paint, outer: f32, inner: f32, colour: u32| {
+            if colour >> 24 == 0 || outer <= inner || w <= 0.0 || h <= 0.0 {
+                return;
+            }
+            fill.set_color(Color::from(colour));
+            let hole = spread(inner);
+            if hole.width() <= 0.0 || hole.height() <= 0.0 {
+                canvas.draw_rrect(spread(outer), fill);
+            } else {
+                canvas.draw_drrect(spread(outer), hole, fill);
+            }
+        };
+
+        // `box-shadow`, as the concentric bands a style row can hold — see
+        // `properties.ts::parseBoxShadow` for why that is the expressible subset and why it
+        // is exactly what Tailwind's ring utilities compile to.
+        //
+        // **Before the background**, because CSS draws an outer shadow behind the box. With
+        // matching corner radii the two shapes only touch rather than overlap, so this is
+        // ordering for correctness-by-construction rather than for a visible difference
+        // today — it stops mattering the day a ring is drawn semi-transparent.
+        let ring_outer = ring_width(g(f::RING_OUTER_WIDTH));
+        let ring_inner = ring_width(g(f::RING_INNER_WIDTH)).min(ring_outer);
+        band(
+            &mut self.fill,
+            ring_outer,
+            ring_inner,
+            c(f::RING_OUTER_COLOR),
+        );
+        // Tailwind's ring offset: a narrower band painted over the inner part of the ring,
+        // which is what puts a gap of page colour between the box and its ring.
+        band(&mut self.fill, ring_inner, 0.0, c(f::RING_INNER_COLOR));
+
         let bg = c(f::BG);
 
         // A zero alpha channel means the box contributes no fill at all.
@@ -1722,6 +1773,11 @@ impl Painter {
                 canvas.draw_rect(rect, &self.fill);
             }
         }
+
+        // An inset ring goes **over** the background and **under** the border, which is
+        // where css-backgrounds-3 puts an inner shadow. Tailwind's `inset-ring-*`.
+        let ring_inset = ring_width(g(f::RING_INSET_WIDTH));
+        band(&mut self.fill, 0.0, -ring_inset, c(f::RING_INSET_COLOR));
 
         // Non-finite is the sentinel for "unset" everywhere else, and `style_of`
         // already resolves it to no border for layout; paint must agree or the
@@ -1883,6 +1939,21 @@ impl Painter {
         // makes the same admission about the blink rate.
         self.fill.set_color(Color::from(colour));
         canvas.draw_rect(Rect::from_xywh(x + dx, y, 1.0, h), &self.fill);
+    }
+}
+
+/// A ring band's width, or 0 if it is not one Skia can be handed.
+///
+/// The same sanitising `BORDER_WIDTH` gets, for the same reason: non-finite is the "unset"
+/// sentinel throughout the style table, and Skia has no defined answer for a NaN or
+/// infinite corner radius. A `calc(infinity * 1px)` ring — which is not idiomatic, but
+/// `rounded-full` proves the value reaches the tables — must draw nothing rather than
+/// whatever an infinite rrect does.
+fn ring_width(raw: f32) -> f32 {
+    if raw.is_finite() && raw > 0.0 {
+        raw
+    } else {
+        0.0
     }
 }
 

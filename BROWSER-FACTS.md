@@ -1008,3 +1008,75 @@ A double click reported `0..10` — the whole value — but the fixture is the s
 `abcdefghij`, so that measures "a double click selects a word" and says **nothing about where a word
 ends**. Word boundaries, and whether a trailing space is included, need a fixture with spaces in it
 and are unrecorded.
+
+---
+
+## What Tailwind's ring utilities actually compile to
+
+**Measured 2026-08-05 · Tailwind CSS v4.3.3 via `bunx @tailwindcss/cli`, then resolved through
+dziri's own `var()` / `@property` machinery** (`parseCss` + `extendVarEnv` + `substituteVars`).
+
+Not a browser measurement, and it is here anyway: the question is the same shape — *what does the
+real thing emit, rather than what do I remember it emitting* — and the `tailwind-coverage` skill
+already records one wrong recollection about this exact property (`box-shadow` "plus a
+`color-mix()`", which v4.3.3 does not emit).
+
+Every ring utility goes through **`box-shadow`**, as one five-layer list that is identical on
+every ring class:
+
+```css
+box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow),
+            var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+```
+
+What differs is which `--tw-*` variable the class sets. After substitution, the value that reaches
+the expander is:
+
+| Classes | Resolved `box-shadow` |
+|---|---|
+| `ring-2` | `0 0 #0000, 0 0 #0000, 0 0 #0000,  0 0 0 calc(2px + 0px) currentcolor, 0 0 #0000` |
+| `ring-2 ring-sky-400` | `… 0 0 0 calc(2px + 0px) #38bdf8, 0 0 #0000` |
+| `ring-2 ring-sky-400 ring-offset-2 ring-offset-black` | `0 0 #0000, 0 0 #0000,  0 0 0 2px #000,  0 0 0 calc(2px + 2px) #38bdf8, 0 0 #0000` |
+| `ring-2 ring-sky-400 ring-inset` | `… inset 0 0 0 calc(2px + 0px) #38bdf8, 0 0 #0000` |
+| `inset-ring-2` | `0 0 #0000, inset 0 0 0 2px currentcolor, 0 0 #0000, 0 0 #0000, 0 0 #0000` |
+| `shadow-md` | `0 0 #0000, ×4, 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)` |
+
+Six things follow, and all six changed what got built.
+
+1. **A ring is a spread-only shadow: no offset, no blur, one solid colour.** That is a subset a
+   fixed style row can hold, which is why dziri supports `box-shadow` as *concentric bands* rather
+   than as a layer list. `shadow-md` is the counter-example in the same table — it has offsets, a
+   blur and a negative spread, so it is warned about and dropped rather than approximated.
+
+2. **The four unset layers arrive as `0 0 #0000`**, from `@property … initial-value: 0 0 #0000`.
+   A parser that rejected a two-length layer, or that treated a transparent layer as an error,
+   would reject every ring in the framework. Four of five layers are this on any single-ring
+   element.
+
+3. **A ring offset is a second, narrower band written *earlier* in the list** — `2px #000` before
+   `calc(2px + 2px) #38bdf8`. Earlier layers paint over later ones, so the visible result is the
+   offset colour from 0 to 2 and the ring colour from 2 to 4. Nothing in the CSS says "offset";
+   the layering *is* the offset. That is why dziri stores two outset extents rather than a width
+   and a gap, and why a narrower band written *later* is dropped: it would be entirely hidden.
+
+4. **`ring-2` with no ring colour is `currentcolor`**, reached through
+   `var(--tw-ring-color, currentcolor)` — the `@property` for it declares no `initial-value`, so
+   the fallback is used. dziri had no value for `currentcolor` at all, which meant the commonest
+   ring in the framework resolved to nothing. It is not dynamic: it is the element's computed
+   `color`, which the cascade already has, so it is substituted textually before the expander
+   runs. Same observation as the `border-color` entry above.
+
+5. **`var(--tw-ring-inset,)` has an empty fallback**, and that is deliberate on Tailwind's part —
+   it resolves to nothing on an outset ring and to the token `inset` when `ring-inset` sets it.
+   A `var()` implementation that treated an empty fallback as "no fallback" would drop the whole
+   declaration.
+
+6. **`@layer properties { @supports (…) { *, ::before { --tw-ring-color: initial; … } } }` must
+   stay skipped.** dziri treats `@layer` as transparent and skips `@supports`, so those `initial`
+   tokens never land — which is correct, and load-bearing: if that block were applied, `env.has()`
+   would find the literal string `initial` and every ring colour would resolve to garbage rather
+   than to the `var()` fallback.
+
+Reproduce with `scripts/` nothing — this is a compiler measurement, and it is pinned by
+`css.test.ts` ("Tailwind's ring utilities become concentric bands"), whose input strings are the
+right-hand column of the table above rather than hand-written approximations of it.

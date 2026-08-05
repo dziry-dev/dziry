@@ -42,6 +42,40 @@ const NAMED_COLORS: Record<string, number> = {
   orange: 0xffffa500,
 };
 
+/**
+ * A colour as `#RRGGBBAA`, which {@link parseColor} reads back exactly.
+ *
+ * Hex rather than `rgba()` because it round-trips without going through a decimal
+ * alpha: 0x80 as `0.5019607843137255` is a value neither side can spell in a way
+ * the other reproduces byte for byte.
+ */
+export function formatColor(argb: number): string {
+  const hex = (n: number) => (n & 0xff).toString(16).padStart(2, "0");
+  return `#${hex(argb >>> 16)}${hex(argb >>> 8)}${hex(argb)}${hex(argb >>> 24)}`;
+}
+
+/**
+ * Replaces every `currentcolor` keyword in a declaration value with `colour`.
+ *
+ * Textual, and for the same reason `var()` substitution is: `currentcolor` can appear
+ * anywhere a colour can, including inside functions whose grammar nothing here models —
+ * `color-mix(in srgb, currentcolor 50%, white)` and, the case that prompted this,
+ * `box-shadow: 0 0 0 2px currentcolor`.
+ *
+ * **`currentcolor` is not dynamic**, which is the only reason this belongs in the
+ * compiler. It means "this element's computed `color`", and the cascade resolves `color`
+ * per node at build time — so it is a lookup, not a signal. The same observation is
+ * recorded in BROWSER-FACTS.md against `border-color`'s initial value.
+ *
+ * Word-bounded so a longer identifier containing it is left alone. The one value where
+ * the keyword could be *text* rather than a colour is `content`, and the caller excludes
+ * it.
+ */
+export function substituteCurrentColor(value: string, colour: number): string {
+  if (!/currentcolor/i.test(value)) return value;
+  return value.replace(/\bcurrentcolor\b/gi, formatColor(colour));
+}
+
 /** Parses a color to 0xAARRGGBB, which is what `sk_color_t` wants. */
 export function parseColor(raw: string): number {
   const v = raw.trim().toLowerCase();

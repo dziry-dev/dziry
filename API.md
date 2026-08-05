@@ -240,8 +240,15 @@ of strings a user can type is unbounded, so there are no variants to emit. Its *
 selection range become a new NOTES.md ledger entry** when A5 lands. The caret blink is an engine-side
 timer flipping one bit, never JS at frame rate.
 
-`bind:value` exists in partial form today — append and backspace only, through the `editables` table
-(`src/compiler/compile.ts:801`).
+`bind:value` exists in partial form today — insert, Backspace and Delete **at the caret**, through
+the `editables` table (`src/compiler/compile.ts:801`). No selection and no clipboard.
+
+The caret index *is* engine-owned, as of A5's first slice, and one detail of that is worth writing
+down: the engine moves the caret **optimistically**, before Bun has written the signal. It has to —
+the alternative is a round trip per keystroke — and the consequence is that the caret can be ahead of
+the string in the tables for a frame. So nothing on the engine side may clamp the caret against that
+string. Doing exactly that made typing quickly move the caret *backwards*: two keystrokes in one
+frame both measured the same pre-edit length and the second clamped to it. See `caret.rs::shift`.
 
 **Until now it did nothing at all, and the reason is worth recording** because the artifact was
 correct throughout. Focus is acquired by clicking, `hit_test` returns only `INTERACTIVE` nodes, and
@@ -289,7 +296,10 @@ cannot open — that one needs the overlay layer, not this machinery.
 | a field's **width** from `size` | planned — `29 + 7 × size` px is measured (BROWSER-FACTS.md), and unimplemented: `size="20"` does nothing, so an `<input>` with no width class fills its container instead of being 169px | A5 |
 | caret — position, blink, `caret-color` | **done** — a click resolves to the nearest character boundary (measured); the blink is an engine timer, so it survives a busy Bun | A5 |
 | arrow keys, Home/End | **done** — consumed by the engine, never forwarded, so a caret move costs one rect and no round trip | A5 |
-| insert and delete *at* the caret | **done** — the engine reports the index beside the text; `typeInto` splices there, clamped, by characters rather than UTF-16 units | A5 |
+| insert and delete *at* the caret | **done** — the engine reports the index beside the text; `typeInto` splices there, clamped, by characters rather than UTF-16 units. Backspace erases behind and moves the caret; **Delete** erases in front and does not | A5 |
+| `box-shadow` — the ring subset | **done** — protocol v16. No offset and no blur, a solid spread, stored as three concentric bands, which is exactly what `ring-*`, `inset-ring-*` and `ring-offset-*` compile to (measured, BROWSER-FACTS.md). `shadow-md` warns and draws nothing rather than being approximated | A1 |
+| `currentcolor` | **done** — the element's computed `color`, substituted textually before the expander. Not dynamic: the cascade already resolves `color` per node. Needed because bare `ring-2` reaches it through a `var()` fallback | A1 |
+| `outline` / `outline-offset` | planned — a ring is what Tailwind reaches for and what landed; `outline`'s own fields are still absent, so `outline-*` utilities warn | A1 |
 | Shift+Arrow, drag-to-select, `::selection` | planned — the rules are measured, and `(anchor, focus)` is the shape they imply | A5 |
 | a `<label>` click focusing a text field | planned — `activates` forwards to control kinds only, and a text field is not one | A3 |
 | caret, selection, IME, clipboard | planned — new ledger entry | A5 |

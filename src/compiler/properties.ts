@@ -677,6 +677,180 @@ const gapShorthand: ExpandRule = (value, out) => {
   out.gapCol = parts[1] ? parseLength(parts[1]) : out.gapRow;
 };
 
+/** One parsed `box-shadow` layer, in list order — earlier layers paint on top. */
+type ShadowLayer = {
+  inset: boolean;
+  x: number;
+  y: number;
+  blur: number;
+  spread: number;
+  color: number;
+};
+
+/**
+ * One `box-shadow` layer: `inset? && <length>{2,4} && <color>?`.
+ *
+ * `inset` and the colour may sit anywhere in the layer — CSS says so, and Tailwind puts
+ * `inset` first while a hand-written sheet often puts the colour there. The lengths are
+ * positional: `<x> <y> <blur>? <spread>?`.
+ */
+function parseShadowLayer(layer: string): ShadowLayer {
+  let inset = false;
+  let color: number | null = null;
+  const lengths: number[] = [];
+
+  for (const token of splitTopLevel(layer)) {
+    if (/^inset$/i.test(token)) {
+      if (inset) throw new CssError(`two "inset" keywords in one box-shadow layer ("${layer}")`);
+      inset = true;
+      continue;
+    }
+    // A length starts with a digit, a sign or a dot; `calc(...)` is a length too, and by
+    // this point it is the only function a length can be — `var()` was substituted long
+    // before the expander saw the value.
+    if (/^[-+.\d]/.test(token) || /^calc\(/i.test(token)) {
+      lengths.push(parseLength(token));
+      continue;
+    }
+    if (color !== null) throw new CssError(`two colors in one box-shadow layer ("${layer}")`);
+    color = parseColor(token);
+  }
+
+  if (lengths.length < 2 || lengths.length > 4) {
+    throw new CssError(
+      `box-shadow layer "${layer}" has ${lengths.length} lengths; CSS allows 2 to 4 ` +
+        `(<x> <y> <blur>? <spread>?)`,
+    );
+  }
+
+  return {
+    inset,
+    x: lengths[0]!,
+    y: lengths[1]!,
+    blur: lengths[2] ?? 0,
+    spread: lengths[3] ?? 0,
+    // CSS's omitted shadow colour is `currentcolor`, and the cascade has already
+    // substituted that keyword by the time this runs — so an omitted colour here means
+    // the sheet said nothing a colour could come from, and nothing is drawn.
+    color: color ?? 0x00000000,
+  };
+}
+
+/**
+ * `box-shadow`, reduced to the concentric bands a fixed style row can hold.
+ *
+ * # Why a subset, and why *this* subset
+ *
+ * A style row is a struct of fixed fields; a shadow list is a list. The part that fits is
+ * the part with **no offset and no blur** — a spread in a solid colour, which paints an
+ * even band around the border box. That is not an arbitrary line: it is exactly what
+ * Tailwind's `ring-*`, `inset-ring-*` and `ring-offset-*` utilities compile to. Measured
+ * against Tailwind v4.3.3 through dziri's own `var()`/`@property` machinery —
+ * `ring-2 ring-sky-400 ring-offset-2 ring-offset-black` arrives here as
+ *
+ *   `0 0 #0000, 0 0 #0000, 0 0 0 2px #000, 0 0 0 calc(2px + 2px) #38bdf8, 0 0 #0000`
+ *
+ * — recorded in BROWSER-FACTS.md. The transparent placeholders are the four unset
+ * `--tw-*-shadow` variables reaching their `@property` initial values.
+ *
+ * # How layers become bands
+ *
+ * Earlier layers paint **over** later ones. A zero-offset zero-blur outset layer of spread
+ * S covers the region from the border box out to +S, so two of them compose into two
+ * concentric bands: the widest gives the outer edge, and a *narrower one written earlier*
+ * paints over its inner part. A narrower one written *later* is behind the wider one and
+ * therefore invisible, which is why it is dropped rather than stored.
+ *
+ * That is a ring offset, exactly. `ring-offset-2` is the narrower layer and it is emitted
+ * before `--tw-ring-shadow` in the list.
+ *
+ * # What is refused
+ *
+ * Blur and offsets are **warned about and dropped**, not thrown on: `shadow-md` is
+ * ordinary Tailwind and a build that fails on it would be unusable, while a drop-shadow
+ * silently rendered as a ring would be worse than nothing. A malformed layer — three
+ * colours, five lengths — does throw, because that is a mistake rather than a feature gap.
+ */
+function parseBoxShadow(value: string, out: Partial<Record<StyleField, number>>): void {
+  const reset = () => {
+    out.ringOuterWidth = 0;
+    out.ringOuterColor = 0;
+    out.ringInnerWidth = 0;
+    out.ringInnerColor = 0;
+    out.ringInsetWidth = 0;
+    out.ringInsetColor = 0;
+  };
+
+  // A shorthand always resets, so `box-shadow: none` after a ring removes it rather than
+  // leaving the ring standing.
+  reset();
+  if (/^none$/i.test(value.trim())) return;
+
+  const layers = splitTopLevelCommas(value).map(parseShadowLayer);
+
+  const bands: ShadowLayer[] = [];
+  for (const layer of layers) {
+    // Fully transparent paints nothing. This is the common case, not an edge one: four of
+    // Tailwind's five layers are `0 0 #0000` on any element that wears one ring.
+    if (layer.color >>> 24 === 0) continue;
+    if (layer.x !== 0 || layer.y !== 0 || layer.blur !== 0) {
+      warnOnce(
+        `ignoring a box-shadow layer with an offset or blur ("${layer.x}px ${layer.y}px ` +
+          `${layer.blur}px"). Only ring-style shadows — no offset, no blur, a solid ` +
+          `spread — reach the engine.`,
+      );
+      continue;
+    }
+    // No spread and no offset is a shadow exactly the size of the box, hidden behind it.
+    if (layer.spread <= 0) continue;
+    bands.push(layer);
+  }
+
+  const inset = bands.filter((b) => b.inset);
+  const outset = bands.filter((b) => !b.inset);
+
+  if (inset.length > 1) {
+    warnOnce(
+      `${inset.length} inset box-shadow bands, and a style row holds one. Keeping the ` +
+        `first, which is the one painted on top.`,
+    );
+  }
+  if (inset[0]) {
+    out.ringInsetWidth = inset[0].spread;
+    out.ringInsetColor = inset[0].color;
+  }
+
+  if (outset.length === 0) return;
+
+  // The widest band sets the outer edge. `reduce` rather than a sort so ties keep the
+  // earlier layer, which is the one painted on top and therefore the visible colour.
+  let outerAt = 0;
+  for (let i = 1; i < outset.length; i++) {
+    if (outset[i]!.spread > outset[outerAt]!.spread) outerAt = i;
+  }
+  const outer = outset[outerAt]!;
+  out.ringOuterWidth = outer.spread;
+  out.ringOuterColor = outer.color;
+
+  // The inner band is the widest of the layers painted *over* the outer one — those before
+  // it in the list. Anything after it is behind it and invisible.
+  let innerAt = -1;
+  for (let i = 0; i < outerAt; i++) {
+    if (innerAt === -1 || outset[i]!.spread > outset[innerAt]!.spread) innerAt = i;
+  }
+  if (innerAt !== -1) {
+    out.ringInnerWidth = outset[innerAt]!.spread;
+    out.ringInnerColor = outset[innerAt]!.color;
+  }
+
+  if (outerAt > 1) {
+    warnOnce(
+      `${outerAt + 1} outset box-shadow bands, and a style row holds two. Keeping the ` +
+        `widest and the widest of the ones drawn over it.`,
+    );
+  }
+}
+
 /** `grid-column` / `grid-row`: a start line and a span, from {@link parsePlacement}. */
 const placement =
   (startField: StyleField, spanField: StyleField): ExpandRule =>
@@ -732,6 +906,8 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   },
   "border-width": { field: "borderWidth", parse: parseLength },
   "border-color": { field: "borderColor", parse: parseColor },
+
+  "box-shadow": parseBoxShadow,
 
   padding: quad("padT", "padR", "padB", "padL"),
 

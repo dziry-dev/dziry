@@ -409,7 +409,11 @@ mod tests {
         // And the first arrow key heals an index that ran past the text — which is the only
         // case the removed clamp was actually guarding.
         assert!(carets.move_to(1, Motion::Left, 1));
-        assert_eq!(carets.index_of(1), Some(0), "clamped to 1, then stepped left");
+        assert_eq!(
+            carets.index_of(1),
+            Some(0),
+            "clamped to 1, then stepped left"
+        );
         carets.shift(1, 9);
         assert!(carets.move_to(1, Motion::End, 4));
         assert_eq!(carets.index_of(1), Some(4), "End pulls it onto the text");

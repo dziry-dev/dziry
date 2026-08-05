@@ -220,6 +220,88 @@ test("the 1-to-4-value box shorthand maps as CSS says", () => {
   expect(expand("margin", "1px 2px 3px 4px")).toEqual({ marT: 1, marR: 2, marB: 3, marL: 4 });
 });
 
+/**
+ * Tailwind's ring utilities, as the compiler actually receives them.
+ *
+ * Not hand-written approximations of the CSS: these are the strings dziri's own
+ * `var()`/`@property` machinery produces from real Tailwind v4.3.3 output, measured and
+ * recorded in BROWSER-FACTS.md. The four transparent placeholders are the unset
+ * `--tw-*-shadow` variables reaching their `@property` initial values, and they matter —
+ * a parser that choked on `0 0 #0000` would reject every ring in the framework.
+ */
+const RING = {
+  bare: "0 0 #0000, 0 0 #0000, 0 0 #0000,  0 0 0 calc(2px + 0px) #38bdf8, 0 0 #0000",
+  offset: "0 0 #0000, 0 0 #0000,  0 0 0 2px #000,  0 0 0 calc(2px + 2px) #38bdf8, 0 0 #0000",
+  inset: "0 0 #0000, inset 0 0 0 2px #38bdf8, 0 0 #0000, 0 0 #0000, 0 0 #0000",
+  shadowMd:
+    "0 0 #0000, 0 0 #0000, 0 0 #0000, 0 0 #0000, " +
+    "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+};
+
+/** Only the ring fields, so a test reads as what the ring is rather than what it is not. */
+function rings(value: string): Record<string, number> {
+  const all = expand("box-shadow", value);
+  return Object.fromEntries(Object.entries(all).filter(([, v]) => v !== 0));
+}
+
+test("Tailwind's ring utilities become concentric bands", () => {
+  // `ring-2 ring-sky-400`: one band, two pixels out from the border box.
+  expect(rings(RING.bare)).toEqual({ ringOuterWidth: 2, ringOuterColor: 0xff38bdf8 });
+
+  // Add `ring-offset-2 ring-offset-black` and the ring moves out to 4 while a black band
+  // fills 0..2. That is what a ring offset *is* — a narrower layer painted over the wider
+  // one — and getting it from the same `box-shadow` list is the reason this is one property
+  // and not two invented ones.
+  expect(rings(RING.offset)).toEqual({
+    ringOuterWidth: 4,
+    ringOuterColor: 0xff38bdf8,
+    ringInnerWidth: 2,
+    ringInnerColor: 0xff000000,
+  });
+
+  // `inset-ring-2` goes inward and touches neither outset field.
+  expect(rings(RING.inset)).toEqual({ ringInsetWidth: 2, ringInsetColor: 0xff38bdf8 });
+});
+
+test("a blurred or offset shadow is dropped, not approximated", () => {
+  // `shadow-md`. A style row cannot hold a blur, and rendering one as a hard ring would
+  // look like a bug in the stylesheet rather than a missing feature — so it warns and
+  // draws nothing. It must not *throw*: `shadow-md` is ordinary Tailwind, and a build that
+  // failed on it would be unusable.
+  expect(rings(RING.shadowMd)).toEqual({});
+
+  // The shorthand resets, so a ring does not survive `box-shadow: none` written after it.
+  expect(expand("box-shadow", "none")).toEqual({
+    ringOuterWidth: 0,
+    ringOuterColor: 0,
+    ringInnerWidth: 0,
+    ringInnerColor: 0,
+    ringInsetWidth: 0,
+    ringInsetColor: 0,
+  });
+});
+
+test("a box-shadow band hidden behind a wider one is dropped", () => {
+  // Later layers are painted *behind* earlier ones. A narrow band written after a wide one
+  // is entirely covered by it, so storing it would put a colour on screen that CSS does not
+  // put there — the opposite order is the ring-offset case above.
+  expect(rings("0 0 0 4px red, 0 0 0 2px blue")).toEqual({
+    ringOuterWidth: 4,
+    ringOuterColor: 0xffff0000,
+  });
+});
+
+test("a malformed box-shadow layer is refused", () => {
+  for (const bad of [
+    "0", // one length; CSS needs at least x and y
+    "0 0 0 0 0 red", // five lengths
+    "0 0 0 2px red blue", // two colours
+    "inset inset 0 0 0 2px red", // two insets
+  ]) {
+    expect(() => expand("box-shadow", bad), bad).toThrow(CssError);
+  }
+});
+
 test("gap takes one value for both axes or row then column", () => {
   expect(expand("gap", "4px")).toEqual({ gapRow: 4, gapCol: 4 });
   expect(expand("gap", "4px 8px")).toEqual({ gapRow: 4, gapCol: 8 });

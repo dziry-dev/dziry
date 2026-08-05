@@ -615,6 +615,39 @@ test("inherited properties pass down, non-inherited do not", () => {
   expect(Number.isNaN(styleOf(html, css, "width"))).toBe(true);
 });
 
+/**
+ * `currentcolor` is not dynamic, and the cascade is where it stops looking like it.
+ *
+ * It means "this element's computed `color`", and the cascade already resolves `color` per
+ * node at build time — so it is a lookup, not a signal. Substituting it textually before
+ * the expander runs is what makes bare `ring-2` work: Tailwind reaches the keyword through
+ * `var(--tw-ring-color, currentcolor)`, so it is not in the authored text at all.
+ */
+test("currentcolor resolves to the element's own colour, whatever the declaration order", () => {
+  const html = `<body><div class="a"></div></body>`;
+
+  // Written *before* `color`, which must not matter: `currentcolor` is a computed-value
+  // rule, not a fold over declarations in order.
+  expect(styleOf(html, `.a { border-color: currentcolor; color: #ff0000 }`, "borderColor")).toBe(
+    0xffff0000,
+  );
+
+  // The element's own colour beats the inherited one.
+  expect(
+    styleOf(html, `body { color: #0000ff } .a { color: #00ff00; box-shadow: 0 0 0 2px currentcolor }`, "ringOuterColor"),
+  ).toBe(0xff00ff00);
+
+  // With no `color` of its own it is the inherited one, because that is what `color`
+  // computes to here.
+  expect(styleOf(html, `body { color: #0000ff } .a { box-shadow: 0 0 0 2px currentcolor }`, "ringOuterColor")).toBe(
+    0xff0000ff,
+  );
+
+  // `currentcolor` on `color` itself is the *parent's* colour — the one case where it must
+  // not resolve against the value being computed, or it would be a cycle.
+  expect(styleOf(html, `body { color: #0000ff } .a { color: currentcolor }`, "fg")).toBe(0xff0000ff);
+});
+
 // ---------------------------------------------------------------------------
 // The emitted artifact
 // ---------------------------------------------------------------------------

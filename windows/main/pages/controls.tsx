@@ -30,11 +30,16 @@
  * A field is also one line high when empty, protocol v14. Both of those were the same
  * bug from opposite ends: a box with nothing in it is not a box with no size.
  *
+ * There is a caret, and it is engine state: clicking puts it on the nearest character
+ * boundary, the arrows and Home/End move it without a round trip to Bun, and typing,
+ * Backspace and Delete all edit at it. So `caret-color` is finally a property something
+ * reads. Both fields also wear a focus **ring**, which is `box-shadow` reduced to the
+ * concentric bands a style row can hold — see `properties.ts::parseBoxShadow`.
+ *
  * Still honestly not working, and the page says so rather than faking it:
  *
- * There is no caret, no selection and no clipboard. Typing appends and Backspace
- * deletes; that is the whole editing model until A5, and it is why `caret-color`
- * resolves into the style table with nothing to paint. `accent-color` is the same.
+ * There is no selection and no clipboard. A click collapses the caret and a drag does
+ * nothing; that is the rest of A5. `accent-color` still resolves with nothing to paint.
  *
  * A `<select>` renders closed. Its picker is a popover with anchor positioning in
  * the spec, and that needs the overlay layer (ROADMAP B1), so the options are
@@ -109,18 +114,37 @@ export default function Controls() {
           click either field and type · `bind:value` names the signal that holds what you type, and
           a click focuses it because an editable is hit-testable · `::placeholder` is an ordinary
           generated box whose text comes from the attribute, positioned absolutely so it costs no
-          room, and paint draws it only while the field is empty · the third is disabled: it cannot
-          be focused, and a press on it produces no events at all · still no caret, no selection and
-          no clipboard — that is A5
+          room, and paint draws it only while the field is empty · the caret lands on the boundary
+          you clicked, the arrows and Home/End move it, and Delete erases forward · focus draws a
+          Tailwind `ring`, which is `box-shadow` and takes no room in layout · the third is
+          disabled: it cannot be focused, and a press on it produces no events at all · no
+          selection and no clipboard yet — that is the rest of A5
         </div>
         <div className="flex flex-col gap-2">
-          <input type="text" placeholder="a text field" bind:value={typed} />
+          {/* `focus:ring-*` rather than a thicker border, which is the point of a ring: a
+              box-shadow never affects layout, so the field does not move when it gains
+              one. The offset colour has to be named — Tailwind's default is `#fff`, and
+              an unnamed offset would put a white band around a field on a dark card. */}
+          <input
+            type="text"
+            placeholder="a text field"
+            bind:value={typed}
+            className="focus:ring-2 focus:ring-sky-400 focus:ring-offset-2 focus:ring-offset-zinc-900"
+          />
           {/* A second field with its own signal, so tabbing is not the only way to tell
               two fields apart and `:focus` has something to move between. It was unbound
               on purpose for one commit, to show what the build warning is about — but a
               field that silently ignores typing reads as broken rather than as a lesson,
               and `compile.ts` warns by name whether or not this page demonstrates it. */}
-          <input type="text" placeholder="and a second one" bind:value={also} />
+          {/* An inset ring on the second one, so both kinds are on screen at once: this
+              band goes *inward* from the border box, over the background and under the
+              border, which is where css-backgrounds-3 puts an inner shadow. */}
+          <input
+            type="text"
+            placeholder="and a second one"
+            bind:value={also}
+            className="focus:inset-ring-2 focus:inset-ring-sky-400"
+          />
           {/* Styled with Tailwind's `disabled:` variant rather than the `input:disabled`
               rule in app.css, to show the same predicate reached both ways: a utility
               class and a hand-written selector compile to one variant slot each.

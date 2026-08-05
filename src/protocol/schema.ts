@@ -221,6 +221,38 @@ const STYLES: Table = {
     { name: "radiusTopRight", type: "f32", affects: "paint", interp: "number", ir: "radTR" },
     { name: "radiusBottomRight", type: "f32", affects: "paint", interp: "number", ir: "radBR" },
     { name: "radiusBottomLeft", type: "f32", affects: "paint", interp: "number", ir: "radBL" },
+    // `box-shadow`, reduced to the concentric bands it can actually be.
+    //
+    // Three bands rather than a layer list, because a style row is a fixed struct and a
+    // shadow list is not. What fits is the subset with no offset and no blur — a *spread*
+    // in a solid colour — and that subset is exactly what Tailwind's `ring-*`, `inset-ring-*`
+    // and `ring-offset-*` utilities compile to. Measured, not assumed: `ring-2 ring-sky-400
+    // ring-offset-2 ring-offset-black` resolves to
+    //
+    //   0 0 #0000, 0 0 #0000, 0 0 0 2px #000, 0 0 0 calc(2px + 2px) #38bdf8, 0 0 #0000
+    //
+    // through dziri's own `var()` and `@property` machinery. See BROWSER-FACTS.md and
+    // `properties.ts::parseBoxShadow`, which refuses the layers that do not fit rather than
+    // approximating them.
+    //
+    // `outer` is the widest outset band and `inner` is an outset band painted *over* it, so
+    // the visible ring is `inner..outer` in `outerColor` and `0..inner` in `innerColor` —
+    // which is precisely how a ring offset works. Extents from the border box, not
+    // thicknesses, because that is what a shadow's spread is.
+    //
+    // All `paint`: CSS says a box shadow never affects layout, which is the whole reason
+    // `ring-2` is reached for instead of a second border.
+    //
+    // **Deliberately not `interp`.** The mask is a `u32` and 25 of its 32 bits are already
+    // spent; six more would leave one. A ring that appears on focus without fading is a
+    // smaller cost than a budget with no room in it, and `transitionMask` warns rather than
+    // silently doing nothing. Revisit when the mask grows.
+    { name: "ringOuterWidth", type: "f32", affects: "paint" },
+    { name: "ringOuterColor", type: "u32", affects: "paint" },
+    { name: "ringInnerWidth", type: "f32", affects: "paint" },
+    { name: "ringInnerColor", type: "u32", affects: "paint" },
+    { name: "ringInsetWidth", type: "f32", affects: "paint" },
+    { name: "ringInsetColor", type: "u32", affects: "paint" },
     // box
     { name: "padTop", type: "f32", affects: "layout", ir: "padT" },
     { name: "padRight", type: "f32", affects: "layout", ir: "padR" },
@@ -950,8 +982,13 @@ export const ENUMS: EnumDef[] = [
  * offset moved. So the bump is by hand, for the same reason v10's was — an engine
  * built before this bit would read a field's flags without it and quietly go back to
  * collapsing every empty field, which is a wrong picture rather than a loud failure.
+ *
+ * v16 adds the six `ring*` style fields — `box-shadow` reduced to the concentric bands a
+ * fixed style row can hold, which is what Tailwind's ring utilities compile to. An
+ * ordinary bump: the styles table grew, so `SCHEMA_HASH` moves on its own and the
+ * handshake would have caught it anyway.
  */
-export const PROTOCOL_VERSION = 15;
+export const PROTOCOL_VERSION = 16;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

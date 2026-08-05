@@ -45,7 +45,9 @@ import type { KeyframeBlock } from "./css.ts";
 import {
   animationFrom,
   EMPTY_VARS,
+  parseColor,
   parseEasing,
+  substituteCurrentColor,
   substituteVars,
   transitionFrom,
   transitionMask,
@@ -80,6 +82,11 @@ export function applyDecls(
 ): ComputedStyle {
   const patch: Partial<Record<StyleField, number>> = {};
 
+  // Before the loop, because `currentcolor` means "this element's computed `color`"
+  // regardless of declaration order: `.x { box-shadow: 0 0 0 2px currentcolor; color: red }`
+  // has a red ring even though the shadow is written first.
+  const currentColor = resolveCurrentColor(base, decls, vars, registered);
+
   for (const [prop, value] of decls) {
     // A custom property is a value carrier, not a style field. It has already
     // been folded into `vars` by the caller; expanding it here would be an error
@@ -88,15 +95,25 @@ export function applyDecls(
 
     // Substituted before the expander sees it, which is what lets `var()` supply
     // part of a value — `padding: var(--y) 4px` — rather than only whole ones.
-    const resolved = value.includes("var(")
+    const substituted = value.includes("var(")
       ? substituteVars(value, vars, 0, registered)
       : value;
-    if (resolved === null) {
+    if (substituted === null) {
       // CSS drops a declaration whose `var()` cannot resolve, rather than taking
       // a partial value. Silent because it is a legitimate authoring pattern:
       // `color: var(--maybe-unset)` is how a theme opts out of setting a colour.
       continue;
     }
+
+    // After `var()` and not before: Tailwind's rings reach `currentcolor` through a
+    // fallback — `var(--tw-ring-color, currentcolor)` — so the keyword does not exist
+    // in the authored text at all. `content` is excluded because there the keyword
+    // would be *text* rather than a colour, and `color` resolves against the parent's
+    // rather than its own, which is what `currentcolor` on `color` means in CSS.
+    const resolved =
+      prop === "content"
+        ? substituted
+        : substituteCurrentColor(substituted, prop === "color" ? base.fg : currentColor);
 
     try {
       expandDeclaration(prop, resolved, patch);
@@ -133,6 +150,37 @@ export function applyDecls(
   if (anim) resolveTiming(style, decls, where, (value) => resolveValue(value, vars, registered), anim);
 
   return style;
+}
+
+/**
+ * What `currentcolor` resolves to on this element: its own `color`, or the inherited one.
+ *
+ * A pre-pass rather than a field read, because `color` may be declared *after* the
+ * property that mentions the keyword and CSS does not care about that order. It parses
+ * `color` a second time — the loop will parse it again for real — and that is the price
+ * of not reordering the loop around one property.
+ *
+ * A `color` this cannot read is not reported here. Returning the inherited colour lets the
+ * main loop reach the same declaration and throw with the position and the `via` chain,
+ * which is a better diagnostic than anything available at this point.
+ */
+function resolveCurrentColor(
+  base: ComputedStyle,
+  decls: Map<string, string>,
+  vars: VarEnv,
+  registered: ReadonlyMap<string, RegisteredProperty>,
+): number {
+  const own = decls.get("color");
+  if (own === undefined) return base.fg;
+  const resolved = resolveValue(own, vars, registered);
+  if (resolved === null) return base.fg;
+  try {
+    // `color: currentcolor` is the inherited colour, so the keyword inside `color`'s own
+    // value resolves against the parent — never against the value being computed.
+    return parseColor(substituteCurrentColor(resolved, base.fg));
+  } catch {
+    return base.fg;
+  }
 }
 
 /**
@@ -509,8 +557,12 @@ function resolveKeyframes(
       // `animation-timing-function` inside a keyframe is the segment's easing, not
       // a style field — measured: it never reaches the element's computed style.
       if (prop === "animation-timing-function") continue;
-      const resolved = resolve(value);
-      if (resolved === null) continue;
+      const substituted = resolve(value);
+      if (substituted === null) continue;
+      // A keyframe resolves against the element's own computed style, so `currentcolor`
+      // inside one is that element's `color` — which `canvas` already carries.
+      const resolved =
+        prop === "content" ? substituted : substituteCurrentColor(substituted, canvas.fg);
       try {
         expandDeclaration(prop, resolved, patch);
       } catch {

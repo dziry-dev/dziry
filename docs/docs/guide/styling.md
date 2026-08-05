@@ -125,7 +125,13 @@ list rather than trusting this one.
 
 - `line-height` is unsupported, so `text-sm` and `text-lg` set their font size and
   warn about the line height that comes with them.
-- `@media (hover: hover)`, `@property` and `@supports` are skipped at-rules.
+- `@media (hover: hover)` and `@supports` are skipped at-rules. `@property` is *not*:
+  its `initial-value` is read, which is what makes Tailwind's `--tw-*` variables
+  resolve at all.
+- `box-shadow` supports the **ring** subset only: no offset, no blur, a solid spread.
+  That is exactly what `ring-*`, `inset-ring-*` and `ring-offset-*` compile to, so
+  every ring utility works and `shadow-md` warns and draws nothing. A style row is a
+  fixed struct and a shadow list is not; see `properties.ts::parseBoxShadow`.
 - `mask-image` and `mask-composite` are the largest blockers by class count, then
   `calc()` over percentages and viewport units.
 

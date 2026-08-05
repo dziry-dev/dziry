@@ -866,3 +866,170 @@ fn a_clipping_box_that_cannot_scroll_draws_no_thumb() {
         "and the wheel agrees, which is what the missing thumb has to match"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Rings — `box-shadow`, reduced to the concentric bands a style row can hold
+// ---------------------------------------------------------------------------
+
+const RING_OUTER: u32 = 0xff00_00ff; // blue, same as BORDER — nothing here has a border
+const RING_INNER: u32 = 0xff00_ff00; // green: Tailwind's ring offset
+const RING_INSET: u32 = 0xffff_ff00; // yellow: `inset-ring-*`
+
+/// A 60x60 red box at (30, 30) inside the 120px window, wearing whatever rings.
+///
+/// Absolutely positioned so the box has 30 px of clear surface on every side — enough
+/// for an 8 px ring plus margin, which is what lets a single pixel decide the assertion
+/// without antialiasing being able to argue.
+fn ringed_box(outer: f32, inner: f32, inset: f32) -> Engine {
+    let mut engine = Engine::new(&config_of(2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+
+        t.set_u32(STYLES, styles::BG, 1, BG);
+        t.set_u8(STYLES, styles::POSITION, 1, protocol::position::ABSOLUTE);
+        t.set_f32(STYLES, styles::INSET_TOP, 1, 30.0);
+        t.set_f32(STYLES, styles::INSET_LEFT, 1, 30.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 60.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 60.0);
+
+        t.set_f32(STYLES, styles::RING_OUTER_WIDTH, 1, outer);
+        t.set_u32(STYLES, styles::RING_OUTER_COLOR, 1, RING_OUTER);
+        t.set_f32(STYLES, styles::RING_INNER_WIDTH, 1, inner);
+        t.set_u32(STYLES, styles::RING_INNER_COLOR, 1, RING_INNER);
+        t.set_f32(STYLES, styles::RING_INSET_WIDTH, 1, inset);
+        t.set_u32(STYLES, styles::RING_INSET_COLOR, 1, RING_INSET);
+
+        for node in 0..2 {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        t.set_i32(NODES, nodes::PARENT, 1, 0);
+    }
+    engine.tick().expect("tick");
+    engine
+}
+
+fn ring_at(engine: &mut Engine, x: usize, y: usize) -> &'static str {
+    let got = pixel(engine, x, y);
+    nearest(
+        got,
+        &[
+            (BG, "background"),
+            (RING_OUTER, "outer"),
+            (RING_INNER, "inner"),
+            (RING_INSET, "inset"),
+            (SURFACE, "surface"),
+        ],
+    )
+}
+
+/// An outset ring occupies exactly `[0, width)` outside the border box, and no more.
+///
+/// The whole reason `ring-2` exists rather than a second border: it takes no space in
+/// layout. So the box must still be 60x60 with the ring on, and the ring must live in
+/// pixels the box does not own.
+#[test]
+fn an_outset_ring_sits_outside_the_border_box_and_takes_no_layout() {
+    let mut engine = ringed_box(8.0, 0.0, 0.0);
+
+    assert_eq!(
+        engine.bounds_of(1).expect("bounds"),
+        [30.0, 30.0, 60.0, 60.0],
+        "a ring is `paint`, so Taffy must not have heard about it"
+    );
+
+    // The left edge is at x = 30, so the ring covers x in [22, 30).
+    assert_eq!(ring_at(&mut engine, 26, 60), "outer", "mid-ring");
+    assert_eq!(
+        ring_at(&mut engine, 23, 60),
+        "outer",
+        "just inside the outer edge"
+    );
+    assert_eq!(
+        ring_at(&mut engine, 19, 60),
+        "surface",
+        "past the ring, nothing"
+    );
+    assert_eq!(
+        ring_at(&mut engine, 60, 60),
+        "background",
+        "and the box is untouched"
+    );
+}
+
+/// A ring offset is a *narrower band painted over* the ring, which is why both fit in
+/// one `box-shadow` and why the wider one is stored as an extent rather than a thickness.
+///
+/// `ring-2 ring-offset-2` resolves to spreads of 4 and 2 — measured, recorded in
+/// BROWSER-FACTS.md — so the visible result is 0..2 in the offset colour and 2..4 in the
+/// ring colour. Mutation check: swapping the two bands' colours, or drawing the inner one
+/// first, moves both assertions.
+#[test]
+fn a_ring_offset_covers_the_inner_part_of_the_ring() {
+    let mut engine = ringed_box(4.0, 2.0, 0.0);
+
+    // Left edge at x = 30: offset band is x in [28, 30), ring band is x in [26, 28).
+    assert_eq!(
+        ring_at(&mut engine, 29, 60),
+        "inner",
+        "the offset, next to the box"
+    );
+    assert_eq!(
+        ring_at(&mut engine, 26, 60),
+        "outer",
+        "the ring, outside the offset"
+    );
+    assert_eq!(
+        ring_at(&mut engine, 24, 60),
+        "surface",
+        "and nothing past 4px"
+    );
+}
+
+/// An inset ring goes inward from the border box, over the background.
+///
+/// css-backgrounds-3 puts an inner shadow above the background and below the border, and
+/// the order here is that order. Drawn under the background it would be invisible on any
+/// box with a fill, which is nearly all of them.
+#[test]
+fn an_inset_ring_goes_inward_over_the_background() {
+    let mut engine = ringed_box(0.0, 0.0, 6.0);
+
+    assert_eq!(
+        ring_at(&mut engine, 33, 60),
+        "inset",
+        "inside the border box"
+    );
+    assert_eq!(
+        ring_at(&mut engine, 27, 60),
+        "surface",
+        "and not outside it"
+    );
+    assert_eq!(
+        ring_at(&mut engine, 60, 60),
+        "background",
+        "the middle is still the fill"
+    );
+}
+
+/// No ring is the common case and must cost nothing on screen.
+#[test]
+fn a_box_with_no_ring_paints_none() {
+    let mut engine = ringed_box(0.0, 0.0, 0.0);
+
+    for x in [24, 27, 29, 33] {
+        assert_eq!(
+            ring_at(&mut engine, x, 60),
+            if x < 30 { "surface" } else { "background" },
+            "nothing may appear at x={x} with every ring width zero"
+        );
+    }
+}

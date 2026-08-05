@@ -198,17 +198,19 @@ input[type="text"] {
 input[type="text"]:hover { border-color: #52525b; }
 input[type="text"]:disabled { color: #52525b; }
 
-/* Focus, so which field has it is visible without a caret to show it.
+/* Focus, as a background lift only.
+
    `:focus` has been a live predicate since the engine set `state.focused` from the
    hit test, and until an editable was hit-testable nothing could ever match it — so
    this rule is only reachable at all because of the `buildInteractive` fix.
 
-   Two declarations rather than a ring: `box-shadow` and `outline` are both absent
-   from STYLE_FIELDS, and a rule naming either would be dropped with a warning. The
-   border colour plus a background lift is what the style table can actually express
-   today, and it reads as focus. */
+   The *ring* is on the elements themselves, as Tailwind `focus:ring-*` and
+   `focus:inset-ring-*` — see `pages/controls.tsx`. This comment used to say
+   `box-shadow` was absent from STYLE_FIELDS and that a ring was therefore
+   unexpressible; that stopped being true when the six `ring*` fields landed, and the
+   ring is what a browser draws here, so the border-colour swap this rule used to do
+   has gone with it. Two focus indicators on one field is one too many. */
 input[type="text"]:focus {
-    border-color: #38bdf8;
     background: #1e1e21;
 }
 
