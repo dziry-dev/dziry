@@ -257,6 +257,10 @@ async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<vo
     down?: boolean;
     up?: boolean;
     key?: string;
+    /** CDP's bitmask: 1 alt, 2 ctrl, 4 meta, 8 shift. */
+    modifiers?: number;
+    /** 2 for a double click. Chrome derives word selection from this, not from timing. */
+    clickCount?: number;
     label?: string;
   }>;
 
@@ -269,11 +273,19 @@ async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<vo
         // A printable key needs `text` or it inserts nothing; a named key must NOT have
         // it, or Chrome treats "Escape" as five characters of input.
         ...(step.key.length === 1 ? { text: step.key } : {}),
+        ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
       };
       await cdp.send("Input.dispatchKeyEvent", { ...key, type: "keyDown" }, sessionId);
       await cdp.send("Input.dispatchKeyEvent", { ...key, type: "keyUp" }, sessionId);
     } else {
-      const common = { x: step.x, y: step.y, button: "left", clickCount: 1, buttons: 0 };
+      const common = {
+        x: step.x,
+        y: step.y,
+        button: "left",
+        clickCount: step.clickCount ?? 1,
+        buttons: 0,
+        ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
+      };
       await cdp.send("Input.dispatchMouseEvent", { ...common, type: "mouseMoved" }, sessionId);
       if (step.down) {
         await cdp.send(

@@ -16,6 +16,7 @@ use skia_safe::textlayout::TextAlign;
 use skia_safe::{Canvas, Color, Matrix, Paint, PaintStyle, Point, RRect, Rect};
 
 use crate::anim::{Anims, Blend};
+use crate::caret::{boundary_at, Carets};
 use crate::controls::{Activation, Controls};
 use crate::protocol::{self, control_flags, display, node_kind, predicate};
 use crate::tables::Tables;
@@ -37,6 +38,35 @@ fn display_of(tables: &Tables, slot: usize) -> u8 {
         .get(slot)
         .copied()
         .unwrap_or(display::FLEX)
+}
+
+/// The `EDITABLE` text run inside `field`, or `None` if it has none.
+///
+/// Every text-entry field owns one — the compiler emits an empty run even for an unbound
+/// `<input>` — so `None` means the node is not a field at all, which is what a press on
+/// anything else looks like.
+fn editable_run_of(tables: &Tables, field: i32, count: usize) -> Option<usize> {
+    if field < 0 || field as usize >= count {
+        return None;
+    }
+    let flags = tables.u8s(NODES, protocol::nodes::FLAGS);
+    let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
+    let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
+
+    let mut child = first[field as usize];
+    let mut seen = 0;
+    while child >= 0 && (child as usize) < count && seen <= count {
+        let c = child as usize;
+        // A placeholder is `GENERATED` and a value run is not, which is what keeps this
+        // from returning the placeholder — it carries no `EDITABLE` bit either, but being
+        // explicit costs nothing and the two boxes are otherwise alike.
+        if flags[c] & protocol::flags::EDITABLE != 0 && flags[c] & protocol::flags::GENERATED == 0 {
+            return Some(c);
+        }
+        child = next[c];
+        seen += 1;
+    }
+    None
 }
 
 /// Whether the field a `::placeholder` belongs to currently holds any text.
@@ -785,6 +815,12 @@ pub struct Painter {
     /// this type's question, and `:checked` is one more predicate that answers it. See
     /// `controls.rs` for why the live state is the engine's at all.
     controls: Controls,
+    /// Where the caret is, and whether this frame draws it.
+    ///
+    /// Beside `controls` for the same reason that is beside `anims`: paint asks "is there
+    /// a caret in this node" while drawing a run, so the answer belongs to whatever owns
+    /// the per-node drawing questions. See `caret.rs` for why the index is engine state.
+    carets: Carets,
 }
 
 impl Default for Painter {
@@ -823,6 +859,7 @@ impl Painter {
             frame: FrameState::default(),
             anims: Anims::new(),
             controls: Controls::new(),
+            carets: Carets::new(),
         }
     }
 
@@ -841,6 +878,75 @@ impl Painter {
     /// Whether a press on `node` is swallowed because the node is a disabled control.
     pub fn press_is_swallowed(&self, node: i32) -> bool {
         self.controls.press_is_swallowed(node)
+    }
+
+    /// Puts the caret where a click at `x` landed inside `field`, if it is a text field.
+    ///
+    /// Returns whether a caret was placed, which is what tells the caller a repaint is
+    /// due. `false` for a press on anything that is not a field — which is also how a
+    /// click elsewhere clears the previous caret, since `place` is one-at-a-time.
+    ///
+    /// The index is resolved against the *run*, not the field: the run is where the text
+    /// is and where its origin is, and it is already inset by the field's padding and
+    /// border. Doing the arithmetic from the field's own box would have to re-derive both.
+    pub fn place_caret(
+        &mut self,
+        tables: &Tables,
+        geometry: Geometry,
+        measurer: &mut Measurer,
+        field: i32,
+        x: f32,
+    ) -> bool {
+        let Some(run) = editable_run_of(tables, field, geometry.bounds.len()) else {
+            self.carets.clear();
+            return false;
+        };
+
+        let [rx, _, _, _] = geometry.bounds[run];
+        let slot = tables.i32s(NODES, protocol::nodes::TEXT)[run];
+        let content = tables.string(slot);
+        let chars: Vec<char> = content.chars().collect();
+
+        // The run's *base* style, not a resolved variant slot. A field's font does not
+        // change with `:hover`, and reading the base keeps this out of the variant
+        // machinery for a value that would be identical either way.
+        let style = tables.u16s(NODES, protocol::nodes::STYLE)[run] as usize;
+        let size = tables
+            .f32s(STYLES, protocol::styles::FONT_SIZE)
+            .get(style)
+            .copied()
+            .unwrap_or(16.0);
+        let weight = tables
+            .u16s(STYLES, protocol::styles::FONT_WEIGHT)
+            .get(style)
+            .copied()
+            .unwrap_or(400);
+
+        // Measured per prefix rather than from an average advance, because the boundaries
+        // of proportional text are not evenly spaced — see `boundary_at`. Each call goes
+        // through the measure cache, so a field of *n* characters costs n cached lookups
+        // on the frame it is clicked and nothing afterwards.
+        let index = boundary_at(x - rx, chars.len(), |n| {
+            if n == 0 {
+                return 0.0;
+            }
+            let prefix: String = chars[..n].iter().collect();
+            measurer.measure(&prefix, size, weight, f32::INFINITY).0
+        });
+
+        self.carets.place(run, index);
+        true
+    }
+
+    /// Moves the caret blink on. Returns whether the phase flipped, so a caller can
+    /// repaint only when it did.
+    pub fn advance_caret(&mut self, dt: f32) -> bool {
+        self.carets.advance(dt)
+    }
+
+    /// Drops the caret, for a blur or a press outside every field.
+    pub fn clear_caret(&mut self) {
+        self.carets.clear();
     }
 
     /// Whether any tween is still in flight, so an idle frame stays free.
@@ -1648,12 +1754,35 @@ impl Painter {
         }
 
         let text = tables.string(text_slot);
-        if text.is_empty() {
-            return;
-        }
 
         let size = g(f::FONT_SIZE);
         let weight = blend.u16(tables, f::FONT_WEIGHT, 400);
+
+        // The caret is drawn *before* the early-out for empty text, because an empty field
+        // is the commonest place to want one — you click a blank box and expect a cursor.
+        // It lived after the glyph drawing at first and the caret never appeared: the run
+        // holds "", the function returned two lines earlier, and a golden of a clicked
+        // field came back byte-identical to an unclicked one.
+        //
+        // Drawn from the run's own origin rather than over the text, which is why it does
+        // not need the paragraph: the offset is the advance of the prefix, and for an empty
+        // field that is zero.
+        self.draw_caret(
+            canvas,
+            node,
+            text,
+            size,
+            weight,
+            measurer,
+            x,
+            y,
+            h,
+            c(f::CARET_COLOR),
+        );
+
+        if text.is_empty() {
+            return;
+        }
         self.fill.set_color(Color::from(c(f::FG)));
 
         let kind = tables
@@ -1691,6 +1820,49 @@ impl Painter {
             let mut paragraph = measurer.paragraph(text, size, weight, w, TextAlign::Left);
             crate::text::paint_paragraph(&mut paragraph, canvas, (x, y).into(), &self.fill);
         }
+    }
+
+    /// The caret in `node`, if it has one and this frame is a visible phase.
+    ///
+    /// `caret-color` has been resolving into the style table since v9 with nothing reading
+    /// it. This is the something. A transparent value means no caret — which is also what
+    /// the CSS initial value gives, so a field whose stylesheet never mentions the property
+    /// shows nothing, exactly as the spec says.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_caret(
+        &mut self,
+        canvas: &Canvas,
+        node: usize,
+        text: &str,
+        size: f32,
+        weight: u16,
+        measurer: &mut Measurer,
+        x: f32,
+        y: f32,
+        h: f32,
+        colour: u32,
+    ) {
+        let Some(index) = self.carets.index_of(node) else {
+            return;
+        };
+        if !self.carets.visible() || colour >> 24 == 0 {
+            return;
+        }
+
+        // The same prefix advance the boundary search used, so the caret lands *on* the
+        // boundary the click resolved to rather than near it.
+        let prefix: String = text.chars().take(index).collect();
+        let dx = if prefix.is_empty() {
+            0.0
+        } else {
+            measurer.measure(&prefix, size, weight, f32::INFINITY).0
+        };
+
+        // One CSS pixel wide, the full line height. Chrome's caret is browser chrome with
+        // no readable width, so this is convention rather than measurement — `caret.rs`
+        // makes the same admission about the blink rate.
+        self.fill.set_color(Color::from(colour));
+        canvas.draw_rect(Rect::from_xywh(x + dx, y, 1.0, h), &self.fill);
     }
 }
 

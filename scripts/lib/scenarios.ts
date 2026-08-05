@@ -190,6 +190,34 @@ export const SCENARIOS: Scenario[] = [
     name: "controls-focus",
     args: ["--route", "controls", "--size", "1040x1400", "--focus", "302"],
   },
+  /**
+   * A caret, which needs a **click** rather than `--focus`.
+   *
+   * The distinction is the point: `--focus` sets the state directly, and a caret is placed
+   * by `mouse_down` resolving an x to a character boundary — so a scenario that only
+   * focused the field would render no caret and prove nothing. `controls-focus` beside
+   * this one is still worth having, because it isolates the `:focus` *style* from the
+   * caret.
+   *
+   * Deterministic despite being a blink: the phase resets solid on placement and advances
+   * on the frame `dt`, which is well under the half-second phase, so frame one always has
+   * a visible caret. Same reason `--advance` makes an animation golden possible.
+   *
+   * The field is empty, so the caret sits at index 0 — one pixel at the text origin, in
+   * `caret-color`. That is the case worth pinning: a caret at 0 is where an off-by-one in
+   * the padding or the border would put it somewhere obviously wrong.
+   *
+   * **This frame shows no focus ring, and that is the harness rather than the engine.**
+   * `main.ts` runs every `--click` and *then* calls `setInputState(--hover, -1, --focus)`,
+   * so with no `--focus` flag the focus the click just acquired is reset to -1 before the
+   * shot. The caret survives because it is not keyed on focus. Worth knowing before
+   * reading this picture as "a clicked field does not look focused", and worth fixing when
+   * `--click` and `--focus` next need to compose.
+   */
+  {
+    name: "controls-caret",
+    args: ["--route", "controls", "--size", "1040x1400", "--click", "302"],
+  },
 
   /**
    * The reactive rewrite, rendered.

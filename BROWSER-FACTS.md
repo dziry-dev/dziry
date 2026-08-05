@@ -935,3 +935,76 @@ Still not implemented, and now measured rather than assumed: the **width** floor
 by its CSS box, so `size="20"` does nothing, and an `<input>` with no width class is as wide as its
 container rather than 169px. That is the `29 + 7 × size` figure recorded above, and it wants the same
 treatment on the inline axis.
+
+---
+
+## Where a click puts the caret, and what keys do to a selection
+
+**Measured 2026-08-05 · Chromium 151 (via Edge 151) · `probes/caret-and-selection.html`,
+driven by a real pointer and real keys.** Asked before writing a caret, because every rule
+below is a coin flip from memory and each one is visible the first time a user clicks.
+
+The caret itself is unmeasurable — it is browser chrome, so its width, blink rate and colour are
+not readable from script. `selectionStart` / `selectionEnd` / `selectionDirection` **are** the caret
+and the selection exactly, and they are the numbers an engine has to reproduce. The fixture is a
+monospace field holding `abcdefghij`; one character advances 8.797px, and every x below is a
+multiple of that read off the page rather than assumed.
+
+### A click resolves to the *nearest* boundary, not the character under the pointer
+
+| click x, in characters | caret |
+|---|---|
+| 0.0 | 0 |
+| **0.4** | **0** |
+| **0.6** | **1** |
+| 3.4 | 3 |
+| 3.6 | 4 |
+| 40 (past the text, inside the box) | **10** — clamped to the length, not to the box |
+
+So it is `round(x / advance)` against character boundaries, and the answer for a point past the end
+is the text length. Flooring instead would put the caret before the character you clicked the right
+half of, which reads as the click being ignored.
+
+### Arrows move one boundary and stop dead at both ends
+
+`ArrowLeft` at 0 and `ArrowRight` at the length both leave the caret where it is. `Home` is 0,
+`End` is the length.
+
+### An arrow with a live selection *collapses* it to the matching end
+
+With `2..6` selected, `ArrowLeft` gives `2..2` and `ArrowRight` gives `6..6` — neither moves a
+further step. Collapsing to the near end and *then* moving would be one character out, in the
+direction the user is looking.
+
+### A drag records a direction, and the offsets stay ordered
+
+Pressing at 2 and releasing at 6 gives `2..6 forward`. Pressing at **8** and dragging back to 3
+gives `3..8 **backward**` — `start` and `end` are always in document order, and the direction is
+carried separately. An engine storing `(anchor, focus)` gets this for free; one storing
+`(start, end)` needs the flag beside them or it cannot extend the right end.
+
+### Shift extension keeps the anchor, and survives a reversal through it
+
+From a collapsed caret at 5:
+
+| step | selection |
+|---|---|
+| Shift+ArrowRight | `5..6 forward` |
+| Shift+ArrowRight | `5..7 forward` |
+| Shift+ArrowLeft | `5..6 forward` — shrinks, does not move the anchor |
+| Shift+ArrowLeft | `5..5 forward` |
+| **Shift+ArrowLeft** | **`4..5 backward`** — through the anchor, which stays at 5 |
+| Shift+Home | `0..5 backward` |
+| Shift+End | `5..10 forward` — still anchored at 5 |
+| plain ArrowLeft | `5..5` |
+
+The anchor at 5 survives all of it, including the flip. That is the argument for storing
+`(anchor, focus)` rather than `(start, end)`: with the ordered pair, "extend" has no way to know
+which end to move once the two have crossed.
+
+### Not measured, and recorded so nobody reads the row as an answer
+
+A double click reported `0..10` — the whole value — but the fixture is the single word
+`abcdefghij`, so that measures "a double click selects a word" and says **nothing about where a word
+ends**. Word boundaries, and whether a trailing space is included, need a fixture with spaces in it
+and are unrecorded.

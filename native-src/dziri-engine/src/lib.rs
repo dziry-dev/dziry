@@ -20,6 +20,7 @@
 //! hidden byte cost no FFI call at all. See [`tables`].
 
 pub mod anim;
+pub mod caret;
 pub mod controls;
 pub mod engine;
 pub mod error;

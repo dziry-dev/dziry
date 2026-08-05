@@ -1,0 +1,134 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>caret-and-selection</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  /* A monospace field with a known advance, so a click at a known x has a predictable
+     answer and "nearest boundary" can be told apart from "the character under the
+     pointer". Proportional text would make every row a font-metrics argument. */
+  #f { font: 16px monospace; padding: 0; border: 0; width: 400px }
+</style>
+<h3>where does a click put the caret, and what do keys do to a selection?</h3>
+<div id="stage"><input id="f" value="abcdefghij"></div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * The caret itself is unmeasurable — it is browser chrome, not an element, so its
+   * width, its blink rate and its colour are not readable from script. What *is*
+   * readable is where it ends up: `selectionStart` / `selectionEnd` / `selectionDirection`
+   * are the caret and the selection, exactly, and they are the numbers an engine has to
+   * reproduce.
+   *
+   * So this measures the rules rather than the pixels:
+   *   - which character boundary a click at a given x resolves to,
+   *   - what the arrows, Home and End do, and whether they collapse a selection,
+   *   - how Shift extends one, and which end is the anchor,
+   *   - what a double click selects, and whether the trailing space is in it.
+   */
+
+  const f = document.getElementById("f");
+  const box = f.getBoundingClientRect();
+
+  // One character's advance, read rather than assumed — even monospace at 16px is not
+  // reliably 8px, and every x below is a multiple of this.
+  const probe = document.createElement("span");
+  probe.style.font = getComputedStyle(f).font;
+  probe.style.position = "absolute";
+  probe.style.whiteSpace = "pre";
+  probe.textContent = "0123456789";
+  document.body.appendChild(probe);
+  const adv = probe.getBoundingClientRect().width / 10;
+  probe.remove();
+
+  log(`one character advances ${adv.toFixed(3)}px; the field holds "abcdefghij"`);
+  log("");
+
+  /** A point inside the field at `chars` character widths from the content origin. */
+  const at = (chars) => ({
+    x: Math.round(box.left + chars * adv),
+    y: Math.round(box.top + box.height / 2),
+  });
+
+  const sel = () => {
+    const d = f.selectionDirection;
+    return `${f.selectionStart}..${f.selectionEnd}${d && d !== "none" ? " " + d : ""}`;
+  };
+
+  const plan = [
+    // Clicks at fractions of a character, to find the rounding rule. If a click picks
+    // the *nearest* boundary, 0.4 lands at 0 and 0.6 at 1; if it floors to the character
+    // under the pointer, both land at 0.
+    ["click at x = 0.0 chars", { ...at(0.0), down: 1, up: 1 }],
+    ["click at x = 0.4 chars", { ...at(0.4), down: 1, up: 1 }],
+    ["click at x = 0.6 chars", { ...at(0.6), down: 1, up: 1 }],
+    ["click at x = 3.4 chars", { ...at(3.4), down: 1, up: 1 }],
+    ["click at x = 3.6 chars", { ...at(3.6), down: 1, up: 1 }],
+    // Past the end of the text but inside the box: the caret has to clamp somewhere.
+    ["click at x = 40 chars (past end)", { ...at(40), down: 1, up: 1 }],
+
+    // Caret movement from a known position.
+    ["click at 5, then ArrowLeft", { ...at(5), down: 1, up: 1 }],
+    ["ArrowLeft", { key: "ArrowLeft" }],
+    ["ArrowRight", { key: "ArrowRight" }],
+    ["Home", { key: "Home" }],
+    ["End", { key: "End" }],
+    // At the boundary: does it stay, and does it still fire anything?
+    ["ArrowRight at the end", { key: "ArrowRight" }],
+    ["Home then ArrowLeft at 0", { key: "Home" }],
+    ["ArrowLeft at 0", { key: "ArrowLeft" }],
+
+    // Selection by drag: press at 2, release at 6.
+    ["press at 2", { ...at(2), down: 1 }],
+    ["drag to 6", { ...at(6) }],
+    ["release at 6", { ...at(6), up: 1 }],
+    // An arrow with a selection live: does it collapse, and to which end?
+    ["ArrowLeft with 2..6 selected", { key: "ArrowLeft" }],
+    ["re-drag 2..6, then ArrowRight", { ...at(2), down: 1 }],
+    ["to 6", { ...at(6) }],
+    ["release", { ...at(6), up: 1 }],
+    ["ArrowRight with 2..6 selected", { key: "ArrowRight" }],
+
+    // Backwards drag, to find which end is the anchor.
+    ["press at 8", { ...at(8), down: 1 }],
+    ["drag back to 3", { ...at(3) }],
+    ["release at 3", { ...at(3), up: 1 }],
+
+    // Shift+Arrow, which is the whole keyboard half of a selection model: it needs an
+    // anchor that stays put while the other end moves, and the anchor has to survive a
+    // reversal through zero without the selection turning inside out.
+    ["click at 5 (collapse)", { ...at(5), down: 1, up: 1 }],
+    ["Shift+ArrowRight", { key: "ArrowRight", modifiers: 8 }],
+    ["Shift+ArrowRight again", { key: "ArrowRight", modifiers: 8 }],
+    ["Shift+ArrowLeft (shrink)", { key: "ArrowLeft", modifiers: 8 }],
+    ["Shift+ArrowLeft (back to 5)", { key: "ArrowLeft", modifiers: 8 }],
+    ["Shift+ArrowLeft (through the anchor)", { key: "ArrowLeft", modifiers: 8 }],
+    ["Shift+Home", { key: "Home", modifiers: 8 }],
+    ["Shift+End", { key: "End", modifiers: 8 }],
+    // A plain arrow after a shift selection: does the anchor survive, or collapse?
+    ["ArrowLeft after Shift+End", { key: "ArrowLeft" }],
+
+    // A double click. `clickCount: 2` rather than two rapid clicks, because Chrome
+    // derives word selection from the count and not from timing.
+    ["double click inside a word", { ...at(1), down: 1, up: 1, clickCount: 2 }],
+  ];
+
+  window.__probeMouse = plan.map(([, p]) => p);
+  const labels = plan.map(([l]) => l);
+
+  const row = (label) => log(label.padEnd(34) + " selection=" + sel());
+
+  f.focus();
+  row("focused, no click yet");
+
+  window.__probeStep = (i) => row(labels[i] ?? `step ${i}`);
+
+  window.__probeMouseDone = () => {
+    log("");
+    log(`settled: selection=${sel()} value=${JSON.stringify(f.value)}`);
+    report();
+  };
+
+  document.title = "ready";
+</script>

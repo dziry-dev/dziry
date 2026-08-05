@@ -384,6 +384,15 @@ impl Engine {
         let dt = self.frame_dt();
         self.advance_scrolls(dt);
         self.advance_animations(dt);
+        // The blink, on the same `dt` everything else reads — so a golden that fixes the
+        // frame length sees the same caret phase every run, exactly as `--advance` does for
+        // animations. It sets `needs_paint` only when the phase actually flips, which is
+        // twice a second rather than sixty times, so a field with a caret does not turn an
+        // idle window into a hot loop. And this is *why* the blink is here rather than on a
+        // JS timer: it keeps flashing while Bun is busy, the worry recorded at `pump_input`.
+        if self.painter.advance_caret(dt) {
+            self.needs_paint = true;
+        }
 
         // An idle tick is an event drain and nothing else. The window keeps the
         // last frame it was given, so not presenting is not the same as
@@ -443,6 +452,15 @@ impl Engine {
         let dt = self.frame_dt();
         self.advance_scrolls(dt);
         self.advance_animations(dt);
+        // The blink, on the same `dt` everything else reads — so a golden that fixes the
+        // frame length sees the same caret phase every run, exactly as `--advance` does for
+        // animations. It sets `needs_paint` only when the phase actually flips, which is
+        // twice a second rather than sixty times, so a field with a caret does not turn an
+        // idle window into a hot loop. And this is *why* the blink is here rather than on a
+        // JS timer: it keeps flashing while Bun is busy, the worry recorded at `pump_input`.
+        if self.painter.advance_caret(dt) {
+            self.needs_paint = true;
+        }
 
         if !self.needs_paint {
             self.last_frame_ms = started.elapsed().as_secs_f32() * 1000.0;
@@ -1164,6 +1182,32 @@ impl Engine {
         self.state.pressed = hit;
         self.state.focused = hit;
         self.needs_paint = true;
+
+        // The caret goes where the press landed, not where the release does — measured
+        // for the *selection* case in `probes/caret-and-selection.html`, where a press at
+        // 2 collapsed the caret to 2 before any drag began. So this belongs beside the
+        // press, and a drag will later extend from it rather than replace it.
+        //
+        // A press on anything that is not a field clears the caret, which is the same
+        // call: `place_caret` returns false and has already cleared.
+        // Destructured so the borrow checker sees disjoint *fields* rather than one
+        // `&mut self`: `geometry()` borrows all of `self` immutably, and the painter and
+        // the measurer both need to be mutable. `advance_animations` does the same, and
+        // for the same reason.
+        let Self {
+            painter,
+            measurer,
+            tables,
+            tree,
+            scroll,
+            ..
+        } = self;
+        let geometry = Geometry {
+            bounds: tree.bounds(),
+            scroll,
+            extent: tree.overflow(),
+        };
+        painter.place_caret(tables, geometry, measurer, hit, x);
         self.events.push(Event {
             kind: event_kind::MOUSE_DOWN,
             node: hit,
