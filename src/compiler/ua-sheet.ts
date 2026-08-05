@@ -81,4 +81,33 @@ select option, select optgroup { display: none }
    belongs to the select. Stated so an author styling select does not get a
    doubled edge they never asked for. */
 select button { border-width: 0 }
+
+/* A placeholder overlays the text rather than occupying room beside it.
+
+   No backticks anywhere in this comment, and that is not a style choice: the whole sheet
+   is a template literal, so one would end the string. It cost a build.
+
+   position:absolute is doing two jobs. It takes the box out of flow, so a field with a
+   placeholder is exactly as tall as one without — which matters because the field's
+   height is now a strut and gaining a second in-flow child would double it. And it is
+   what lets paint decide the visibility of a box layout has already placed: the engine
+   draws a placeholder only while its field is empty, and because nothing is in flow
+   there is no relayout when that flips.
+
+   No left/top here, deliberately. An absolutely positioned box is placed against its
+   containing block's *padding* box, while text sits in the *content* box — so left:0 is
+   short by padding-left, and the placeholder sat against the border while the typed text
+   beside it was correctly indented. The inset has to be the field's own padding, which
+   is a value the author chooses and this sheet cannot name. walkPlaceholder supplies it
+   as a per-state default instead, from the resolved style, which an author's own rule
+   still overrides.
+
+   The colour is Chrome's own placeholder grey, and it is here rather than in a theme for
+   the reason the rest of this file is: a placeholder nobody can read is not "unstyled",
+   it is broken. An author's own ::placeholder rule overrides it like any other, since
+   this is an ordinary generated box in an ordinary cascade. */
+input::placeholder, textarea::placeholder {
+  position: absolute;
+  color: #757575;
+}
 `;

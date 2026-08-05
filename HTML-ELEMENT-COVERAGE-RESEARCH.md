@@ -145,7 +145,7 @@ name?: string;
 ```
 
 `Props` (`src/compiler/jsx-runtime.ts:87-139`) is the complete authored-attribute surface:
-`class`/`className`, `id`, `onClick`, `type`, `name`, `bindValue`, `style`, `children`. There is no
+`class`/`className`, `id`, `onClick`, `type`, `name`, `bind:value`, `style`, `children`. There is no
 `value`, `checked`, `disabled`, `placeholder`, `min`, `max`, `step`, `multiple`, `selected`,
 `required`, `readonly`, `for`, `src`, `alt`, or `href`. `type` and `name` are parsed and discarded.
 
@@ -242,7 +242,9 @@ expressed today, because the properties and the state selectors it needs do not 
   the one editable is broken today, not just IME.
 
 The sample app's own "text field" is not an `<input>` — it is
-`<div bindValue={draft} />` (`windows/main/pages/features.tsx:125`).
+`<div bind:value={draft} />` (`windows/main/pages/features.tsx:125`). That is also why the field
+could not be focused for as long as it could not: a `<div>` with a binding and no other reason to be
+interactive was in no clause of `buildInteractive`, and `hit_test` returns only interactive nodes.
 
 ### 2.8 What the project's own docs already decided
 

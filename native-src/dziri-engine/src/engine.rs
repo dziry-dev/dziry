@@ -1184,6 +1184,22 @@ impl Engine {
         }
 
         let hit = self.hit_test(x, y);
+
+        // The other half of "a disabled control receives no button events at all".
+        // `mouse_down` has dropped the press since v13, but the *release* was pushed
+        // unconditionally at the end of this function, so a host still saw a `MOUSE_UP`
+        // over a disabled field — and since a text field had no `controls` row at all
+        // until now, a disabled one also took focus and matched no `:disabled` rule.
+        //
+        // The bookkeeping still runs: returning without clearing `pressed` would leave
+        // a stale press that the next release anywhere could complete.
+        if self.painter.press_is_swallowed(hit) {
+            self.state.pressed = -1;
+            self.state.hovered = hit;
+            self.needs_paint = true;
+            return;
+        }
+
         // A click is press and release on the *same* node, which is what makes
         // dragging off a button cancel it. Measured too: pressing a checkbox and
         // releasing away from it focused the box without ticking it.

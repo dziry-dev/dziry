@@ -1,0 +1,91 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>text-field-box</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  /* No styling of the controls themselves — the question is what the UA gives them. */
+</style>
+<h3>how tall is a text field, and does its content have any say?</h3>
+<div id="stage"></div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * The question dziri got wrong: an empty field rendered as a thin line, because its
+   * height came from the text inside it and an empty string measures zero. A browser
+   * plainly does not do that, but "one line high" is not a number, and the number is
+   * what a layout pass needs.
+   *
+   * So: content-box height of a text field, empty and filled, against the font — and
+   * the same for the block-level box a naive implementation would reach for instead
+   * (`<div>` with text), because the two differ and the difference *is* the rule.
+   */
+
+  const stage = document.getElementById("stage");
+  const box = (el) => {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    const pad = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const bor = parseFloat(cs.borderTopWidth) + parseFloat(cs.borderBottomWidth);
+    return {
+      outer: `${r.width.toFixed(1)}x${r.height.toFixed(1)}`,
+      content: (r.height - pad - bor).toFixed(1),
+      lh: cs.lineHeight,
+      fs: cs.fontSize,
+      ff: cs.fontFamily.split(",")[0],
+    };
+  };
+
+  const row = (label, el) => {
+    const b = box(el);
+    log(
+      label.padEnd(38) +
+        " outer=" + b.outer.padEnd(14) +
+        " content-h=" + b.content.padEnd(7) +
+        " line-height=" + b.lh.padEnd(9) +
+        " font=" + b.fs + " " + b.ff,
+    );
+  };
+
+  log("=== a text field, empty vs filled, at the UA font ===");
+  stage.innerHTML = `
+    <input id="a">
+    <input id="b" value="x">
+    <input id="c" value="wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww">
+    <textarea id="t"></textarea>
+  `;
+  row("input, empty", document.getElementById("a"));
+  row("input, one char", document.getElementById("b"));
+  row("input, 40 chars (overflows)", document.getElementById("c"));
+  row("textarea, empty", document.getElementById("t"));
+
+  log("");
+  log("=== does an explicit font change the height, and by what rule? ===");
+  for (const [fs, lh] of [["13.3333px", "normal"], ["20px", "normal"], ["20px", "40px"], ["20px", "1"]]) {
+    stage.innerHTML = `<input id="f" style="font-size:${fs};line-height:${lh};font-family:Arial">`;
+    row(`input font-size:${fs} line-height:${lh}`, document.getElementById("f"));
+  }
+
+  log("");
+  log("=== the contrast: a block box with the same text is content-driven ===");
+  stage.innerHTML = `
+    <div id="d1" style="font:13.3333px Arial"></div>
+    <div id="d2" style="font:13.3333px Arial">x</div>
+    <div id="d3" style="font:13.3333px Arial"><span></span></div>
+  `;
+  row("div, empty", document.getElementById("d1"));
+  row("div, one char", document.getElementById("d2"));
+  row("div, empty inline child", document.getElementById("d3"));
+
+  log("");
+  log("=== and a contenteditable div, which is the closest analogue ===");
+  stage.innerHTML = `
+    <div id="e1" contenteditable style="font:13.3333px Arial"></div>
+    <div id="e2" contenteditable style="font:13.3333px Arial">x</div>
+  `;
+  row("contenteditable, empty", document.getElementById("e1"));
+  row("contenteditable, one char", document.getElementById("e2"));
+
+  report();
+</script>

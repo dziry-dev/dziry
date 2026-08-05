@@ -11,21 +11,37 @@
  * and knob is a generated box the compiler emitted as an ordinary node, so Taffy
  * lays it out and paint draws it like anything else.
  *
- * Three things are honestly not working yet, and the page says so rather than
- * faking them:
+ * `:checked` and `:disabled` are **live**, as of protocol v13 — this paragraph used
+ * to say nothing set them and that they were stuck in whatever state they were
+ * authored with, which stopped being true when `controls.rs` landed. A click ticks a
+ * box, a radio sets itself and clears its group, a disabled control swallows the
+ * press, and clicking the *words* beside a box reaches the box.
  *
- * `:checked` and `:disabled` compile to predicate bits exactly like `:hover`, and
- * nothing sets them — that is A3. The authored `checked`/`disabled` *attributes*
- * are matched instead, which is a static selector rather than live state, so the
- * controls below are stuck in whatever state they were authored with.
+ * Both text fields are typeable. A field needs `bind:value` to name the signal that
+ * holds what the user types; without one there is nothing to write to, so the build
+ * warns by name rather than shipping a box that silently eats keystrokes.
+ *
+ * `::placeholder` works, as of protocol v15 — this paragraph used to say it was refused
+ * by name and that an empty field looks empty. It is an ordinary generated box, like
+ * `::before`, with two differences: its text comes from the attribute rather than from
+ * `content`, and paint draws it only while the field is empty. The UA sheet positions it
+ * absolutely so it costs no room and overlays where the first character goes.
+ *
+ * A field is also one line high when empty, protocol v14. Both of those were the same
+ * bug from opposite ends: a box with nothing in it is not a box with no size.
+ *
+ * Still honestly not working, and the page says so rather than faking it:
+ *
+ * There is no caret, no selection and no clipboard. Typing appends and Backspace
+ * deletes; that is the whole editing model until A5, and it is why `caret-color`
+ * resolves into the style table with nothing to paint. `accent-color` is the same.
  *
  * A `<select>` renders closed. Its picker is a popover with anchor positioning in
  * the spec, and that needs the overlay layer (ROADMAP B1), so the options are
  * `display: none` for now. The closed control is most of what a form looks like.
- *
- * `accent-color` and `caret-color` resolve into the style table and nothing reads
- * them yet.
  */
+import { signal } from "dziri";
+
 const CARD = "flex flex-col gap-3 rounded-xl bg-zinc-900 p-6";
 const H = "text-lg font-semibold text-zinc-50";
 const SUB = "muted text-xs text-zinc-400";
@@ -33,6 +49,12 @@ const ROW = "flex flex-row items-center gap-2";
 const LABEL = "text-xs text-zinc-300";
 
 export default function Controls() {
+  // Component-local, because the field belongs to this page and nothing else reads it.
+  // The compiler registers it and declares `const locals = […]` in the artifact — see
+  // the Reactivity page for why a local needs that and an export does not.
+  const typed = signal("");
+  const also = signal("");
+
   return (
     <div className="flex flex-col gap-5">
       <div className={CARD}>
@@ -84,14 +106,35 @@ export default function Controls() {
       <div className={CARD}>
         <div className={H}>input[type=text]</div>
         <div className={SUB}>
-          the box is styled and the field is empty, honestly: `placeholder` reaches the IR as an
-          attribute and a selector can test it, but rendering its text needs `::placeholder`, which
-          is refused by name until it exists · `caret-color` and `accent-color` are set here and
-          compile into the style table, and neither is painted — there is no caret until A5
+          click either field and type · `bind:value` names the signal that holds what you type, and
+          a click focuses it because an editable is hit-testable · `::placeholder` is an ordinary
+          generated box whose text comes from the attribute, positioned absolutely so it costs no
+          room, and paint draws it only while the field is empty · the third is disabled: it cannot
+          be focused, and a press on it produces no events at all · still no caret, no selection and
+          no clipboard — that is A5
         </div>
         <div className="flex flex-col gap-2">
-          <input type="text" placeholder="a text field" />
-          <input type="text" disabled placeholder="disabled" />
+          <input type="text" placeholder="a text field" bind:value={typed} />
+          {/* A second field with its own signal, so tabbing is not the only way to tell
+              two fields apart and `:focus` has something to move between. It was unbound
+              on purpose for one commit, to show what the build warning is about — but a
+              field that silently ignores typing reads as broken rather than as a lesson,
+              and `compile.ts` warns by name whether or not this page demonstrates it. */}
+          <input type="text" placeholder="and a second one" bind:value={also} />
+          {/* Styled with Tailwind's `disabled:` variant rather than the `input:disabled`
+              rule in app.css, to show the same predicate reached both ways: a utility
+              class and a hand-written selector compile to one variant slot each.
+
+              It also cannot be focused any more. A disabled control swallows the press
+              entirely — measured, BROWSER-FACTS.md: no mousedown, no mouseup, no click,
+              and it never takes focus. That needed a `controls` row for a *text* field,
+              which the compiler had been emitting only for checkbox and radio. */}
+          <input
+            type="text"
+            disabled
+            placeholder="disabled"
+            className="disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+          />
         </div>
       </div>
 

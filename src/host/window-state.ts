@@ -64,6 +64,8 @@ export function buildUi(artifact: WindowArtifact): CompiledUi {
     variants: artifact.variants,
     interactive: artifact.interactive,
     generated: artifact.generated,
+    editableBoxes: artifact.editableBoxes,
+    placeholders: artifact.placeholders,
     textBindings: artifact.textBindings,
     handlers: artifact.handlers,
     lists: artifact.lists,

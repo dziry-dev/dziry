@@ -85,6 +85,14 @@ const PAINT_SLACK: f32 = 0.05;
 /// bounded the same cache at 4096 entries.
 const MEASURE_LIMIT: usize = 4096;
 
+/// The glyph [`Measurer::line_height`] measures a line with.
+///
+/// Any character would do — a single line's height is ascent + descent + line gap and
+/// does not depend on what is on it — and `x` is chosen for being present in every font
+/// this could fall back to. It goes through the ordinary measure cache, so a page full of
+/// empty fields at one font size costs one Skia layout in total.
+const STRUT: &str = "x";
+
 /// `(font size bits, weight, text hash, available width bits)`.
 ///
 /// Sizes and widths are keyed on their bit pattern so `16.0` and `16.000001` stay
@@ -202,6 +210,24 @@ impl Measurer {
             MAX_LAYOUT_WIDTH
         });
         paragraph
+    }
+
+    /// How tall one line of this font is, with no text in it — CSS's *strut*.
+    ///
+    /// What an empty editable field is worth. Measured, `probes/text-field-box.html`:
+    /// an `<input>`'s content box is 15.0px at 13.3333px Arial whether it holds nothing,
+    /// one character or forty, so the height is a property of the **font** and content
+    /// has no say. A `contenteditable` div agrees; a plain block box does not, which is
+    /// why the caller checks a flag rather than applying this to every empty run.
+    ///
+    /// Taken from a one-line paragraph rather than from raw font metrics because that is
+    /// the number the *filled* field will report a keystroke later, and the two have to
+    /// agree exactly or the box jumps by a fraction of a pixel the first time anyone
+    /// types — which is the bug being fixed here, only smaller and harder to see. The
+    /// glyph is irrelevant: a single line's height comes from ascent + descent + line
+    /// gap, so any character measures the same.
+    pub fn line_height(&mut self, size: f32, weight: u16) -> f32 {
+        self.measure(STRUT, size, weight, f32::INFINITY).1
     }
 
     /// The size a text node wants, given whatever space Taffy is offering.

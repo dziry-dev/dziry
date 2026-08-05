@@ -39,6 +39,53 @@ fn display_of(tables: &Tables, slot: usize) -> u8 {
         .unwrap_or(display::FLEX)
 }
 
+/// Whether the field a `::placeholder` belongs to currently holds any text.
+///
+/// The placeholder's parent is the field, and the field's value is in whichever child
+/// carries `EDITABLE` — the generated text run. So this is a walk of the placeholder's
+/// own siblings, which is at most a handful and runs only for placeholder nodes.
+///
+/// **False for a field with no run at all**, which is an *unbound* `<input>`: nothing
+/// owns its value yet, so it is permanently empty and its placeholder permanently shows.
+/// That is the honest rendering of the current state rather than a special case — when an
+/// engine-owned text buffer lands, the buffer becomes the thing this asks, and every
+/// unbound field starts behaving like a bound one with no further change here.
+fn field_has_text(
+    tables: &Tables,
+    first: &[i32],
+    next: &[i32],
+    flags: &[u8],
+    text: &[i32],
+    count: usize,
+    placeholder: usize,
+) -> bool {
+    let parent = match tables
+        .i32s(NODES, protocol::nodes::PARENT)
+        .get(placeholder)
+        .copied()
+    {
+        Some(p) if p >= 0 && (p as usize) < count => p as usize,
+        _ => return false,
+    };
+
+    let mut child = first.get(parent).copied().unwrap_or(-1);
+    // Bounded by the sibling count, and by `count` besides: a malformed chain must not
+    // spin the render thread.
+    let mut seen = 0;
+    while child >= 0 && (child as usize) < count && seen <= count {
+        let c = child as usize;
+        if flags.get(c).copied().unwrap_or(0) & protocol::flags::EDITABLE != 0 {
+            let slot = text.get(c).copied().unwrap_or(-1);
+            if !tables.string(slot).is_empty() {
+                return true;
+            }
+        }
+        child = next.get(c).copied().unwrap_or(-1);
+        seen += 1;
+    }
+    false
+}
+
 /// How thick a scrollbar thumb is, in CSS pixels.
 ///
 /// dziri's scrollbars are **overlay**: drawn over the content, reserving no layout
@@ -987,6 +1034,12 @@ impl Painter {
         let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
         let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
         let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
+        // Hoisted with the chains for the same reason they are: `flags` is read for
+        // every node to test `PLACEHOLDER`, and `f32s`/`u8s` resolve a span plan through
+        // two dependent loads each time — cheap once per frame, not once per node. That
+        // is the lesson `StyleCols` was extracted for.
+        let flags = tables.u8s(NODES, protocol::nodes::FLAGS);
+        let text = tables.i32s(NODES, protocol::nodes::TEXT);
         // For the same reason as the three above, and it was the one missing: the
         // per-node transform and opacity reads are fourteen more style columns.
         let cols = StyleCols::of(tables);
@@ -1062,6 +1115,21 @@ impl Painter {
             // the live slot is the whole point of the variant machinery.
             let blend = self.blend_for(tables, node, state);
             if display_of(tables, blend.to) == display::NONE {
+                continue;
+            }
+
+            // A `::placeholder` is drawn only while its field is empty, and this is the
+            // whole of that rule. It reads emptiness from the field's own text rather
+            // than from a predicate bit, because a value nobody declared is engine state
+            // by the same argument checkedness is — and because paint owning the
+            // condition means no stylesheet can show a placeholder underneath the user's
+            // own text by setting `display` on it.
+            //
+            // Free for every other node: one flag test, and the sibling walk happens
+            // only for the handful of nodes that are placeholders.
+            if flags.get(node).copied().unwrap_or(0) & protocol::flags::PLACEHOLDER != 0
+                && field_has_text(tables, first, next, flags, text, count, node)
+            {
                 continue;
             }
 
@@ -2426,5 +2494,88 @@ mod tests {
         t.set_f32(s, protocol::styles::OPACITY, 0, f32::NAN);
         t.commit();
         assert_eq!(opacity_of(&StyleCols::of(&t), &Blend::solid(0)), None);
+    }
+
+    /// A placeholder shows only while its field is empty.
+    ///
+    /// The condition `paint` consults, tested directly rather than through a rendered
+    /// frame, because "a grey word is not on screen" is a claim about pixels that a
+    /// golden states far less precisely than this does — and both directions matter. A
+    /// placeholder that never hides sits underneath the user's own text; one that never
+    /// shows is the bug this whole feature was written for.
+    #[test]
+    fn a_placeholder_is_hidden_exactly_while_its_field_has_text() {
+        // 0: the field. 1: its editable run. 2: the placeholder box.
+        let mut tables = Tables::new(Capacities {
+            nodes: 3,
+            styles: 1,
+            variants: 1,
+            variant_slots: 1,
+            media: 1,
+            lists: 1,
+            tweens: 1,
+            keyframes: 1,
+            controls: 1,
+            strings: 2,
+            string_bytes: 32,
+        });
+
+        let nodes = Table::Nodes as usize;
+        for n in 0..3 {
+            tables.set_i32(nodes, protocol::nodes::FIRST_CHILD, n, -1);
+            tables.set_i32(nodes, protocol::nodes::NEXT_SIBLING, n, -1);
+            tables.set_i32(nodes, protocol::nodes::TEXT, n, -1);
+        }
+        tables.set_i32(nodes, protocol::nodes::PARENT, 0, -1);
+        tables.set_i32(nodes, protocol::nodes::PARENT, 1, 0);
+        tables.set_i32(nodes, protocol::nodes::PARENT, 2, 0);
+        tables.set_i32(nodes, protocol::nodes::FIRST_CHILD, 0, 1);
+        tables.set_i32(nodes, protocol::nodes::NEXT_SIBLING, 1, 2);
+
+        tables.set_u8(nodes, protocol::nodes::FLAGS, 1, protocol::flags::EDITABLE);
+        tables.set_u8(
+            nodes,
+            protocol::nodes::FLAGS,
+            2,
+            protocol::flags::PLACEHOLDER | protocol::flags::GENERATED,
+        );
+
+        let mut cursor = 0;
+        tables.push_string(0, "", &mut cursor).expect("arena");
+        tables.push_string(1, "typed", &mut cursor).expect("arena");
+        tables.set_i32(nodes, protocol::nodes::TEXT, 1, 0);
+        tables.commit();
+
+        let read = |t: &Tables| {
+            let first = t.i32s(nodes, protocol::nodes::FIRST_CHILD).to_vec();
+            let next = t.i32s(nodes, protocol::nodes::NEXT_SIBLING).to_vec();
+            let flags = t.u8s(nodes, protocol::nodes::FLAGS).to_vec();
+            let text = t.i32s(nodes, protocol::nodes::TEXT).to_vec();
+            field_has_text(t, &first, &next, &flags, &text, 3, 2)
+        };
+
+        assert!(
+            !read(&tables),
+            "the run holds the empty string, so the placeholder must show"
+        );
+
+        // The same tree with text in the field.
+        tables.set_i32(nodes, protocol::nodes::TEXT, 1, 1);
+        tables.commit();
+        assert!(
+            read(&tables),
+            "the run holds \"typed\", so the placeholder must be hidden"
+        );
+
+        // A field with no run at all — an *unbound* `<input>` as things stand. Nothing
+        // owns its value, so it is permanently empty and its placeholder permanently
+        // shows. Asserted so that when an engine-owned buffer lands, the test that has
+        // to change is this one, and it says why.
+        tables.set_i32(nodes, protocol::nodes::FIRST_CHILD, 0, 2);
+        tables.commit();
+        assert!(
+            !read(&tables),
+            "a field with no editable run has no text, so its placeholder shows"
+        );
     }
 }

@@ -109,7 +109,7 @@ export default function Home() {
   return (
     <div className="flex flex-col gap-4">
       <div className="text-lg font-semibold">{remaining} left</div>
-      <div className="rounded-lg bg-zinc-800 px-3 py-2" bindValue={draft} />
+      <input type="text" className="rounded-lg bg-zinc-800 px-3 py-2" bind:value={draft} />
       <button className="rounded bg-sky-600 px-3 py-2" onClick={addTodo}>
         Add
       </button>

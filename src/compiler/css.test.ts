@@ -448,10 +448,19 @@ test("::before and ::after parse, and the rest are refused by name", () => {
   // point about a notation change from Selectors Level 3.
   expect(parseSelector("p:after").element).toBe("after");
 
+  // `::placeholder` parses now — it needed nothing the others need. A picker wants an
+  // overlay layer and a checkmark wants a control that can be in that state; a
+  // placeholder is a box holding text the markup already carries, which is what
+  // `::before` is. It is a *pseudo-element* rather than a pseudo-class, so it lands in
+  // the type column exactly as `::before` does.
+  const ph = parseSelector("input::placeholder");
+  expect(ph.element).toBe("placeholder");
+  expect(ph.specificity).toEqual([0, 0, 2]);
+
   // Named rather than lumped into "unsupported syntax", because these are the
   // ones a form-control stylesheet will reach for next.
   expect(() => parseSelector("select::picker-icon")).toThrow(/unsupported pseudo-element/);
-  expect(() => parseSelector("input::placeholder")).toThrow(/unsupported pseudo-element/);
+  expect(() => parseSelector("select::checkmark")).toThrow(/unsupported pseudo-element/);
 
   // Only on the subject, only one, and a pseudo-class may not follow it.
   expect(() => parseSelector("div::before span")).toThrow(CssError);

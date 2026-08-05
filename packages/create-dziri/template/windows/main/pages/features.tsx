@@ -122,7 +122,7 @@ export default function Features() {
         <div className="flex flex-row gap-2">
           <div
             className="grow rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-            bindValue={draft}
+            bind:value={draft}
           />
           <Btn label="Add" className="bg-sky-600 text-sky-50 hover:bg-sky-500" onClick={addTodo} />
           <Btn label="Clear" onClick={clearDraft} />

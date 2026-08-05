@@ -82,6 +82,15 @@ type BuiltNode = {
    * interactive nodes.
    */
   generated?: true;
+  /** A `::placeholder` box, painted only while its field is empty. */
+  placeholder?: true;
+  /**
+   * A text run inside an editable field, which is one line high even with no text.
+   *
+   * Set on the *run* rather than on the field because layout measures the run and the
+   * field's height is whatever its child reports.
+   */
+  editable?: true;
   /**
    * The control node a press here operates. Filled by `resolveActivation`.
    *
@@ -263,6 +272,70 @@ function controlKindOf(el: Element): number {
   }
 }
 
+/** `type`, lowercased; `""` when absent, which for an `<input>` means `text`. */
+function typeOf(el: Element): string {
+  return (el.attrs.get("type") ?? "").toLowerCase();
+}
+
+/** The elements `disabled` means something on — the ones a press can reach. */
+const DISABLEABLE = new Set(["input", "select", "textarea", "button"]);
+
+/**
+ * Whether this element needs a `controls` row at all.
+ *
+ * A control kind needs one because a press *does* something. A **disabled** form
+ * control needs one because a press must do exactly nothing — and that is the fact the
+ * engine cannot work out for itself, since `Controls::is_disabled` reads this table and
+ * nothing else.
+ *
+ * The docblock on [`controlKindOf`] argues the other twenty input types earn no row,
+ * because a row would say "nothing happens". That is right for an *enabled* field and
+ * backwards for a disabled one: "nothing happens" is precisely the claim, and without
+ * the row a disabled text field took focus on click and matched no `:disabled` rule.
+ * Both were visible in the demo — measured for the first half in BROWSER-FACTS.md, "a
+ * disabled control receives no button events at all": no `mousedown`, no `mouseup`, no
+ * `click`, and it never took focus.
+ *
+ * The row's `kind` stays `NONE`, so `Controls::activate` still declines it and no
+ * behaviour is invented for a text field. Only the `DISABLED` flag is load-bearing.
+ */
+function needsControlRow(el: Element): boolean {
+  if (controlKindOf(el) !== ControlKind.NONE) return true;
+  return DISABLEABLE.has(el.tag) && el.attrs.has("disabled");
+}
+
+/**
+ * The elements a user would expect to be able to type into.
+ *
+ * Six `input` keywords plus `textarea`, which is the set a browser routes to one text
+ * editor — Blitz does the same, and it is why "one editor" is the whole cost of text
+ * entry rather than one per keyword.
+ *
+ * Used only to warn. A field with no `bind:value` compiles to a correct styled box
+ * and then silently ignores every keystroke, which is indistinguishable from a
+ * working empty field in a screenshot — the exact failure that let a broken
+ * `bind:value` survive this long. `disabled` and `readonly` are excluded because a
+ * browser does not accept typing into those either, so there is nothing to warn about.
+ */
+const TEXT_ENTRY_TYPES = new Set(["", "text", "search", "tel", "url", "email", "password"]);
+
+/**
+ * A text-entry box, by tag and type alone.
+ *
+ * Separate from [`isTextEntry`] because the two questions have different answers for a
+ * disabled field: it cannot be typed into, so it earns no warning, but it is still one
+ * line high — being disabled does not collapse a box in any browser.
+ */
+function isTextEntryTag(el: Element): boolean {
+  if (el.tag === "textarea") return true;
+  return el.tag === "input" && TEXT_ENTRY_TYPES.has(typeOf(el));
+}
+
+function isTextEntry(el: Element): boolean {
+  if (el.attrs.has("disabled") || el.attrs.has("readonly")) return false;
+  return isTextEntryTag(el);
+}
+
 /**
  * Whether a press on this element is aimed at *it* rather than at a label's
  * control.
@@ -422,6 +495,8 @@ export function compileTree(
    */
   const pendingAnchors: Array<{ list: number; container: number; after: number }> = [];
   const editables: BuiltEditable[] = [];
+  /** Node ids of elements carrying `bind:value`, so their text run can be flagged. */
+  const editableFields = new Set<number>();
 
   /**
    * Every element that got a node, so the label pass can start from markup.
@@ -564,6 +639,20 @@ export function compileTree(
     parentVars: VarEnv,
     where: string,
     element: PseudoElement | null,
+    /**
+     * Declarations to use for properties **no rule set**, applied to every state's
+     * cascade.
+     *
+     * Not a stylesheet, because what needs them is not expressible in one: a
+     * `::placeholder` has to be inset by its field's `padding`, and the UA sheet cannot
+     * name a value the author chooses. The compiler can, because by here the field's
+     * padding is a resolved number.
+     *
+     * Absent-only, so it is a default and not an override — `input::placeholder { left:
+     * 4px }` still wins. And applied inside the per-state loop rather than once, or
+     * `input:focus::placeholder` would resolve a cascade without them and jump on focus.
+     */
+    defaults?: Map<string, string>,
   ): {
     style: ComputedStyle;
     styleId: number;
@@ -572,8 +661,15 @@ export function compileTree(
     vars: VarEnv;
     decls: Map<string, string>;
   } {
-    const inline = (decls: Map<string, string>) =>
-      element === null ? withInline(decls, el) : decls;
+    const inline = (decls: Map<string, string>) => {
+      if (element === null) return withInline(decls, el);
+      if (defaults !== undefined) {
+        for (const [property, value] of defaults) {
+          if (!decls.has(property)) decls.set(property, value);
+        }
+      }
+      return decls;
+    };
 
     const base = inline(collectDecls(rules, path, ["none"], media, 0, element));
     // Custom properties inherit *unless registered otherwise*, so the environment
@@ -763,6 +859,68 @@ export function compileTree(
     return self;
   }
 
+  /**
+   * The `::placeholder` box for a field that has a `placeholder` attribute.
+   *
+   * Beside [`walkPseudoElement`] rather than inside it because the two get their text
+   * from opposite places. `::before` exists *because* a rule gave it `content`, and has
+   * no box without one; a placeholder's text is in the markup, so the attribute decides
+   * whether the box exists and CSS only decides how it looks. Reusing that function
+   * would have meant a UA rule inventing `content: attr(placeholder)` and an `attr()`
+   * implementation to go with it, to express something already known.
+   *
+   * The box is `position: absolute` in the UA sheet, so it takes no room and overlays
+   * where the text will be — that is what lets paint decide the visibility of a box
+   * layout has already placed, with nothing to invalidate when it flips.
+   */
+  function walkPlaceholder(
+    el: Element,
+    path: Element[],
+    ownStyle: ComputedStyle,
+    parentVars: VarEnv,
+    where: string,
+    parent: number,
+  ): number {
+    if (!isTextEntryTag(el)) return -1;
+    const text = el.attrs.get("placeholder");
+    if (text === undefined || text === "") return -1;
+
+    const inherited = inheritFrom(ownStyle);
+
+    // Inset by the field's own padding, because an absolutely positioned box is placed
+    // against its containing block's **padding box** while text sits in the *content*
+    // box — so `left: 0` is short by exactly `padding-left`, which is what put the
+    // placeholder against the border while the typed text was correctly indented.
+    //
+    // It cannot live in the UA sheet: the sheet would have to name a length the author
+    // chooses. Here the field's padding is already a resolved number, so this is a
+    // compile-time read of the cascade's own output and costs nothing at run time.
+    //
+    // Defaults rather than overrides, so `input::placeholder { left: 4px }` still wins.
+    const defaults = new Map<string, string>([
+      ["left", `${ownStyle.padL}px`],
+      ["top", `${ownStyle.padT}px`],
+    ]);
+    const r = resolveVariants(path, el, inherited, parentVars, where, "placeholder", defaults);
+
+    return (
+      nodes.push({
+        kind: NodeKind.TEXT,
+        style: r.styleId,
+        mask: r.mask,
+        run: r.run,
+        text: internString(text),
+        parent,
+        children: [],
+        // Both: it is a pseudo-element, so its predicates come from the field — which
+        // is what makes `input:focus::placeholder` mean what it says — and paint has to
+        // know to check emptiness before drawing it.
+        generated: true,
+        placeholder: true,
+      }) - 1
+    );
+  }
+
   /** Returns the index of the node created for `el`. */
   function walk(
     el: Element,
@@ -793,16 +951,36 @@ export function compileTree(
       parent,
       children: [],
       ...(ownsItsPress(el) ? { ownsPress: true as const } : {}),
+      // A text-entry element is one line high on its own account, bound or not — a
+      // browser does not ask whether anything owns the value before giving the box a
+      // height. When it *is* bound the generated run below carries the floor instead,
+      // and the flag here is harmless because a node with a child is never measured.
+      ...(isTextEntryTag(el) ? { editable: true as const } : {}),
     });
     opts.nodeOf?.set(el, self);
     nodeOfEl.set(el, self);
 
     if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "" });
-    if (el.bindValue) editables.push({ node: self, ref: el.bindValue, name: "" });
+    if (el.bindValue) {
+      editables.push({ node: self, ref: el.bindValue, name: "" });
+      // Read back when this element's children are walked, a few lines below — the
+      // element is pushed before its children, so the run always finds its field here.
+      editableFields.add(self);
+    }
+    else if (isTextEntry(el)) {
+      warnings.push(
+        `<${el.tag}${typeOf(el) ? ` type="${typeOf(el)}"` : ""}> has no bind:value, so it cannot ` +
+          `be typed into — it compiles to a styled box.\n` +
+          `    Add bind:value={someSignal} to make it a field. A value nobody declared has ` +
+          `nowhere to live:\n` +
+          `    the text a user types is held by a signal, and an engine-owned text buffer for ` +
+          `unbound fields is A5.`,
+      );
+    }
 
     if (el.tag === "label") labelEls.push({ el, node: self });
     const controlKind = controlKindOf(el);
-    if (controlKind !== ControlKind.NONE) {
+    if (needsControlRow(el)) {
       controls.push({
         node: self,
         kind: controlKind,
@@ -821,6 +999,9 @@ export function compileTree(
     // describes and what makes Taffy lay them out with no special case.
     const before = walkPseudoElement(el, path, style, vars, where, self, "before");
     const after = walkPseudoElement(el, path, style, vars, where, self, "after");
+    // Out of flow, so where it sits among its siblings does not matter — unlike the two
+    // above, whose whole contract is being first and last.
+    const placeholder = walkPlaceholder(el, path, style, vars, where, self);
 
     // A button whose content is a single static text run keeps the label on the
     // button itself, so paint can centre it without a child node to lay out.
@@ -840,11 +1021,45 @@ export function compileTree(
     }
 
     if (before !== -1) nodes[self]!.children.push(before);
+
+    // An unbound field gets an empty text run, so *every* text-entry field has one.
+    //
+    // Written because the placeholder broke the field it was drawn in. The strut lived
+    // on the element for unbound fields, justified by "a node with a child is never
+    // measured" — and a placeholder is a child, so the moment one existed the field
+    // stopped being a leaf, was never measured, and collapsed back to padding height.
+    // Visible immediately: the disabled field became a line with its placeholder
+    // hanging outside it.
+    //
+    // Giving it a run instead is the better shape rather than the smaller patch. Both
+    // kinds of field are then one thing — a box containing a run that holds the value —
+    // so the strut, the placeholder's emptiness test and paint all take one path. It is
+    // also where an engine-owned text buffer will write, so nothing here moves again
+    // when unbound fields start holding text.
+    if (isTextEntryTag(el) && el.bindValue === null && kids.length === 0) {
+      const runStyle = styles.intern(textStyle(style));
+      nodes[self]!.children.push(
+        nodes.push({
+          kind: NodeKind.TEXT,
+          style: runStyle,
+          mask: 0,
+          run: [runStyle],
+          text: internString(""),
+          parent: self,
+          children: [],
+          editable: true,
+        }) - 1,
+      );
+    }
+
     for (const child of kids) {
       const childIndex = walkChild(child, path, style, self, vars);
       if (childIndex !== -1) nodes[self]!.children.push(childIndex);
     }
     if (after !== -1) nodes[self]!.children.push(after);
+    // Last, and it does not matter: absolutely positioned, so it is out of flow and its
+    // position among the siblings changes nothing about where anything is drawn.
+    if (placeholder !== -1) nodes[self]!.children.push(placeholder);
 
     return self;
   }
@@ -1004,6 +1219,10 @@ export function compileTree(
         text: slot,
         parent,
         children: [],
+        // An empty field is still one line tall. Only a run whose parent is the field
+        // gets this, so an ordinary binding that happens to render "" keeps a browser's
+        // answer of zero height.
+        ...(editableFields.has(parent) ? { editable: true as const } : {}),
       });
 
       if (node.type === "dyntext") {
@@ -1264,13 +1483,42 @@ function buildGenerated(nodes: BuiltNode[]): Int32Array {
   return new Int32Array(out.sort((a, b) => a - b));
 }
 
+/** Text runs inside an editable field. Sorted, for the same binary search. */
+function buildEditableBoxes(nodes: BuiltNode[]): Int32Array {
+  const out: number[] = [];
+  for (let i = 0; i < nodes.length; i++) if (nodes[i]!.editable) out.push(i);
+  return new Int32Array(out.sort((a, b) => a - b));
+}
+
+
+/** `::placeholder` boxes. Sorted, for the same binary search. */
+function buildPlaceholders(nodes: BuiltNode[]): Int32Array {
+  const out: number[] = [];
+  for (let i = 0; i < nodes.length; i++) if (nodes[i]!.placeholder) out.push(i);
+  return new Int32Array(out.sort((a, b) => a - b));
+}
+
 function buildInteractive(
   nodes: BuiltNode[],
   handlers: BuiltHandler[],
+  editables: BuiltEditable[] = [],
   lists: BuiltList[] = [],
   variants?: VariantCompiled,
 ): number[] {
   const withHandler = new Set(handlers.map((h) => h.node));
+
+  // An editable is interactive because focus is acquired by clicking and
+  // `hit_test` only ever returns an `INTERACTIVE` node — so without this a
+  // `bind:value` node can never become `state.focused`, the host's `typeInto`
+  // never finds a target for the keystroke, and typing does nothing at all.
+  //
+  // That was the state of the world until this line: both demo editables are a
+  // bare `<div bind:value>` with no `hover:` class and no handler, so their masks
+  // are 0 and neither qualified under any other clause below. The bug outlived a
+  // fix to the layer beneath it — `SDL_StartTextInput` was missing too, and
+  // starting it changed nothing, because the events it unblocked arrive addressed
+  // to a node that could not hold focus.
+  const editable = new Set(editables.map((e) => e.node));
 
   // Per-row handlers live at an offset inside every replica, so each replica's
   // node has to be interactive — the template's single entry is not enough.
@@ -1312,7 +1560,15 @@ function buildInteractive(
     // silent shape as a variant no predicate can select.
     const operates = n.activates !== undefined;
 
-    if (n.kind === NodeKind.BUTTON || stateful || operates || withHandler.has(i)) out.push(i);
+    if (
+      n.kind === NodeKind.BUTTON ||
+      stateful ||
+      operates ||
+      editable.has(i) ||
+      withHandler.has(i)
+    ) {
+      out.push(i);
+    }
   }
   return out;
 }
@@ -1363,8 +1619,12 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
       runStart: new Int32Array(variants.runStart),
       slots: new Uint16Array(variants.slots),
     },
-    interactive: new Int32Array(buildInteractive(result.nodes, result.handlers, result.lists)),
+    interactive: new Int32Array(
+      buildInteractive(result.nodes, result.handlers, result.editables, result.lists),
+    ),
     generated: buildGenerated(result.nodes),
+    editableBoxes: buildEditableBoxes(result.nodes),
+    placeholders: buildPlaceholders(result.nodes),
     // Bindings are resolved and emitted only on the generated-module path; the
     // in-memory IR is used by tests and the variant probe, which are static.
     textBindings: [],
@@ -1560,7 +1820,13 @@ export function emit(
 
   const variantTable = buildVariants(nodes, runOf);
 
-  const interactive = buildInteractive(nodes, result.handlers, result.lists, variants);
+  const interactive = buildInteractive(
+    nodes,
+    result.handlers,
+    result.editables,
+    result.lists,
+    variants,
+  );
   const styleCount = variants ? variants.slotCount : result.styles.length;
   const nodeStyle = variants ? variants.base : nodes.map((n) => n.style);
 
@@ -1816,6 +2082,8 @@ export const interactive = ${typedArray("Int32Array", interactive)};
 
 /** \`::before\` / \`::after\` boxes, sorted. Their predicates come from the parent. */
 export const generated = ${typedArray("Int32Array", [...buildGenerated(nodes)])};
+export const editableBoxes = ${typedArray("Int32Array", [...buildEditableBoxes(nodes)])};
+export const placeholders = ${typedArray("Int32Array", [...buildPlaceholders(nodes)])};
 
 ${localsSource}/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [

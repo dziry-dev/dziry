@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 13;
+pub const PROTOCOL_VERSION: u32 = 15;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: u32 = 13;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x91909483;
+pub const SCHEMA_HASH: u32 = 0x2a14f46d;
 
 pub const TABLE_COUNT: usize = 11;
 
@@ -502,6 +502,8 @@ pub mod flags {
     pub const INTERACTIVE: u8 = 1 << 0;
     pub const MEASURABLE: u8 = 1 << 1;
     pub const GENERATED: u8 = 1 << 2;
+    pub const EDITABLE: u8 = 1 << 3;
+    pub const PLACEHOLDER: u8 = 1 << 4;
 }
 
 pub mod control_flags {

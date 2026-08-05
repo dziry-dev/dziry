@@ -35,7 +35,7 @@ import { Align, Display, FlexWrap, Position } from "../protocol/generated.ts";
 import { INITIAL_STYLE, type CompiledUi, type StyleField } from "../ir.ts";
 import { Engine } from "./host.ts";
 import { NUMBER_FIELDS, Uploader, capacitiesFor } from "./upload.ts";
-import { applyTextBindings } from "../runtime/bindings.ts";
+import { applyTextBindings, typeInto } from "../runtime/bindings.ts";
 import { updateLists, type ListBindingRef } from "../runtime/list-runtime.ts";
 import { applyStylePatches, type StylePatchRef } from "../runtime/patches.ts";
 import { buildUi, requireRoute, showRoute } from "../host/window-state.ts";
@@ -44,7 +44,16 @@ import * as generated from "../../windows/main/ui.gen.ts";
 const WIDTH = 1040;
 const HEIGHT = 560;
 
-function load(): {
+/**
+ * @param route Which of the demo's routes to make visible. Defaults to `features`,
+ *   which is where the grid, the list and the absolute children live.
+ *
+ *   Parameterised because the form controls are on a *different* route, and everything
+ *   on a hidden one reads zero — a test measuring it is asserting against `display:
+ *   none`, which is a correct frame and a useless test. That is not hypothetical: the
+ *   placeholder test below found exactly this, having assumed the default.
+ */
+function load(route = "features"): {
   ui: CompiledUi;
   engine: Engine;
   uploader: Uploader;
@@ -62,7 +71,7 @@ function load(): {
   // together" means cannot leave the tests measuring something the application
   // never shows.
   const routes = generated.routeNodes;
-  showRoute(ui, routes, requireRoute(routes, "features", generated.windowId));
+  showRoute(ui, routes, requireRoute(routes, route, generated.windowId));
 
   applyTextBindings(ui, []);
   updateLists(ui, generated.listBindings satisfies ListBindingRef[]);
@@ -274,6 +283,138 @@ test("hit-testing finds an interactive node and ignores the rest", () => {
   engine.close();
 });
 
+/**
+ * The one editable on the route `load()` shows, with the point at its centre.
+ *
+ * Not `editables[0]`, and the difference is a failure this file already caused once:
+ * the demo gained a bound field on the *controls* route, that field sorted first by
+ * node id, and two tests began measuring a `hidden` subtree — reading bounds of 0 and
+ * hit-testing a point at the window's origin. Exactly the drift the header warns
+ * about, committed by the tests added to fix a different silent failure.
+ *
+ * So the field is chosen by being laid out, and `exactly one` is asserted rather than
+ * assumed: if a second visible field ever appears, this fails loudly instead of
+ * quietly picking whichever came first.
+ */
+function shownEditable(engine: Engine): {
+  node: number;
+  signal: { value: string };
+  centre: [number, number];
+} {
+  const laidOut = generated.editables.filter((e) => engine.bounds(e.node)[2] > 0);
+  expect(laidOut.length).toBe(1);
+
+  const found = laidOut[0]!;
+  const [x, y, w, h] = engine.bounds(found.node);
+  return { node: found.node, signal: found.signal, centre: [x + w / 2, y + h / 2] };
+}
+
+test("clicking a text field focuses the field itself, so a keystroke has a target", () => {
+  const { engine } = load();
+
+  // The whole chain, through the real engine rather than through the compiler's
+  // array: click the demo's editable, and the node the host will match a keystroke
+  // against is the one the `editables` table names.
+  //
+  // Every link here was already correct except the first. `hit_test` returns only
+  // `INTERACTIVE` nodes, and an editable was in no clause of `buildInteractive` — so
+  // this returned the field's *parent* row, `typeInto` found no editable at that
+  // node, and the keystroke was dropped. Asserting on `hitTest` rather than on
+  // `interactive` is deliberate: the array is the compiler's claim, and this is the
+  // engine agreeing with it.
+  const { node, centre } = shownEditable(engine);
+  expect(engine.hitTest(...centre)).toBe(node);
+
+  engine.close();
+});
+
+test("a keystroke aimed at where the pointer landed reaches the bound signal", () => {
+  const { engine } = load();
+
+  // Focus and typing composed, which is the claim a user actually cares about and
+  // neither half proves alone. The node is not passed in — it is whatever the engine
+  // says is under the pointer, so a regression in `interactive`, in `bounds` or in
+  // `hit_test` breaks this even though it never mentions them.
+  //
+  // What is still not covered, and cannot be from here: SDL. A real keystroke needs a
+  // real window and real OS input, so `RawInput::Text -> TEXT_INPUT` is the one link
+  // in the chain with no harness. This starts one node later, from the focus the
+  // engine reports.
+  const { signal, centre } = shownEditable(engine);
+  const focused = engine.hitTest(...centre);
+
+  const before = signal.value;
+  expect(typeInto(generated.editables, focused, { text: "Z", backspace: false })).toBe(true);
+  expect(signal.value).toBe(`${before}Z`);
+
+  // And backspace takes it off again, so the field is not write-only.
+  expect(typeInto(generated.editables, focused, { text: null, backspace: true })).toBe(true);
+  expect(signal.value).toBe(before);
+
+  engine.close();
+});
+
+test("a placeholder is drawn exactly where the typed text will be", () => {
+  // The form controls, not the default route. Written with the default first, and the
+  // test failed with zero placeholders laid out — they were all on a `display: none`
+  // subtree, which is exactly the trap `nodesWhere` documents.
+  const { engine, ui } = load("controls");
+
+  // The assertion is an *agreement* between two boxes rather than a number, which is
+  // what makes it worth having: a placeholder that lands anywhere else than the text it
+  // stands in for shifts the moment the user types a character.
+  //
+  // It was `left: 0` in the UA sheet, and that is short by exactly `padding-left`: an
+  // absolutely positioned box is placed against its containing block's *padding* box
+  // while text sits in the *content* box. The placeholder sat against the border with
+  // the typed text correctly indented beside it. `walkPlaceholder` supplies the field's
+  // own resolved padding as a per-state default instead, because the UA sheet cannot
+  // name a length the author chooses.
+  const laidOut = [...generated.placeholders].filter((n) => engine.bounds(n)[2] > 0);
+  expect(laidOut.length).toBeGreaterThan(0);
+
+  for (const box of laidOut) {
+    const field = ui.nodes.parent[box]!;
+
+    // The field's other child is the editable run — where the value is drawn.
+    let run = ui.nodes.firstChild[field]!;
+    while (run >= 0 && run === box) run = ui.nodes.nextSibling[run]!;
+    expect(run).toBeGreaterThanOrEqual(0);
+
+    const [px, py] = engine.bounds(box);
+    const [rx, ry] = engine.bounds(run);
+    expect(px).toBeCloseTo(rx, 1);
+    expect(py).toBeCloseTo(ry, 1);
+
+    // And both are inside the padding, not against the border — so the agreement above
+    // cannot be satisfied by *both* being wrong in the same way.
+    const [fx, fy] = engine.bounds(field);
+    expect(px).toBeGreaterThan(fx);
+    expect(py).toBeGreaterThan(fy);
+  }
+
+  engine.close();
+});
+
+test("an unbound <input> swallows the keystroke, because no signal owns its value", () => {
+  const { engine, ui } = load();
+
+  // The demo's Controls page has two `<input type="text">` with no binding, and this
+  // is what that costs: even if one could be focused, there is no signal to write to,
+  // so `typeInto` reports the key unconsumed and the field stays empty forever.
+  //
+  // Asserted rather than left implicit because it is the *design* question A5 has to
+  // answer, and it is the same question `controls.rs` already answered for a
+  // checkbox: nobody declared the value, so an engine-owned buffer is the only thing
+  // that could hold it. Until that exists, a typeable field is one with `bind:value`,
+  // and this test is what will start failing when that stops being true.
+  const bound = new Set(generated.editables.map((e) => e.node));
+  const unbound = [...ui.interactive].find((n) => !bound.has(n))!;
+  expect(typeInto(generated.editables, unbound, { text: "Z", backspace: false })).toBe(false);
+
+  engine.close();
+});
+
 test("a layout-affecting style patch reaches the engine", () => {
   const { engine, ui, uploader, patches } = load();
 
@@ -374,6 +515,8 @@ test("a capacity request is a power of two", () => {
     variants: generated.variants,
     interactive: generated.interactive,
     generated: generated.generated,
+    editableBoxes: generated.editableBoxes,
+    placeholders: generated.placeholders,
     textBindings: [],
     handlers: [],
     lists: generated.lists,

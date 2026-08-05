@@ -58,7 +58,7 @@ const onSave = () => {};
   className="flex gap-2"
   style={{ padding: 8, fontWeight: 600 }}
   onClick={onSave}
-  bindValue={draft}
+  bind:value={draft}
 />;
 ```
 
@@ -97,23 +97,35 @@ A value that is **not** static is a build error rather than a silent drop, becau
 there is no node left to attach it to once the compiler is gone. Use a conditional
 class instead.
 
-### bindValue
+### bind:value
 
-<Status of="bindValue" note />
+<Status of="bind:value" note />
 ```tsx
 const draft = signal("");
 
-<div className="rounded bg-zinc-800 px-3 py-2" bindValue={draft} />;
+<input type="text" className="rounded bg-zinc-800 px-3 py-2" bind:value={draft} />;
 ```
 
 A string signal the element edits. Click to focus, then typing appends and Backspace
 deletes. The value renders automatically when the element has no children of its own.
 
+**The colon is real syntax, not a naming convention.** TypeScript parses a namespaced
+JSX attribute and lowers it to a quoted key, then typechecks that key against the
+element's props — so a misspelling is an error that names the property it meant, and
+Bun's transform emits the identical key. `bind:` is a namespace rather than a prefix
+because two-way is a different kind of prop: every other prop flows one way into the
+build artifact, while these are the only place the engine writes back into your state.
+`bind:checked` and `bind:group` join it when checkbox binding lands.
+
+A bound value is always a **string**, including for `number` and `range` — the same
+rule the DOM follows, where `value` is a string and `valueAsNumber` is separate. Write
+`derived(() => Number(volume))` if you want a number.
+
 :::warning Partial
 
-Append and backspace only. No caret, no selection, no IME, no clipboard. There are no
-real form widgets yet — `<input>` compiles to an empty box, and `type` and `name` are
-accepted and ignored so markup written against HTML habits still typechecks.
+Append and backspace only. No caret, no selection, no IME, no clipboard. `<input>`
+renders as a styled box with no widget appearance of its own, and clicking a `<label>`
+does not yet focus the field it names.
 :::
 
 ## bind

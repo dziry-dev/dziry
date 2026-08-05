@@ -76,7 +76,7 @@ export const increment = () => count.set(count + 1);
 {count === 7 ? "seven" : "not"}             // === works
 {`n is ${count}`}                           // interpolation works
 className={cn("box", { big: count > 3 })}   // conditional class
-bindValue={draft}                           // editable
+bind:value={draft}                          // editable — a namespace, and the colon is real syntax
 onClick={increment}                         // handler
 {todos.map(row, { key: (t) => t.id })}      // list
 ```

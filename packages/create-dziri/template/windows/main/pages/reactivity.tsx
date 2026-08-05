@@ -204,7 +204,7 @@ export default function Reactivity() {
         <div className="flex flex-row gap-2">
           <div
             className="grow rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
-            bindValue={note}
+            bind:value={note}
           />
           <button className={cn(BTN, "bg-sky-600 text-sky-50 hover:bg-sky-500")} onClick={addLang}>
             Add

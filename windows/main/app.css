@@ -176,7 +176,11 @@ input:disabled {
 input[type="checkbox"]:disabled::before { color: #52525b; }
 input[type="radio"]:disabled::before { background: #52525b; }
 
-/* A text field. `caret-color` compiles and is not painted — there is no caret. */
+/* A text field.
+   `caret-color` compiles and is not painted — there is no caret yet. Its *height* is
+   no longer a function of its content: an empty field is one line high, which is what
+   a browser does and what `NodeFlags.EDITABLE` is for. Its width still is authored
+   here rather than derived from `size`, which is the remaining half. */
 input[type="text"] {
     appearance: none;
     caret-color: #38bdf8;
@@ -193,6 +197,20 @@ input[type="text"] {
 
 input[type="text"]:hover { border-color: #52525b; }
 input[type="text"]:disabled { color: #52525b; }
+
+/* Focus, so which field has it is visible without a caret to show it.
+   `:focus` has been a live predicate since the engine set `state.focused` from the
+   hit test, and until an editable was hit-testable nothing could ever match it — so
+   this rule is only reachable at all because of the `buildInteractive` fix.
+
+   Two declarations rather than a ring: `box-shadow` and `outline` are both absent
+   from STYLE_FIELDS, and a rule naming either would be dropped with a warning. The
+   border colour plus a background lift is what the style table can actually express
+   today, and it reads as focus. */
+input[type="text"]:focus {
+    border-color: #38bdf8;
+    background: #1e1e21;
+}
 
 /* A select, closed. The structure is MDN's customizable-select model: ordinary
    children, a `<button>` holding `<selectedcontent>`, then the options. */

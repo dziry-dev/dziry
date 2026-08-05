@@ -125,6 +125,8 @@ export const interactive = new Int32Array([1,3]);
 
 /** `::before` / `::after` boxes, sorted. Their predicates come from the parent. */
 export const generated = new Int32Array([2,4,6,7]);
+export const editableBoxes = new Int32Array([]);
+export const placeholders = new Int32Array([]);
 
 /** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [

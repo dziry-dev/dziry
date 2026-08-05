@@ -314,7 +314,7 @@ export function resolveRefs(
   }
 
   for (const editable of result.editables) {
-    editable.name = lookup(editable.ref, `the bindValue on node ${editable.node}`).name;
+    editable.name = lookup(editable.ref, `the bind:value on node ${editable.node}`).name;
   }
 
   for (const list of result.lists) {

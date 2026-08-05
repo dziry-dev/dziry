@@ -186,13 +186,47 @@ async function launch() {
  *   1. the page builds its DOM, fills `window.__probeMouse` with real coordinates it
  *      read off real rects, and sets `document.title = "ready"`;
  *   2. this dispatches each step and waits a frame between them, so the page's own
- *      listeners observe each one separately;
+ *      listeners observe each one separately, then calls `window.__probeStep(i)` so
+ *      the page can record *that* step's outcome under the right name;
  *   3. the page's `report()` sets `done` as usual.
  *
  * Coordinates come from the page rather than from a flag because only the page knows
  * where its boxes ended up, and a hardcoded pair in a script is a probe that silently
  * stops pointing at the thing it names the day the layout changes.
+ *
+ * # Keys travel in the same list
+ *
+ * A step carrying `key` is dispatched as a keyboard event instead of a mouse one, in
+ * the same ordered plan, because the questions that need keys need them *interleaved*
+ * with clicks: "click to open the picker, then ArrowDown, then Enter" is one sequence
+ * and two lists could not express it.
+ *
+ * It has to be CDP rather than `dispatchEvent` for the same reason the mouse does, and
+ * more sharply: a synthetic `KeyboardEvent` is untrusted, so it runs listeners and
+ * performs **no default action**. Escape does not close anything, an arrow key does not
+ * move a selection, and Enter does not commit one — so every question about what a key
+ * *does* is unmeasurable from page script. `Input.dispatchKeyEvent` produces a trusted
+ * event, which is the only way to observe the behaviour rather than the listener.
+ *
+ * `windowsVirtualKeyCode` is set because Chrome ignores `key` alone for non-printable
+ * keys: without it, Escape arrives as a keydown that closes nothing, which looks
+ * exactly like a finding.
  */
+
+/** Virtual key codes for the non-printable keys probes ask about. */
+const VK: Record<string, number> = {
+  Escape: 27,
+  Enter: 13,
+  Tab: 9,
+  " ": 32,
+  ArrowUp: 38,
+  ArrowDown: 40,
+  ArrowLeft: 37,
+  ArrowRight: 39,
+  Home: 36,
+  End: 35,
+  Backspace: 8,
+};
 async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<void> {
   const ready = `new Promise((res) => {
     let waited = 0;
@@ -218,33 +252,58 @@ async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<vo
     sessionId,
   );
   const steps = JSON.parse((declared.result?.value as string) ?? "[]") as Array<{
-    x: number;
-    y: number;
+    x?: number;
+    y?: number;
     down?: boolean;
     up?: boolean;
+    key?: string;
     label?: string;
   }>;
 
-  for (const step of steps) {
-    const common = { x: step.x, y: step.y, button: "left", clickCount: 1, buttons: 0 };
-    await cdp.send("Input.dispatchMouseEvent", { ...common, type: "mouseMoved" }, sessionId);
-    if (step.down) {
-      await cdp.send(
-        "Input.dispatchMouseEvent",
-        { ...common, type: "mousePressed", buttons: 1 },
-        sessionId,
-      );
-    }
-    if (step.up) {
-      await cdp.send("Input.dispatchMouseEvent", { ...common, type: "mouseReleased" }, sessionId);
+  for (const [index, step] of steps.entries()) {
+    if (step.key !== undefined) {
+      const code = VK[step.key];
+      const key = {
+        key: step.key,
+        ...(code === undefined ? {} : { windowsVirtualKeyCode: code, nativeVirtualKeyCode: code }),
+        // A printable key needs `text` or it inserts nothing; a named key must NOT have
+        // it, or Chrome treats "Escape" as five characters of input.
+        ...(step.key.length === 1 ? { text: step.key } : {}),
+      };
+      await cdp.send("Input.dispatchKeyEvent", { ...key, type: "keyDown" }, sessionId);
+      await cdp.send("Input.dispatchKeyEvent", { ...key, type: "keyUp" }, sessionId);
+    } else {
+      const common = { x: step.x, y: step.y, button: "left", clickCount: 1, buttons: 0 };
+      await cdp.send("Input.dispatchMouseEvent", { ...common, type: "mouseMoved" }, sessionId);
+      if (step.down) {
+        await cdp.send(
+          "Input.dispatchMouseEvent",
+          { ...common, type: "mousePressed", buttons: 1 },
+          sessionId,
+        );
+      }
+      if (step.up) {
+        await cdp.send("Input.dispatchMouseEvent", { ...common, type: "mouseReleased" }, sessionId);
+      }
     }
     // One frame, so style resolution has run before the page reads it back. Two
     // `requestAnimationFrame`s rather than one for the reason `_harness.js` already
     // documents: the first is *before* style and layout for the frame.
+    //
+    // Then tell the page which step just finished. **Only the runner knows where a
+    // step boundary is**, and a page trying to infer them cannot: the first version of
+    // the select probe watched for changes on every frame and assigned each one to the
+    // next label, which slid the whole table by one as soon as a step changed nothing
+    // — `Enter to commit` was captioning the row for the click that reopened the
+    // picker. A misattributed table is worse than no table, because it reads as a
+    // finding. So attribution comes from here, where it is known, rather than from a
+    // heuristic there.
     await cdp.send(
       "Runtime.evaluate",
       {
-        expression: `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))`,
+        expression:
+          `new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))` +
+          `.then(() => window.__probeStep && window.__probeStep(${index}))`,
         awaitPromise: true,
       },
       sessionId,

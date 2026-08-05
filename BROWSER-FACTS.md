@@ -792,3 +792,146 @@ container:
 | `p1` | 16px |
 | `p2` | 16px |
 | `p3`, the last child | 12px — the UA `margin-block: 1em`, so the rule did not reach it |
+
+---
+
+## Opening, dismissing and committing a `<select>`
+
+**Measured 2026-08-04 · Chromium 151 (via Edge 151) · `probes/select-picker.html`, driven by a real
+pointer *and real keys* through `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent`.** Asked
+before writing any of B1, because "clicking a select opens a list" hides at least six decisions and
+half of them are guessable backwards.
+
+**Measured on `appearance: base-select`, deliberately.** A native picker is browser *chrome*: not in
+the DOM, no computed style, and no script can see whether it is open — so on a legacy control every
+question below is unobservable, and answering them would be reporting confidence rather than
+measurement. `base-select` is the spec's opt-in that moves the picker into the page, which is what
+makes `:open`, `toggle` and `::picker(select)` exist at all; it is also the model dziri is already
+copying, since `ua-structure.ts` builds the `<button><selectedcontent>` half of it.
+
+| step | `:open` | `value` | `document.activeElement` | events on the select |
+|---|---|---|---|---|
+| initial | closed | free | BODY | — |
+| **press** the closed select | **open** | free | OPTION | none |
+| release on it | open | free | OPTION | `click` |
+| ArrowDown, picker open | open | free | OPTION | `keydown` |
+| Enter | **closed** | **pro** | **SELECT** | `keydown`, **`input`, `change`** |
+| click to open again | open | pro | OPTION | `click` |
+| ArrowDown, picker open | open | pro | OPTION | `keydown` |
+| Escape | **closed** | **pro** — unchanged | **SELECT** | `keydown` only |
+| click to open a third time | open | pro | OPTION | `click` |
+| click a `<button>` outside | **closed** | pro | **BUTTON#outside** | none |
+| ArrowDown, closed + focused | **open** | pro | OPTION | `keydown` |
+| ArrowUp, closed + focused | **open** | pro | OPTION | `keydown` |
+
+Identical across two consecutive runs.
+
+### It opens on `mousedown`, not on the click
+
+The press alone opened it, before any release. **This is the opposite of a checkbox**, whose bit
+flips during the *click*, after `mouseup` — measured in "What activates a form control" above. So
+the two cannot share a trigger point: `Engine::mouse_down` has to open a picker while
+`activate_control` stays where it is, on the release. Putting the picker on `mouse_up` would make a
+select feel a frame late in exactly the gesture people use most.
+
+### Focus goes *into* the picker, and comes back to the select on close
+
+While open, `activeElement` is an `OPTION` — not the select. Both exits restore it to the SELECT,
+Enter and Escape alike. That confirms ROADMAP B1's "restore focus to the trigger on dismissal" and
+extends it: the restore is not specific to cancelling, it is what closing does.
+
+### Navigating is not committing, and Escape throws the highlight away
+
+An arrow key with the picker open fires `keydown` and **nothing else** — no `input`, no `change`,
+and `value` does not move. Enter is what commits, and it fires **`input` then `change`**, in that
+order, once. Escape closes with `value` untouched and neither event.
+
+So a picker needs **two pieces of state, not one**: the committed selection and a pending highlight
+that Escape discards. One integer each, and the highlight belongs to the open picker rather than to
+every select — only one can be open — so it costs nothing per select and nothing per frame. This is
+also the measured basis for A3's `onChange`/`onInput` split: both fire, in that order, only on
+commit.
+
+### A dismissing click still reaches what it hit
+
+Clicking a `<button>` outside an open picker closed the picker **and fired that button's own
+`click`**, leaving focus on it. Dismissal does not swallow the press.
+
+Worth stating because ROADMAP B1 says "a click on an overlay must not reach nodes beneath it", and
+that is a different rule about a different click — a press on the *overlay* is consumed by it, while
+a press *outside* both dismisses and activates. Implementing the first and assuming it covered the
+second would make every click that closes a dropdown mysteriously do nothing else.
+
+### An arrow key on a closed, focused select opens the picker — it does not change the value
+
+Both ArrowDown and ArrowUp opened it, with no `input` and no `change`. **This refutes the common
+belief** that arrowing a closed select in Chrome walks the value directly; that is legacy-appearance
+behaviour, and `base-select` does not inherit it. Convenient for dziri: keyboard opening is then the
+same path as the click, not a second mechanism.
+
+### The legacy control: what could not be measured, recorded as a limitation
+
+A plain `<select>` beside it was clicked and arrowed, and produced **no value change and no events
+at all**. That is not a finding about legacy selects — under headless the native popup is almost
+certainly up and consuming the keys, and native popup behaviour is not trustworthy to measure
+headlessly. Recorded so nobody reads the empty cells as "legacy arrows do nothing", and so the
+question is re-asked headed if it ever matters.
+
+---
+
+## How tall a text field is, and whether its content has any say
+
+**Measured 2026-08-04 · Chromium 151 (via Edge 151) · `probes/text-field-box.html`.** Asked because
+dziri rendered an empty field as a bare line: its height came from the text inside it, and an empty
+string measures zero. A browser plainly does not do that — but "one line high" is not a number, and a
+number is what a layout pass needs.
+
+| case | outer | content height | line-height | font |
+|---|---|---|---|---|
+| `input`, empty | 177 × 21 | **15.0** | normal | 13.3333px Arial |
+| `input`, one char | 177 × 21 | **15.0** | normal | |
+| `input`, 40 chars (overflowing) | 177 × 21 | **15.0** | normal | |
+| `input` at `font-size: 20px` | 251 × 29 | 23.0 | normal | 20px Arial |
+| `input` at `line-height: 40px` | 251 × 46 | **40.0** | 40px | |
+| `input` at `line-height: 1` (= 20px) | 251 × 29 | **23.0** | 20px | |
+| `div`, empty | 976 × 0 | **0.0** | normal | |
+| `div`, one char | 976 × 15 | 15.0 | normal | |
+| `div`, empty `<span>` child | 976 × 0 | **0.0** | normal | |
+| `contenteditable`, empty | 976 × 15 | **15.0** | normal | |
+| `contenteditable`, one char | 976 × 15 | 15.0 | normal | |
+
+Identical across two runs.
+
+### Content has no say at all, and the font decides
+
+Empty, one character and forty all give exactly 15.0. The height tracks the **font** — 20px gives
+23.0 — and an explicit *larger* `line-height` raises it, while `line-height: 1` (20px, below the
+font's own line box at 23) does **not** lower it. So the font's line height is a floor rather than
+just a default.
+
+This is the same fact as "a text field's width is a character count" two sections up, on the other
+axis: **neither dimension of a text field is a function of its value.**
+
+### A block box does the opposite, and that is what scopes the fix
+
+`<div></div>` is 0 high, and so is a div containing an empty `<span>`. Only the *editable* box has a
+floor — `contenteditable` behaves exactly like `<input>`, empty or not.
+
+That distinction is load-bearing for dziri, because it rules out the fix that first suggests itself.
+dziri only ever emits a text node with an empty string for a **dynamic binding**, so giving every
+empty run a line's height would appear to work and would be wrong the moment a non-editable binding
+rendered `""` — Chrome gives that 0, and a counter reading empty would silently reserve a line
+forever. Hence `NodeFlags.EDITABLE` (protocol v14) on the run itself: the compiler already knows
+which runs those are, because it is the `editables` table it has been emitting all along.
+
+### What it means for dziri
+
+`Measurer::line_height` takes the height from a **one-line paragraph**, not from raw font metrics,
+and the reason is the failure mode it avoids: that height has to equal what the *filled* field
+reports one keystroke later, or the box moves by a fraction of a pixel the first time anyone types —
+the same bug being fixed, only smaller and harder to see.
+
+Still not implemented, and now measured rather than assumed: the **width** floor. dziri sizes a field
+by its CSS box, so `size="20"` does nothing, and an `<input>` with no width class is as wide as its
+container rather than 169px. That is the `29 + 7 × size` figure recorded above, and it wants the same
+treatment on the inline axis.

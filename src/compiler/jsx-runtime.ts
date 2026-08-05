@@ -16,6 +16,7 @@ import {
   setListBuilder,
   type MapOptions,
   type ReadonlySignal,
+  type Signal,
 } from "../runtime/signal.ts";
 import { isRecorder, pathOf, recorder } from "./item-path.ts";
 import { isRouteParam, ParamNotEmittedError, paramNameOf } from "./route-args.ts";
@@ -128,7 +129,7 @@ export type Props = {
    * `string & unknown`, so every component that takes a prop called `value` —
    * which is most of them — would have to start writing `Omit<Props, "value">`.
    * A framework type that claims the commonest prop name in the language is
-   * hostile, and dziri already spells an input's value `bindValue`. An authored
+   * hostile, and dziri spells an input's value `bind:value`. An authored
    * `value=` attribute still reaches the IR from HTML, so `[value="x"]` selectors
    * work; it is only the JSX prop that is withheld.
    */
@@ -145,8 +146,25 @@ export type Props = {
    * A string signal this element edits. Focus it by clicking, then typing appends
    * and Backspace deletes. Its value is displayed automatically when the element
    * has no children of its own.
+   *
+   * **The colon is real syntax, not a naming convention.** TypeScript parses a
+   * namespaced JSX attribute and lowers it to a quoted key — `bind:value={draft}`
+   * becomes `{ "bind:value": draft }` — then typechecks that key against this
+   * type, so a typo is an error naming the property it meant. Bun's transform
+   * emits the identical key, which is why one spelling serves both. Measured
+   * before the rename, because a syntax the type checker merely tolerated would
+   * have been worse than a camelCased prop.
+   *
+   * Why a namespace at all: two-way is a different *kind* of prop. Everything
+   * else here flows one way into a build artifact, while this one is the only
+   * place the engine writes back into app state, and the family it opens —
+   * `bind:checked` for a checkbox, `bind:group` for a radio set — reads as one
+   * idea rather than four unrelated names. Svelte and Vue both landed here.
+   *
+   * Writable, deliberately: this used to be a `ReadonlySignal`, which let a
+   * `derived()` typecheck in a position the host assigns to.
    */
-  bindValue?: ReadonlySignal<string>;
+  "bind:value"?: Signal<string>;
   /**
    * Inline declarations, applied after the cascade and beating every selector —
    * the same precedence a browser gives them.
@@ -525,10 +543,11 @@ export function jsx(
   flatten(props.children, children);
   const names = classList(props);
 
-  // An editable with no children displays its own value, so `bindValue` alone is
+  // An editable with no children displays its own value, so `bind:value` alone is
   // enough to both show and edit — reusing the ordinary text-binding machinery.
-  if (props.bindValue && children.length === 0) {
-    children.push({ type: "dyntext", parts: [{ source: props.bindValue }] });
+  const bound = props["bind:value"];
+  if (bound && children.length === 0) {
+    children.push({ type: "dyntext", parts: [{ source: bound }] });
   }
 
   return {
@@ -539,7 +558,7 @@ export function jsx(
     children: normalize(children),
     onClick: props.onClick ?? null,
     classWhen: names.classWhen,
-    bindValue: props.bindValue ?? null,
+    bindValue: bound ?? null,
     style: styleAttr(props.style, type),
     attrs: attrsOf(props, names.classes),
   };
@@ -557,11 +576,18 @@ export function jsx(
  * `class` and `id` are re-added from the parsed forms so `[class~="x"]` sees the
  * same list the cascade does — `className` may have been a `cn()` call, and the
  * raw prop would be an object.
+ *
+ * The `bind:` namespace is skipped by prefix rather than by name, so
+ * `bind:checked` and `bind:group` need no second edit here. It would be skipped
+ * anyway — a signal is neither a string nor `true` — but only by accident of what
+ * it holds, and `kebab("bind:value")` is not an attribute name anyone wants in
+ * the map if a future binding ever carries a literal.
  */
 function attrsOf(props: Props, classes: string[]): ReadonlyMap<string, string> {
   const out = new Map<string, string>();
   for (const [key, value] of Object.entries(props)) {
     if (key === "children" || key === "className" || key === "class" || key === "style") continue;
+    if (key.startsWith("bind:")) continue;
     if (typeof value === "string") out.set(kebab(key).toLowerCase(), value);
     else if (value === true) out.set(kebab(key).toLowerCase(), "");
   }

@@ -938,8 +938,20 @@ export const ENUMS: EnumDef[] = [
  * The `CHECKED` and `DISABLED` predicate bits reserved back in v9 are finally read
  * by something. They needed no protocol change to become live, which is what
  * reserving them was for.
+ *
+ * v15 adds `NodeFlags.PLACEHOLDER`, a box paint draws only while its field is empty.
+ * Hand-bumped for the same reason v14 was — a flag bit moves no bytes, so `SCHEMA_HASH`
+ * cannot see it, and an engine without the bit would paint every placeholder over the
+ * user's own text.
+ *
+ * v14 adds `NodeFlags.EDITABLE`, so a field is one line high when it is empty.
+ * **`SCHEMA_HASH` cannot see this**, exactly as it cannot see enum values: the flags
+ * are a hand-written bitfield rather than a generated column, no table grew and no
+ * offset moved. So the bump is by hand, for the same reason v10's was — an engine
+ * built before this bit would read a field's flags without it and quietly go back to
+ * collapsing every empty field, which is a wrong picture rather than a loud failure.
  */
-export const PROTOCOL_VERSION = 13;
+export const PROTOCOL_VERSION = 15;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
@@ -961,6 +973,48 @@ export const NodeFlags = {
    * is not a direct child would need the column; none is.
    */
   GENERATED: 1 << 2,
+  /**
+   * A text run inside a field the user can edit, which is one line high **whether
+   * or not it has any text**.
+   *
+   * Measured, 2026-08-04, `probes/text-field-box.html`: an `<input>`'s content box
+   * is 15.0px at 13.3333px Arial when empty, with one character, and with forty —
+   * content has no say at all, and a `contenteditable` div behaves the same way. A
+   * plain block box does the opposite: `<div></div>` is 0 high.
+   *
+   * So the floor cannot live in `measure` for every empty string. dziri only ever
+   * emits a text node with an empty string for a *dynamic* binding, so doing it
+   * unconditionally would work by accident today and diverge the moment a
+   * non-editable binding renders `""` — Chrome gives that 0 height, and a counter
+   * reading empty would silently reserve a line. This bit is what separates the two
+   * cases, and the compiler already knows which is which: it is the `editables`
+   * table it has been emitting all along.
+   *
+   * Why the flag is on the text run rather than on the field: layout measures the
+   * run, and the field's height is whatever its child reports. Putting it on the
+   * parent would mean teaching layout to look at a child's parent mid-measure.
+   */
+  EDITABLE: 1 << 3,
+  /**
+   * A `::placeholder` box, painted **only while its field is empty**.
+   *
+   * The condition is why this is a flag rather than a variant. Every other
+   * pseudo-element's visibility is a compile-time question, and `:hover`-style state is
+   * a predicate bit the compiler can enumerate — but "does this field hold text" is the
+   * emptiness of a value nobody declared, which is the same category as checkedness and
+   * for the same reason lives on this side of the boundary.
+   *
+   * A predicate bit would also work and would let a stylesheet write
+   * `:placeholder-shown`. It is not what this does, deliberately: a bit would make the
+   * placeholder's *display* an authored decision, and an author who set
+   * `display: block` on it would get a placeholder sitting behind their own text. Paint
+   * owning the condition means the box cannot be shown at the wrong time.
+   *
+   * The box is laid out `position: absolute` by the UA sheet, so it costs no room and
+   * overlays where the text will go — which is also what makes hiding it a pure paint
+   * decision with nothing to re-lay-out.
+   */
+  PLACEHOLDER: 1 << 4,
 } as const;
 
 /**

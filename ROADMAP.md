@@ -442,7 +442,7 @@ winit-versus-SDL3 choice reversible.
 - Tab / Shift-Tab walking the **live tree**, not the sorted `interactive` array — arena rows are
   numbered by slot, so after a reorder those diverge and tab order must follow what the user sees.
 - Enter/Space activation through the same dispatch as a click, including `dispatchItem`.
-- `onSubmit` on `bindValue`; distinct `onChange` vs `onInput` semantics.
+- `onSubmit` on `bind:value`; distinct `onChange` vs `onInput` semantics.
 - `:focus-visible` — ring for keyboard focus only, which is the difference between polished and
   broken.
 - Skip hidden subtrees; autofocus.
@@ -556,8 +556,37 @@ Still to do: **held-button auto-repeat** on a track click (one click, one page t
     derives from the clock, so it flips one bit and invalidates the caret rect only. Same shape as
     transitions, which interpolate in Rust precisely so nothing runs in JS at frame rate — and it is
     what makes the caret survive a long JS computation, the worry recorded under `pump_input` below.
-  - `bindValue` already exists in partial form — append and backspace, via the `editables` table
-    (`compile.ts:808`). A5 is what turns it into a real input rather than a demo.
+  - `bind:value` already exists in partial form — append and backspace, via the `editables` table
+    (`compile.ts:801`). A5 is what turns it into a real input rather than a demo.
+  - **It had never worked, and the fix was one clause in `buildInteractive`.** Focus comes from a
+    click, `hit_test` returns only `INTERACTIVE` nodes, and an editable was in no clause — so the
+    keystroke was addressed to a node that could not hold focus. Recorded here because starting
+    `SDL_StartTextInput` looked like the fix and changed nothing on its own; two dead links in one
+    chain hid each other.
+  - **A field is one line high when empty — done**, protocol v14's `NodeFlags.EDITABLE`. Measured
+    first (`probes/text-field-box.html`): a field's height comes from its *font*, not its content, so
+    empty, one character and forty are all 15.0px at 13.3333px Arial. It had been rendering as a bare
+    line and jumping to full height on the first keystroke. The flag is what scopes it — an empty
+    `<div>` is 0 high, so a floor on every empty run would have been wrong for every binding that
+    happens to render `""`.
+  - **`::placeholder` works — done**, protocol v15's `NodeFlags.PLACEHOLDER`. An ordinary generated
+    box in an ordinary cascade, differing from `::before` in exactly two ways: its text comes from
+    the attribute rather than from `content`, and paint draws it only while the field is empty. The
+    UA sheet positions it absolutely, so it costs no layout room and hiding it invalidates nothing.
+    The condition is engine-owned for the same reason checkedness is — the emptiness of a value
+    nobody declared — and paint owning it means no stylesheet can show a placeholder underneath the
+    user's own text.
+  - **Every field now owns a text run**, bound or not. Written because the placeholder broke the
+    field it was drawn in: the strut lived on the *element* for unbound fields, justified by "a node
+    with a child is never measured", and a placeholder is a child. One shape for both kinds is the
+    better answer rather than the smaller patch, and it is where an engine-owned buffer will write.
+  - **The width is still content-driven and should not be.** `29 + 7 × size` px is measured and
+    unimplemented, so `size="20"` does nothing and an `<input>` with no width class fills its
+    container. Same treatment, inline axis.
+  - Still ahead, and none of it started: the caret (position, blink, `caret-color`), a selection
+    model (click-drag, shift+arrows, `::selection`), and an editing model that inserts *at* a caret
+    rather than appending — which is the prerequisite for the other two, since `typeInto` has nowhere
+    for a caret to be.
 - **Font discovery, not just font loading.** System fonts per platform (Segoe UI, San Francisco,
   Noto), a fallback chain, and an emoji font. Text without emoji fallback looks broken.
 
@@ -578,8 +607,32 @@ Phases B and C, which together exceed the compiler and runtime combined.
   contexts and no `z-index` arithmetic.
 - **Hit-testing must respect layers**: a click on an overlay must not reach nodes beneath it.
   Easy to get wrong with a single paint tree.
+- **A click *outside* the overlay dismisses it *and* activates what it hit.** Measured, 2026-08-04,
+  BROWSER-FACTS.md — clicking a `<button>` beside an open picker closed the picker and fired that
+  button's own `click`, leaving focus on it. This is a different rule from the bullet above, about a
+  different click, and the two are easy to conflate: implementing "the overlay consumes the press"
+  and assuming it covered dismissal makes every click that closes a dropdown mysteriously do
+  nothing else. Both rules, not one.
 - Dismissal: click-outside, Escape, scroll-outside.
-- Focus scopes: trap, **restore focus to the trigger on dismissal**, focus stack.
+- Focus scopes: trap, **restore focus to the trigger on dismissal**, focus stack. Measured and
+  slightly wider than written: focus moves *into* the picker while it is open (an `<option>` holds
+  it, not the select), and **both** exits restore it to the trigger — Escape and Enter alike. So the
+  restore is what closing does, not something specific to cancelling.
+
+**Measured before writing any of it** (`probes/select-picker.html`, and the probe runner gained key
+injection to make it possible — a synthetic `KeyboardEvent` is untrusted and performs no default
+action, so nothing about what a key *does* was measurable before). Three findings change the design:
+
+1. **A picker opens on `mousedown`, not on the click** — the opposite of a checkbox, whose bit flips
+   during the click, after `mouseup`. So `Engine::mouse_down` opens a picker while `activate_control`
+   stays on the release; they cannot share a trigger point.
+2. **A picker needs two pieces of state**: the committed selection and a *pending highlight*. An
+   arrow key with the picker open moves the highlight and fires no `input`/`change`; Enter commits
+   and fires both, in that order; Escape closes with the value untouched. One integer each, and the
+   highlight belongs to the open picker rather than to every select, since only one can be open.
+3. **An arrow key on a closed, focused select opens the picker** rather than walking the value —
+   which refutes the belief carried over from legacy selects. Keyboard opening is then the same path
+   as the click rather than a second mechanism.
 
 ### B2 · Positioning
 Adapter for `@floating-ui/core`, which is platform-agnostic by design (built that way for React
@@ -904,7 +957,7 @@ Without a published answer, "no web target" reads as a limitation rather than a 
 position. The answer is memory per window and predictable frame cost, and it needs numbers.
 
 ### D4 · Docs and API freeze
-**Freeze the authoring API before adoption.** `cn`, `signal`, `.map(fn, { key })`, `bindValue`,
+**Freeze the authoring API before adoption.** `cn`, `signal`, `.map(fn, { key })`, `bind:value`,
 `ref` are all still in flux, and every week of adoption raises the cost of changing them.
 
 Document boundaries as features: no floats, no assistive-tech bridge yet, logic libraries only.

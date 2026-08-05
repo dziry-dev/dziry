@@ -1618,3 +1618,96 @@ fn an_absolute_child_insets_from_its_parents_padding_box() {
         "the in-flow sibling ignores the absolute one: {flow:?} in {parent:?}"
     );
 }
+
+/// An empty *field* is one line high; an empty anything else is nothing.
+///
+/// The rule `NodeFlags::EDITABLE` exists for, asserted from both sides in one test
+/// because it is the *contrast* that is the rule — either half alone is satisfied by
+/// a wrong implementation. Measured, `probes/text-field-box.html`: an `<input>` is
+/// 15.0px high with no text, one character and forty, while `<div></div>` is 0.
+///
+/// Two flagged shapes, both leaves, because a field has two forms. A **bound** field
+/// owns a text run and layout measures that — an empty string in the arena. An
+/// **unbound** `<input>` has no run at all, so `TEXT` is -1 and it is not
+/// `MEASURABLE`; a browser still gives it a full-height box, which is why the flag is
+/// checked before that gate rather than after.
+///
+/// Without this the height came out 0 and a field rendered as a bare line, then
+/// jumped to full height on the first keystroke.
+#[test]
+fn an_empty_field_is_one_line_high_and_an_empty_box_is_not() {
+    let mut engine = Engine::new(&config(5, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_f32(STYLES, styles::WIDTH, 0, 200.0);
+        t.set_f32(STYLES, styles::HEIGHT, 0, 100.0);
+        t.set_u8(STYLES, styles::ALIGN_ITEMS, 0, align::FLEX_START);
+
+        for n in 0..5 {
+            leaf(t, n, if n == 0 { 0 } else { 1 });
+        }
+        link(t, 0, &[1, 2, 3, 4]);
+
+        let mut cursor = 0;
+        t.push_string(0, "", &mut cursor).expect("string arena");
+
+        // 1: a bound field's run — an empty string, flagged.
+        t.set_i32(NODES, nodes::TEXT, 1, 0);
+        t.set_u8(NODES, nodes::KIND, 1, protocol::node_kind::TEXT);
+        t.set_u8(
+            NODES,
+            nodes::FLAGS,
+            1,
+            protocol::flags::MEASURABLE | protocol::flags::EDITABLE,
+        );
+
+        // 2: the same empty run *without* the flag — an ordinary binding that happens
+        // to render nothing, which Chrome gives no height at all.
+        t.set_i32(NODES, nodes::TEXT, 2, 0);
+        t.set_u8(NODES, nodes::KIND, 2, protocol::node_kind::TEXT);
+        t.set_u8(NODES, nodes::FLAGS, 2, protocol::flags::MEASURABLE);
+
+        // 3: an unbound `<input>` — no text at all, so not measurable, but flagged.
+        t.set_u8(NODES, nodes::FLAGS, 3, protocol::flags::EDITABLE);
+
+        // 4: a plain empty box, the control for node 3.
+        t.set_u8(NODES, nodes::FLAGS, 4, 0);
+    }
+
+    engine.tick().expect("tick");
+
+    let field = bound(&engine, 1)[3];
+    let plain_run = bound(&engine, 2)[3];
+    let unbound = bound(&engine, 3)[3];
+    let empty_box = bound(&engine, 4)[3];
+
+    assert!(
+        field > 0.0,
+        "an empty bound field collapsed to {field}; it must be one line high"
+    );
+    assert!(
+        close(unbound, field),
+        "an unbound field is {unbound} and a bound one {field} — a browser gives both \
+         the same box, since it does not ask who owns the value"
+    );
+    assert!(
+        close(plain_run, 0.0),
+        "an unflagged empty run took {plain_run}; only a *field* has a floor, or every \
+         binding that renders \"\" silently reserves a line"
+    );
+    assert!(
+        close(empty_box, 0.0),
+        "an empty box took {empty_box}, but <div></div> is 0 high"
+    );
+
+    // The floor is the font's line height, so it has to be in the same neighbourhood
+    // as a line of real text at the same size rather than an arbitrary constant —
+    // and it must equal what the field reports once it *has* text, or the box moves
+    // on the first keystroke.
+    assert!(
+        field > 16.0 && field < 32.0,
+        "a 16px font's line box should be a little over 16px, got {field}"
+    );
+}

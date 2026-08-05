@@ -70,9 +70,22 @@ export const SCENARIOS: Scenario[] = [
   /**
    * A transform that lives in a variant slot, which nothing else covers.
    *
-   * Node 900 is the `hover:scale-110` button. It matters because the transform is
+   * Node 902 is the `hover:scale-110` button. It matters because the transform is
    * only reachable through the *resolved* style — and because hit-testing has to
    * agree, or the pointer leaves the box the moment it grows.
+   *
+   * **The id is derived, not chosen, and it moves.** Node ids are allocated in tree
+   * order, so any node added to a route that sorts before `transforms` renumbers this
+   * one — it was 900 until the controls page gained a bound text field and its
+   * generated text child, and the symptom was this scenario going `DIFF` while the
+   * transforms page had not changed at all. That is indistinguishable from a
+   * rendering regression at a glance, and `--accept` would have silently repointed
+   * the scenario at whatever node inherited the number.
+   *
+   * If it diffs again after an unrelated demo edit, check that first: re-point it and
+   * the picture should come back **byte-identical** to the committed golden, which is
+   * the proof that nothing rendered differently. If the pixels still differ once the
+   * right button is hovered, then it is a real regression.
    *
    * Same tall size as above, and not incidentally: that button is near the bottom
    * of the page, so at the default 700px the scenario captured only the header and
@@ -80,7 +93,7 @@ export const SCENARIOS: Scenario[] = [
    */
   {
     name: "transform-hover",
-    args: ["--route", "transforms", "--hover", "900", "--size", "1040x1500"],
+    args: ["--route", "transforms", "--hover", "902", "--size", "1040x1500"],
   },
 
   /**
@@ -158,6 +171,24 @@ export const SCENARIOS: Scenario[] = [
   {
     name: "controls-radio",
     args: ["--route", "controls", "--size", "1040x1400", "--click", "282"],
+  },
+  /**
+   * A focused text field, which is the only way to see focus at all until there is a
+   * caret to show it.
+   *
+   * `--focus` sets the state directly rather than clicking, because a click sets
+   * `pressed` too and `input[type=text]:focus` is the rule under test. Node 302 is the
+   * first field on the page — the bound one.
+   *
+   * This scenario is newly *possible*, not newly written: `:focus` has been a live
+   * predicate for as long as the engine has set `state.focused` from the hit test, and
+   * an editable was in no clause of `buildInteractive`, so no field could ever be the
+   * hit and the rule was unreachable. A golden of it would have been a golden of
+   * nothing.
+   */
+  {
+    name: "controls-focus",
+    args: ["--route", "controls", "--size", "1040x1400", "--focus", "302"],
   },
 
   /**

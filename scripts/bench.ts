@@ -127,6 +127,8 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     variants: m.variants,
     interactive: m.interactive,
     generated: m.generated,
+    editableBoxes: m.editableBoxes,
+    placeholders: m.placeholders,
     textBindings: m.textBindings,
     handlers: m.handlers,
     lists: m.lists,

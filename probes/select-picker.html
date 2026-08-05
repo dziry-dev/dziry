@@ -1,0 +1,186 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>select-picker</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  /* The customizable-select opt-in. Without it the picker is browser chrome and
+     nothing about its open state is observable from script — see the note below.
+     Scoped to #s so the legacy control beside it keeps its native appearance.
+
+     `#s::picker(select)`, NOT `::picker(#s)`. The latter is invalid — `picker()`
+     takes the keyword `select`, not a selector — and one invalid member drops the
+     *entire* selector list, so `appearance` never applied and a whole run silently
+     measured two legacy controls instead. It disagreed with the previous run in
+     three places and looked like browser nondeterminism. */
+  #s, #s::picker(select) { appearance: base-select }
+  select { width: 180px }
+  #stage { display: flex; gap: 24px; align-items: flex-start; height: 120px }
+</style>
+<h3>what does opening, dismissing and committing a &lt;select&gt; actually do?</h3>
+<div id="stage"></div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * Why `appearance: base-select` rather than a plain `<select>`.
+   *
+   * A native picker is browser *chrome*: it is not in the DOM, it has no computed
+   * style, and no script can see whether it is open. Every question here — did it
+   * open, did Escape close it, was the value reverted — is unobservable on the
+   * native control, so measuring it would mean measuring nothing and reporting
+   * confidence.
+   *
+   * `base-select` is the spec's opt-in that moves the picker *into* the page, which
+   * is what makes `:open`, `toggle` events and `::picker(select)` exist at all. It is
+   * also the model dziri is copying — `ua-structure.ts` already builds the
+   * `<button><selectedcontent>` half of it — so this measures the thing being
+   * implemented rather than a legacy widget nobody is reproducing.
+   */
+
+  const stage = document.getElementById("stage");
+  stage.innerHTML = `
+    <select id="s">
+      <button><selectedcontent></selectedcontent></button>
+      <option value="free" selected>Free</option>
+      <option value="pro">Pro</option>
+      <option value="ent">Enterprise</option>
+    </select>
+    <button id="outside">outside</button>
+    <select id="legacy">
+      <option value="free" selected>Free</option>
+      <option value="pro">Pro</option>
+      <option value="ent">Enterprise</option>
+    </select>
+  `;
+
+  const s = document.getElementById("s");
+  const centre = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  };
+
+  /** Where the second option lands once the picker is open — read at drive time. */
+  const optionPoint = () => {
+    const r = s.querySelectorAll("option")[1].getBoundingClientRect();
+    return r.width > 0 ? { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) } : null;
+  };
+
+  const open = () => (s.matches(":open") ? "open" : "closed");
+  const act = () => {
+    const a = document.activeElement;
+    return a === document.body ? "BODY" : a.tagName + (a.id ? "#" + a.id : "");
+  };
+
+  // Event log, so "did it fire" is answered by observation and not by inference from
+  // the value. `change` vs `input` is the pair that matters: a host wanting "the user
+  // picked something" needs to know which one to listen for, and how many times.
+  const fired = [];
+  for (const n of ["toggle", "beforetoggle", "change", "input", "click", "keydown"]) {
+    s.addEventListener(n, (e) => {
+      fired.push(n === "toggle" || n === "beforetoggle" ? `${n}:${e.newState}` : n);
+    });
+  }
+  const drain = () => {
+    const f = fired.join(",") || "none";
+    fired.length = 0;
+    return f;
+  };
+
+  // The legacy control's own events, kept apart so one column cannot be mistaken for
+  // the other. Its `open` state is deliberately absent: it is browser chrome, so any
+  // value printed there would be an invention.
+  const legacy = document.getElementById("legacy");
+  const legacyFired = [];
+  for (const n of ["change", "input"]) legacy.addEventListener(n, () => legacyFired.push(n));
+  const drainLegacy = () => {
+    const f = legacyFired.join(",") || "none";
+    legacyFired.length = 0;
+    return f;
+  };
+
+  const row = (label) =>
+    log(
+      label.padEnd(32) +
+        " open=" + open().padEnd(7) +
+        " value=" + s.value.padEnd(5) +
+        " focus=" + act().padEnd(16) +
+        " events=[" + drain() + "]" +
+        (label.startsWith("legacy")
+          ? `  ‖ legacy value=${legacy.value} events=[${drainLegacy()}]`
+          : ""),
+    );
+
+  // The plan. Mouse and keys interleaved, which is the whole reason keys had to join
+  // the same list: "open it, then arrow, then Enter" is one sequence.
+  const out = document.getElementById("outside");
+  let outsideClicks = 0;
+  out.addEventListener("click", () => (outsideClicks += 1));
+
+  const plan = [
+    ["press the closed select", { ...centre(s), down: 1 }],
+    ["release on it", { ...centre(s), up: 1 }],
+    ["ArrowDown with picker open", { key: "ArrowDown" }],
+    ["Enter to commit", { key: "Enter" }],
+    ["click to open again", { ...centre(s), down: 1, up: 1 }],
+    ["ArrowDown (pending highlight)", { key: "ArrowDown" }],
+    ["Escape", { key: "Escape" }],
+    ["click to open a third time", { ...centre(s), down: 1, up: 1 }],
+    // The focusable button, not empty space. The first run clicked (0,0) — the page
+    // padding — which answers "where does focus go when you click nothing", not the
+    // question B1 needs: does the dismissing click also *reach* what it hit? That is
+    // the inverse of "a click on an overlay must not reach nodes beneath it", and the
+    // answer decides whether dziri's dismissal swallows the press or lets it through.
+    ["click the outside button", { ...centre(out), down: 1, up: 1 }],
+    // Arrowing a *focused, closed* select. The first run arrowed while focus was on
+    // BODY, so it measured nothing and read as "closed arrows do nothing". Chrome is
+    // widely believed to change the value directly here; that belief is the thing to
+    // test, so focus is re-established first.
+    ["refocus the select (opens it)", { ...centre(s), down: 1, up: 1 }],
+    ["Escape to close, keeping focus", { key: "Escape" }],
+    ["ArrowDown while closed + focused", { key: "ArrowDown" }],
+    ["ArrowUp while closed + focused", { key: "ArrowUp" }],
+
+    // The legacy control, for the one question it can answer. Its openness is browser
+    // chrome and unobservable, but its *value* and its events are not — so "does an
+    // arrow key on a closed native select change the value directly", which is what
+    // everyone believes Chrome does and what authors will expect, is measurable here
+    // and nowhere else.
+    ["--- legacy: Escape closes base", { key: "Escape" }],
+    ["legacy: focus it", { ...centre(document.getElementById("legacy")), down: 1, up: 1 }],
+    ["legacy: ArrowDown", { key: "ArrowDown" }],
+    ["legacy: ArrowDown again", { key: "ArrowDown" }],
+  ];
+
+  window.__probeMouse = plan.map(([, p]) => p);
+
+  const labels = plan.map(([l]) => l);
+
+  // Recorded before the first input, so "what did the press change" has a baseline.
+  row("initial");
+
+  /**
+   * One row per step, named by the runner's index rather than by a guess.
+   *
+   * The first version of this probe watched every animation frame and gave each
+   * observed change the next unused label. That slid the entire table by one the
+   * moment a step changed nothing — `press the closed select` captioned the row for
+   * the release, and `ArrowDown with picker open` captioned the combined result of
+   * ArrowDown *and* Enter, complete with a plausible `input,change` pair. It looked
+   * exactly like a finding. Attribution now comes from the side that knows.
+   */
+  window.__probeStep = (i) => row(labels[i] ?? `step ${i}`);
+
+  window.__probeMouseDone = () => {
+    log("");
+    log(`settled: open=${open()} value=${s.value} focus=${act()} events=[${drain()}]`);
+    log("");
+    log(
+      `the dismissing click reached the button underneath it: ` +
+        (outsideClicks > 0 ? `YES (${outsideClicks} click)` : "NO — it was swallowed"),
+    );
+    report();
+  };
+
+  document.title = "ready";
+</script>

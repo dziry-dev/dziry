@@ -483,6 +483,34 @@ export type CompiledUi = {
    * hit test returns.
    */
   generated: Int32Array;
+  /**
+   * Sorted node ids that are one line high **when they hold nothing**.
+   *
+   * Which an `<input>` is and a plain block box is not — measured,
+   * `probes/text-field-box.html`: a field is 15.0px high empty, with one character and
+   * with forty, while `<div></div>` is 0.
+   *
+   * Two kinds of node, deliberately, because a field has two shapes. A **bound** field
+   * has a generated text run and layout measures *that*, so the run carries the floor.
+   * An **unbound** `<input>` has no run at all — nothing owns its value — and is
+   * measured directly, so the element carries it. A browser gives both the same height:
+   * it does not ask who owns the value before sizing the box, and a `disabled` field is
+   * full height too.
+   *
+   * Emitted rather than inferred for the same reason as the two above. By measure time
+   * layout has a leaf with an empty string, or no string, and nothing to say about why —
+   * the fact lives in the tag, the `type` attribute and the `editables` table, none of
+   * which cross the boundary.
+   */
+  editableBoxes: Int32Array;
+  /**
+   * Sorted node ids of `::placeholder` boxes, painted only while the field is empty.
+   *
+   * The condition is the engine's because the emptiness of a value nobody declared is
+   * the engine's — the same argument checkedness makes. Laid out `position: absolute` by
+   * the UA sheet, so hiding one is a paint decision with nothing to re-lay-out.
+   */
+  placeholders: Int32Array;
   lists: ListTable;
   media: MediaTable;
   tweens: TweenTable;

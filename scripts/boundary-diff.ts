@@ -160,6 +160,8 @@ if (LIVE) {
       variants: ui.variants,
       interactive: ui.interactive,
       generated: ui.generated,
+      editableBoxes: ui.editableBoxes,
+      placeholders: ui.placeholders,
       textBindings: ui.textBindings,
       handlers: ui.handlers,
       lists: ui.lists,

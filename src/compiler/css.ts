@@ -60,9 +60,19 @@ const SUPPORTED_PSEUDO = new Set<string>([
  * `::placeholder`, `::marker`) are the same machinery with a different trigger,
  * and land once there are controls to hang them on.
  */
-export type PseudoElement = "before" | "after";
+/**
+ * `::placeholder` is here rather than with the other control pseudo-elements because
+ * it needs nothing they need. A picker wants an overlay layer and a checkmark wants a
+ * control that can be in that state; a placeholder is a box holding text the markup
+ * already carries, which is exactly what `::before` is.
+ *
+ * The one thing it has that `::before` does not is a *condition*: it shows only while
+ * the field is empty. That is engine-owned — the emptiness of a value nobody declared —
+ * so it is a node flag and a paint branch, not a variant. See `NodeFlags.PLACEHOLDER`.
+ */
+export type PseudoElement = "before" | "after" | "placeholder";
 
-const SUPPORTED_PSEUDO_ELEMENT = new Set<string>(["before", "after"]);
+const SUPPORTED_PSEUDO_ELEMENT = new Set<string>(["before", "after", "placeholder"]);
 
 /**
  * One `[attr]` / `[attr op "value"]` test.
@@ -1253,9 +1263,9 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
           if (!SUPPORTED_PSEUDO_ELEMENT.has(name)) {
             throw new CssError(
               `unsupported pseudo-element "::${name}".\n` +
-                `  Supported: ::before, ::after.\n` +
+                `  Supported: ::before, ::after, ::placeholder.\n` +
                 `  The control-specific ones (::picker(select), ::picker-icon, ` +
-                `::checkmark, ::placeholder, ::marker) are the same machinery and ` +
+                `::checkmark, ::marker) are the same machinery and ` +
                 `land with the controls they belong to.`,
               partAt,
             );

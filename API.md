@@ -97,7 +97,7 @@ Anything that trades robustness for capability stays a proposal.
 | `.map(fn, { key })` keyed lists | **done** | — |
 | inline `style=` (string + object) | **done** | — |
 | `ref()` | partial — `resolve-refs.ts` | C3 |
-| `bindValue` | partial — append + backspace only | M12 |
+| `bind:value` | partial — append + backspace, and a click now focuses the field | M12 |
 | form controls — `<Checkbox>` `<Switch>` `<Radio>` `<Toggle>` `<Tabs>` `<Input>` | planned — see **Form controls** below | C2 |
 | `effect` `untrack` `peek` cleanup, disposal scopes | planned | M6 |
 | `Show` | planned | M3 |
@@ -197,8 +197,30 @@ const draft = state("");
 <Switch checked={done} disabled={locked} />
 <Radio name="plan" value="pro" checked={plan} />
 
-<Input bindValue={draft} onSubmit={save} />     {/* onChange fires on commit, onInput per keystroke */}
+<Input bind:value={draft} onSubmit={save} />    {/* onChange fires on commit, onInput per keystroke */}
 ```
+
+**Two-way binding is a `bind:` namespace, and the colon is real syntax.** TypeScript parses a
+namespaced JSX attribute, lowers it to a quoted key — `bind:value={draft}` becomes
+`{ "bind:value": draft }` — and typechecks that key against the props type, so a misspelling is an
+error that names the property it meant. Bun's transform emits the identical key. Both halves were
+measured before the spelling was adopted, because a syntax the checker merely tolerated would have
+been worse than a camelCased prop.
+
+The namespace exists because two-way is a different *kind* of prop. Every other prop flows one way
+into a build artifact; these are the only place the engine writes back into app state, and the
+family reads as one idea instead of four unrelated names:
+
+| binding | holds | status |
+|---|---|---|
+| `bind:value` | `State<string>` — `input`, `textarea`, `select` | **live**, append + backspace |
+| `bind:checked` | `State<boolean>` — one checkbox or switch | planned · A3 |
+| `bind:group` | `State<string>` — the selected `value` in a radio set | planned · A3 |
+
+**A bound value is always a string**, including for `number` and `range`. That matches the DOM,
+where an input's value *is* a string and `valueAsNumber` is a separate accessor, and it keeps the
+engine out of the business of deciding what an empty field or a lone `-` parses to. An author who
+wants a number writes `derived(() => Number(volume))`.
 
 Why this costs almost nothing for everything except `Input`: `:checked`, `:disabled` and
 `:indeterminate` are enumerable booleans, so they pass the compile-time gate at question 3 — a second
@@ -218,8 +240,19 @@ of strings a user can type is unbounded, so there are no variants to emit. Its *
 selection range become a new NOTES.md ledger entry** when A5 lands. The caret blink is an engine-side
 timer flipping one bit, never JS at frame rate.
 
-`bindValue` exists in partial form today — append and backspace only, through the `editables` table
-(`src/compiler/compile.ts:808`).
+`bind:value` exists in partial form today — append and backspace only, through the `editables` table
+(`src/compiler/compile.ts:801`).
+
+**Until now it did nothing at all, and the reason is worth recording** because the artifact was
+correct throughout. Focus is acquired by clicking, `hit_test` returns only `INTERACTIVE` nodes, and
+`buildInteractive` had no clause for an editable — so a `<div bind:value>` with no `hover:` class and
+no `onClick`, which is exactly what both demo pages authored, could never become `state.focused`, and
+the host's `typeInto` never found a target for the keystroke. Nothing reported it: the text binding
+rendered, the signal was real, and an empty field looks identical to a working one in a screenshot.
+The layer beneath it had the same class of bug — `SDL_StartTextInput` was never called — and fixing
+that changed nothing, because the events it unblocked arrived addressed to a node that could not hold
+focus. Both halves are fixed; a click now focuses a field, asserted through the engine's own
+`hit_test` in `src/engine/upload.test.ts`.
 
 Both halves are in for checkbox and radio, as of protocol v13. A stylesheet writes `:checked` and
 `:disabled` and the compiler resolves them like `:hover`, merging combinations per property; the engine
@@ -240,7 +273,7 @@ cannot open — that one needs the overlay layer, not this machinery.
 | checkbox and radio activation, radio groups, label forwarding | **done** — protocol v13. A radio group is keyed on `(form, name)`, measured | A3 |
 | `:indeterminate` | planned — same shape and cost, held back until a control can be in that state | A3 |
 | `::before` / `::after` + `content` | **done** — generated boxes are real emitted nodes; this is what replaces a UA shadow tree | A1 |
-| `::picker(select)` `::picker-icon` `::checkmark` `::placeholder` `::marker` | planned — same machinery as `::before`, refused by name until the controls exist | C2 |
+| `::picker(select)` `::picker-icon` `::checkmark` `::marker` | planned — same machinery as `::before`, refused by name until the controls exist | C2 |
 | attribute selectors — `[a]` `=` `~=` `\|=` `^=` `$=` `*=`, `i` flag | **done** — `input[type=checkbox]` is how a UA sheet names one control among twenty-two | A1 |
 | `<input>` `<select>` `<option>` `<textarea>` `<label>` … as real tags | **done** — they compile to ordinary boxes; being a tag is not being a widget | C2 |
 | `<select>` closed, with UA-supplied `<button>` + `<selectedcontent>` | **done** — `ua-structure.ts`; the parts a browser builds in a shadow tree, built as nodes | C2 |
@@ -248,7 +281,16 @@ cannot open — that one needs the overlay layer, not this machinery.
 | `accent-color` `caret-color` `appearance` | **done** — `STYLE_FIELDS`, checked in `conformance` and `spec-audit` | A1 |
 | `resize`, `field-sizing: content` | **non-goal** — see ROADMAP C2; in `css-coverage`'s `OUT_OF_SCOPE_NAMES` | — |
 | `<Input>` | planned | C2 · Tier 1b (needs A5) |
-| `onSubmit` on `bindValue`; `onChange` vs `onInput` | planned | A3 |
+| `onSubmit` on `bind:value`; `onChange` vs `onInput` | planned | A3 |
+| a click focusing a bound field | **done** — editables are `INTERACTIVE`, so `hit_test` can return one | A3 |
+| an empty field is still one line high | **done** — `NodeFlags.EDITABLE`, protocol v14. Measured: a field's height is its *font*, not its content | A5 |
+| `::placeholder` | **done** — protocol v15. An ordinary generated box, like `::before`, with two differences: its text comes from the attribute rather than `content`, and paint draws it only while the field is empty | C2 |
+| a disabled field refuses focus | **done** — a disabled form control now gets a `controls` row, so the engine can see it. A press on one produces no `mousedown`, `mouseup` or `click` at all, as measured | A3 |
+| a field's **width** from `size` | planned — `29 + 7 × size` px is measured (BROWSER-FACTS.md), and unimplemented: `size="20"` does nothing, so an `<input>` with no width class fills its container instead of being 169px | A5 |
+| caret — position, blink, `caret-color` | planned — the field takes text but shows no cursor | A5 |
+| selection — click-drag, shift+arrows, `::selection` | planned — no selection model exists; `typeInto` appends and backspaces only | A5 |
+| arrow keys, Home/End, insert *at* the caret | planned — editing is append-only, so there is nowhere for a caret to be | A5 |
+| a `<label>` click focusing a text field | planned — `activates` forwards to control kinds only, and a text field is not one | A3 |
 | caret, selection, IME, clipboard | planned — new ledger entry | A5 |
 
 *The Milestone column above uses ROADMAP's phase labels. The table under Status uses `M`-numbers,

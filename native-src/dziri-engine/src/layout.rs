@@ -454,20 +454,44 @@ impl LayoutTree {
                     None => return Size::ZERO,
                 };
 
-                // Leaves with no text never reach Skia at all.
-                if flags.get(node).copied().unwrap_or(0) & protocol::flags::MEASURABLE == 0 {
-                    return Size::ZERO;
-                }
-
-                let slot = text.get(node).copied().unwrap_or(-1);
-                let content = tables.string(slot);
-                if content.is_empty() {
-                    return Size::ZERO;
-                }
+                let node_flags = flags.get(node).copied().unwrap_or(0);
+                let editable = node_flags & protocol::flags::EDITABLE != 0;
 
                 let style = style_of_node.get(node).copied().unwrap_or(0) as usize;
                 let size = font_size.get(style).copied().unwrap_or(16.0);
                 let weight = font_weight.get(style).copied().unwrap_or(400);
+
+                // A text field is one line high with nothing in it, and an empty
+                // anything else is nothing at all. Measured both ways,
+                // `probes/text-field-box.html`: an `<input>` and a `contenteditable` div
+                // are 15.0px high empty, with one character and with forty, while
+                // `<div></div>` is 0. Without this an empty field rendered as a bare
+                // line and jumped to full height on the first keystroke.
+                //
+                // **Before the `MEASURABLE` gate, deliberately.** An *unbound* `<input>`
+                // has no text run at all, so its `text` slot is -1 and it is not
+                // measurable — and it still has to be one line high, because a browser
+                // does not ask who owns the value before sizing the box. A bound field
+                // reaches this through its generated run instead; both are leaves, which
+                // is what makes one branch serve both.
+                // `mut` because `line_height` goes through the measure cache, which it
+                // may fill — the closure borrows `measurer` mutably.
+                let mut strut = || Size {
+                    width: known.width.unwrap_or(0.0),
+                    height: known.height.unwrap_or(measurer.line_height(size, weight)),
+                };
+
+                // Leaves with no text never reach Skia at all.
+                if node_flags & protocol::flags::MEASURABLE == 0 {
+                    return if editable { strut() } else { Size::ZERO };
+                }
+
+                let slot = text.get(node).copied().unwrap_or(-1);
+                let content = tables.string(slot);
+
+                if content.is_empty() {
+                    return if editable { strut() } else { Size::ZERO };
+                }
 
                 let avail = match available.width {
                     AvailableSpace::Definite(v) => v,
