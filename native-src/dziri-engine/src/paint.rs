@@ -965,8 +965,8 @@ impl Painter {
     }
 
     /// Shifts the caret by an edit of `delta` characters.
-    pub fn shift_caret(&mut self, node: usize, delta: i32, chars: usize) {
-        self.carets.shift(node, delta, chars);
+    pub fn shift_caret(&mut self, node: usize, delta: i32) {
+        self.carets.shift(node, delta);
     }
 
     /// Whether any tween is still in flight, so an idle frame stays free.

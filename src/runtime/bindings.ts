@@ -82,6 +82,15 @@ export function subscribeBindings(ui: CompiledUi, onChange: () => void): () => v
 export type EditableRef = { node: number; signal: Signal<string> };
 
 /**
+ * Which way an erasing key eats: Backspace behind the caret, Delete in front of it.
+ *
+ * A union rather than two booleans, because "backspace and forward-delete at once" is not
+ * a state any keyboard can produce and a shape that can express it invites a caller to
+ * try.
+ */
+export type Erase = "backward" | "forward";
+
+/**
  * Routes a keystroke into the focused editable, **at the caret**.
  *
  * Insert and delete at `caret`, which the engine reports beside the text — it owns the
@@ -100,7 +109,7 @@ export type EditableRef = { node: number; signal: Signal<string> };
 export function typeInto(
   editables: EditableRef[],
   focused: number,
-  input: { text: string | null; backspace: boolean; caret?: number },
+  input: { text: string | null; erase?: Erase; caret?: number },
 ): boolean {
   const target = editables.find((e) => e.node === focused);
   if (!target) return false;
@@ -113,7 +122,7 @@ export function typeInto(
   const at = caret < 0 ? chars.length : Math.min(caret, chars.length);
   const tail = chars.slice(at).join("");
 
-  if (input.backspace) {
+  if (input.erase === "backward") {
     // Nothing to the left of the caret is not a failure — it is the measured behaviour of
     // Backspace at offset 0 — but the key is still consumed, so the host does not go
     // looking for another meaning for it.
@@ -121,6 +130,18 @@ export function typeInto(
     const head = chars.slice(0, at - 1).join("");
     batch(() => {
       target.signal.value = head + tail;
+    });
+    return true;
+  }
+
+  if (input.erase === "forward") {
+    // Delete eats the character *after* the caret and leaves the caret where it is — which
+    // is why the engine does not shift it for this key, and why the head is the whole
+    // prefix rather than one short of it.
+    if (at === chars.length) return true;
+    const head = chars.slice(0, at).join("");
+    batch(() => {
+      target.signal.value = head + chars.slice(at + 1).join("");
     });
     return true;
   }

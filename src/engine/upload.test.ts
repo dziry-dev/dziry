@@ -344,11 +344,11 @@ test("a keystroke aimed at where the pointer landed reaches the bound signal", (
   const focused = engine.hitTest(...centre);
 
   const before = signal.value;
-  expect(typeInto(generated.editables, focused, { text: "Z", backspace: false })).toBe(true);
+  expect(typeInto(generated.editables, focused, { text: "Z" })).toBe(true);
   expect(signal.value).toBe(`${before}Z`);
 
   // And backspace takes it off again, so the field is not write-only.
-  expect(typeInto(generated.editables, focused, { text: null, backspace: true })).toBe(true);
+  expect(typeInto(generated.editables, focused, { text: null, erase: "backward" })).toBe(true);
   expect(signal.value).toBe(before);
 
   engine.close();
@@ -410,7 +410,7 @@ test("an unbound <input> swallows the keystroke, because no signal owns its valu
   // and this test is what will start failing when that stops being true.
   const bound = new Set(generated.editables.map((e) => e.node));
   const unbound = [...ui.interactive].find((n) => !bound.has(n))!;
-  expect(typeInto(generated.editables, unbound, { text: "Z", backspace: false })).toBe(false);
+  expect(typeInto(generated.editables, unbound, { text: "Z" })).toBe(false);
 
   engine.close();
 });

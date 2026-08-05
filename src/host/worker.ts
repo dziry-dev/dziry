@@ -39,9 +39,18 @@ import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
 import { buildUi, indexOfRoute, requireRoute, showRoute } from "./window-state.ts";
 
-/** SDL keycodes. Two constants is cheaper than binding the whole keysym table. */
+/**
+ * SDL keycodes. A handful of constants is cheaper than binding the whole keysym table.
+ *
+ * All three are unmasked because all three are ASCII control characters — SDL only sets
+ * `1 << 30` on keys that have no character. Delete is the one worth naming: it *looks* like
+ * it should be a masked scancode next to the arrows, and it is not.
+ * `caret.rs::the_caret_keycodes_are_the_ones_sdl_sends` checks these numbers against
+ * `sdl3::keyboard::Keycode` rather than against a recollection.
+ */
 const KEY_BACKSPACE = 8;
 const KEY_ESCAPE = 27;
+const KEY_DELETE = 127;
 
 /**
  * The worker global, typed to this channel rather than to the DOM.
@@ -339,17 +348,22 @@ function start(
             case EventKind.TEXT_INPUT:
               // `b` is the caret, which the engine owns. Without it this could only append,
               // so clicking into the middle of a field and typing put the text at the end.
-              if (typeInto(editables, e.node, { text: e.text, backspace: false, caret: e.b })) {
+              if (typeInto(editables, e.node, { text: e.text, caret: e.b })) {
                 dirty = true;
               }
               break;
 
             case EventKind.KEY_DOWN:
-              if (e.a === KEY_BACKSPACE) {
+              if (e.a === KEY_BACKSPACE || e.a === KEY_DELETE) {
                 // The arrows never arrive here: the engine consumes them, so a caret move
-                // costs a repaint of one rect and no round trip. Backspace does arrive,
-                // because it edits the *value* and only Bun owns that.
-                if (typeInto(editables, e.node, { text: null, backspace: true, caret: e.b })) {
+                // costs a repaint of one rect and no round trip. The two erasing keys do
+                // arrive, because they edit the *value* and only Bun owns that.
+                //
+                // They differ only in direction, and only Backspace moves the caret — the
+                // engine has already shifted it by the time this runs, and deliberately
+                // does not for Delete.
+                const erase = e.a === KEY_BACKSPACE ? "backward" : "forward";
+                if (typeInto(editables, e.node, { text: null, erase, caret: e.b })) {
                   dirty = true;
                 }
               } else if (e.a === KEY_ESCAPE) {

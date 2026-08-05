@@ -984,6 +984,12 @@ impl Engine {
                         // moves back over it — the same optimism as typing, and the same
                         // reason: waiting for Bun to republish would leave the caret a frame
                         // behind the text.
+                        //
+                        // Delete (SDL 127, checked in `caret.rs`) is forwarded on this same
+                        // path and deliberately gets **no** shift: it removes the character
+                        // *after* the caret, so the caret does not move. Shifting it here
+                        // would be the forward-delete version of the fast-typing bug — the
+                        // caret sliding for an edit on the other side of it.
                         if keycode == keys::BACKSPACE {
                             self.shift_caret(-1);
                         }
@@ -1187,12 +1193,14 @@ impl Engine {
     }
 
     /// Moves the caret by an edit of `delta` characters.
+    ///
+    /// No length is passed, and that is the fix for a real bug: the tables hold the string
+    /// as of Bun's last publish, so two keystrokes inside one frame both measured the same
+    /// pre-edit length and the second clamped to it — typing quickly left the caret a
+    /// character behind the text. `Carets::shift` carries the reasoning.
     fn shift_caret(&mut self, delta: i32) {
-        if let Some((node, chars)) = self.caret_run_chars() {
-            // Clamped to the length *before* the edit plus the edit itself, because the
-            // tables still hold the old string — Bun has not committed the new one yet.
-            let after = (chars as i32 + delta).max(0) as usize;
-            self.painter.shift_caret(node, delta, after);
+        if let Some((node, _)) = self.caret_run_chars() {
+            self.painter.shift_caret(node, delta);
             self.needs_paint = true;
         }
     }

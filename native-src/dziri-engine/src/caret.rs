@@ -144,9 +144,15 @@ impl Carets {
     /// Restarts the blink on every move, for the reason `place` does: a caret mid-off-phase
     /// while the user is holding an arrow down looks like the key stopped working.
     pub fn move_to(&mut self, node: usize, to: Motion, chars: usize) -> bool {
-        let Some(from) = self.index_of(node) else {
+        let Some(index) = self.index_of(node) else {
             return false;
         };
+        // Clamped on the way in, not just on the way out. `shift` deliberately does not
+        // bound the caret from above — see the note there — so it can be sitting past the
+        // end of a string the host refused to grow. This is where that heals: the first
+        // arrow key pulls it back onto the text, rather than stepping from an index that
+        // was never in it.
+        let from = index.min(chars);
         let next = match to {
             Motion::Left => from.saturating_sub(1),
             Motion::Right => (from + 1).min(chars),
@@ -155,24 +161,42 @@ impl Carets {
         };
         self.visible = true;
         self.elapsed = 0.0;
-        if next == from {
+        // Against the *stored* index, not against `from`: End on a caret already past the
+        // end has `next == from` while the stored value is still out of range, and
+        // returning early there would leave it there.
+        if next == index {
             return false;
         }
         self.index[node] = next as i32;
         true
     }
 
-    /// Shifts the caret by an edit of `delta` characters, clamped to `chars`.
+    /// Shifts the caret by an edit of `delta` characters.
     ///
     /// Typing moves the caret past what was inserted; a backspace moves it back over what
     /// was removed. The engine does this arithmetic itself rather than waiting to be told,
     /// because the alternative is a round trip to Bun before the caret catches up — and a
     /// caret that lags the text it is in is the one thing a text field cannot do.
-    pub fn shift(&mut self, node: usize, delta: i32, chars: usize) {
+    ///
+    /// # Why there is no upper bound here
+    ///
+    /// There used to be one — the length of the string in the tables — and it made typing
+    /// quickly move the caret *backwards*. The value is a signal, so the tables hold the
+    /// string as of Bun's last publish; two keystrokes inside one frame both measure the
+    /// same pre-edit length, and the second one clamped to it. Typing "ab" into an empty
+    /// field left the caret at 1 with two characters in front of it, which is exactly the
+    /// off-by-one a fast typist sees.
+    ///
+    /// An insertion of `delta` characters puts the caret `delta` further along by
+    /// definition, so no length is needed to say where it goes. The bound only ever guarded
+    /// the case where the host *refuses* the keystroke at `MAX_SLOT_CHARS`; that now heals
+    /// at the next arrow or click, both of which clamp, and paint clamps meanwhile because
+    /// it takes a prefix rather than a slice.
+    pub fn shift(&mut self, node: usize, delta: i32) {
         let Some(from) = self.index_of(node) else {
             return;
         };
-        let next = (from as i64 + delta as i64).clamp(0, chars as i64);
+        let next = (from as i64 + delta as i64).max(0);
         self.index[node] = next as i32;
         self.visible = true;
         self.elapsed = 0.0;
@@ -223,7 +247,11 @@ pub fn boundary_at(dx: f32, chars: usize, mut width_to: impl FnMut(usize) -> f32
 mod tests {
     use super::*;
 
-    /// The keycodes `engine.rs` matches on are SDL's own.
+    /// The keycodes the editing path matches on are SDL's own.
+    ///
+    /// Both sides of the boundary depend on these: `engine.rs` matches the arrows, Home,
+    /// End and Backspace, and `host/worker.ts` matches Backspace and Delete — so this test
+    /// is the oracle for the numbers written down over there too.
     ///
     /// Written from memory first, which is the thing this repo keeps proving is not good
     /// enough — so they are checked against the dependency rather than against a
@@ -240,9 +268,12 @@ mod tests {
         assert_eq!(Keycode::Home.to_ll().0 as i32, SCANCODE_MASK | 74);
         assert_eq!(Keycode::End.to_ll().0 as i32, SCANCODE_MASK | 77);
 
-        // And Backspace is *not* masked, because it is an ASCII control character — which
-        // is why the host can match it as plain 8.
+        // Backspace and Delete are *not* masked, because both are ASCII control
+        // characters — which is why the host can match them as plain 8 and 127. Delete
+        // being 127 rather than a scancode is the whole reason it is easy to get wrong:
+        // every other editing key in this list is masked.
         assert_eq!(Keycode::Backspace.to_ll().0 as i32, 8);
+        assert_eq!(Keycode::Delete.to_ll().0 as i32, 127);
     }
 
     /// Even spacing, so the expected answers are readable: 10px per character.
@@ -336,19 +367,52 @@ mod tests {
         carets.place(1, 3);
 
         // Typing two characters at 3 leaves the caret after them.
-        carets.shift(1, 2, 7);
+        carets.shift(1, 2);
         assert_eq!(carets.index_of(1), Some(5));
 
         // A backspace takes it back over what was removed.
-        carets.shift(1, -1, 6);
+        carets.shift(1, -1);
         assert_eq!(carets.index_of(1), Some(4));
 
-        // Clamped at both ends, so a mismatch between what the host accepted and what the
-        // engine assumed cannot walk the caret outside the string.
-        carets.shift(1, -99, 6);
+        // Clamped at 0, so a host that accepted fewer deletions than the engine assumed
+        // cannot walk the caret to a negative index.
+        carets.shift(1, -99);
         assert_eq!(carets.index_of(1), Some(0));
-        carets.shift(1, 99, 6);
-        assert_eq!(carets.index_of(1), Some(6));
+    }
+
+    /// The bug this replaced: typing quickly moved the caret **backwards**.
+    ///
+    /// `shift` used to clamp to the length of the string in the tables, and the tables hold
+    /// the value as of Bun's last publish. Two keystrokes inside one frame therefore both
+    /// measured the same pre-edit length, and the second one clamped to it — so the caret
+    /// ended up one behind the text, which is what a fast typist reported seeing.
+    ///
+    /// Mutation check: restoring the clamp — `next.min(chars)` for any `chars` the tables
+    /// could supply here, which is 0 for an empty field — makes the second assertion read
+    /// `Some(1)` instead of `Some(2)`.
+    #[test]
+    fn two_keystrokes_in_one_frame_do_not_clamp_against_the_stale_string() {
+        let mut carets = Carets::new();
+        carets.resize(2);
+        carets.place(1, 0);
+
+        // An empty field. Bun has published nothing, so the tables still say 0 characters.
+        carets.shift(1, 1);
+        assert_eq!(carets.index_of(1), Some(1));
+        carets.shift(1, 1);
+        assert_eq!(
+            carets.index_of(1),
+            Some(2),
+            "the second keystroke of a burst must not be clamped to the pre-burst length"
+        );
+
+        // And the first arrow key heals an index that ran past the text — which is the only
+        // case the removed clamp was actually guarding.
+        assert!(carets.move_to(1, Motion::Left, 1));
+        assert_eq!(carets.index_of(1), Some(0), "clamped to 1, then stepped left");
+        carets.shift(1, 9);
+        assert!(carets.move_to(1, Motion::End, 4));
+        assert_eq!(carets.index_of(1), Some(4), "End pulls it onto the text");
     }
 
     #[test]
