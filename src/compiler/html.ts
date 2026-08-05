@@ -36,8 +36,14 @@ export type Element = {
    * A string signal this element edits. Makes the node focusable and routes
    * keystrokes into the signal while it holds focus.
    *
-   * There is no text-editing widget; this is the minimum that makes typing work —
-   * append on text input, delete on backspace. No caret, no selection.
+   * There is no text-editing *widget* — the field is an ordinary node and the value is an
+   * ordinary signal — but the editing model behind it is a real one: the engine owns the
+   * caret and the selection, and every editing key is one splice into this signal. Insert,
+   * Backspace and Delete at the caret or over a range, arrows and Home/End, drag, Shift+Arrow,
+   * Shift+click, double click for a word, Ctrl+A. No clipboard and no IME.
+   *
+   * This comment used to end "No caret, no selection", and that sentence was quoted as
+   * evidence in `HTML-ELEMENT-COVERAGE-RESEARCH.md` — so it is worth keeping accurate.
    */
   bindValue: unknown;
   /**

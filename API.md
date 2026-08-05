@@ -237,12 +237,14 @@ and nothing per frame; what changed is who owns it, not how much it costs.
 
 `Input` is the exception and the only part that fails the gate. It fails at question 3 because the set
 of strings a user can type is unbounded, so there are no variants to emit. Its **caret index and
-selection range become a new NOTES.md ledger entry** when A5 lands. The caret blink is an engine-side
-timer flipping one bit, never JS at frame rate.
+selection range are a NOTES.md ledger entry**, in the same terms as the ones already there — and
+that entry is **still owed**: both are built, the argument for both is in `caret.rs`'s header, and
+nothing has been written into NOTES.md yet. The caret blink is an engine-side timer flipping one bit,
+never JS at frame rate.
 
-`bind:value` exists in partial form today — insert, Backspace and Delete at the caret **or over
-the selection**, through the `editables` table (`src/compiler/compile.ts:801`). No clipboard, and
-no IME.
+`bind:value` is a working text field today — insert, Backspace and Delete at the caret **or over the
+selection**, through the `editables` table (`src/compiler/compile.ts:801`). What is left before it is
+*finished* is the clipboard and IME; the rest of what a browser field does is here.
 
 The selection is engine state for the same reason the caret is, and its shape is a measurement
 rather than a preference: `(anchor, focus)` rather than `(start, end)`. From a collapsed caret at
@@ -251,7 +253,7 @@ the reversal, and an ordered pair has no way to know which end to move once the 
 It crosses to Bun as two numbers beside a keystroke and nowhere else, so nothing in the app can
 observe it, which is what keeps a drag from costing a round trip per pointer move.
 
-The caret index *is* engine-owned, as of A5's first slice, and one detail of that is worth writing
+The caret index and the selection are both engine-owned, and one detail of that is worth writing
 down: the engine moves the caret **optimistically**, before Bun has written the signal. It has to —
 the alternative is a round trip per keystroke — and the consequence is that the caret can be ahead of
 the string in the tables for a frame. So nothing on the engine side may clamp the caret against that

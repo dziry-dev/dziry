@@ -538,26 +538,46 @@ exist for that, and they are worth naming because each has an obvious wrong vers
 Still to do: **held-button auto-repeat** on a track click (one click, one page today), and a
 `scroll-behavior`-style animated jump for the page rather than a hard cut.
 
-### A5 · Images, icons, and single-line text input
+### A5 · Images, icons, and single-line text input — **text input done**, protocol v17
+
+A `<input type="text">` behaves like the browser one now: click to place the caret, arrows and
+Home/End to move it, type/Backspace/Delete to edit at it, drag or Shift+Arrow or Shift+click to
+select, double click for a word, triple click or Ctrl+A for all of it, and every editing key
+replaces a live range. `::selection` styles the highlight and `focus:ring-*` the field.
+
+**Every rule was probed before it was written**, and that is the part worth carrying forward: five
+of the seventeen measured rows contradicted the obvious implementation. A click resolves to the
+*nearest* boundary, not the character under the pointer. A plain arrow with a range live collapses
+to the matching end and does not then step. A double click uses the boundary rather than the
+pointer, which is why one in the right half of a hyphen selects the word after it. Backspace and
+Delete are *identical* over a range. And the selection is `(anchor, focus)`, because a Shift
+reversal keeps the anchor while the ends cross. See BROWSER-FACTS.md.
+
+What is left of A5 is images and icons, plus the clipboard and IME below.
+
 - Image decode, async load, cache, eviction. Decode off the main thread.
 - **Icons.** Lucide SVGs are what shadcn uses, so Tier 0 needs *something*. Full SVG is not
   fundamental — ship a built-in icon set (paths baked at compile time, which suits the thesis) and
   move general SVG parsing behind demand.
-- **Single-line text input**, moved forward from B4: selection, IME, clipboard (text only for v1).
-  You cannot build a login form without it, and IME must be validated in A0 anyway. *Rich* editing
-  — multi-line, undo, word navigation — stays deferred indefinitely.
+- **Single-line text input**, moved forward from B4. Editing and selection ship; **IME and the
+  clipboard do not**, and they are the two things still standing between this and "text input,
+  finished". *Rich* editing — multi-line, undo, word navigation — stays deferred indefinitely.
   - **This is the one part of forms that fails the compile-time gate**, and it fails at question 3:
     the set of strings a user can type is unbounded, so there are no variants to emit. The *value*
     is already covered by the ledger's "current state values", but **caret index and selection range
     are a new NOTES.md ledger entry** — engine-internal editing state the app never declares,
-    unbounded, and dependent on where the user clicked or arrowed. Add the entry when this lands,
-    and justify it in the same terms as the ones already there.
+    unbounded, and dependent on where the user clicked or arrowed.
+
+    **Still owed.** Both are built and the argument for both is in `caret.rs`'s header, which for
+    one commit claimed the entry already existed. It does not. Write it in the same terms as the
+    ones already there.
   - **Caret blink is an engine-side timer, not a JS one.** Visible/not is two states and the phase
     derives from the clock, so it flips one bit and invalidates the caret rect only. Same shape as
     transitions, which interpolate in Rust precisely so nothing runs in JS at frame rate — and it is
     what makes the caret survive a long JS computation, the worry recorded under `pump_input` below.
-  - `bind:value` already exists in partial form — append and backspace, via the `editables` table
-    (`compile.ts:801`). A5 is what turns it into a real input rather than a demo.
+  - `bind:value` was append-and-backspace when this was written, via the `editables` table
+    (`compile.ts:801`). It now splices at the caret or over the selection — one splice for every
+    editing key, which is what the measurement said those keys are.
   - **It had never worked, and the fix was one clause in `buildInteractive`.** Focus comes from a
     click, `hit_test` returns only `INTERACTIVE` nodes, and an editable was in no clause — so the
     keystroke was addressed to a node that could not hold focus. Recorded here because starting

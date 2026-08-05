@@ -233,13 +233,16 @@ expressed today, because the properties and the state selectors it needs do not 
   (`src/compiler/compile.ts:884`).
 - Hit-testing is a rectangle containment walk of the live tree (`paint.rs:314-368`). Correct, but
   there are no sub-node hit regions — a `<select>` arrow or a slider thumb has nowhere to live.
-- Keyboard is a click-and-type stopgap. `typeInto` (`src/runtime/bindings.ts:74-95`) appends text
-  and deletes on Backspace. The doc comment is explicit: *"No caret, no selection."*
-  (`src/compiler/html.ts:40`). No Tab order, no Enter/Space activation
-  (`ROADMAP.md:364-378` lists all of that as unbuilt).
-- `SDL_StartTextInput` is never called, so `TEXT_INPUT` never fires at all
-  (`ARCHITECTURE-REVIEW.md:70`, `native-src/dziri-engine/src/window.rs:72-82`). Latin typing into
-  the one editable is broken today, not just IME.
+- Keyboard was a click-and-type stopgap when this was written: `typeInto` appended text and deleted
+  on Backspace, and the doc comment on `bindValue` said so — *"No caret, no selection."* **Both of
+  those are now out of date.** The engine owns a caret and an `(anchor, focus)` selection, every
+  editing key is one splice, and the movement and boundary rules all came from probes rather than
+  from assumption (BROWSER-FACTS.md). Still true: no Tab order and no Enter/Space activation, which
+  `ROADMAP.md` A3 lists as unbuilt.
+- `SDL_StartTextInput` was never called when this was written, so `TEXT_INPUT` never fired. Fixed —
+  and fixing it alone changed nothing, because the events it unblocked arrived addressed to a node
+  that could not hold focus: `buildInteractive` had no clause for an editable. Two bugs stacked, and
+  the outer one hid the inner one.
 
 The sample app's own "text field" is not an `<input>` — it is
 `<div bind:value={draft} />` (`windows/main/pages/features.tsx:125`). That is also why the field
