@@ -110,4 +110,26 @@ input::placeholder, textarea::placeholder {
   position: absolute;
   color: #757575;
 }
+
+/* What a selected range looks like when nobody said.
+
+   This one is a stated convention rather than a match, and the difference is recorded
+   because it cannot be closed: Chromium does not expose its own highlight colour through
+   getComputedStyle. A ::selection with no author rule reports a transparent background,
+   which is a "nothing here" and not the colour it paints — same category as the caret's
+   width and blink rate. Measured and refused, BROWSER-FACTS.md. Getting the real answer
+   would take a screen recording.
+
+   So this is a choice: #3390ff, a mid blue close to what desktop platforms use, with white
+   text over it. Both are needed. A background with no colour beside it leaves dark text on
+   a saturated fill, which is the one combination that reads worse than no highlight at all.
+
+   On body rather than on input, and that is the whole reason the two fields inherit. A UA
+   rule on the field would beat an author's body::selection, which is backwards: the author
+   should win. Declared at the root, it reaches every field by inheritance, so an author's
+   body::selection wins on origin and an author's input::selection wins by sitting closer. */
+body::selection {
+  background-color: #3390ff;
+  color: #ffffff;
+}
 `;

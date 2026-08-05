@@ -165,6 +165,12 @@ export const INITIAL_STYLE: ComputedStyle = {
   ringInnerColor: 0x00000000,
   ringInsetWidth: 0,
   ringInsetColor: 0x00000000,
+  // `::selection` with nothing said. Transparent rather than a colour, so a build whose UA
+  // sheet is missing draws no highlight instead of one nobody asked for — and `selectionFg`
+  // at alpha 0 means "leave the text its own colour", the convention `borderColor` uses.
+  // The real default is a UA rule on `body::selection`; see `ua-sheet.ts`.
+  selectionBg: 0x00000000,
+  selectionFg: 0x00000000,
   padT: 0,
   padR: 0,
   padB: 0,

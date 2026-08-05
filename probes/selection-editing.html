@@ -1,0 +1,238 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>selection-editing</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  /* Monospace with a known advance, same reason as `caret-and-selection`: a click at a
+     known x must have a predictable answer, and proportional text would turn every row
+     into a font-metrics argument. */
+  #f, #g, #h, #i { font: 16px monospace; padding: 0; border: 0; width: 400px; display: block }
+</style>
+<h3>what selects a word, and what does editing do to a live selection?</h3>
+<div id="stage">
+  <input id="f" value="the quick-brown fox">
+  <input id="g" value="abcdefghij">
+  <input id="h" value="a,, bb  cc">
+  <input id="i" value="a-b c,d e - f">
+</div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * `caret-and-selection.html` measured where a click lands and how Shift extends, and
+   * closed by recording two things it could **not** answer: its fixture was the single
+   * word `abcdefghij`, so a double click reporting `0..10` said nothing about where a
+   * word ends. This is that fixture with spaces and a hyphen in it.
+   *
+   * The other half is editing. A selection model is only half a feature until typing
+   * over one replaces it, and "replace" hides three separate questions: which characters
+   * go, where the caret lands, and whether Backspace and Delete agree with each other
+   * when there is a range rather than a caret.
+   *
+   * And `::selection` — the colours are what dziri has to draw, and a UA default that
+   * nothing reads is a rectangle painted in a guess.
+   */
+
+  const f = document.getElementById("f");   // "the quick-brown fox"
+  const g = document.getElementById("g");   // "abcdefghij", for the editing half
+  const h = document.getElementById("h");   // "a,, bb  cc", for punctuation and space runs
+  const i4 = document.getElementById("i");  // "a-b c,d e - f", for punctuation between letters
+
+  //  0         1
+  //  0123456789012345678
+  // "the quick-brown fox"
+  //  ^   ^    ^     ^
+  //  0   4    9     15
+
+  const advOf = (el) => {
+    const probe = document.createElement("span");
+    probe.style.font = getComputedStyle(el).font;
+    probe.style.position = "absolute";
+    probe.style.whiteSpace = "pre";
+    probe.textContent = "0123456789";
+    document.body.appendChild(probe);
+    const w = probe.getBoundingClientRect().width / 10;
+    probe.remove();
+    return w;
+  };
+
+  const adv = advOf(f);
+  const at = (el, chars) => {
+    const box = el.getBoundingClientRect();
+    return {
+      x: Math.round(box.left + chars * adv),
+      y: Math.round(box.top + box.height / 2),
+    };
+  };
+
+  const sel = (el) => {
+    const d = el.selectionDirection;
+    return `${el.selectionStart}..${el.selectionEnd}${d && d !== "none" ? " " + d : ""}`;
+  };
+
+  log(`one character advances ${adv.toFixed(3)}px`);
+  log(`field 1 = ${JSON.stringify(f.value)}`);
+  log(`field 2 = ${JSON.stringify(g.value)}`);
+  log("");
+
+  // --- what a UA paints a selection in, with no author rule ------------------------
+  //
+  // Read before any input, because reading `::selection` needs no selection to exist and
+  // a live one might change what a UA reports.
+  {
+    const s = getComputedStyle(f, "::selection");
+    log(`::selection with no author rule: background=${s.backgroundColor} color=${s.color}`);
+    // And with one, to confirm an author rule is honoured at all rather than merely parsed.
+    const style = document.createElement("style");
+    style.textContent = "#f::selection { background: rgb(1, 2, 3); color: rgb(4, 5, 6) }";
+    document.head.appendChild(style);
+    const authored = getComputedStyle(f, "::selection");
+    log(`::selection with an author rule:  background=${authored.backgroundColor} color=${authored.color}`);
+    style.remove();
+    log("");
+  }
+
+  const plan = [
+    // --- what a double click selects ----------------------------------------------
+    //
+    // **Each double click is preceded by a plain single click at the same point**, and
+    // that is not decoration. A first pass sent only `clickCount: 2` events and every row
+    // came back `0..4` no matter where it clicked — the first one landed and the rest did
+    // nothing, because a real double click is a *sequence* (press/release at count 1, then
+    // press/release at count 2) and Chrome will not treat a lone count-2 press at a new
+    // position as the second half of one. The single click also collapses the previous
+    // row's selection, so no row inherits another's state.
+    //
+    // `clickCount` rather than two timed clicks: Chrome derives word selection from the
+    // count, not from timing, which is what makes this driveable at all.
+    ["click in 'the' (x=1)", { ...at(f, 1), down: 1, up: 1 }],
+    ["dbl in 'the' (x=1)", { ...at(f, 1), down: 1, up: 1, clickCount: 2 }],
+    ["click in 'quick' (x=6)", { ...at(f, 6), down: 1, up: 1 }],
+    ["dbl in 'quick' (x=6)", { ...at(f, 6), down: 1, up: 1, clickCount: 2 }],
+    // The hyphen is the question: is `quick-brown` one word or three tokens?
+    ["click on the hyphen (x=9.5)", { ...at(f, 9.5), down: 1, up: 1 }],
+    ["dbl on the hyphen (x=9.5)", { ...at(f, 9.5), down: 1, up: 1, clickCount: 2 }],
+    ["click in 'brown' (x=12)", { ...at(f, 12), down: 1, up: 1 }],
+    ["dbl in 'brown' (x=12)", { ...at(f, 12), down: 1, up: 1, clickCount: 2 }],
+    // A double click *on a space* — does it select the run of whitespace, or a word?
+    ["click on the space (x=3.5)", { ...at(f, 3.5), down: 1, up: 1 }],
+    ["dbl on the space (x=3.5)", { ...at(f, 3.5), down: 1, up: 1, clickCount: 2 }],
+    // The last word, so a trailing boundary is the end of the value rather than a space.
+    ["click in 'fox' (x=17)", { ...at(f, 17), down: 1, up: 1 }],
+    ["dbl in 'fox' (x=17)", { ...at(f, 17), down: 1, up: 1, clickCount: 2 }],
+    // Past the end of the text but inside the box.
+    ["click past the end (x=30)", { ...at(f, 30), down: 1, up: 1 }],
+    ["dbl past the end (x=30)", { ...at(f, 30), down: 1, up: 1, clickCount: 2 }],
+    // Triple click: a paragraph selects a line, but an input has only one.
+    ["click at 6 before triple", { ...at(f, 6), down: 1, up: 1 }],
+    ["dbl at 6 before triple", { ...at(f, 6), down: 1, up: 1, clickCount: 2 }],
+    ["triple click (x=6)", { ...at(f, 6), down: 1, up: 1, clickCount: 3 }],
+
+    // --- punctuation and whitespace runs -------------------------------------------
+    //
+    // Field 1 proved the hyphen is a word *boundary* — a double click in `quick` stopped
+    // short of it — but never landed on the hyphen itself: x=9.5 resolves to boundary 10,
+    // which is the start of `brown`. So this is a field whose punctuation is wide enough
+    // to click into, and whose spaces come in runs of two.
+    //
+    //  0123456789
+    // "a,, bb  cc"   a=0  ,,=1..3  space=3  bb=4..6  spaces=6..8  cc=8..10
+    ["field 3: click on ',,' (x=2)", { ...at(h, 2), down: 1, up: 1 }],
+    ["field 3: dbl on ',,' (x=2)", { ...at(h, 2), down: 1, up: 1, clickCount: 2 }],
+    ["field 3: click in 'bb' (x=5)", { ...at(h, 5), down: 1, up: 1 }],
+    // The question: does the *whole* run of two spaces come with the word, or just one?
+    ["field 3: dbl in 'bb' (x=5)", { ...at(h, 5), down: 1, up: 1, clickCount: 2 }],
+    ["field 3: click in spaces (x=7)", { ...at(h, 7), down: 1, up: 1 }],
+    ["field 3: dbl in spaces (x=7)", { ...at(h, 7), down: 1, up: 1, clickCount: 2 }],
+
+    // --- punctuation *between letters*, which is where the model above broke ---------
+    //
+    // Field 1's hyphen sits between letters (`quick-brown`) and a double click on it
+    // reported the *following* word rather than the hyphen. Field 3's comma sits between a
+    // comma and a space and reported itself. Those two cannot both be "the segment under
+    // the pointer", so one of them is a different rule and this is which.
+    //
+    //  0123456789012
+    // "a-b c,d e - f"   -=1 (between letters)  ,=5 (between letters)  -=10 (between spaces)
+    ["field 4: click on - at 1.5", { ...at(i4, 1.5), down: 1, up: 1 }],
+    ["field 4: dbl on - at 1.5", { ...at(i4, 1.5), down: 1, up: 1, clickCount: 2 }],
+    ["field 4: click on , at 5.5", { ...at(i4, 5.5), down: 1, up: 1 }],
+    ["field 4: dbl on , at 5.5", { ...at(i4, 5.5), down: 1, up: 1, clickCount: 2 }],
+    ["field 4: click on - at 10.5", { ...at(i4, 10.5), down: 1, up: 1 }],
+    ["field 4: dbl on - at 10.5", { ...at(i4, 10.5), down: 1, up: 1, clickCount: 2 }],
+
+    // --- shift+click, which is the other way to make a range ----------------------
+    ["click at 4 (collapse)", { ...at(f, 4), down: 1, up: 1 }],
+    ["Shift+click at 9", { ...at(f, 9), down: 1, up: 1, modifiers: 8 }],
+    // A second Shift+click on the other side of the anchor: does the anchor hold?
+    ["Shift+click at 1", { ...at(f, 1), down: 1, up: 1, modifiers: 8 }],
+
+    // --- select all ----------------------------------------------------------------
+    ["Ctrl+A", { key: "a", modifiers: 2 }],
+
+    // --- editing over a live selection ---------------------------------------------
+    //
+    // On the second field, so the first one's value stays intact for the rows above to
+    // remain readable in the report.
+    ["field 2: drag 2..6", { ...at(g, 2), down: 1 }],
+    ["  to 6", { ...at(g, 6) }],
+    ["  release", { ...at(g, 6), up: 1 }],
+    // Typing one character over a 4-character range: which characters go, and where does
+    // the caret land — at the start of what was replaced, or after the inserted text?
+    ["  type 'X' over 2..6", { key: "X" }],
+
+    ["field 2: drag 1..4", { ...at(g, 1), down: 1 }],
+    ["  to 4", { ...at(g, 4) }],
+    ["  release", { ...at(g, 4), up: 1 }],
+    // Backspace with a range: does it delete the range, or the range *plus* the character
+    // before it? The answer decides whether the engine may reuse its caret path.
+    ["  Backspace over 1..4", { key: "Backspace" }],
+
+    ["field 2: drag 1..3", { ...at(g, 1), down: 1 }],
+    ["  to 3", { ...at(g, 3) }],
+    ["  release", { ...at(g, 3), up: 1 }],
+    // Delete with a range: the same question from the other side.
+    ["  Delete over 1..3", { key: "Delete" }],
+
+    // A backward selection, to check the edit does not depend on the direction — the
+    // engine stores (anchor, focus) and could easily splice the wrong way round.
+    ["field 2: drag backwards 4->1", { ...at(g, 4), down: 1 }],
+    ["  to 1", { ...at(g, 1) }],
+    ["  release", { ...at(g, 1), up: 1 }],
+    ["  type 'Z' over a backward range", { key: "Z" }],
+
+    // An empty selection is a caret, and the erasing keys must not treat it as a range of
+    // length zero and do nothing.
+    ["field 2: click at 2 (collapse)", { ...at(g, 2), down: 1, up: 1 }],
+    ["  Backspace with no range", { key: "Backspace" }],
+  ];
+
+  window.__probeMouse = plan.map(([, p]) => p);
+  const labels = plan.map(([l]) => l);
+
+  const row = (label, el) =>
+    log(label.padEnd(34) + ` selection=${sel(el)} value=${JSON.stringify(el.value)}`);
+
+  f.focus();
+  row("focused, no input yet", f);
+
+  // Which field a step is about is decided by the label, so the report reads in order
+  // rather than needing the reader to track focus.
+  window.__probeStep = (i) => {
+    const label = labels[i] ?? `step ${i}`;
+    const el = /field 4/.test(label) ? i4 : /field 3/.test(label) ? h : /field 2|^ {2}/.test(label) ? g : f;
+    row(label, el);
+  };
+
+  window.__probeMouseDone = () => {
+    log("");
+    log(`settled: field 1 ${sel(f)} ${JSON.stringify(f.value)}`);
+    log(`         field 2 ${sel(g)} ${JSON.stringify(g.value)}`);
+    log(`         field 3 ${sel(h)} ${JSON.stringify(h.value)}`);
+    log(`         field 4 ${sel(i4)} ${JSON.stringify(i4.value)}`);
+    report();
+  };
+
+  document.title = "ready";
+</script>

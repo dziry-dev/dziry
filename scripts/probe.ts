@@ -226,6 +226,15 @@ const VK: Record<string, number> = {
   Home: 36,
   End: 35,
   Backspace: 8,
+  // Windows VK_DELETE is 46, *not* the ASCII 127 SDL reports for the same key. The two
+  // numbering schemes are unrelated and both are in this repo — `host/worker.ts` matches
+  // SDL's 127 — so getting them the wrong way round is easy and silent: a probe step that
+  // dispatched 127 would send an unrelated key and measure nothing.
+  Delete: 46,
+  // For select-all, which needs a printable key *with* a modifier. `a` is its own virtual
+  // key code (0x41), and the runner suppresses `text` when a modifier other than Shift is
+  // held — see `driveMouse`.
+  a: 65,
 };
 async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<void> {
   const ready = `new Promise((res) => {
@@ -272,7 +281,14 @@ async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<vo
         ...(code === undefined ? {} : { windowsVirtualKeyCode: code, nativeVirtualKeyCode: code }),
         // A printable key needs `text` or it inserts nothing; a named key must NOT have
         // it, or Chrome treats "Escape" as five characters of input.
-        ...(step.key.length === 1 ? { text: step.key } : {}),
+        //
+        // **Except under a non-Shift modifier**, where `text` is what turns Ctrl+A back
+        // into typing the letter "a": Chrome takes the presence of `text` as "this
+        // keystroke produced a character" and inserts it over the selection instead of
+        // selecting all. Shift is exempt because Shift+A really does produce a character.
+        ...(step.key.length === 1 && ((step.modifiers ?? 0) & ~8) === 0
+          ? { text: step.key }
+          : {}),
         ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
       };
       await cdp.send("Input.dispatchKeyEvent", { ...key, type: "keyDown" }, sessionId);

@@ -653,6 +653,16 @@ export function compileTree(
      * `input:focus::placeholder` would resolve a cascade without them and jump on focus.
      */
     defaults?: Map<string, string>,
+    /**
+     * Fields laid over **every** state's resolved style, after the cascade.
+     *
+     * For `::selection`, whose two colours belong on the originating element's row rather
+     * than on a row of their own — a selection is a range inside an existing node, not a
+     * box. Over the top rather than as declarations, because there are no property names
+     * to declare: `selectionBg` is not `background-color`, and putting the pseudo-element's
+     * `background-color` into this element's cascade would paint the *field* blue.
+     */
+    overlay?: Partial<ComputedStyle>,
   ): {
     style: ComputedStyle;
     styleId: number;
@@ -671,13 +681,17 @@ export function compileTree(
       return decls;
     };
 
+    /** The cascade's answer with {@link overlay} on top, which is what gets interned. */
+    const withOverlay = (resolved: ComputedStyle): ComputedStyle =>
+      overlay === undefined ? resolved : { ...resolved, ...overlay };
+
     const base = inline(collectDecls(rules, path, ["none"], media, 0, element));
     // Custom properties inherit *unless registered otherwise*, so the environment
     // is the parent's with this node's own laid over it and any non-inheriting
     // registration removed — and it is built from the *cascaded* declarations, so
     // `--x` obeys specificity like everything else.
     const vars = extendVarEnv(parentVars, base, registered);
-    const style = applyDecls(inherited, base, where, vars, registered, anim);
+    const style = withOverlay(applyDecls(inherited, base, where, vars, registered, anim));
 
     // Precomputed variants: the compiler emits finished styles and the runtime
     // only picks an index. Each state is resolved as a full cascade from
@@ -740,7 +754,7 @@ export function compileTree(
         registered,
         anim,
       );
-      run[combo] = styles.intern(resolvedStyle);
+      run[combo] = styles.intern(withOverlay(resolvedStyle));
     }
 
     return { style, styleId, mask, run, vars, decls: base };
@@ -921,6 +935,61 @@ export function compileTree(
     );
   }
 
+  /**
+   * Whether the sheet mentions `::selection` at all, so the common document pays nothing.
+   *
+   * The resolution below is one extra cascade per *element*, not per editable — `::selection`
+   * inherits, so a rule on `body` has to be seen while walking `body`. Cheap, and skipped
+   * entirely when no such rule exists.
+   */
+  const hasSelectionRules = rules.some((r) =>
+    r.selectors.some((s) => s.element === "selection"),
+  );
+
+  /**
+   * The two `::selection` colours this element *declares*, if any.
+   *
+   * Only the properties the rule actually set, which is the load-bearing detail. These land
+   * on the element's own style row as `selectionBg` / `selectionFg`, and those two **inherit**
+   * — so a field with no `::selection` rule of its own must keep what came down from the root,
+   * where the UA default is. Writing both unconditionally would overwrite that inherited
+   * value with whatever `applyDecls` returned for a cascade that declared nothing, which is
+   * the *element's* background and text colour: a field's selection painted in the field's
+   * own colours, i.e. invisible.
+   *
+   * That check is also why resolving against the parent's style rather than the element's own
+   * is sound, even though a pseudo-element inherits from its originating element. Only a
+   * property the rule declared is ever read, so the base value never survives — and the
+   * element's own style does not exist yet at this point, being what this feeds into.
+   *
+   * Resolved once, in the resting state, and applied to every variant. `input:hover::selection`
+   * is therefore not honoured, and that is a deliberate simplification rather than an
+   * oversight: a selection only exists while the field is focused, so a state-varying
+   * highlight has almost no reachable meaning, and honouring it would mean `2^n` extra
+   * cascades on every element in the document.
+   */
+  function selectionColors(
+    path: Element[],
+    inherited: ComputedStyle,
+    parentVars: VarEnv,
+    where: string,
+  ): Partial<ComputedStyle> | undefined {
+    if (!hasSelectionRules) return undefined;
+
+    const decls = collectDecls(rules, path, ["none"], media, 0, "selection");
+    const setsBg = decls.has("background-color") || decls.has("background");
+    const setsFg = decls.has("color");
+    if (!setsBg && !setsFg) return undefined;
+
+    const vars = extendVarEnv(parentVars, decls, registered);
+    const style = applyDecls(inherited, decls, `${where}::selection`, vars, registered, anim);
+
+    return {
+      ...(setsBg ? { selectionBg: style.bg } : {}),
+      ...(setsFg ? { selectionFg: style.fg } : {}),
+    };
+  }
+
   /** Returns the index of the node created for `el`. */
   function walk(
     el: Element,
@@ -939,6 +1008,8 @@ export function compileTree(
       parentVars,
       where,
       null,
+      undefined,
+      selectionColors(path, inherited, parentVars, where),
     );
 
     const self = nodes.length;
@@ -2277,6 +2348,22 @@ function hex(argb: number): string {
   return a === 255 ? `#${rgb}` : `#${rgb}@${(a / 255).toFixed(2)}`;
 }
 
+/**
+ * Which style fields are colours, **derived rather than listed**.
+ *
+ * Every `u32` field in the styles table is an ARGB colour and nothing else is, so the wire
+ * type is the whole answer — and unlike a hand-written list it cannot fall behind. It had:
+ * this named `bg`, `fg` and `borderColor` while the table also held two scrollbar colours,
+ * `accentColor` and `caretColor`, so half the palette dumped as a nine-digit decimal.
+ *
+ * `interp: "color"` would have been the tempting source and is the wrong one — the `ring*` and
+ * `selection*` colours are deliberately not interpolated, to keep the 32-bit animation mask
+ * from filling up, so they carry no such tag.
+ */
+const COLOR_FIELDS = new Set(
+  STYLE_FIELDS.filter(([, view]) => view === "Uint32Array").map(([field]) => field),
+);
+
 /** Only the fields that differ from the initial value, so output stays readable. */
 function describeStyle(s: ComputedStyle): string {
   const parts: string[] = [];
@@ -2286,7 +2373,7 @@ function describeStyle(s: ComputedStyle): string {
     const same = Number.isNaN(v) && Number.isNaN(init) ? true : v === init;
     if (same) continue;
 
-    if (field === "bg" || field === "fg" || field === "borderColor") {
+    if (COLOR_FIELDS.has(field)) {
       parts.push(`${field}=${hex(v)}`);
     } else if (field === "direction") {
       parts.push(`${field}=${DIRECTION_NAMES[v]}`);

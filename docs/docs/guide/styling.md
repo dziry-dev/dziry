@@ -128,6 +128,11 @@ list rather than trusting this one.
 - `@media (hover: hover)` and `@supports` are skipped at-rules. `@property` is *not*:
   its `initial-value` is read, which is what makes Tailwind's `--tw-*` variables
   resolve at all.
+- `::selection` takes `background-color` and `color` and nothing else — a selection is a range
+  inside a box rather than a box, so there is nothing for a padding or a border to apply to,
+  which is also the short list CSS gives the highlight pseudo-elements. dziri's default is a
+  UA-sheet rule on `body::selection`, and it is a stated convention: Chromium does not expose
+  its own highlight colour to script, so there is nothing to match.
 - `box-shadow` supports the **ring** subset only: no offset, no blur, a solid spread.
   That is exactly what `ring-*`, `inset-ring-*` and `ring-offset-*` compile to, so
   every ring utility works and `shadow-md` warns and draws nothing. A style row is a

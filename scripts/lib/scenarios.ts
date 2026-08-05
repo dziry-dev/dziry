@@ -220,6 +220,52 @@ export const SCENARIOS: Scenario[] = [
   },
 
   /**
+   * A selection, made by **dragging** — which is the only way to make one from out here.
+   *
+   * `--click` runs a press and a release; a range needs the motion between them, because the
+   * focus follows `mouse_move` while the anchor stays where the press landed. So this exercises
+   * a path `--focus` and `--click` cannot reach between them, and it is the picture that would
+   * catch a band drawn at the wrong offsets, drawn over the glyphs instead of behind them, or
+   * a caret still blinking inside a highlight.
+   *
+   * `--focus 302` as well, for the reason `controls-caret` records: `main.ts` runs the gesture
+   * and *then* sets the input state, so without it the focus the press acquired is reset to -1
+   * before the shot and the ring would be missing from a frame that is otherwise about a
+   * focused field.
+   *
+   * Fractions of the field's width rather than pixels, and both well inside the *text*: the box
+   * is wider than the string, so a drag past the last character clamps to the length and the
+   * frame would stop being about a partial selection.
+   */
+  {
+    name: "controls-selection",
+    args: [
+      "--route",
+      "controls",
+      "--size",
+      "1040x1400",
+      "--drag",
+      "302:0.05:0.45",
+      "--focus",
+      "302",
+    ],
+  },
+
+  /**
+   * A word, from a double click — the measured boundary rule, rendered.
+   *
+   * Worth a frame of its own beside the drag: the *offsets* are what `caret.rs::word_at` gets
+   * wrong or right, and they are invisible in a table of numbers next to a band that is one
+   * character too wide. The field's centre lands inside `brown` of `quick-brown`, so a correct
+   * frame highlights `brown` and its trailing space and stops short of the hyphen — which is
+   * three of the four rules at once.
+   */
+  {
+    name: "controls-word",
+    args: ["--route", "controls", "--size", "1040x1400", "--double", "302", "--focus", "302"],
+  },
+
+  /**
    * The reactive rewrite, rendered.
    *
    * Every value on this page is derived from one signal through an operator that a

@@ -131,6 +131,74 @@ test("a caret past the end is clamped rather than trusted", () => {
   expect(value.value).toBe("ab!");
 });
 
+// ---------------------------------------------------------------------------
+// Editing over a live selection
+// ---------------------------------------------------------------------------
+
+test("typing over a selection replaces exactly the selected range", () => {
+  const { value, refs } = editable("abcdefghij");
+  // Measured: `X` over `2..6` gives `abXghij`. The engine sends the two offsets it holds —
+  // `caret` is the focus and `anchor` the other end — and this splices between them.
+  expect(typeInto(refs, 7, { text: "X", caret: 6, anchor: 2 })).toBe(true);
+  expect(value.value).toBe("abXghij");
+});
+
+test("Backspace and Delete are identical once a range is live", () => {
+  // The measured surprise, and the reason both keys share one branch: over a range neither
+  // takes the extra character its collapsed behaviour would. Backspace over `1..4` gives
+  // `ahij`, not `hij`, and Delete over the same range gives `ahij` too.
+  for (const erase of ["backward", "forward"] as const) {
+    const { value, refs } = editable("abcdefghij");
+    expect(typeInto(refs, 7, { text: null, erase, caret: 4, anchor: 1 })).toBe(true);
+    expect(value.value, erase).toBe("aefghij");
+  }
+});
+
+test("a backward selection edits the same as a forward one", () => {
+  // The engine stores `(anchor, focus)` because that is what survives a Shift reversal, so
+  // `caret` can be the *low* end. Measured to edit identically; splicing `caret..anchor`
+  // without ordering them first would produce a negative slice and silently drop nothing.
+  const forward = editable("abcdefghij");
+  expect(typeInto(forward.refs, 7, { text: "Z", caret: 4, anchor: 1 })).toBe(true);
+
+  const backward = editable("abcdefghij");
+  expect(typeInto(backward.refs, 7, { text: "Z", caret: 1, anchor: 4 })).toBe(true);
+
+  expect(backward.value.value).toBe(forward.value.value);
+  expect(forward.value.value).toBe("aZefghij");
+});
+
+test("a collapsed range is a caret, not a zero-length selection", () => {
+  // `anchor === caret` is what the engine sends whenever nothing is selected, which is most
+  // of the time. Taking the range branch there would make every Backspace a no-op.
+  const { value, refs } = editable("abcd");
+  expect(typeInto(refs, 7, { text: null, erase: "backward", caret: 2, anchor: 2 })).toBe(true);
+  expect(value.value).toBe("acd");
+
+  // And an absent anchor — a host that never reports one — behaves the same way.
+  const two = editable("abcd");
+  expect(typeInto(two.refs, 7, { text: "X", caret: 2 })).toBe(true);
+  expect(two.value.value).toBe("abXcd");
+});
+
+test("a selection past the end is clamped, not trusted", () => {
+  // Both offsets crossed a process boundary, and app code may have shortened the signal
+  // since the engine read it. Slicing at 99 would drop text silently.
+  const { value, refs } = editable("abc");
+  expect(typeInto(refs, 7, { text: "!", caret: 99, anchor: 1 })).toBe(true);
+  expect(value.value).toBe("a!");
+});
+
+test("replacing a selection can free room at the cap", () => {
+  // The ceiling is on the *result*, not on what was there before — so selecting the whole of
+  // a full field and typing one character has to be allowed. Checking `chars.length + text`
+  // as the collapsed path does would refuse it and leave the field uneditable forever.
+  const full = "x".repeat(MAX_SLOT_CHARS);
+  const { value, refs } = editable(full);
+  expect(typeInto(refs, 7, { text: "y", caret: MAX_SLOT_CHARS, anchor: 0 })).toBe(true);
+  expect(value.value).toBe("y");
+});
+
 test("the caret counts characters, not UTF-16 units", () => {
   // "😀" is one character and two UTF-16 units. The engine resolved the click by counting
   // *characters*, so slicing by `.length` here would put the insert in the middle of a

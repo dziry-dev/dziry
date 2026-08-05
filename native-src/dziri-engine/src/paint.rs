@@ -45,7 +45,7 @@ fn display_of(tables: &Tables, slot: usize) -> u8 {
 /// Every text-entry field owns one — the compiler emits an empty run even for an unbound
 /// `<input>` — so `None` means the node is not a field at all, which is what a press on
 /// anything else looks like.
-fn editable_run_of(tables: &Tables, field: i32, count: usize) -> Option<usize> {
+pub fn editable_run_of(tables: &Tables, field: i32, count: usize) -> Option<usize> {
     if field < 0 || field as usize >= count {
         return None;
     }
@@ -897,10 +897,91 @@ impl Painter {
         field: i32,
         x: f32,
     ) -> bool {
-        let Some(run) = editable_run_of(tables, field, geometry.bounds.len()) else {
+        let Some((run, index, _)) = self.resolve_x(tables, geometry, measurer, field, x) else {
             self.carets.clear();
             return false;
         };
+        self.carets.place(run, index);
+        true
+    }
+
+    /// Drags the selection's focus to `x`, leaving the anchor the press put down.
+    ///
+    /// The same resolution a click uses, which is what makes a press-then-drag land exactly
+    /// where two separate clicks would.
+    pub fn extend_caret(
+        &mut self,
+        tables: &Tables,
+        geometry: Geometry,
+        measurer: &mut Measurer,
+        field: i32,
+        x: f32,
+    ) -> bool {
+        // No `clear` on a miss, unlike `place_caret`. A drag that leaves the field — which
+        // is most drags, since the pointer is not confined — must keep the selection it has
+        // built rather than dropping it because one motion event landed outside.
+        let Some((run, index, _)) = self.resolve_x(tables, geometry, measurer, field, x) else {
+            return false;
+        };
+        self.carets.extend(run, index)
+    }
+
+    /// Selects the word at `x`, for a double click. Returns whether anything is selected.
+    pub fn select_word(
+        &mut self,
+        tables: &Tables,
+        geometry: Geometry,
+        measurer: &mut Measurer,
+        field: i32,
+        x: f32,
+    ) -> bool {
+        let Some((run, index, chars)) = self.resolve_x(tables, geometry, measurer, field, x) else {
+            return false;
+        };
+        let (start, end) = crate::caret::word_at(index, &chars);
+        // Anchor at the start, so a Shift+Arrow afterwards extends from the end the user is
+        // most likely reaching away from.
+        self.carets.select(run, start, end);
+        true
+    }
+
+    /// Selects everything in the field, for a triple click or Ctrl+A.
+    pub fn select_all(&mut self, tables: &Tables, node_count: usize, field: i32) -> bool {
+        let Some(run) = editable_run_of(tables, field, node_count) else {
+            return false;
+        };
+        let slot = tables.i32s(NODES, protocol::nodes::TEXT)[run];
+        let chars = tables.string(slot).chars().count();
+        self.carets.select(run, 0, chars);
+        true
+    }
+
+    /// The selected range in the field's run, in document order, or `None`.
+    pub fn selection(
+        &self,
+        tables: &Tables,
+        node_count: usize,
+        field: i32,
+    ) -> Option<(usize, usize)> {
+        let run = editable_run_of(tables, field, node_count)?;
+        self.carets.range_of(run)
+    }
+
+    /// Which character boundary `x` falls on inside `field`'s text run, and the run's text.
+    ///
+    /// Shared by every gesture that turns a pointer position into an offset — click, drag,
+    /// double click — so all three agree. They agreeing is not cosmetic: a double click is
+    /// specified in terms of *the boundary a click would have produced*, which is how a
+    /// pointer in the right half of a hyphen selects the word after it. See `word_at`.
+    fn resolve_x(
+        &self,
+        tables: &Tables,
+        geometry: Geometry,
+        measurer: &mut Measurer,
+        field: i32,
+        x: f32,
+    ) -> Option<(usize, usize, Vec<char>)> {
+        let run = editable_run_of(tables, field, geometry.bounds.len())?;
 
         let [rx, _, _, _] = geometry.bounds[run];
         let slot = tables.i32s(NODES, protocol::nodes::TEXT)[run];
@@ -934,8 +1015,7 @@ impl Painter {
             measurer.measure(&prefix, size, weight, f32::INFINITY).0
         });
 
-        self.carets.place(run, index);
-        true
+        Some((run, index, chars))
     }
 
     /// Moves the caret blink on. Returns whether the phase flipped, so a caller can
@@ -959,14 +1039,41 @@ impl Painter {
         self.carets.current().map(|(_, index)| index)
     }
 
-    /// Moves the caret within `node`. Returns whether it actually moved.
-    pub fn move_caret(&mut self, node: usize, motion: Motion, chars: usize) -> bool {
-        self.carets.move_to(node, motion, chars)
+    /// The anchor in the node holding the caret, or `None`.
+    ///
+    /// Equal to `caret_index` when collapsed, which is how the host tells "no selection" from
+    /// a range without a third state to keep in step.
+    pub fn caret_anchor(&self) -> Option<usize> {
+        let (node, index) = self.carets.current()?;
+        Some(self.carets.range_of(node).map_or(index, |(start, end)| {
+            // Whichever end is *not* the focus. The host only needs the pair to know the
+            // range, and it orders them itself — but returning the focus for both would make
+            // every selection look collapsed.
+            if index == start {
+                end
+            } else {
+                start
+            }
+        }))
     }
 
-    /// Shifts the caret by an edit of `delta` characters.
-    pub fn shift_caret(&mut self, node: usize, delta: i32) {
-        self.carets.shift(node, delta);
+    /// The selection in the node holding the caret, in document order, or `None`.
+    ///
+    /// By caret rather than by field, so the `TEXT_INPUT` path can read it without knowing
+    /// which element is focused — the caret already knows which run it is in.
+    pub fn caret_range(&self) -> Option<(usize, usize)> {
+        let (node, _) = self.carets.current()?;
+        self.carets.range_of(node)
+    }
+
+    /// Moves the caret within `node`. `extend` is Shift held. Returns whether anything moved.
+    pub fn move_caret(&mut self, node: usize, motion: Motion, chars: usize, extend: bool) -> bool {
+        self.carets.move_to(node, motion, chars, extend)
+    }
+
+    /// Shifts the caret by an edit that inserted `inserted` characters, `delta` net.
+    pub fn shift_caret(&mut self, node: usize, delta: i32, inserted: usize) {
+        self.carets.shift(node, delta, inserted);
     }
 
     /// Whether any tween is still in flight, so an idle frame stays free.
@@ -1834,6 +1941,14 @@ impl Painter {
         let size = g(f::FONT_SIZE);
         let weight = blend.u16(tables, f::FONT_WEIGHT, 400);
 
+        // The selection band goes **behind** the text and behind the caret, which is the order
+        // a highlight has to be drawn in: over the background, under the glyphs.
+        let band = self.selection_band(node, text, size, weight, measurer, x, y, h);
+        if let Some(rect) = band {
+            self.fill.set_color(Color::from(c(f::SELECTION_BG)));
+            canvas.draw_rect(rect, &self.fill);
+        }
+
         // The caret is drawn *before* the early-out for empty text, because an empty field
         // is the commonest place to want one — you click a blank box and expect a cursor.
         // It lived after the glyph drawing at first and the caret never appeared: the run
@@ -1895,7 +2010,63 @@ impl Painter {
             // would be the wrong height for what is drawn in it.
             let mut paragraph = measurer.paragraph(text, size, weight, w, TextAlign::Left);
             crate::text::paint_paragraph(&mut paragraph, canvas, (x, y).into(), &self.fill);
+
+            // Selected characters in `::selection`'s colour, by drawing the same paragraph a
+            // second time clipped to the band. Not a styled range on the paragraph: the
+            // measure cache is keyed on (text, size, weight, width), so a paragraph whose
+            // glyph colours varied by selection would have to be rebuilt on every drag step
+            // and would miss the cache every time. Clipping reuses the cached layout, and
+            // both passes lay the text out identically because it is the same call.
+            //
+            // Alpha 0 on `selectionFg` means "leave the text its own colour", the convention
+            // the rest of the table uses for "nothing was said" — so an author who sets only
+            // a background gets one.
+            if let Some(rect) = band {
+                let fg = c(f::SELECTION_FG);
+                if fg >> 24 != 0 {
+                    canvas.save();
+                    canvas.clip_rect(rect, None, None);
+                    self.fill.set_color(Color::from(fg));
+                    let mut over = measurer.paragraph(text, size, weight, w, TextAlign::Left);
+                    crate::text::paint_paragraph(&mut over, canvas, (x, y).into(), &self.fill);
+                    canvas.restore();
+                }
+            }
         }
+    }
+
+    /// The rectangle a live selection covers in `node`, or `None` when there is none.
+    ///
+    /// From the same prefix advances the caret uses, so the band's edges land exactly on the
+    /// boundaries a click resolves to. The full run height rather than the glyphs' ink extent,
+    /// which is what a browser highlights and what makes a selection of a space visible.
+    #[allow(clippy::too_many_arguments)]
+    fn selection_band(
+        &mut self,
+        node: usize,
+        text: &str,
+        size: f32,
+        weight: u16,
+        measurer: &mut Measurer,
+        x: f32,
+        y: f32,
+        h: f32,
+    ) -> Option<Rect> {
+        let (start, end) = self.carets.range_of(node)?;
+        let chars: Vec<char> = text.chars().collect();
+        let mut advance = |n: usize| -> f32 {
+            let n = n.min(chars.len());
+            if n == 0 {
+                return 0.0;
+            }
+            let prefix: String = chars[..n].iter().collect();
+            measurer.measure(&prefix, size, weight, f32::INFINITY).0
+        };
+        let (left, right) = (advance(start), advance(end));
+        if right <= left {
+            return None;
+        }
+        Some(Rect::from_xywh(x + left, y, right - left, h))
     }
 
     /// The caret in `node`, if it has one and this frame is a visible phase.
@@ -1922,6 +2093,13 @@ impl Painter {
             return;
         };
         if !self.carets.visible() || colour >> 24 == 0 {
+            return;
+        }
+        // No caret while a range is live. **A convention, not a measurement** — the caret is
+        // browser chrome and nothing script can read, the same admission `caret.rs` makes
+        // about the blink rate — but it is what every desktop text field does, and a caret
+        // blinking at one edge of a highlight reads as two cursors rather than one selection.
+        if self.carets.range_of(node).is_some() {
             return;
         }
 

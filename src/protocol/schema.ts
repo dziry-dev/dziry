@@ -253,6 +253,32 @@ const STYLES: Table = {
     { name: "ringInnerColor", type: "u32", affects: "paint" },
     { name: "ringInsetWidth", type: "f32", affects: "paint" },
     { name: "ringInsetColor", type: "u32", affects: "paint" },
+    // `::selection`, as two colours on the *originating element's* row rather than a
+    // style row of its own.
+    //
+    // A selection is not a box. `::before` and `::placeholder` are generated nodes because
+    // they occupy space; a selection is a range of characters inside a node that already
+    // exists, so it has nowhere to put a row and nothing to lay out. Two fields on the
+    // field itself is the whole of it.
+    //
+    // The **default is a convention, not a measurement**: Chromium does not expose its
+    // highlight colour through `getComputedStyle` — a selection with no author rule reports
+    // `rgba(0, 0, 0, 0)` — so it is unmeasurable from script, in the same category as the
+    // caret's width and blink rate. dziri's default therefore lives in its own UA sheet,
+    // where a UA default belongs, and `::selection` is what makes it overridable. See
+    // BROWSER-FACTS.md, which records the refusal.
+    //
+    // **Inherited**, which is what makes the cascade come out right. The UA default is set
+    // on `body::selection`, so it reaches every field by inheritance rather than by being
+    // declared on it — and an author's `body::selection` then wins on origin, while an
+    // author's `input::selection` wins by being declared closer. A UA rule *on the field*
+    // would have beaten an author rule on the root, which is backwards.
+    //
+    // Not `interp`, for the reason the `ring*` fields are not: 25 of the mask's 32 bits were
+    // already spent before this commit, and a selection colour that cross-fades is not worth
+    // one of the seven left.
+    { name: "selectionBg", type: "u32", affects: "paint", inherited: true },
+    { name: "selectionFg", type: "u32", affects: "paint", inherited: true },
     // box
     { name: "padTop", type: "f32", affects: "layout", ir: "padT" },
     { name: "padRight", type: "f32", affects: "layout", ir: "padR" },
@@ -987,8 +1013,21 @@ export const ENUMS: EnumDef[] = [
  * fixed style row can hold, which is what Tailwind's ring utilities compile to. An
  * ordinary bump: the styles table grew, so `SCHEMA_HASH` moves on its own and the
  * handshake would have caught it anyway.
+ *
+ * v17 adds `selectionBg` / `selectionFg` — `::selection`, as two inherited colours on the
+ * originating element rather than a style row of its own, because a selection is a range
+ * inside a node that already exists rather than a box. The styles table grew, so the hash
+ * moves on its own.
+ *
+ * It also grows `Event` by one `i32`: `b` carries the caret and `c` now carries the
+ * selection anchor, because splicing a range needs both ends and the host had only one
+ * number. **`Event` is outside the generator** — its layout is written by hand in
+ * `engine.rs` and again as byte offsets in `host.ts` — so `dziri_engine_event_size` was
+ * added for `host.ts` to check its own constant against at open time. That check is the
+ * point: the two had agreed on 56 bytes only because someone kept them in sync, which is
+ * precisely the failure this file's header says the generator exists to prevent.
  */
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

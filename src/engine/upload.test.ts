@@ -53,7 +53,19 @@ const HEIGHT = 560;
  *   none`, which is a correct frame and a useless test. That is not hypothetical: the
  *   placeholder test below found exactly this, having assumed the default.
  */
-function load(route = "features"): {
+function load(
+  route = "features",
+  /**
+   * Window height. Taller than the default only where a test has to *press* something.
+   *
+   * A node below the viewport is laid out — `bounds` reports it — but `hit_test` rejects it,
+   * so a press aimed at it returns -1 and every later assertion measures a field that was
+   * never touched. The Controls route's text fields sit at y≈650, past the 560 the window
+   * opens at, which is exactly how the selection tests below first failed: with a null
+   * selection and nothing to say the click had missed.
+   */
+  height = HEIGHT,
+): {
   ui: CompiledUi;
   engine: Engine;
   uploader: Uploader;
@@ -80,7 +92,7 @@ function load(route = "features"): {
   const engine = Engine.open({
     ...capacitiesFor(ui),
     width: WIDTH,
-    height: HEIGHT,
+    height,
     root: ui.root,
     windowed: false,
   });
@@ -301,12 +313,40 @@ function shownEditable(engine: Engine): {
   signal: { value: string };
   centre: [number, number];
 } {
-  const laidOut = generated.editables.filter((e) => engine.bounds(e.node)[2] > 0);
+  const laidOut = shownEditables(engine);
   expect(laidOut.length).toBe(1);
+  return laidOut[0]!;
+}
 
-  const found = laidOut[0]!;
-  const [x, y, w, h] = engine.bounds(found.node);
-  return { node: found.node, signal: found.signal, centre: [x + w / 2, y + h / 2] };
+/**
+ * Every editable with a laid-out box, in document order.
+ *
+ * The plural exists because the Controls route shows two and the default route shows one,
+ * and {@link shownEditable}'s `toBe(1)` is load-bearing on the default route: it is what
+ * catches an editable that stopped being laid out at all.
+ */
+function shownEditables(engine: Engine): {
+  node: number;
+  signal: { value: string };
+  centre: [number, number];
+}[] {
+  return generated.editables
+    .filter((e) => engine.bounds(e.node)[2] > 0)
+    .map((found) => {
+      const [x, y, w, h] = engine.bounds(found.node);
+      return {
+        node: found.node,
+        signal: found.signal,
+        centre: [x + w / 2, y + h / 2] as [number, number],
+      };
+    });
+}
+
+/** The one field on the Controls route that starts with text in it, so a range has substance. */
+function filledEditable(engine: Engine) {
+  const found = shownEditables(engine).find((e) => e.signal.value.length > 6);
+  expect(found, "the Controls route needs a field with text for a selection to cover").toBeDefined();
+  return found!;
 }
 
 test("clicking a text field focuses the field itself, so a keystroke has a target", () => {
@@ -411,6 +451,93 @@ test("an unbound <input> swallows the keystroke, because no signal owns its valu
   const bound = new Set(generated.editables.map((e) => e.node));
   const unbound = [...ui.interactive].find((n) => !bound.has(n))!;
   expect(typeInto(generated.editables, unbound, { text: "Z" })).toBe(false);
+
+  engine.close();
+});
+
+/**
+ * A drag makes a range, and typing over it replaces exactly that range.
+ *
+ * The whole chain through the real engine: a press puts the anchor down, a *motion* moves
+ * the focus — a press and a release at two points select nothing, because the focus follows
+ * `mouse_move` — and the offsets the engine reports are what `typeInto` splices at. Nothing
+ * here mentions `(anchor, focus)`; it asserts on the value, which is the only part a user
+ * sees.
+ */
+test("dragging across a field selects a range, and typing replaces it", () => {
+  const { engine } = load("controls", 900);
+
+  const { node, signal } = filledEditable(engine);
+  const before = signal.value;
+  expect(before.length).toBeGreaterThan(6);
+
+  // Fractions rather than pixels, so the test keeps pointing at the middle of the text when
+  // the demo's copy changes. Both stay well inside the *text* rather than the box: the box is
+  // wider than the string, and a drag past the last character clamps to the length — which is
+  // correct and would make the "a proper interior range" assertions below vacuous.
+  engine.dragNode(node, 0.1, 0.45);
+
+  const range = engine.selectionOf(node);
+  expect(range).not.toBeNull();
+  const [start, end] = range!;
+  expect(end).toBeGreaterThan(start);
+  expect(start).toBeGreaterThan(0);
+  expect(end).toBeLessThan(before.length);
+
+  // Typing over it: the range goes and the character takes its place — measured, and it is
+  // where a naive implementation appends instead, or deletes one character too many.
+  expect(
+    typeInto(generated.editables, node, { text: "Z", caret: end, anchor: start }),
+  ).toBe(true);
+  expect(signal.value).toBe(before.slice(0, start) + "Z" + before.slice(end));
+
+  signal.value = before;
+  engine.close();
+});
+
+/**
+ * A double click selects a word; Backspace over it erases exactly the word.
+ *
+ * Backspace and Delete are *identical* once a range is live — both take the range and
+ * neither takes the extra character its collapsed behaviour would. Measured, and it is the
+ * detail that lets the two keys share one code path.
+ */
+test("a double click selects a word, and Backspace erases just that word", () => {
+  const { engine } = load("controls", 900);
+
+  const { node, signal } = filledEditable(engine);
+  const before = signal.value;
+
+  engine.clickNodeTimes(node, 2);
+  const range = engine.selectionOf(node);
+  expect(range).not.toBeNull();
+  const [start, end] = range!;
+
+  // A word, and the trailing space that comes with it — so the selected text has no
+  // internal space and the whole thing is one segment plus whitespace.
+  const word = before.slice(start, end);
+  expect(word.trimEnd().length).toBeGreaterThan(0);
+  expect(word.trimEnd()).not.toContain(" ");
+
+  for (const erase of ["backward", "forward"] as const) {
+    expect(typeInto(generated.editables, node, { text: null, erase, caret: end, anchor: start })).toBe(
+      true,
+    );
+    expect(signal.value, erase).toBe(before.slice(0, start) + before.slice(end));
+    signal.value = before;
+  }
+
+  engine.close();
+});
+
+/** A triple click takes the whole value, which is what Ctrl+A does too. */
+test("a triple click selects everything in the field", () => {
+  const { engine } = load("controls", 900);
+
+  const { node, signal } = filledEditable(engine);
+  engine.clickNodeTimes(node, 3);
+
+  expect(engine.selectionOf(node)).toEqual([0, [...signal.value].length]);
 
   engine.close();
 });

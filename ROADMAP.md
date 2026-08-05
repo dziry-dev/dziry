@@ -583,10 +583,24 @@ Still to do: **held-button auto-repeat** on a track click (one click, one page t
   - **The width is still content-driven and should not be.** `29 + 7 × size` px is measured and
     unimplemented, so `size="20"` does nothing and an `<input>` with no width class fills its
     container. Same treatment, inline axis.
-  - Still ahead, and none of it started: the caret (position, blink, `caret-color`), a selection
-    model (click-drag, shift+arrows, `::selection`), and an editing model that inserts *at* a caret
-    rather than appending — which is the prerequisite for the other two, since `typeInto` has nowhere
-    for a caret to be.
+  - **The caret, the selection and the editing model all landed**, in that order, because the
+    editing model was the prerequisite the other two had no place to sit on: `typeInto` appended,
+    so there was nowhere for a caret to be. All three are engine state (`caret.rs`), so an arrow
+    key or a drag costs a repaint of one rect and no round trip to Bun.
+
+    Every rule came from a probe before it was written, which is how three separate defaults that
+    "everybody knows" turned out to be wrong. A click resolves to the **nearest** boundary rather
+    than the character under the pointer. A plain arrow with a range live **collapses to the
+    matching end and does not then step**. And a selection is `(anchor, focus)`, not
+    `(start, end)`, because a Shift reversal keeps the anchor while the ends cross. Two more
+    surfaced in the same pass: a double click uses the boundary rather than the pointer, and
+    Backspace and Delete are *identical* over a range. See BROWSER-FACTS.md.
+
+    `::selection` is protocol v17, and the one place a measurement was refused: Chromium does not
+    expose its own highlight colour to script, so the default is a stated convention in dziri's UA
+    sheet — the same admission `caret.rs` makes about the blink rate.
+  - Still ahead: the clipboard, IME, and a double-click-then-drag that extends by word rather
+    than by character.
 - **Font discovery, not just font loading.** System fonts per platform (Segoe UI, San Francisco,
   Noto), a fallback chain, and an emoji font. Text without emoji fallback looks broken.
 

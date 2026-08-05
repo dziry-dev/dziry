@@ -61,6 +61,17 @@ pub enum RawInput {
     MouseDown {
         x: f32,
         y: f32,
+        /// 1 for a click, 2 for a double, 3 for a triple — SDL's own running count.
+        ///
+        /// Reported rather than derived, because deriving it means owning a double-click
+        /// *time* threshold, and the platform already has one the user may have changed.
+        /// Measured too: Chrome selects a word from the click count and not from timing, so
+        /// this is the same signal a browser acts on.
+        clicks: u8,
+        /// Whether shift was held, which makes the press extend the selection rather than
+        /// place a caret. From a separate `SDL_GetModState` query for the reason `Wheel`
+        /// documents: SDL's mouse events carry no modifier state.
+        shift: bool,
     },
     MouseUp {
         x: f32,
@@ -435,8 +446,18 @@ impl Window {
                     mouse_btn: MouseButton::Left,
                     x,
                     y,
+                    clicks,
                     ..
-                } => out.push(RawInput::MouseDown { x, y }),
+                } => out.push(RawInput::MouseDown {
+                    x,
+                    y,
+                    clicks,
+                    shift: self
+                        .sdl
+                        .keyboard()
+                        .mod_state()
+                        .intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD),
+                }),
 
                 SdlEvent::MouseButtonUp {
                     mouse_btn: MouseButton::Left,

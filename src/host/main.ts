@@ -264,6 +264,40 @@ export async function runMain(options: MainOptions): Promise<void> {
       engine.clickNode(node);
     }
 
+    /**
+     * `--drag <node>:<from>:<to>` — select by dragging across a field, in width fractions.
+     *
+     * A selection cannot be reached any other way from out here. `--focus` declares a state
+     * and `--click` runs a press and a release; a *range* needs the motion between them,
+     * because the focus follows `mouse_move` while the anchor stays where the press landed.
+     * So this is the same argument `--click` makes against `--hover`, one step further along.
+     *
+     * Fractions rather than pixels, so a scenario keeps pointing at the same characters when
+     * the layout above it shifts.
+     */
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] !== "--drag") continue;
+      const parts = (argv[i + 1] ?? "").split(":");
+      const [node, from, to] = parts.map(Number);
+      if (parts.length !== 3 || !Number.isInteger(node) || node! < 0 || !Number.isFinite(from!) || !Number.isFinite(to!)) {
+        throw new Error(`--drag takes <node>:<from>:<to> in width fractions, got "${argv[i + 1]}"`);
+      }
+      frame();
+      engine.dragNode(node!, from!, to!);
+    }
+
+    /** `--double <node>` / `--triple <node>` — a word, or the whole value. */
+    for (let i = 0; i < argv.length; i++) {
+      const clicks = argv[i] === "--double" ? 2 : argv[i] === "--triple" ? 3 : 0;
+      if (clicks === 0) continue;
+      const node = Number(argv[i + 1]);
+      if (!Number.isInteger(node) || node < 0) {
+        throw new Error(`${argv[i]} takes a node id, got "${argv[i + 1]}"`);
+      }
+      frame();
+      engine.clickNodeTimes(node, clicks);
+    }
+
     engine.setInputState(numberFlag("--hover"), -1, numberFlag("--focus"));
     frame();
 

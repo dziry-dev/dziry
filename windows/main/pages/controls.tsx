@@ -36,10 +36,18 @@
  * reads. Both fields also wear a focus **ring**, which is `box-shadow` reduced to the
  * concentric bands a style row can hold — see `properties.ts::parseBoxShadow`.
  *
+ * And there is **selection**, which is the same argument one step further: the engine holds
+ * an `(anchor, focus)` pair rather than an ordered range, because that is the only shape a
+ * Shift+Arrow reversal survives — measured, BROWSER-FACTS.md. Drag, Shift+Arrow, Shift+click,
+ * double click for a word, triple click or Ctrl+A for everything; typing, Backspace and Delete
+ * all replace a live range, and Backspace and Delete become identical once there is one. The
+ * highlight is `::selection`, two colours on the field's own style row, defaulting from
+ * dziri's UA sheet because Chromium does not expose its own.
+ *
  * Still honestly not working, and the page says so rather than faking it:
  *
- * There is no selection and no clipboard. A click collapses the caret and a drag does
- * nothing; that is the rest of A5. `accent-color` still resolves with nothing to paint.
+ * There is no clipboard, and no IME. A double-click-then-drag extends by character rather
+ * than by word. `accent-color` still resolves with nothing to paint.
  *
  * A `<select>` renders closed. Its picker is a popover with anchor positioning in
  * the spec, and that needs the overlay layer (ROADMAP B1), so the options are
@@ -57,7 +65,11 @@ export default function Controls() {
   // Component-local, because the field belongs to this page and nothing else reads it.
   // The compiler registers it and declares `const locals = […]` in the artifact — see
   // the Reactivity page for why a local needs that and an export does not.
-  const typed = signal("");
+  // The first one starts with text so a selection has something to cover — drag across it,
+  // double click a word, Ctrl+A. The second stays empty, because that is the only way the
+  // `::placeholder` box is on screen, and a page where every field is full would demonstrate
+  // one feature by hiding another.
+  const typed = signal("drag across the quick-brown fox");
   const also = signal("");
 
   return (
@@ -115,10 +127,12 @@ export default function Controls() {
           a click focuses it because an editable is hit-testable · `::placeholder` is an ordinary
           generated box whose text comes from the attribute, positioned absolutely so it costs no
           room, and paint draws it only while the field is empty · the caret lands on the boundary
-          you clicked, the arrows and Home/End move it, and Delete erases forward · focus draws a
-          Tailwind `ring`, which is `box-shadow` and takes no room in layout · the third is
-          disabled: it cannot be focused, and a press on it produces no events at all · no
-          selection and no clipboard yet — that is the rest of A5
+          you clicked, the arrows and Home/End move it, and Delete erases forward · drag to select,
+          double click for a word, triple click or Ctrl+A for all of it, Shift+Arrow and Shift+click
+          to extend — the engine keeps an `(anchor, focus)` pair, which is the only shape that
+          survives extending back through where you started · focus draws a Tailwind `ring`, which
+          is `box-shadow` and takes no room in layout · the third is disabled: it cannot be focused,
+          and a press on it produces no events at all · no clipboard and no IME yet
         </div>
         <div className="flex flex-col gap-2">
           {/* `focus:ring-*` rather than a thicker border, which is the point of a ring: a

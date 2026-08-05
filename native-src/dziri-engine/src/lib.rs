@@ -230,6 +230,23 @@ pub extern "C" fn dziri_schema_hash() -> u32 {
     protocol::SCHEMA_HASH
 }
 
+/// `size_of::<Event>()`, so the host can check the stride it decodes with.
+///
+/// Every *table* layout is generated from `schema.ts` and every offset is reported by the
+/// engine, which is what that file's header says the generator exists for. `Event` is the one
+/// struct outside it: its fields are written in `engine.rs` and again as literal byte offsets
+/// in `host.ts`, and the two agreed on 56 bytes only because somebody kept them in step by
+/// hand. Adding a field to it — `c`, the selection anchor — is exactly the change that would
+/// have shifted `text` under a host still reading the old offset, and the symptom would have
+/// been keystrokes arriving as mojibake rather than an error.
+///
+/// So the host asserts its constant against this when the library opens. Cheap, and it turns
+/// the whole class of drift into a startup message.
+#[no_mangle]
+pub extern "C" fn dziri_engine_event_size() -> u32 {
+    std::mem::size_of::<engine::Event>() as u32
+}
+
 /// Copies the calling thread's last error into `buf` as UTF-8. Returns the full
 /// byte length, which may exceed `len`.
 ///
@@ -582,6 +599,70 @@ pub extern "C" fn dziri_engine_set_time_step(handle: Handle, dt: f32) -> i32 {
 pub extern "C" fn dziri_engine_mouse_down(handle: Handle, x: f32, y: f32) -> i32 {
     with(handle, |engine| {
         engine.mouse_down(x, y);
+        status::OK
+    })
+}
+
+/// Writes the selected range in `field`'s text run to `out` as two `i32`, or `(-1, -1)`.
+///
+/// The selection is engine state — it has no signal and crosses to Bun only as two numbers
+/// beside a keystroke — so from outside there is otherwise no way to ask what is selected.
+/// That makes the pointer half of the feature untestable: a drag either built the range it
+/// should have or it did not, and only the value after an edit would say, which is a test of
+/// two things at once.
+///
+/// # Safety
+/// `out` must be writable for two `i32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_selection(handle: Handle, field: i32, out: *mut i32) -> i32 {
+    if out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        let (start, end) = engine
+            .selection_of(field)
+            .map_or((-1, -1), |(s, e)| (s as i32, e as i32));
+        // SAFETY: the caller promises two writable `i32`, checked non-null above.
+        unsafe {
+            *out = start;
+            *out.add(1) = end;
+        }
+        status::OK
+    })
+}
+
+/// Moves the pointer to a point, running the whole motion path.
+///
+/// The third of the trio, and it earns its place for the same reason `mouse_down` does over
+/// `set_input_state`: a **drag** only exists in motion. A press followed by a release cannot
+/// select a range however far apart the two points are, because the selection's focus follows
+/// `mouse_move` — so without this, the only selection reachable headlessly is one made with
+/// the keyboard, and the pointer path would go untested and unscreenshottable.
+///
+/// `clicks` and `shift` are deliberately absent here: motion carries neither.
+#[no_mangle]
+pub extern "C" fn dziri_engine_mouse_move(handle: Handle, x: f32, y: f32) -> i32 {
+    with(handle, |engine| {
+        engine.mouse_move(x, y);
+        status::OK
+    })
+}
+
+/// Presses at a point with a click count and Shift state, for a double click or a Shift+click.
+///
+/// A separate entry point rather than more arguments on `dziri_engine_mouse_down`, so the
+/// plain-click spelling stays two floats — which is what every existing caller wants and what
+/// `clickNode` is built on.
+#[no_mangle]
+pub extern "C" fn dziri_engine_mouse_down_with(
+    handle: Handle,
+    x: f32,
+    y: f32,
+    clicks: u32,
+    shift: u32,
+) -> i32 {
+    with(handle, |engine| {
+        engine.mouse_down_with(x, y, clicks as u8, shift != 0);
         status::OK
     })
 }

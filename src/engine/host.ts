@@ -37,8 +37,18 @@ const { i32, u32, f32, ptr: PTR } = FFIType;
  * anything reads this struct.
  */
 const CONFIG_SIZE = 80;
-/** Matches `Event` in `engine.rs`: six 4-byte fields plus 32 inline text bytes. */
-export const EVENT_SIZE = 56;
+/**
+ * Matches `Event` in `engine.rs`: seven 4-byte fields plus 32 inline text bytes.
+ *
+ * **Checked against the engine at open time**, by `dziri_engine_event_size`. Every table
+ * layout in this codebase is generated from `schema.ts` and every offset is reported by the
+ * engine at runtime; `Event` is the one struct outside that, written there and again as byte
+ * offsets below. The two agreed on 56 bytes only because somebody kept them in step by hand,
+ * and the change that grew it to 60 — a selection anchor — would otherwise have shifted
+ * `text` under a reader still using the old stride. The symptom is keystrokes arriving as
+ * mojibake, not an error, which is why the check exists rather than a comment asking for care.
+ */
+export const EVENT_SIZE = 60;
 
 /**
  * The engine handle is a `u32`, not a pointer.
@@ -52,6 +62,7 @@ export const EVENT_SIZE = 56;
 const SYMBOLS = {
   dziri_protocol_version: { args: [], returns: u32 },
   dziri_schema_hash: { args: [], returns: u32 },
+  dziri_engine_event_size: { args: [], returns: u32 },
   dziri_last_error: { args: [PTR, u32], returns: u32 },
   dziri_engine_create: { args: [PTR, PTR], returns: i32 },
   dziri_engine_destroy: { args: [u32], returns: i32 },
@@ -67,8 +78,11 @@ const SYMBOLS = {
   dziri_engine_set_time_step: { args: [u32, f32], returns: i32 },
   dziri_engine_hit_test: { args: [u32, f32, f32, PTR], returns: i32 },
   dziri_engine_mouse_down: { args: [u32, f32, f32], returns: i32 },
+  dziri_engine_mouse_move: { args: [u32, f32, f32], returns: i32 },
+  dziri_engine_mouse_down_with: { args: [u32, f32, f32, u32, u32], returns: i32 },
   dziri_engine_mouse_up: { args: [u32, f32, f32], returns: i32 },
   dziri_engine_bounds: { args: [u32, u32, PTR], returns: i32 },
+  dziri_engine_selection: { args: [u32, i32, PTR], returns: i32 },
   dziri_engine_surface_info: { args: [u32, PTR], returns: i32 },
   dziri_engine_read_pixels: { args: [u32, PTR, u32], returns: i32 },
   dziri_engine_encode_png: { args: [u32, PTR], returns: i32 },
@@ -227,7 +241,10 @@ export type EngineEvent = {
   kind: number;
   node: number;
   a: number;
+  /** The caret — the selection focus — for the editing events, or -1. */
   b: number;
+  /** The selection anchor. Equal to `b` when collapsed, which is an ordinary caret. */
+  c: number;
   x: number;
   y: number;
   text: string;
@@ -269,6 +286,22 @@ export class Engine {
           `0x${hash.toString(16).padStart(8, "0")}.\n` +
           `  Both sides are generated from src/protocol/schema.ts, so they have drifted:\n` +
           `  run \`bun run gen:protocol\` and then \`bun run engine\`.`,
+      );
+    }
+
+    /* `Event` is the one struct the generator does not own — its fields are written in
+       `engine.rs` and again as byte offsets in `drainEvents` — so its stride is checked here
+       rather than assumed. The version and the hash cannot catch it: neither is derived from
+       `Event`, so growing it by a field leaves both untouched while moving `text` under a
+       reader still using the old stride. That reads as keystrokes arriving corrupted, which
+       is a much worse thing to debug than this message. */
+    const eventSize = engine.dziri_engine_event_size();
+    if (eventSize !== EVENT_SIZE) {
+      throw new Error(
+        `event layout mismatch: this build decodes ${EVENT_SIZE}-byte events, the engine ` +
+          `binary writes ${eventSize}.\n` +
+          `  \`Event\` in engine.rs and EVENT_SIZE in host.ts are two hand-written copies of ` +
+          `one layout; they have drifted.`,
       );
     }
 
@@ -442,9 +475,10 @@ export class Engine {
         node: view.getInt32(at + 4, true),
         a,
         b: view.getInt32(at + 12, true),
-        x: view.getFloat32(at + 16, true),
-        y: view.getFloat32(at + 20, true),
-        text: decoder.decode(bytes.subarray(at + 24, at + 24 + textLen)),
+        c: view.getInt32(at + 16, true),
+        x: view.getFloat32(at + 20, true),
+        y: view.getFloat32(at + 24, true),
+        text: decoder.decode(bytes.subarray(at + 28, at + 28 + textLen)),
       });
     }
     return out;
@@ -485,6 +519,18 @@ export class Engine {
     check(engine.dziri_engine_mouse_up(this.#handle, x, y), "dziri_engine_mouse_up");
   }
 
+  mouseMove(x: number, y: number): void {
+    check(engine.dziri_engine_mouse_move(this.#handle, x, y), "dziri_engine_mouse_move");
+  }
+
+  /** A press carrying a click count and Shift, for a double click or a Shift+click. */
+  mouseDownWith(x: number, y: number, clicks: number, shift: boolean): void {
+    check(
+      engine.dziri_engine_mouse_down_with(this.#handle, x, y, clicks, shift ? 1 : 0),
+      "dziri_engine_mouse_down_with",
+    );
+  }
+
   /**
    * Presses and releases at the centre of a node's layout box.
    *
@@ -497,6 +543,49 @@ export class Engine {
   clickNode(node: number): void {
     const [x, y, w, h] = this.bounds(node);
     this.mouseDown(x + w / 2, y + h / 2);
+    this.mouseUp(x + w / 2, y + h / 2);
+  }
+
+  /**
+   * Drags across a node's box, from `from` to `to` as fractions of its width.
+   *
+   * Fractions rather than pixels for the reason `clickNode` takes a node id: a golden
+   * addressed in pixels stops pointing at what it names the first time the layout above it
+   * moves.
+   *
+   * The motion step is what makes this a drag rather than two clicks, and it is not
+   * optional — a selection's focus follows `mouse_move`, so a press and a release at
+   * different points select nothing at all.
+   */
+  dragNode(node: number, from: number, to: number): void {
+    const [x, y, w, h] = this.bounds(node);
+    const mid = y + h / 2;
+    this.mouseDown(x + w * from, mid);
+    this.mouseMove(x + w * to, mid);
+    this.mouseUp(x + w * to, mid);
+  }
+
+  /**
+   * The selected range in a field, in document order, or null when nothing is selected.
+   *
+   * The selection has no signal — it crosses to Bun only as two numbers beside a keystroke —
+   * so this is the only way to ask what a drag built. Without it the pointer half of
+   * selecting could only be checked through the value after an edit, which tests two things
+   * at once and blames the wrong one when it fails.
+   */
+  selectionOf(node: number): [number, number] | null {
+    check(
+      engine.dziri_engine_selection(this.#handle, node, ptr(scratch) as Pointer),
+      "dziri_engine_selection",
+    );
+    const [start, end] = [scratch32[0]!, scratch32[1]!];
+    return start < 0 ? null : [start, end];
+  }
+
+  /** Presses `clicks` times at a node's centre — 2 for a word, 3 for the whole value. */
+  clickNodeTimes(node: number, clicks: number, shift = false): void {
+    const [x, y, w, h] = this.bounds(node);
+    this.mouseDownWith(x + w / 2, y + h / 2, clicks, shift);
     this.mouseUp(x + w / 2, y + h / 2);
   }
 

@@ -70,9 +70,27 @@ const SUPPORTED_PSEUDO = new Set<string>([
  * the field is empty. That is engine-owned — the emptiness of a value nobody declared —
  * so it is a node flag and a paint branch, not a variant. See `NodeFlags.PLACEHOLDER`.
  */
-export type PseudoElement = "before" | "after" | "placeholder";
+/**
+ * `::selection` is the odd one out: it is **not a box**, and so not a node.
+ *
+ * The other three occupy space, which is why each becomes an emitted node Taffy lays out.
+ * A selection is a range of characters inside a node that already exists — it has nowhere
+ * to put a row and nothing to lay out — so its cascade is resolved for two properties only,
+ * `background-color` and `color`, and those land on the *originating element's* style row as
+ * `selectionBg` / `selectionFg`. See `compile.ts::selectionColors`.
+ *
+ * A consequence worth stating: everything else in a `::selection` rule is ignored, because
+ * there is no box for a padding or a border to apply to. That is also what CSS says — the
+ * highlight pseudo-elements accept a short list of properties and nothing else.
+ */
+export type PseudoElement = "before" | "after" | "placeholder" | "selection";
 
-const SUPPORTED_PSEUDO_ELEMENT = new Set<string>(["before", "after", "placeholder"]);
+const SUPPORTED_PSEUDO_ELEMENT = new Set<string>([
+  "before",
+  "after",
+  "placeholder",
+  "selection",
+]);
 
 /**
  * One `[attr]` / `[attr op "value"]` test.

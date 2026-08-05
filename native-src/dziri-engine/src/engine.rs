@@ -44,11 +44,29 @@ mod keys {
     pub const HOME: i32 = SCANCODE_MASK | 74;
     /// Unmasked, being an ASCII control character — which is why the host matches plain 8.
     pub const BACKSPACE: i32 = 8;
+    /// Also unmasked: ASCII DEL. Every *other* editing key here is a masked scancode, so
+    /// this is the one that looks like it should be `SCANCODE_MASK | 76` and is not. Checked
+    /// against `sdl3::keyboard::Keycode` in `caret.rs` rather than trusted.
+    pub const DELETE: i32 = 127;
+    /// A printable key's keycode *is* its Unicode scalar, so `a` is 0x61 — lower case, and
+    /// SDL reports the same keycode whether or not Ctrl is held.
+    pub const A: i32 = 0x61;
+}
+
+/// The bits of SDL's modifier mask this engine reads.
+///
+/// `SDL_KMOD_*`, written out for the reason `keys` is: `window.rs` flattens the mask to a
+/// `u16` at the boundary, so there is no `Mod` left to call `.intersects()` on. Both sides of
+/// each pair, because a user may hold either.
+mod mod_bits {
+    pub const SHIFT: u16 = 0x0001 | 0x0002; // LSHIFT | RSHIFT
+    pub const CTRL: u16 = 0x0040 | 0x0080; // LCTRL | RCTRL
 }
 
 use crate::layout::LayoutTree;
 use crate::paint::{
-    hit_test, is_scrollable, scrollable_at, Bar, BarHover, Geometry, InputState, Painter,
+    editable_run_of, hit_test, is_scrollable, scrollable_at, Bar, BarHover, Geometry, InputState,
+    Painter,
 };
 use crate::protocol::{self, event_kind};
 use crate::tables::{Capacities, Diff, SpanDesc, Tables};
@@ -69,6 +87,18 @@ pub struct Event {
     /// Key code, or the byte length of `text`.
     pub a: i32,
     pub b: i32,
+    /// The selection anchor for the editing events, or -1.
+    ///
+    /// `b` is the caret — the focus — and this is the other end, so the host can splice a
+    /// range. It cannot be packed into `b`: `MAX_SLOT_CHARS` is 65536, which does not fit in
+    /// a 16-bit half, and overloading `x`/`y` is what produced the bug where `b` carried a
+    /// modifier mask that nothing read.
+    ///
+    /// **This struct is outside the schema generator.** Its layout is written here and again
+    /// as byte offsets in `host.ts`, which is exactly the failure mode `schema.ts` exists to
+    /// prevent — so `dziri_engine_event_size` reports `size_of::<Event>()` and `host.ts`
+    /// checks its own constant against it when the library opens.
+    pub c: i32,
     pub x: f32,
     pub y: f32,
     pub text: [u8; 32],
@@ -81,6 +111,7 @@ impl Default for Event {
             node: -1,
             a: 0,
             b: 0,
+            c: -1,
             x: 0.0,
             y: 0.0,
             text: [0; 32],
@@ -950,33 +981,41 @@ impl Engine {
                 } => self.wheel(x, y, dx, dy, shift),
 
                 RawInput::MouseMotion { x, y } => self.mouse_move(x, y),
-                RawInput::MouseDown { x, y } => self.mouse_down(x, y),
+                RawInput::MouseDown {
+                    x,
+                    y,
+                    clicks,
+                    shift,
+                } => self.mouse_down_with(x, y, clicks, shift),
                 RawInput::MouseUp { x, y } => self.mouse_up(x, y),
 
                 RawInput::KeyDown { keycode, mods } => {
-                    // Caret movement is handled here and **not forwarded**, which is the
-                    // whole point of the caret being engine state: an arrow key costs a
-                    // repaint of one rect and no round trip to Bun, so it stays responsive
-                    // while app code is busy. Forwarding as well would also invite a host
-                    // to move the caret a second time.
+                    // Caret and selection movement is handled here and **not forwarded**,
+                    // which is the whole point of both being engine state: an arrow key costs
+                    // a repaint of one rect and no round trip to Bun, so it stays responsive
+                    // while app code is busy. Forwarding as well would also invite a host to
+                    // move the caret a second time.
                     //
                     // Anything else goes on to the host untouched — Backspace still edits
                     // the value there, because the value is a signal and only Bun owns it.
-                    if !self.move_caret(keycode) {
-                        // `b` is the **caret**, not the modifier mask it used to be.
-                        //
-                        // Nothing consumed `mods`: the host matches on the keycode alone,
-                        // and every key whose meaning depends on a modifier — Shift+Arrow to
-                        // extend a selection, and later Ctrl+Arrow by word — is handled on
-                        // this side, because the caret and the selection are engine state.
-                        // So the field is worth more as the index Backspace has to delete
-                        // in front of, which the host cannot know and cannot ask for.
-                        let _ = mods;
+                    let shift = mods & mod_bits::SHIFT != 0;
+                    let ctrl = mods & mod_bits::CTRL != 0;
+                    let select_all = ctrl && keycode == keys::A;
+
+                    if select_all {
+                        self.select_all();
+                    } else if !self.move_caret(keycode, shift) {
+                        // `b` is the **caret** and `c` is the **anchor**, not the modifier mask
+                        // `b` used to be. The mask is read on this side now — Shift decides
+                        // whether an arrow extends — and the host needs the two offsets
+                        // instead: splicing a range takes both ends, and one number cannot
+                        // carry them.
                         self.events.push(Event {
                             kind: event_kind::KEY_DOWN,
                             node: self.state.focused,
                             a: keycode,
                             b: self.painter.caret_index().map_or(-1, |i| i as i32),
+                            c: self.painter.caret_anchor().map_or(-1, |i| i as i32),
                             ..Default::default()
                         });
 
@@ -990,8 +1029,16 @@ impl Engine {
                         // *after* the caret, so the caret does not move. Shifting it here
                         // would be the forward-delete version of the fast-typing bug — the
                         // caret sliding for an edit on the other side of it.
+                        //
+                        // **Over a live range both keys erase the range and nothing more**, so
+                        // both land at its start — measured, and it means the direction is only
+                        // consulted on a collapsed caret. `shift_caret` reads the range itself,
+                        // which is why Delete now calls it at all: with a range live it is not
+                        // a no-op.
                         if keycode == keys::BACKSPACE {
-                            self.shift_caret(-1);
+                            self.shift_caret(-1, 0);
+                        } else if keycode == keys::DELETE && self.painter.caret_range().is_some() {
+                            self.shift_caret(0, 0);
                         }
                     }
                 }
@@ -1006,6 +1053,10 @@ impl Engine {
                         kind: event_kind::TEXT_INPUT,
                         node: self.state.focused,
                         b: caret.map_or(-1, |i| i as i32),
+                        // The anchor, so typing over a selection replaces it. Measured: `X`
+                        // over `2..6` gives `abXghij`, i.e. the range goes and the character
+                        // takes its place.
+                        c: self.painter.caret_anchor().map_or(-1, |i| i as i32),
                         ..Default::default()
                     };
                     let bytes = text.as_bytes();
@@ -1029,9 +1080,13 @@ impl Engine {
                     // until the next click. The alternative is a round trip before the caret
                     // moves, which is worse on every keystroke to be right on the last one.
                     let typed = std::str::from_utf8(&event.text[..n])
-                        .map(|s| s.chars().count() as i32)
+                        .map(|s| s.chars().count())
                         .unwrap_or(0);
-                    self.shift_caret(typed);
+                    // Both numbers, because they differ over a selection: with a range live
+                    // the caret lands at `start + typed` and `delta` says nothing useful.
+                    // Measured — `X` over `2..6` leaves the caret at 3, which is neither
+                    // end plus one.
+                    self.shift_caret(typed as i32, typed);
                 }
 
                 RawInput::FocusChanged { focused } => self.events.push(Event {
@@ -1175,7 +1230,12 @@ impl Engine {
     /// changes nothing, which is measured — `probes/caret-and-selection.html` shows
     /// ArrowRight at the length and ArrowLeft at 0 both leaving the caret put. Forwarding
     /// those to the host instead would let it act on a key the engine had already claimed.
-    fn move_caret(&mut self, keycode: i32) -> bool {
+    ///
+    /// `shift` extends the selection instead of moving a caret, which is the whole keyboard
+    /// half of selecting. It is why the `KeyDown` arm reads `mods` again after a commit that
+    /// discarded it with `let _ = mods`: nothing consumed the mask when every key the engine
+    /// claimed meant one thing.
+    fn move_caret(&mut self, keycode: i32, shift: bool) -> bool {
         let motion = match keycode {
             k if k == keys::LEFT => Motion::Left,
             k if k == keys::RIGHT => Motion::Right,
@@ -1186,7 +1246,59 @@ impl Engine {
         let Some((node, chars)) = self.caret_run_chars() else {
             return false;
         };
-        if self.painter.move_caret(node, motion, chars) {
+        if self.painter.move_caret(node, motion, chars, shift) {
+            self.needs_paint = true;
+        }
+        true
+    }
+
+    /// The selected range in `field`'s text run, in document order, or `None`.
+    pub fn selection_of(&self, field: i32) -> Option<(usize, usize)> {
+        self.painter
+            .selection(&self.tables, self.tree.bounds().len(), field)
+    }
+
+    /// Selects everything in the focused field. Returns whether there was one.
+    fn select_all(&mut self) -> bool {
+        let nodes = self.tree.bounds().len();
+        let Self {
+            painter,
+            tables,
+            state,
+            ..
+        } = self;
+        if painter.select_all(tables, nodes, state.focused) {
+            self.needs_paint = true;
+            return true;
+        }
+        false
+    }
+
+    /// Drags the selection's focus to `x` inside `field`. Returns whether it is a field.
+    ///
+    /// Destructured for the reason `mouse_down` is: `geometry()` borrows all of `self`, and
+    /// the painter and the measurer both have to be mutable at once.
+    fn extend_selection(&mut self, field: i32, x: f32) -> bool {
+        let Self {
+            painter,
+            measurer,
+            tables,
+            tree,
+            scroll,
+            ..
+        } = self;
+        let geometry = Geometry {
+            bounds: tree.bounds(),
+            scroll,
+            extent: tree.overflow(),
+        };
+        // The return value is "this is a field", not "the selection changed": a drag that
+        // moves within one character changes nothing and must still own the pointer, or the
+        // rest of `mouse_move` would start reporting hovers halfway through a gesture.
+        if editable_run_of(tables, field, geometry.bounds.len()).is_none() {
+            return false;
+        }
+        if painter.extend_caret(tables, geometry, measurer, field, x) {
             self.needs_paint = true;
         }
         true
@@ -1198,9 +1310,9 @@ impl Engine {
     /// as of Bun's last publish, so two keystrokes inside one frame both measured the same
     /// pre-edit length and the second clamped to it — typing quickly left the caret a
     /// character behind the text. `Carets::shift` carries the reasoning.
-    fn shift_caret(&mut self, delta: i32) {
+    fn shift_caret(&mut self, delta: i32, inserted: usize) {
         if let Some((node, _)) = self.caret_run_chars() {
-            self.painter.shift_caret(node, delta);
+            self.painter.shift_caret(node, delta, inserted);
             self.needs_paint = true;
         }
     }
@@ -1244,6 +1356,18 @@ impl Engine {
             return;
         }
 
+        // A press held inside a field is a selection drag, and it owns the pointer the way a
+        // bar drag does: the focus follows x while the anchor stays where the press landed.
+        //
+        // Keyed on `pressed` rather than on a separate "dragging" flag, because that *is* the
+        // state — `mouse_up` clears it — and it is keyed on the **pressed node** rather than
+        // on what the pointer is over now, which is what lets a drag continue past the end of
+        // the field. Chased the other way, dragging one pixel too far right would stop
+        // extending, and the selection would freeze mid-gesture.
+        if self.state.pressed != -1 && self.extend_selection(self.state.pressed, x) {
+            return;
+        }
+
         let hit = self.hit_test(x, y);
         if hit != self.state.hovered {
             self.state.hovered = hit;
@@ -1283,6 +1407,16 @@ impl Engine {
 
     /// A press at `(x, y)`.
     pub fn mouse_down(&mut self, x: f32, y: f32) {
+        self.mouse_down_with(x, y, 1, false)
+    }
+
+    /// A press, with the click count and whether Shift was held.
+    ///
+    /// Both change what the press means to a text field and nothing else: 2 selects a word,
+    /// 3 selects the value, and Shift extends from the anchor instead of collapsing. The
+    /// three-argument [`Engine::mouse_down`] is the plain-click spelling, which is what every
+    /// test and every non-field path wants.
+    pub fn mouse_down_with(&mut self, x: f32, y: f32, clicks: u8, shift: bool) {
         // A press on a bar is consumed entirely: no `pressed`, no focus change, and no
         // event for the host. The row under an overlay bar must not be clicked by
         // someone reaching for the thumb.
@@ -1333,7 +1467,27 @@ impl Engine {
             scroll,
             extent: tree.overflow(),
         };
-        painter.place_caret(tables, geometry, measurer, hit, x);
+        let nodes = geometry.bounds.len();
+        match clicks {
+            // A triple click selects the whole value. On a single-line field that is also
+            // what a "select the line" gesture means, and measured: a triple click and
+            // Ctrl+A both report `0..19` on a 19-character field.
+            n if n >= 3 => {
+                painter.select_all(tables, nodes, hit);
+            }
+            2 => {
+                painter.select_word(tables, geometry, measurer, hit, x);
+            }
+            // Shift+click extends from the anchor the last press left, which is measured to
+            // flip direction through it: from a caret at 4, Shift+click at 9 gives
+            // `4..9 forward` and a further Shift+click at 1 gives `1..4 backward`.
+            _ if shift => {
+                painter.extend_caret(tables, geometry, measurer, hit, x);
+            }
+            _ => {
+                painter.place_caret(tables, geometry, measurer, hit, x);
+            }
+        }
         self.events.push(Event {
             kind: event_kind::MOUSE_DOWN,
             node: hit,

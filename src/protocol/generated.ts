@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 16;
+export const PROTOCOL_VERSION = 17;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,12 +19,12 @@ export const PROTOCOL_VERSION = 16;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xbbe19d0e;
+export const SCHEMA_HASH = 0xb8a6b92b;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
   nodes: [1, 2, 4, 4, 4, 4, 2, 1, 1, 4],
-  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2],
+  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2],
   variants: [4, 4, 4],
   variantSlots: [2],
   media: [4, 1, 4],
@@ -39,7 +39,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
 /** Field names per table, in descriptor order — used to name a mismatch. */
 export const FIELD_NAMES: Record<TableName, string[]> = {
   nodes: ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags", "activates"],
-  styles: ["bg", "fg", "borderColor", "borderWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "ringOuterWidth", "ringOuterColor", "ringInnerWidth", "ringInnerColor", "ringInsetWidth", "ringInsetColor", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance", "opacity", "translateX", "translateY", "translatePercentX", "translatePercentY", "rotate", "scaleX", "scaleY", "skewX", "skewY", "transformOriginPercentX", "transformOriginPercentY", "transformOriginX", "transformOriginY", "transition", "animation"],
+  styles: ["bg", "fg", "borderColor", "borderWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "ringOuterWidth", "ringOuterColor", "ringInnerWidth", "ringInnerColor", "ringInsetWidth", "ringInsetColor", "selectionBg", "selectionFg", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance", "opacity", "translateX", "translateY", "translatePercentX", "translatePercentY", "rotate", "scaleX", "scaleY", "skewX", "skewY", "transformOriginPercentX", "transformOriginPercentY", "transformOriginX", "transformOriginY", "transition", "animation"],
   variants: ["node", "mask", "runStart"],
   variantSlots: ["style"],
   media: ["bit", "kind", "value"],
@@ -59,7 +59,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
  * can be checked against it rather than trusted to agree.
  */
 export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
-  styles: [false, false, false, true, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
+  styles: [false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
 };
 
 /**
@@ -148,72 +148,74 @@ export const F = {
     ringInnerColor: 11,
     ringInsetWidth: 12,
     ringInsetColor: 13,
-    padTop: 14,
-    padRight: 15,
-    padBottom: 16,
-    padLeft: 17,
-    marginTop: 18,
-    marginRight: 19,
-    marginBottom: 20,
-    marginLeft: 21,
-    display: 22, // 0 flex, 1 grid, 2 block, 3 none
-    flexDirection: 23,
-    flexWrap: 24,
-    justifyContent: 25,
-    alignItems: 26,
-    alignSelf: 27,
-    justifyItems: 28, // Grid only
-    justifySelf: 29, // Grid only
-    flexGrow: 30,
-    flexShrink: 31,
-    flexBasis: 32,
-    gapRow: 33,
-    gapColumn: 34,
-    gridColumns: 35, // repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N
-    gridRows: 36,
-    gridColumnStart: 37,
-    gridColumnSpan: 38,
-    gridRowStart: 39,
-    gridRowSpan: 40,
-    width: 41,
-    height: 42,
-    minWidth: 43,
-    minHeight: 44,
-    maxWidth: 45,
-    maxHeight: 46,
-    aspectRatio: 47,
-    position: 48, // 0 relative, 1 absolute
-    insetTop: 49,
-    insetRight: 50,
-    insetBottom: 51,
-    insetLeft: 52,
-    fontSize: 53,
-    fontWeight: 54,
-    lineClamp: 55, // 0 = unlimited; drives SkParagraph maxLines
-    overflowX: 56, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
-    overflowY: 57, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
-    scrollbarWidth: 58, // 0 auto, 1 thin, 2 none
-    scrollbarThumb: 59,
-    scrollbarTrack: 60,
-    accentColor: 61,
-    caretColor: 62,
-    appearance: 63, // 0 none, 1 auto
-    opacity: 64, // 0..1, initial 1
-    translateX: 65,
-    translateY: 66,
-    translatePercentX: 67, // fraction of own border-box width
-    translatePercentY: 68, // fraction of own border-box height
-    rotate: 69, // degrees, unnormalised
-    scaleX: 70, // initial 1
-    scaleY: 71, // initial 1
-    skewX: 72, // degrees
-    skewY: 73, // degrees
-    transformOriginPercentX: 74, // initial 0.5
-    transformOriginPercentY: 75, // initial 0.5
-    transformOriginX: 76, // px, added to the percentage
-    transformOriginY: 77, // px, added to the percentage
-    transition: 78, // tween row + 1, or 0 for none
-    animation: 79, // tween row + 1, or 0 for none
+    selectionBg: 14,
+    selectionFg: 15,
+    padTop: 16,
+    padRight: 17,
+    padBottom: 18,
+    padLeft: 19,
+    marginTop: 20,
+    marginRight: 21,
+    marginBottom: 22,
+    marginLeft: 23,
+    display: 24, // 0 flex, 1 grid, 2 block, 3 none
+    flexDirection: 25,
+    flexWrap: 26,
+    justifyContent: 27,
+    alignItems: 28,
+    alignSelf: 29,
+    justifyItems: 30, // Grid only
+    justifySelf: 31, // Grid only
+    flexGrow: 32,
+    flexShrink: 33,
+    flexBasis: 34,
+    gapRow: 35,
+    gapColumn: 36,
+    gridColumns: 37, // repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N
+    gridRows: 38,
+    gridColumnStart: 39,
+    gridColumnSpan: 40,
+    gridRowStart: 41,
+    gridRowSpan: 42,
+    width: 43,
+    height: 44,
+    minWidth: 45,
+    minHeight: 46,
+    maxWidth: 47,
+    maxHeight: 48,
+    aspectRatio: 49,
+    position: 50, // 0 relative, 1 absolute
+    insetTop: 51,
+    insetRight: 52,
+    insetBottom: 53,
+    insetLeft: 54,
+    fontSize: 55,
+    fontWeight: 56,
+    lineClamp: 57, // 0 = unlimited; drives SkParagraph maxLines
+    overflowX: 58, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
+    overflowY: 59, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
+    scrollbarWidth: 60, // 0 auto, 1 thin, 2 none
+    scrollbarThumb: 61,
+    scrollbarTrack: 62,
+    accentColor: 63,
+    caretColor: 64,
+    appearance: 65, // 0 none, 1 auto
+    opacity: 66, // 0..1, initial 1
+    translateX: 67,
+    translateY: 68,
+    translatePercentX: 69, // fraction of own border-box width
+    translatePercentY: 70, // fraction of own border-box height
+    rotate: 71, // degrees, unnormalised
+    scaleX: 72, // initial 1
+    scaleY: 73, // initial 1
+    skewX: 74, // degrees
+    skewY: 75, // degrees
+    transformOriginPercentX: 76, // initial 0.5
+    transformOriginPercentY: 77, // initial 0.5
+    transformOriginX: 78, // px, added to the percentage
+    transformOriginY: 79, // px, added to the percentage
+    transition: 80, // tween row + 1, or 0 for none
+    animation: 81, // tween row + 1, or 0 for none
   },
   /** Per-node predicate mask and where that node's style run begins. */
   variants: {
@@ -289,7 +291,7 @@ export const F = {
 /** Field counts, asserted against the engine's descriptor at startup. */
 export const FIELD_COUNTS: Record<TableName, number> = {
   nodes: 10,
-  styles: 80,
+  styles: 82,
   variants: 3,
   variantSlots: 1,
   media: 3,
@@ -304,7 +306,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
 /** Typed-array constructor per field, used to wrap the engine's memory. */
 export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   nodes: [Uint8Array, Uint16Array, Int32Array, Int32Array, Int32Array, Int32Array, Int16Array, Uint8Array, Uint8Array, Int32Array],
-  styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array],
+  styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array],
   variants: [Int32Array, Uint32Array, Int32Array],
   variantSlots: [Uint16Array],
   media: [Uint32Array, Uint8Array, Float32Array],
@@ -345,6 +347,8 @@ export type SharedTables = {
     ringInnerColor: Uint32Array;
     ringInsetWidth: Float32Array;
     ringInsetColor: Uint32Array;
+    selectionBg: Uint32Array;
+    selectionFg: Uint32Array;
     padTop: Float32Array;
     padRight: Float32Array;
     padBottom: Float32Array;
@@ -698,6 +702,8 @@ export const STYLE_FIELDS = [
   ["ringInnerColor", "Uint32Array", false, false],
   ["ringInsetWidth", "Float32Array", false, false],
   ["ringInsetColor", "Uint32Array", false, false],
+  ["selectionBg", "Uint32Array", true, false],
+  ["selectionFg", "Uint32Array", true, false],
   ["padT", "Float32Array", false, true],
   ["padR", "Float32Array", false, true],
   ["padB", "Float32Array", false, true],
@@ -789,6 +795,8 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[
   ["ringInnerColor", "ringInnerColor"],
   ["ringInsetWidth", "ringInsetWidth"],
   ["ringInsetColor", "ringInsetColor"],
+  ["selectionBg", "selectionBg"],
+  ["selectionFg", "selectionFg"],
   ["padTop", "padT"],
   ["padRight", "padR"],
   ["padBottom", "padB"],

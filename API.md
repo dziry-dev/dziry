@@ -240,8 +240,16 @@ of strings a user can type is unbounded, so there are no variants to emit. Its *
 selection range become a new NOTES.md ledger entry** when A5 lands. The caret blink is an engine-side
 timer flipping one bit, never JS at frame rate.
 
-`bind:value` exists in partial form today — insert, Backspace and Delete **at the caret**, through
-the `editables` table (`src/compiler/compile.ts:801`). No selection and no clipboard.
+`bind:value` exists in partial form today — insert, Backspace and Delete at the caret **or over
+the selection**, through the `editables` table (`src/compiler/compile.ts:801`). No clipboard, and
+no IME.
+
+The selection is engine state for the same reason the caret is, and its shape is a measurement
+rather than a preference: `(anchor, focus)` rather than `(start, end)`. From a collapsed caret at
+5, Shift+ArrowLeft walks `5..6`, `5..5`, then `4..5 backward` — the anchor stays at 5 *through*
+the reversal, and an ordered pair has no way to know which end to move once the two have crossed.
+It crosses to Bun as two numbers beside a keystroke and nowhere else, so nothing in the app can
+observe it, which is what keeps a drag from costing a round trip per pointer move.
 
 The caret index *is* engine-owned, as of A5's first slice, and one detail of that is worth writing
 down: the engine moves the caret **optimistically**, before Bun has written the signal. It has to —
@@ -300,9 +308,13 @@ cannot open — that one needs the overlay layer, not this machinery.
 | `box-shadow` — the ring subset | **done** — protocol v16. No offset and no blur, a solid spread, stored as three concentric bands, which is exactly what `ring-*`, `inset-ring-*` and `ring-offset-*` compile to (measured, BROWSER-FACTS.md). `shadow-md` warns and draws nothing rather than being approximated | A1 |
 | `currentcolor` | **done** — the element's computed `color`, substituted textually before the expander. Not dynamic: the cascade already resolves `color` per node. Needed because bare `ring-2` reaches it through a `var()` fallback | A1 |
 | `outline` / `outline-offset` | planned — a ring is what Tailwind reaches for and what landed; `outline`'s own fields are still absent, so `outline-*` utilities warn | A1 |
-| Shift+Arrow, drag-to-select, `::selection` | planned — the rules are measured, and `(anchor, focus)` is the shape they imply | A5 |
+| selection — drag, Shift+Arrow, Shift+click | **done** — the engine holds `(anchor, focus)`, not an ordered range, because that is the only shape a Shift reversal survives: from a caret at 5, Shift+Left walks `5..6`, `5..5`, `4..5 backward` with the anchor still at 5 (measured) | A5 |
+| double click for a word, triple click / Ctrl+A for all | **done** — the segment at the *nearest boundary* plus its trailing whitespace run, which is one rule over thirteen measured rows. A double click does **not** use the character under the pointer: at 9.55 in `quick-brown` it selects `brown ` | A5 |
+| editing over a selection | **done** — one splice replaces the range. Backspace and Delete are *identical* once a range is live, so the direction only widens a collapsed caret; insertion leaves the caret after what it inserted | A5 |
+| `::selection` | **done** — protocol v17. Two inherited colours on the originating element's row, not a node: a selection is a range inside a box rather than a box. The default is a **stated convention** in dziri's UA sheet, because Chromium does not expose its own highlight colour to script | A1 |
+| clipboard, IME, double-click-then-drag by word | planned — a drag after a double click extends by character | A5 |
 | a `<label>` click focusing a text field | planned — `activates` forwards to control kinds only, and a text field is not one | A3 |
-| caret, selection, IME, clipboard | planned — new ledger entry | A5 |
+| the caret and selection as a ledger entry | **half done** — the state is built and the argument is in `caret.rs`'s header; the NOTES.md entry ROADMAP A5 asks for is still owed. Both fail the compile-time gate at question 3: neither is declared and both are unbounded, so they are engine-owned interaction state beside `hovered` and `focused` | A5 |
 
 *The Milestone column above uses ROADMAP's phase labels. The table under Status uses `M`-numbers,
 and the two vocabularies have no mapping anywhere in the repo — worth reconciling, but inventing one

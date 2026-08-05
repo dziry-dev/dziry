@@ -348,7 +348,7 @@ function start(
             case EventKind.TEXT_INPUT:
               // `b` is the caret, which the engine owns. Without it this could only append,
               // so clicking into the middle of a field and typing put the text at the end.
-              if (typeInto(editables, e.node, { text: e.text, caret: e.b })) {
+              if (typeInto(editables, e.node, { text: e.text, caret: e.b, anchor: e.c })) {
                 dirty = true;
               }
               break;
@@ -363,7 +363,7 @@ function start(
                 // engine has already shifted it by the time this runs, and deliberately
                 // does not for Delete.
                 const erase = e.a === KEY_BACKSPACE ? "backward" : "forward";
-                if (typeInto(editables, e.node, { text: null, erase, caret: e.b })) {
+                if (typeInto(editables, e.node, { text: null, erase, caret: e.b, anchor: e.c })) {
                   dirty = true;
                 }
               } else if (e.a === KEY_ESCAPE) {

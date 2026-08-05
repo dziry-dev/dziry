@@ -31,6 +31,8 @@ export const styles = {
   ringInnerColor: new Uint32Array(9),
   ringInsetWidth: new Float32Array(9),
   ringInsetColor: new Uint32Array(9),
+  selectionBg: new Uint32Array(9).fill(4281569535),
+  selectionFg: new Uint32Array(9).fill(4294967295),
   padT: new Float32Array([12,0,0,0,0,0,0,0,0]),
   padR: new Float32Array([12,0,0,0,0,0,0,0,0]),
   padB: new Float32Array([12,0,0,0,0,0,0,0,0]),

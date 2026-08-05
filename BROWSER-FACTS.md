@@ -1080,3 +1080,120 @@ Six things follow, and all six changed what got built.
 Reproduce with `scripts/` nothing — this is a compiler measurement, and it is pinned by
 `css.test.ts` ("Tailwind's ring utilities become concentric bands"), whose input strings are the
 right-hand column of the table above rather than hand-written approximations of it.
+
+---
+
+## What selects a word, and what editing does to a live selection
+
+**Measured 2026-08-05 · Chromium 151 (via Edge 151) · `probes/selection-editing.html`, driven by
+real pointer and key events. Run twice, identical.**
+
+This closes the row the previous section left open: its fixture was the single word `abcdefghij`,
+so a double click reporting `0..10` said "a double click selects a word" and nothing about where a
+word ends. Four fields here — `"the quick-brown fox"`, `"abcdefghij"`, `"a,, bb  cc"` and
+`"a-b c,d e - f"` — pin the boundary rule, and the second one carries the editing half.
+
+### The harness had to be fixed before it measured anything
+
+A first pass sent only `clickCount: 2` events and **every double click reported `0..4`** regardless
+of where it clicked. Not a browser behaviour: the first one landed and the rest did nothing, because
+a real double click is a *sequence* — press/release at count 1, then press/release at count 2 — and
+Chrome will not treat a lone count-2 press at a new position as the second half of one. Every double
+click below is preceded by a plain single click at the same point, which also collapses the previous
+row's selection so no row inherits another's state.
+
+Recorded because the wrong version was *plausible*: `0..4` is "the ", a real word selection, and a
+table of thirteen identical rows is easy to read as "Chrome always selects the first word".
+
+### A double click selects the segment at the **nearest boundary**, plus trailing whitespace
+
+| field | pointer | nearest boundary | selection | what that is |
+|---|---|---|---|---|
+| `the quick-brown fox` | 1.0 | 1 | `0..4` | `"the "` — **the trailing space is included** |
+| | 6.0 | 6 | `4..9` | `"quick"` — the hyphen is **not** |
+| | 9.55 | 10 | `10..16` | `"brown "` — not the hyphen it is hovering |
+| | 12.0 | 12 | `10..16` | `"brown "` |
+| | 3.52 | 4 | `4..9` | `"quick"` — not the space it is hovering |
+| | 17.0 | 17 | `16..19` | `"fox"` — nothing follows, so nothing is appended |
+| | 30 (past end) | 19 | `16..19` | `"fox"` |
+| `a,, bb  cc` | 2.05 | 2 | `2..4` | the **second** comma plus the space — not the `,,` run |
+| | 5.0 | 5 | `4..8` | `"bb  "` — the **whole** run of two spaces comes with it |
+| | 7.05 | 7 | `6..8` | `"  "` — whitespace alone selects the run |
+| `a-b c,d e - f` | 1.48 | 1 | `1..2` | the hyphen alone, `b` follows so nothing is appended |
+| | 5.46 | 5 | `5..6` | the comma alone |
+| | 10.46 | 10 | `10..12` | the hyphen plus its trailing space |
+
+One rule explains all thirteen:
+
+1. Resolve the pointer to the **nearest character boundary** — the same rounding a single click
+   uses, `boundary_at`.
+2. Take the segment that boundary falls in. Segments are a run of word characters, a run of
+   whitespace, or **one** punctuation character (`,,` is two segments, which is why clicking the
+   second comma selects only it).
+3. When the boundary sits exactly between two segments, prefer the one **starting** there; at the
+   very end of the text, where nothing starts, take the one ending there.
+4. Unless the segment is whitespace, append the whole run of whitespace that follows it.
+
+Rule 3 is what made two rows look contradictory before it was found. A pointer at 9.55 is *inside*
+the hyphen of `quick-brown`, and a pointer at 10.46 is inside the hyphen of `e - f`; the first
+selects `brown ` and the second selects the hyphen. Both round to boundary 10, and in the first case
+a word starts there while in the second the hyphen does. **A double click does not use the character
+under the pointer.** Implementing it that way would have made every click in the right half of a
+character select the wrong segment.
+
+Rule 2 is the one worth stating out loud: the hyphen in `quick-brown` is a word boundary, so
+`quick-brown` is two words, not one.
+
+### Triple click and Ctrl+A both select everything
+
+`0..19 forward` for both, on a single-line field. A triple click in a paragraph selects a line; an
+input has only one, so the two coincide here and nothing distinguishes them.
+
+### Shift+click extends from the anchor, and flips through it
+
+From a collapsed caret at 4: Shift+click at 9 gives `4..9 forward`; a second Shift+click at 1 gives
+`1..4 **backward**` — the anchor stays at 4. The same `(anchor, focus)` argument the Shift+Arrow
+table makes, reached with the pointer instead.
+
+### Editing over a range replaces exactly the range
+
+| before | key | after | caret |
+|---|---|---|---|
+| `abcdefghij`, `2..6` | `X` | `abXghij` | `3..3` — **after the inserted text** |
+| `abXghij`, `1..4` | Backspace | `ahij` | `1..1` |
+| `ahij`, `1..3` | Delete | `aj` | `1..1` |
+| `aj`, `1..2 **backward**` | `Z` | `aZ` | `2..2` |
+| `aZ`, `2..2` (collapsed) | Backspace | `a` | `1..1` |
+
+Four things follow, and three of them are places an implementation can plausibly go wrong.
+
+- **Backspace and Delete are identical when a range is live.** Both erase exactly the range and
+  neither takes the extra character its collapsed behaviour would. So the erase direction is only
+  consulted on a collapsed caret.
+- **Insertion leaves the caret after the inserted text**, not at the start of what it replaced.
+- **The direction does not change the splice.** A backward `1..2` edits the same as a forward one,
+  which matters because the engine stores `(anchor, focus)` and could easily splice `anchor..focus`
+  the wrong way round.
+- A collapsed range is still a caret, so the erasing keys must not treat it as a zero-length range
+  and do nothing.
+
+### The UA's own selection colour is **not readable**, and an author rule is
+
+```
+::selection with no author rule: background=rgba(0, 0, 0, 0) color=rgb(0, 0, 0)
+::selection with an author rule:  background=rgb(1, 2, 3) color=rgb(4, 5, 6)
+```
+
+Chromium does not expose its highlight colour through `getComputedStyle` — the transparent
+background is a "nothing here", not the colour it paints. Same category as the caret's width and
+blink rate: browser chrome, unmeasurable from script, and it would take a screen recording to get.
+
+So dziri's default belongs in **its own UA sheet**, where a UA default is supposed to live, and is
+therefore a stated convention rather than a match. An author `::selection` rule *is* honoured, which
+is what makes the two style fields worth having: the default is a guess, and overriding it is not.
+
+### Not measured
+
+Double-click-then-drag extends by *word* in Chrome, and a shift+double-click extends to a word
+boundary. Neither is measured here and neither is implemented; a drag after a double click extends
+by character.

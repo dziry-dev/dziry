@@ -724,16 +724,28 @@ test("the IR for one small document is exactly this", () => {
       // style and stop sharing a slot. Every index after it shifts by one. That is
       // the interner working, not a regression: `.row` and the nested `.row` span
       // still share style 3, which is the sharing this fixture exists to pin.
+      //
+      // `selectionBg`/`selectionFg` on every row is the UA sheet's `body::selection`
+      // arriving by *inheritance*, which is how one rule at the root becomes the default
+      // for every field without being declared on any of them — and what lets an author's
+      // own `body::selection` win on origin instead of losing to a UA rule sitting closer.
+      //
+      // They print as hex rather than as a nine-digit decimal because `describeStyle`
+      // derives which fields are colours from the wire type now instead of naming three of
+      // them. Half the palette — both scrollbar colours, `accentColor`, `caretColor` — had
+      // been dumping as raw integers.
       "styles (7 unique)",
-      "    0  fg=#eeeeee padT=8 padR=8 padB=8 padL=8 gapRow=4 gapCol=4",
-      "    1  fg=#eeeeee marT=21.44 marB=21.44 fontSize=20 fontWeight=700",
-      "    2  fg=#eeeeee fontSize=20 fontWeight=700",
-      "    3  fg=#eeeeee direction=row gapRow=4 gapCol=4",
+      "    0  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff " +
+        "padT=8 padR=8 padB=8 padL=8 gapRow=4 gapCol=4",
+      "    1  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff " +
+        "marT=21.44 marB=21.44 fontSize=20 fontWeight=700",
+      "    2  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff fontSize=20 fontWeight=700",
+      "    3  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff direction=row gapRow=4 gapCol=4",
       "    4  bg=#123456 fg=#eeeeee borderColor=#abcdef borderWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
-        "padT=2 padR=6 padB=2 padL=6",
+        "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
       "    5  bg=#2244aa fg=#eeeeee borderColor=#abcdef borderWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
-        "padT=2 padR=6 padB=2 padL=6",
-      "    6  fg=#eeeeee",
+        "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
+      "    6  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff",
       "",
       "strings (3)",
       '    0  "Hi"',
