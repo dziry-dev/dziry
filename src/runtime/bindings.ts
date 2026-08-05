@@ -82,23 +82,45 @@ export function subscribeBindings(ui: CompiledUi, onChange: () => void): () => v
 export type EditableRef = { node: number; signal: Signal<string> };
 
 /**
- * Routes a keystroke into the focused editable.
+ * Routes a keystroke into the focused editable, **at the caret**.
  *
- * The minimum that makes typing work: append text, delete on backspace. No caret,
- * no selection, no clipboard — those need a text-editing model this does not have.
+ * Insert and delete at `caret`, which the engine reports beside the text — it owns the
+ * index, this owns the string. `caret` is a character offset, not a byte one, and is
+ * clamped rather than trusted: it crossed a process boundary and the value may have been
+ * rewritten by app code since the engine read it.
+ *
+ * A `caret` of -1 means "no caret", which is what a keystroke arriving with nothing focused
+ * looks like. It appends, so a host that never places a caret still behaves as this did
+ * before there was one.
+ *
+ * Still no selection and no clipboard.
+ *
  * Returns true if the key was consumed.
  */
 export function typeInto(
   editables: EditableRef[],
   focused: number,
-  input: { text: string | null; backspace: boolean },
+  input: { text: string | null; backspace: boolean; caret?: number },
 ): boolean {
   const target = editables.find((e) => e.node === focused);
   if (!target) return false;
 
+  // Characters rather than UTF-16 units, because that is what the engine counted when it
+  // resolved a click to a boundary. They differ for anything outside the BMP, and slicing
+  // by the wrong unit would split a surrogate pair into two broken halves.
+  const chars = [...target.signal.value];
+  const caret = input.caret ?? -1;
+  const at = caret < 0 ? chars.length : Math.min(caret, chars.length);
+  const tail = chars.slice(at).join("");
+
   if (input.backspace) {
+    // Nothing to the left of the caret is not a failure — it is the measured behaviour of
+    // Backspace at offset 0 — but the key is still consumed, so the host does not go
+    // looking for another meaning for it.
+    if (at === 0) return true;
+    const head = chars.slice(0, at - 1).join("");
     batch(() => {
-      target.signal.value = target.signal.value.slice(0, -1);
+      target.signal.value = head + tail;
     });
     return true;
   }
@@ -109,9 +131,10 @@ export function typeInto(
     // driven by whoever is holding a key down. Dropping the keystroke at a
     // documented limit is the only place that can be decided, because by the
     // time the signal has the text the slot is already sized for it.
-    if (target.signal.value.length + input.text.length > MAX_SLOT_CHARS) return false;
+    if (chars.length + input.text.length > MAX_SLOT_CHARS) return false;
+    const head = chars.slice(0, at).join("");
     batch(() => {
-      target.signal.value += input.text;
+      target.signal.value = head + input.text + tail;
     });
     return true;
   }

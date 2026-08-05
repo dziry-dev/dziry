@@ -26,7 +26,26 @@ use skia_safe::{
     surfaces, Color, ImageInfo, PixelGeometry, Surface, SurfaceProps, SurfacePropsFlags,
 };
 
+use crate::caret::Motion;
 use crate::error::EngineError;
+
+/// SDL keycodes for the keys that move a caret.
+///
+/// SDL's own constants are `SDLK_*`, and these are their values: a printable key's keycode
+/// *is* its Unicode scalar, and everything else is its scancode with `1 << 30` set — which
+/// is why these are large numbers rather than an enum. Written out because `window.rs`
+/// flattens the keycode to an `i32` at the boundary, so by the time the engine sees one
+/// there is no `Keycode` left to match on.
+mod keys {
+    const SCANCODE_MASK: i32 = 1 << 30;
+    pub const RIGHT: i32 = SCANCODE_MASK | 79;
+    pub const LEFT: i32 = SCANCODE_MASK | 80;
+    pub const END: i32 = SCANCODE_MASK | 77;
+    pub const HOME: i32 = SCANCODE_MASK | 74;
+    /// Unmasked, being an ASCII control character — which is why the host matches plain 8.
+    pub const BACKSPACE: i32 = 8;
+}
+
 use crate::layout::LayoutTree;
 use crate::paint::{
     hit_test, is_scrollable, scrollable_at, Bar, BarHover, Geometry, InputState, Painter,
@@ -934,18 +953,53 @@ impl Engine {
                 RawInput::MouseDown { x, y } => self.mouse_down(x, y),
                 RawInput::MouseUp { x, y } => self.mouse_up(x, y),
 
-                RawInput::KeyDown { keycode, mods } => self.events.push(Event {
-                    kind: event_kind::KEY_DOWN,
-                    node: self.state.focused,
-                    a: keycode,
-                    b: mods as i32,
-                    ..Default::default()
-                }),
+                RawInput::KeyDown { keycode, mods } => {
+                    // Caret movement is handled here and **not forwarded**, which is the
+                    // whole point of the caret being engine state: an arrow key costs a
+                    // repaint of one rect and no round trip to Bun, so it stays responsive
+                    // while app code is busy. Forwarding as well would also invite a host
+                    // to move the caret a second time.
+                    //
+                    // Anything else goes on to the host untouched — Backspace still edits
+                    // the value there, because the value is a signal and only Bun owns it.
+                    if !self.move_caret(keycode) {
+                        // `b` is the **caret**, not the modifier mask it used to be.
+                        //
+                        // Nothing consumed `mods`: the host matches on the keycode alone,
+                        // and every key whose meaning depends on a modifier — Shift+Arrow to
+                        // extend a selection, and later Ctrl+Arrow by word — is handled on
+                        // this side, because the caret and the selection are engine state.
+                        // So the field is worth more as the index Backspace has to delete
+                        // in front of, which the host cannot know and cannot ask for.
+                        let _ = mods;
+                        self.events.push(Event {
+                            kind: event_kind::KEY_DOWN,
+                            node: self.state.focused,
+                            a: keycode,
+                            b: self.painter.caret_index().map_or(-1, |i| i as i32),
+                            ..Default::default()
+                        });
+
+                        // Backspace removes the character before the caret, so the caret
+                        // moves back over it — the same optimism as typing, and the same
+                        // reason: waiting for Bun to republish would leave the caret a frame
+                        // behind the text.
+                        if keycode == keys::BACKSPACE {
+                            self.shift_caret(-1);
+                        }
+                    }
+                }
 
                 RawInput::Text { text } => {
+                    // `b` carries where to insert. Without it the host can only append,
+                    // which is what it did: clicking into the middle of a field and typing
+                    // put the characters at the end. The caret is engine state and the value
+                    // is a signal, so the index has to cross the boundary with the text.
+                    let caret = self.painter.caret_index();
                     let mut event = Event {
                         kind: event_kind::TEXT_INPUT,
                         node: self.state.focused,
+                        b: caret.map_or(-1, |i| i as i32),
                         ..Default::default()
                     };
                     let bytes = text.as_bytes();
@@ -958,6 +1012,20 @@ impl Engine {
                     event.text[..n].copy_from_slice(&bytes[..n]);
                     event.a = n as i32;
                     self.events.push(event);
+
+                    // Move the caret past what was typed, now, rather than waiting for Bun
+                    // to write the signal and republish. A caret that lags the text it sits
+                    // in is the one thing a text field cannot do.
+                    //
+                    // **It can be one ahead for a frame.** `typeInto` refuses a keystroke
+                    // that would take the value past `MAX_SLOT_CHARS`, and this cannot know
+                    // that — so at the cap the caret sits one character beyond the text
+                    // until the next click. The alternative is a round trip before the caret
+                    // moves, which is worse on every keystroke to be right on the last one.
+                    let typed = std::str::from_utf8(&event.text[..n])
+                        .map(|s| s.chars().count() as i32)
+                        .unwrap_or(0);
+                    self.shift_caret(typed);
                 }
 
                 RawInput::FocusChanged { focused } => self.events.push(Event {
@@ -1079,6 +1147,56 @@ impl Engine {
     }
 
     /// Layout rects plus scroll offsets, which every walk needs together.
+    /// How many characters the run holding the caret contains.
+    ///
+    /// Every caret movement clamps to this, and it is read from the tables each time rather
+    /// than cached: the value is a signal, so a commit can change its length between one
+    /// keystroke and the next.
+    fn caret_run_chars(&self) -> Option<(usize, usize)> {
+        let (node, _) = self.painter.caret()?;
+        let slot = self
+            .tables
+            .i32s(protocol::Table::Nodes as usize, protocol::nodes::TEXT)
+            .get(node)
+            .copied()
+            .unwrap_or(-1);
+        Some((node, self.tables.string(slot).chars().count()))
+    }
+
+    /// Handles an arrow, Home or End if there is a caret. Returns whether it was consumed.
+    ///
+    /// Consumed is not the same as moved: an arrow at the end of the text is *handled* and
+    /// changes nothing, which is measured — `probes/caret-and-selection.html` shows
+    /// ArrowRight at the length and ArrowLeft at 0 both leaving the caret put. Forwarding
+    /// those to the host instead would let it act on a key the engine had already claimed.
+    fn move_caret(&mut self, keycode: i32) -> bool {
+        let motion = match keycode {
+            k if k == keys::LEFT => Motion::Left,
+            k if k == keys::RIGHT => Motion::Right,
+            k if k == keys::HOME => Motion::Start,
+            k if k == keys::END => Motion::End,
+            _ => return false,
+        };
+        let Some((node, chars)) = self.caret_run_chars() else {
+            return false;
+        };
+        if self.painter.move_caret(node, motion, chars) {
+            self.needs_paint = true;
+        }
+        true
+    }
+
+    /// Moves the caret by an edit of `delta` characters.
+    fn shift_caret(&mut self, delta: i32) {
+        if let Some((node, chars)) = self.caret_run_chars() {
+            // Clamped to the length *before* the edit plus the edit itself, because the
+            // tables still hold the old string — Bun has not committed the new one yet.
+            let after = (chars as i32 + delta).max(0) as usize;
+            self.painter.shift_caret(node, delta, after);
+            self.needs_paint = true;
+        }
+    }
+
     fn geometry(&self) -> Geometry<'_> {
         Geometry {
             bounds: self.tree.bounds(),

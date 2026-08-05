@@ -287,9 +287,10 @@ cannot open — that one needs the overlay layer, not this machinery.
 | `::placeholder` | **done** — protocol v15. An ordinary generated box, like `::before`, with two differences: its text comes from the attribute rather than `content`, and paint draws it only while the field is empty | C2 |
 | a disabled field refuses focus | **done** — a disabled form control now gets a `controls` row, so the engine can see it. A press on one produces no `mousedown`, `mouseup` or `click` at all, as measured | A3 |
 | a field's **width** from `size` | planned — `29 + 7 × size` px is measured (BROWSER-FACTS.md), and unimplemented: `size="20"` does nothing, so an `<input>` with no width class fills its container instead of being 169px | A5 |
-| caret — position, blink, `caret-color` | planned — the field takes text but shows no cursor | A5 |
-| selection — click-drag, shift+arrows, `::selection` | planned — no selection model exists; `typeInto` appends and backspaces only | A5 |
-| arrow keys, Home/End, insert *at* the caret | planned — editing is append-only, so there is nowhere for a caret to be | A5 |
+| caret — position, blink, `caret-color` | **done** — a click resolves to the nearest character boundary (measured); the blink is an engine timer, so it survives a busy Bun | A5 |
+| arrow keys, Home/End | **done** — consumed by the engine, never forwarded, so a caret move costs one rect and no round trip | A5 |
+| insert and delete *at* the caret | **done** — the engine reports the index beside the text; `typeInto` splices there, clamped, by characters rather than UTF-16 units | A5 |
+| Shift+Arrow, drag-to-select, `::selection` | planned — the rules are measured, and `(anchor, focus)` is the shape they imply | A5 |
 | a `<label>` click focusing a text field | planned — `activates` forwards to control kinds only, and a text field is not one | A3 |
 | caret, selection, IME, clipboard | planned — new ledger entry | A5 |
 

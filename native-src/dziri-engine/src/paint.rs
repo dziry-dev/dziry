@@ -16,7 +16,7 @@ use skia_safe::textlayout::TextAlign;
 use skia_safe::{Canvas, Color, Matrix, Paint, PaintStyle, Point, RRect, Rect};
 
 use crate::anim::{Anims, Blend};
-use crate::caret::{boundary_at, Carets};
+use crate::caret::{boundary_at, Carets, Motion};
 use crate::controls::{Activation, Controls};
 use crate::protocol::{self, control_flags, display, node_kind, predicate};
 use crate::tables::Tables;
@@ -947,6 +947,26 @@ impl Painter {
     /// Drops the caret, for a blur or a press outside every field.
     pub fn clear_caret(&mut self) {
         self.carets.clear();
+    }
+
+    /// The node holding the caret and its index, or `None`.
+    pub fn caret(&self) -> Option<(usize, usize)> {
+        self.carets.current()
+    }
+
+    /// Just the index, which is what a `TEXT_INPUT` event carries to the host.
+    pub fn caret_index(&self) -> Option<usize> {
+        self.carets.current().map(|(_, index)| index)
+    }
+
+    /// Moves the caret within `node`. Returns whether it actually moved.
+    pub fn move_caret(&mut self, node: usize, motion: Motion, chars: usize) -> bool {
+        self.carets.move_to(node, motion, chars)
+    }
+
+    /// Shifts the caret by an edit of `delta` characters.
+    pub fn shift_caret(&mut self, node: usize, delta: i32, chars: usize) {
+        self.carets.shift(node, delta, chars);
     }
 
     /// Whether any tween is still in flight, so an idle frame stays free.

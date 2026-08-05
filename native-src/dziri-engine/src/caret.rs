@@ -125,6 +125,67 @@ impl Carets {
             *slot = -1;
         }
     }
+
+    /// The node holding the caret, and its index. `None` when there is no caret.
+    pub fn current(&self) -> Option<(usize, usize)> {
+        self.index
+            .iter()
+            .position(|&i| i >= 0)
+            .map(|node| (node, self.index[node] as usize))
+    }
+
+    /// Moves the caret within a run of `chars` characters. Returns whether it moved.
+    ///
+    /// `false` means the frame needs no repaint *and* the key was still consumed — an
+    /// arrow at the end of the text is handled and does nothing, which is the measured
+    /// behaviour: `probes/caret-and-selection.html` shows ArrowRight at the length and
+    /// ArrowLeft at 0 both leaving the caret exactly where it was.
+    ///
+    /// Restarts the blink on every move, for the reason `place` does: a caret mid-off-phase
+    /// while the user is holding an arrow down looks like the key stopped working.
+    pub fn move_to(&mut self, node: usize, to: Motion, chars: usize) -> bool {
+        let Some(from) = self.index_of(node) else {
+            return false;
+        };
+        let next = match to {
+            Motion::Left => from.saturating_sub(1),
+            Motion::Right => (from + 1).min(chars),
+            Motion::Start => 0,
+            Motion::End => chars,
+        };
+        self.visible = true;
+        self.elapsed = 0.0;
+        if next == from {
+            return false;
+        }
+        self.index[node] = next as i32;
+        true
+    }
+
+    /// Shifts the caret by an edit of `delta` characters, clamped to `chars`.
+    ///
+    /// Typing moves the caret past what was inserted; a backspace moves it back over what
+    /// was removed. The engine does this arithmetic itself rather than waiting to be told,
+    /// because the alternative is a round trip to Bun before the caret catches up — and a
+    /// caret that lags the text it is in is the one thing a text field cannot do.
+    pub fn shift(&mut self, node: usize, delta: i32, chars: usize) {
+        let Some(from) = self.index_of(node) else {
+            return;
+        };
+        let next = (from as i64 + delta as i64).clamp(0, chars as i64);
+        self.index[node] = next as i32;
+        self.visible = true;
+        self.elapsed = 0.0;
+    }
+}
+
+/// Where a caret key wants to go.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Motion {
+    Left,
+    Right,
+    Start,
+    End,
 }
 
 /// The character boundary a click at `dx` past the run's origin lands on.
@@ -161,6 +222,28 @@ pub fn boundary_at(dx: f32, chars: usize, mut width_to: impl FnMut(usize) -> f32
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The keycodes `engine.rs` matches on are SDL's own.
+    ///
+    /// Written from memory first, which is the thing this repo keeps proving is not good
+    /// enough — so they are checked against the dependency rather than against a
+    /// recollection. `window.rs` flattens a `Keycode` to `i32` at the boundary, so by the
+    /// time the engine sees one there is nothing left to match on but the number, and a
+    /// number that is wrong by one gives an arrow key that silently does nothing.
+    #[test]
+    fn the_caret_keycodes_are_the_ones_sdl_sends() {
+        use sdl3::keyboard::Keycode;
+
+        const SCANCODE_MASK: i32 = 1 << 30;
+        assert_eq!(Keycode::Left.to_ll().0 as i32, SCANCODE_MASK | 80);
+        assert_eq!(Keycode::Right.to_ll().0 as i32, SCANCODE_MASK | 79);
+        assert_eq!(Keycode::Home.to_ll().0 as i32, SCANCODE_MASK | 74);
+        assert_eq!(Keycode::End.to_ll().0 as i32, SCANCODE_MASK | 77);
+
+        // And Backspace is *not* masked, because it is an ASCII control character — which
+        // is why the host can match it as plain 8.
+        assert_eq!(Keycode::Backspace.to_ll().0 as i32, 8);
+    }
 
     /// Even spacing, so the expected answers are readable: 10px per character.
     fn even(n: usize) -> f32 {
@@ -214,6 +297,58 @@ mod tests {
             3,
             "26 is nearer to 20 than 6 is"
         );
+    }
+
+    /// The measured movement rules, from `probes/caret-and-selection.html`.
+    #[test]
+    fn arrows_move_one_boundary_and_stop_dead_at_the_ends() {
+        let mut carets = Carets::new();
+        carets.resize(2);
+        carets.place(1, 5);
+
+        assert!(carets.move_to(1, Motion::Left, 10));
+        assert_eq!(carets.index_of(1), Some(4));
+        assert!(carets.move_to(1, Motion::Right, 10));
+        assert_eq!(carets.index_of(1), Some(5));
+
+        assert!(carets.move_to(1, Motion::Start, 10));
+        assert_eq!(carets.index_of(1), Some(0));
+        assert!(carets.move_to(1, Motion::End, 10));
+        assert_eq!(carets.index_of(1), Some(10));
+
+        // Measured: ArrowRight at the length and ArrowLeft at 0 both leave the caret put.
+        // `false` is "did not move" and the key is still consumed — the caller must not
+        // forward it, or the host acts on a key the engine already claimed.
+        assert!(!carets.move_to(1, Motion::Right, 10), "no move at the end");
+        assert_eq!(carets.index_of(1), Some(10));
+        carets.move_to(1, Motion::Start, 10);
+        assert!(!carets.move_to(1, Motion::Left, 10), "no move at 0");
+        assert_eq!(carets.index_of(1), Some(0));
+
+        // A node with no caret is not something to move.
+        assert!(!carets.move_to(0, Motion::Right, 10));
+    }
+
+    #[test]
+    fn an_edit_carries_the_caret_with_it() {
+        let mut carets = Carets::new();
+        carets.resize(2);
+        carets.place(1, 3);
+
+        // Typing two characters at 3 leaves the caret after them.
+        carets.shift(1, 2, 7);
+        assert_eq!(carets.index_of(1), Some(5));
+
+        // A backspace takes it back over what was removed.
+        carets.shift(1, -1, 6);
+        assert_eq!(carets.index_of(1), Some(4));
+
+        // Clamped at both ends, so a mismatch between what the host accepted and what the
+        // engine assumed cannot walk the caret outside the string.
+        carets.shift(1, -99, 6);
+        assert_eq!(carets.index_of(1), Some(0));
+        carets.shift(1, 99, 6);
+        assert_eq!(carets.index_of(1), Some(6));
     }
 
     #[test]

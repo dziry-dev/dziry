@@ -337,14 +337,21 @@ function start(
               break;
 
             case EventKind.TEXT_INPUT:
-              if (typeInto(editables, e.node, { text: e.text, backspace: false })) {
+              // `b` is the caret, which the engine owns. Without it this could only append,
+              // so clicking into the middle of a field and typing put the text at the end.
+              if (typeInto(editables, e.node, { text: e.text, backspace: false, caret: e.b })) {
                 dirty = true;
               }
               break;
 
             case EventKind.KEY_DOWN:
               if (e.a === KEY_BACKSPACE) {
-                if (typeInto(editables, e.node, { text: null, backspace: true })) dirty = true;
+                // The arrows never arrive here: the engine consumes them, so a caret move
+                // costs a repaint of one rect and no round trip. Backspace does arrive,
+                // because it edits the *value* and only Bun owns that.
+                if (typeInto(editables, e.node, { text: null, backspace: true, caret: e.b })) {
+                  dirty = true;
+                }
               } else if (e.a === KEY_ESCAPE) {
                 post({ t: "input", hovered: -1, pressed: -1, focused: -1 });
               }

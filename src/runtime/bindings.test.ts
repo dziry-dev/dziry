@@ -55,3 +55,65 @@ test("backspace still works at the cap, so the field is not a trap", () => {
   expect(typeInto(refs, 7, { text: null, backspace: true })).toBe(true);
   expect(value.value.length).toBe(MAX_SLOT_CHARS - 1);
 });
+
+// ---------------------------------------------------------------------------
+// Editing at the caret
+// ---------------------------------------------------------------------------
+
+test("text is inserted at the caret, not appended", () => {
+  const { value, refs } = editable("abcd");
+  // The bug this fixes: clicking into the middle of a field and typing put the
+  // characters at the end, because the host had no idea where the caret was. The engine
+  // owns the index and reports it beside the text; this owns the string.
+  expect(typeInto(refs, 7, { text: "X", backspace: false, caret: 2 })).toBe(true);
+  expect(value.value).toBe("abXcd");
+});
+
+test("backspace removes the character before the caret", () => {
+  const { value, refs } = editable("abcd");
+  expect(typeInto(refs, 7, { text: null, backspace: true, caret: 2 })).toBe(true);
+  expect(value.value).toBe("acd");
+});
+
+test("backspace at the start consumes the key and changes nothing", () => {
+  const { value, refs } = editable("abcd");
+  // Consumed, not refused: Backspace at offset 0 doing nothing is the measured behaviour,
+  // and returning false would send the host looking for another meaning for the key.
+  expect(typeInto(refs, 7, { text: null, backspace: true, caret: 0 })).toBe(true);
+  expect(value.value).toBe("abcd");
+});
+
+test("a caret at the end appends, and so does no caret at all", () => {
+  const { value, refs } = editable("ab");
+  expect(typeInto(refs, 7, { text: "c", backspace: false, caret: 2 })).toBe(true);
+  expect(value.value).toBe("abc");
+
+  // -1 is "nothing focused", and an absent field is a host that never places a caret.
+  // Both append, so this behaves as it did before there was a caret at all.
+  expect(typeInto(refs, 7, { text: "d", backspace: false, caret: -1 })).toBe(true);
+  expect(value.value).toBe("abcd");
+  expect(typeInto(refs, 7, { text: "e", backspace: false })).toBe(true);
+  expect(value.value).toBe("abcde");
+});
+
+test("a caret past the end is clamped rather than trusted", () => {
+  const { value, refs } = editable("ab");
+  // It crossed a process boundary, and app code may have rewritten the signal since the
+  // engine read the length. Slicing at 99 would silently drop text.
+  expect(typeInto(refs, 7, { text: "!", backspace: false, caret: 99 })).toBe(true);
+  expect(value.value).toBe("ab!");
+});
+
+test("the caret counts characters, not UTF-16 units", () => {
+  // "😀" is one character and two UTF-16 units. The engine resolved the click by counting
+  // *characters*, so slicing by `.length` here would put the insert in the middle of a
+  // surrogate pair and produce two broken halves.
+  const { value, refs } = editable("😀a");
+  expect(typeInto(refs, 7, { text: "X", backspace: false, caret: 1 })).toBe(true);
+  expect(value.value).toBe("😀Xa");
+
+  // And backspace over the emoji removes the whole thing, not half of it.
+  const two = editable("😀a");
+  expect(typeInto(two.refs, 7, { text: null, backspace: true, caret: 1 })).toBe(true);
+  expect(two.value.value).toBe("a");
+});
