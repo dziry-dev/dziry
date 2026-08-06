@@ -83,6 +83,7 @@ const SYMBOLS = {
   dziri_engine_mouse_up: { args: [u32, f32, f32], returns: i32 },
   dziri_engine_bounds: { args: [u32, u32, PTR], returns: i32 },
   dziri_engine_selection: { args: [u32, i32, PTR], returns: i32 },
+  dziri_engine_open_select: { args: [u32, PTR], returns: i32 },
   dziri_engine_surface_info: { args: [u32, PTR], returns: i32 },
   dziri_engine_read_pixels: { args: [u32, PTR, u32], returns: i32 },
   dziri_engine_encode_png: { args: [u32, PTR], returns: i32 },
@@ -580,6 +581,24 @@ export class Engine {
     );
     const [start, end] = [scratch32[0]!, scratch32[1]!];
     return start < 0 ? null : [start, end];
+  }
+
+  /**
+   * The open `<select>` and the option it shows, or null when no picker is open.
+   *
+   * The only way to ask, for the reason {@link Engine.selectionOf} is: openness is engine
+   * state that reaches Bun as an event and nothing else. Both numbers together because both
+   * are always wanted at once — a golden can show that *a* dropdown is open, and is at its
+   * worst at showing *which option is highlighted in it*, since a highlight is a few pixels
+   * of background colour.
+   */
+  openSelect(): { select: number; option: number } | null {
+    check(
+      engine.dziri_engine_open_select(this.#handle, ptr(scratch) as Pointer),
+      "dziri_engine_open_select",
+    );
+    const [select, option] = [scratch32[0]!, scratch32[1]!];
+    return select < 0 ? null : { select, option };
   }
 
   /** Presses `clicks` times at a node's centre — 2 for a word, 3 for the whole value. */

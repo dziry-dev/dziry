@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 17;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xb8a6b92b;
+export const SCHEMA_HASH = 0xf2ce59f6;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -31,7 +31,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
   lists: [4, 4, 4, 4, 4, 4, 4],
   tweens: [4, 4, 4, 4, 4, 2, 1, 4, 4, 4, 4],
   keyframes: [2, 4, 1, 4, 4, 4, 4],
-  controls: [4, 1, 4, 1],
+  controls: [4, 1, 4, 1, 4],
   layout: [4, 4, 4, 4],
   strings: [4, 4],
 };
@@ -46,7 +46,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
   lists: ["container", "anchorPrev", "anchorNext", "arenaStart", "stride", "capacity", "active"],
   tweens: ["mask", "duration", "delay", "iterations", "firstSegment", "segmentCount", "easing", "easeA", "easeB", "easeC", "easeD"],
   keyframes: ["style", "offset", "easing", "easeA", "easeB", "easeC", "easeD"],
-  controls: ["node", "kind", "group", "flags"],
+  controls: ["node", "kind", "group", "flags", "label"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
 };
@@ -271,8 +271,9 @@ export const F = {
   controls: {
     node: 0, // Sorted ascending, for binary search
     kind: 1, // ControlKind
-    group: 2, // Radio group id — interned per (form, name) — or -1
+    group: 2, // Radio group id — interned per (form, name), or per <select> for an option — or -1
     flags: 3, // ControlFlags: the authored initial state
+    label: 4, // The text-run node this control's label lives on, or -1. On a SELECT it is the run inside <selectedcontent>, whose string the engine repoints at the committed option's; on an OPTION it is that option's own run. Nothing else fills it.
   },
   /** Final bounds per node, written by the engine. */
   layout: {
@@ -298,7 +299,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
   lists: 7,
   tweens: 11,
   keyframes: 7,
-  controls: 4,
+  controls: 5,
   layout: 4,
   strings: 2,
 };
@@ -313,7 +314,7 @@ export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
   tweens: [Uint32Array, Float32Array, Float32Array, Float32Array, Int32Array, Uint16Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
   keyframes: [Uint16Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
-  controls: [Int32Array, Uint8Array, Int32Array, Uint8Array],
+  controls: [Int32Array, Uint8Array, Int32Array, Uint8Array, Int32Array],
   layout: [Float32Array, Float32Array, Float32Array, Float32Array],
   strings: [Uint32Array, Uint32Array],
 };
@@ -465,6 +466,7 @@ export type SharedTables = {
     kind: Uint8Array;
     group: Int32Array;
     flags: Uint8Array;
+    label: Int32Array;
   };
   layout: {
     x: Float32Array;
@@ -484,6 +486,7 @@ export const NodeFlags = {
   GENERATED: 1 << 2,
   EDITABLE: 1 << 3,
   PLACEHOLDER: 1 << 4,
+  OVERLAY: 1 << 5,
 } as const;
 
 export const ControlFlags = {
@@ -597,6 +600,7 @@ export const Predicate = {
   FOCUS: 4,
   CHECKED: 8,
   DISABLED: 16,
+  OPEN: 32,
   FIRST_GLOBAL: 256,
 } as const;
 export type Predicate = (typeof Predicate)[keyof typeof Predicate];
@@ -643,11 +647,13 @@ export const EventKind = {
 } as const;
 export type EventKind = (typeof EventKind)[keyof typeof EventKind];
 
-/** `controls.kind`. What a press does to this node, which is the only thing the engine needs to know about a control — appearance is the stylesheet's job and is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets itself and clears its group, and cannot be unchecked by pointer (measured). */
+/** `controls.kind`. What a press does to this node, which is the only thing the engine needs to know about a control — appearance is the stylesheet's job and is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets itself and clears its group, and cannot be unchecked by pointer (measured). `SELECT` opens its picker on the press rather than the release, and `OPTION` commits — which is the same set-self-clear-group `RADIO` does, plus closing. */
 export const ControlKind = {
   NONE: 0,
   CHECKBOX: 1,
   RADIO: 2,
+  SELECT: 3,
+  OPTION: 4,
 } as const;
 export type ControlKind = (typeof ControlKind)[keyof typeof ControlKind];
 

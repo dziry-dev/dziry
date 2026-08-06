@@ -162,6 +162,7 @@ if (LIVE) {
       generated: ui.generated,
       editableBoxes: ui.editableBoxes,
       placeholders: ui.placeholders,
+      overlays: ui.overlays,
       textBindings: ui.textBindings,
       handlers: ui.handlers,
       lists: ui.lists,

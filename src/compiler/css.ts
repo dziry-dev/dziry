@@ -20,7 +20,7 @@
 import { CssError, warnOnce } from "./diagnostics.ts";
 import { parseLength, type RegisteredProperty } from "./values.ts";
 
-export type Pseudo = "none" | "hover" | "active" | "focus" | "checked" | "disabled";
+export type Pseudo = "none" | "hover" | "active" | "focus" | "checked" | "disabled" | "open";
 
 /**
  * Pseudo-classes compiled into precomputed style variants.
@@ -36,6 +36,16 @@ export type Pseudo = "none" | "hover" | "active" | "focus" | "checked" | "disabl
  * here. It is the same shape and would cost the same, but nothing can author it
  * until there is a control to be indeterminate — adding it now would mean
  * supporting a selector that provably cannot match.
+ *
+ * `:open` is the newest, and it is closer to `:hover` than to `:checked`: the engine
+ * opened the picker, so the engine already knows. What makes it worth a bit of its own
+ * rather than a node flag is that the UA sheet's own visibility rule is written with it —
+ * `select::picker(select)` is hidden at rest and shown `:open` — so an author reading
+ * `:open` reads exactly the condition the picker itself is drawn by.
+ *
+ * `:closed` is its complement and is absent for the reason `:indeterminate` is not quite:
+ * it would match every non-popover element in the document, which is not a variant worth
+ * compiling. Write the base rule instead.
  */
 const SUPPORTED_PSEUDO = new Set<string>([
   "hover",
@@ -43,6 +53,7 @@ const SUPPORTED_PSEUDO = new Set<string>([
   "focus",
   "checked",
   "disabled",
+  "open",
 ]);
 
 /**
@@ -83,13 +94,45 @@ const SUPPORTED_PSEUDO = new Set<string>([
  * there is no box for a padding or a border to apply to. That is also what CSS says — the
  * highlight pseudo-elements accept a short list of properties and nothing else.
  */
-export type PseudoElement = "before" | "after" | "placeholder" | "selection";
+/**
+ * `::picker(select)` is the first *functional* pseudo-element, and the only spelling.
+ *
+ * The argument is not decoration and is not optional: the spec defines
+ * `::picker(<ident>)` so that a future control can name a picker of its own, and
+ * `select` is the one identifier defined today. Accepting a bare `::picker` would invent
+ * a shorthand no browser has, which is the kind of divergence that only surfaces when
+ * someone copies a stylesheet out of dziri and into a page.
+ *
+ * Unlike the other four, this one is a **box that contains authored children** rather
+ * than a box holding text the compiler supplies. That is what makes it an overlay: the
+ * options are laid out inside it, it hangs below its select, and it is painted after the
+ * tree. See `compile.ts::walkPicker` and `NodeFlags.OVERLAY`.
+ *
+ * What it does *not* do is change what the options' own selectors see. `select > option`
+ * still matches, because the picker is spliced in at the *node* level and the ancestor
+ * path the matcher walks still ends at the select — a browser's picker is a pseudo-element
+ * the light-DOM options render into, not a wrapper they become children of, and this keeps
+ * that property.
+ */
+export type PseudoElement = "before" | "after" | "placeholder" | "selection" | "picker";
 
 const SUPPORTED_PSEUDO_ELEMENT = new Set<string>([
   "before",
   "after",
   "placeholder",
   "selection",
+]);
+
+/**
+ * Pseudo-elements that must be written with an argument, and the arguments allowed.
+ *
+ * Separate from the set above because the two are checked at different points: a bare
+ * name is refused there with "did you mean `::picker(select)`", and a functional one is
+ * refused in {@link applyFuncPseudo} with the same list. Both messages have to exist,
+ * because `::picker` and `::picker(button)` are different mistakes.
+ */
+const FUNCTIONAL_PSEUDO_ELEMENT = new Map<string, Set<string>>([
+  ["picker", new Set(["select"])],
 ]);
 
 /**
@@ -1203,7 +1246,32 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
       spec[1] += attrs.length;
     }
 
-    for (const func of funcs) applyFuncPseudo(compound, func, spec, src);
+    for (const func of funcs) {
+      const named = applyFuncPseudo(compound, func, spec, src);
+      if (named === null) continue;
+      // The same three checks the bare `::name` path makes, on the same grounds: a
+      // pseudo-element names which cascade the *rule* is in, so it cannot be an
+      // argument, cannot sit on a non-subject compound, and there cannot be two.
+      if (role === "argument") {
+        throw new CssError(
+          `"::${named}()" cannot be used inside :is(), :where() or :not() — a\n` +
+            `  pseudo-element names which cascade the rule is in, which is a property\n` +
+            `  of the rule and not of one compound.`,
+          partAt,
+        );
+      }
+      if (p !== parts.length - 1) {
+        throw new CssError(
+          `"::${named}()" is only supported on the subject of a selector`,
+          partAt,
+        );
+      }
+      if (element !== null) {
+        throw new CssError(`a selector may carry only one pseudo-element`, partAt);
+      }
+      element = named;
+      spec[2]++;
+    }
 
     // `[type=checkbox]` and `:not(:last-child)` are each a whole compound; there
     // is nothing left to tokenize and both are legal CSS, not a parse failure.
@@ -1279,12 +1347,27 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
 
         if (doubled || SUPPORTED_PSEUDO_ELEMENT.has(name)) {
           if (!SUPPORTED_PSEUDO_ELEMENT.has(name)) {
+            // A functional one written bare is its own mistake, and naming the
+            // argument is the whole of the fix — so it gets its own message rather
+            // than being swept into "unsupported".
+            const args = FUNCTIONAL_PSEUDO_ELEMENT.get(name);
+            if (args !== undefined) {
+              throw new CssError(
+                `"::${name}" needs an argument: write ` +
+                  `${[...args].map((a) => `::${name}(${a})`).join(" or ")}.\n` +
+                  `  The spec defines ::${name}() as functional so a future control can name ` +
+                  `a ${name} of its own, and\n` +
+                  `  a bare ::${name} would be a shorthand no browser has.`,
+                partAt,
+              );
+            }
             throw new CssError(
               `unsupported pseudo-element "::${name}".\n` +
-                `  Supported: ::before, ::after, ::placeholder.\n` +
-                `  The control-specific ones (::picker(select), ::picker-icon, ` +
-                `::checkmark, ::marker) are the same machinery and ` +
-                `land with the controls they belong to.`,
+                `  Supported: ::before, ::after, ::placeholder, ::selection, ` +
+                `::picker(select).\n` +
+                `  The remaining control-specific ones (::picker-icon, ::checkmark, ` +
+                `::marker) are the same machinery and\n` +
+                `  land with the parts they draw.`,
               partAt,
             );
           }
@@ -1327,7 +1410,7 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
           // which is the descendant-selector problem again.
           throw new CssError(
             `unsupported pseudo-class ":${name}".\n` +
-              `  Supported: :hover, :active, :focus, :checked, :disabled, :root,\n` +
+              `  Supported: :hover, :active, :focus, :checked, :disabled, :open, :root,\n` +
               `  :first-child, :last-child, :only-child, :is(), :where(), :not().`,
             partAt,
           );
@@ -1383,19 +1466,40 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
  * what it contributes to specificity. Which is why they share a representation
  * rather than getting a flag each: the matcher has one recursive case to handle,
  * and the three spellings are all reachable through it.
+ *
+ * Returns the pseudo-*element* it named, if it named one. `::picker(select)` comes
+ * through here because it is written with parentheses and is therefore lifted out by
+ * {@link extractFuncPseudos} before tokenizing, but what it produces is not a
+ * compound-level fact at all — it names which cascade the rule belongs to. So it is
+ * handed back for the caller to apply, where the "only on the subject" and "only one"
+ * checks already live and do not need a second copy.
  */
 function applyFuncPseudo(
   compound: Compound,
   func: FuncPseudo,
   spec: [number, number, number],
   src: string,
-): void {
+): PseudoElement | null {
   if (func.doubled) {
+    const allowed = FUNCTIONAL_PSEUDO_ELEMENT.get(func.name);
+    if (allowed !== undefined) {
+      const arg = func.args.trim().toLowerCase();
+      if (!allowed.has(arg)) {
+        throw new CssError(
+          `"::${func.name}(${func.args.trim()})" names no picker dziri knows.\n` +
+            `  Supported: ${[...allowed].map((a) => `::${func.name}(${a})`).join(", ")}.`,
+          func.offset,
+        );
+      }
+      // Counted by the caller along with every other pseudo-element, so the type
+      // column is not bumped twice.
+      return func.name as PseudoElement;
+    }
     throw new CssError(
       `unsupported pseudo-element "::${func.name}()".\n` +
-        `  Supported: ::before, ::after.\n` +
-        `  The control-specific ones (::picker(select), ::picker-icon) are the same ` +
-        `machinery and land with the controls they belong to.`,
+        `  Supported functional: ::picker(select).\n` +
+        `  ::picker-icon, ::checkmark and ::marker take no argument and are the same ` +
+        `machinery; they land with the parts they draw.`,
       func.offset,
     );
   }
@@ -1435,9 +1539,10 @@ function applyFuncPseudo(
   // `:is()` and `:not()` take the specificity of their most specific argument —
   // the *argument's*, not one class each, which is why this adds a whole triple
   // rather than bumping the class column.
-  if (func.name === "where") return;
+  if (func.name === "where") return null;
   const most = mostSpecific(parsed);
   for (let k = 0; k < 3; k++) spec[k] = spec[k]! + most[k]!;
+  return null;
 }
 
 /** The largest of several selectors' specificities, compared column by column. */

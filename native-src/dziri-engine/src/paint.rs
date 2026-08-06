@@ -19,6 +19,7 @@ use crate::anim::{Anims, Blend};
 use crate::caret::{boundary_at, Carets, Motion};
 use crate::controls::{Activation, Controls};
 use crate::protocol::{self, control_flags, display, node_kind, predicate};
+use crate::select::{self, Selects};
 use crate::tables::Tables;
 use crate::text::Measurer;
 
@@ -603,6 +604,11 @@ pub struct InputState {
     pub hovered: i32,
     pub pressed: i32,
     pub focused: i32,
+    /// The `<select>` whose picker is showing, or -1 — the `:open` predicate.
+    ///
+    /// One integer rather than a set, because only one popover can be open at a time.
+    /// Measured, `probes/select-picker.html`: opening a second closes the first.
+    pub open: i32,
     /// The scrollbar under the pointer, if the pointer is on one at all.
     pub bar: Option<BarHover>,
 }
@@ -613,6 +619,7 @@ impl InputState {
             hovered: -1,
             pressed: -1,
             focused: -1,
+            open: -1,
             bar: None,
         }
     }
@@ -821,6 +828,13 @@ pub struct Painter {
     /// a caret in this node" while drawing a run, so the answer belongs to whatever owns
     /// the per-node drawing questions. See `caret.rs` for why the index is engine state.
     carets: Carets,
+    /// Which picker is open, and what a committed selection made the closed button read.
+    ///
+    /// The fourth of the same kind, and it earns the place twice over. The `:open`
+    /// predicate is one more answer to "which style row does this node wear", and the
+    /// label redirect is consulted while drawing a run — so both of its jobs are
+    /// questions this type already asks per node. See `select.rs`.
+    selects: Selects,
 }
 
 impl Default for Painter {
@@ -860,6 +874,7 @@ impl Painter {
             anims: Anims::new(),
             controls: Controls::new(),
             carets: Carets::new(),
+            selects: Selects::new(),
         }
     }
 
@@ -868,6 +883,7 @@ impl Painter {
     pub fn rescan_animations(&mut self, tables: &Tables, node_count: usize) {
         self.anims.rescan(tables, node_count);
         self.controls.rescan(tables, node_count);
+        self.selects.rescan(node_count);
     }
 
     /// Runs the activation behaviour for a press on `node`. See `Controls::activate`.
@@ -875,9 +891,97 @@ impl Painter {
         self.controls.activate(tables, node)
     }
 
+    /// What kind of control `node` is, or `ControlKind::NONE`.
+    pub fn control_kind(&self, tables: &Tables, node: i32) -> u8 {
+        self.controls.kind_of(tables, node)
+    }
+
+    /// The `<select>` whose picker is open, or -1.
+    pub fn open_select(&self) -> i32 {
+        self.selects.open()
+    }
+
+    /// The open picker's box, or -1 — the node an overlay pass starts at.
+    pub fn open_picker(&self) -> i32 {
+        self.selects.picker()
+    }
+
+    /// Opens `select`'s picker, closing whatever was open. False if it has no picker box.
+    pub fn open_select_picker(&mut self, tables: &Tables, select: i32, node_count: usize) -> bool {
+        self.selects.show(tables, select, node_count)
+    }
+
+    pub fn close_picker(&mut self) {
+        self.selects.close();
+    }
+
+    /// Points a select's closed label at the option just committed.
+    ///
+    /// Returns the node whose text moved, or -1. The caller **must** mark it dirty for
+    /// layout — see `Selects::commit_label` for why nothing else can notice.
+    #[must_use]
+    pub fn commit_selection(
+        &mut self,
+        tables: &Tables,
+        select: i32,
+        option: i32,
+        node_count: usize,
+    ) -> i32 {
+        self.selects
+            .commit_label(tables, select, option, node_count)
+    }
+
+    /// The redirects paint and layout both read a node's text through. See `select.rs`.
+    pub fn label_redirects(&self) -> &[i32] {
+        self.selects.labels()
+    }
+
+    /// Every `<option>` in the open picker, in document order.
+    ///
+    /// Collected on demand rather than cached, because the only caller is a keypress on an
+    /// open picker — so it runs when a human presses a key, against a subtree of a handful
+    /// of nodes. Caching it would be a second copy of the tree to invalidate.
+    pub fn open_options(&self, tables: &Tables, node_count: usize, out: &mut Vec<i32>) {
+        select::options_of(
+            tables,
+            &self.controls,
+            self.selects.picker(),
+            node_count,
+            out,
+        );
+    }
+
+    /// The option this select currently shows, or -1 — the `CHECKED` one.
+    pub fn selected_option(&self, tables: &Tables, node_count: usize) -> i32 {
+        let mut options = Vec::new();
+        select::options_of(
+            tables,
+            &self.controls,
+            self.selects.picker(),
+            node_count,
+            &mut options,
+        );
+        options
+            .into_iter()
+            .find(|&o| self.controls.state(o) & control_flags::CHECKED != 0)
+            .unwrap_or(-1)
+    }
+
     /// Whether a press on `node` is swallowed because the node is a disabled control.
     pub fn press_is_swallowed(&self, node: i32) -> bool {
         self.controls.press_is_swallowed(node)
+    }
+
+    /// Whether `node` is a disabled control.
+    ///
+    /// Distinct from [`Painter::press_is_swallowed`], which asks about the node the pointer
+    /// hit; this asks about the control that node *operates*. The two differ exactly where
+    /// it matters here: a disabled `<select>`'s own button is not disabled, so a press on it
+    /// is not swallowed — and without this the picker of a disabled select would open.
+    /// `Controls::activate` already refuses a disabled target, and opening is the one
+    /// activation that does not go through it.
+    pub fn control_is_disabled(&self, node: i32) -> bool {
+        self.controls.is_disabled(node)
     }
 
     /// Puts the caret where a click at `x` landed inside `field`, if it is a text field.
@@ -1221,6 +1325,15 @@ fn resolve_slot(
         live |= predicate::DISABLED;
     }
 
+    // `:open`, and it is the cheapest of the lot: one integer for the whole document,
+    // because only one picker can be open at a time (measured). Against `subject` like
+    // the rest, which is what makes `select:open::picker(select)` mean "the picker of an
+    // open select" — the box is generated, so its subject is the select, and it could
+    // never be `state.open` itself.
+    if subject == state.open {
+        live |= predicate::OPEN;
+    }
+
     if live == 0 {
         return base;
     }
@@ -1254,7 +1367,82 @@ fn resolve_slot(
 }
 
 impl Painter {
+    /// The main tree, with every overlay subtree left out.
+    ///
+    /// See [`Painter::paint_overlay`] for the other half and `NodeFlags::OVERLAY` for why
+    /// there are two halves at all.
     pub fn paint(
+        &mut self,
+        canvas: &Canvas,
+        tables: &Tables,
+        geometry: Geometry,
+        state: &InputState,
+        measurer: &mut Measurer,
+        root: usize,
+    ) {
+        self.paint_from(canvas, tables, geometry, state, measurer, root, [0.0, 0.0]);
+    }
+
+    /// One overlay subtree, drawn last and shifted onto its anchor.
+    ///
+    /// `offset` comes from [`crate::select::anchor_offset`], which is where the reasoning
+    /// about anchoring lives. It is applied as a canvas translate around the whole walk
+    /// rather than added to each rect, so the viewport test, the clips and every nested
+    /// transform stay in one consistent space — the same reason the scroll offsets are
+    /// carried rather than baked into `bounds`.
+    ///
+    /// Called by the engine rather than from [`Painter::paint`], because *which* overlay
+    /// is showing is the engine's state and the painter has no business holding a second
+    /// copy of it.
+    ///
+    /// Eight arguments, one over clippy's limit, and they are the same seven [`Painter::paint`]
+    /// takes plus the offset. Bundling them into a struct would make the two entry points
+    /// disagree about their own signature to satisfy a count.
+    #[allow(clippy::too_many_arguments)]
+    pub fn paint_overlay(
+        &mut self,
+        canvas: &Canvas,
+        tables: &Tables,
+        geometry: Geometry,
+        state: &InputState,
+        measurer: &mut Measurer,
+        root: usize,
+        offset: [f32; 2],
+    ) {
+        self.paint_from(canvas, tables, geometry, state, measurer, root, offset);
+    }
+
+    /// The walk both entry points share.
+    ///
+    /// A subtree rooted at a flagged node is skipped **unless it is the root of this
+    /// walk** — which is the whole of the layering rule, in one condition. The main pass
+    /// starts at the tree root, so every overlay falls out of it; an overlay pass starts
+    /// at the flagged node itself, so that one is drawn and any overlay nested inside it
+    /// is again deferred to its own pass.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_from(
+        &mut self,
+        canvas: &Canvas,
+        tables: &Tables,
+        geometry: Geometry,
+        state: &InputState,
+        measurer: &mut Measurer,
+        root: usize,
+        offset: [f32; 2],
+    ) {
+        let translated = offset != [0.0, 0.0];
+        if translated {
+            canvas.save();
+            canvas.translate((offset[0], offset[1]));
+        }
+        self.paint_walk(canvas, tables, geometry, state, measurer, root);
+        if translated {
+            canvas.restore();
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn paint_walk(
         &mut self,
         canvas: &Canvas,
         tables: &Tables,
@@ -1332,6 +1520,14 @@ impl Painter {
             };
 
             if node >= count || hidden.get(node).copied().unwrap_or(0) != 0 {
+                continue;
+            }
+
+            // An overlay's subtree belongs to its own pass — see `NodeFlags::OVERLAY` and
+            // [`Painter::paint_from`]. `node != root` is what lets one condition serve both
+            // directions: skipped from the main walk, drawn by the walk that starts on it.
+            if node != root && flags.get(node).copied().unwrap_or(0) & protocol::flags::OVERLAY != 0
+            {
                 continue;
             }
 
@@ -1927,11 +2123,10 @@ impl Painter {
             }
         }
 
-        let text_slot = tables
-            .i32s(NODES, protocol::nodes::TEXT)
-            .get(node)
-            .copied()
-            .unwrap_or(-1);
+        // Through the select layer's redirect, so a `<selectedcontent>` reads the
+        // committed option's string rather than the one the compiler baked. Free for
+        // every other node — the redirect table is empty until something commits.
+        let text_slot = select::text_slot(tables, self.selects.labels(), node);
         if text_slot < 0 {
             return;
         }
@@ -2335,6 +2530,66 @@ pub fn hit_test(
     px: f32,
     py: f32,
 ) -> i32 {
+    hit_walk(painter, tables, geometry, state, root, px, py)
+}
+
+/// What a press at `(px, py)` found in the open overlay rooted at `root`.
+///
+/// The distinction the two variants draw is the one ROADMAP B1 warns is easy to conflate,
+/// and both halves are measured:
+///
+/// - Inside the overlay's own box, the press belongs to it — `Some(node)`, with `node`
+///   the innermost interactive thing there or -1 for the picker's own padding. B1: "a
+///   click on an overlay must not reach nodes beneath it."
+/// - Outside it, the press **dismisses the overlay and still activates what it hit** —
+///   `None`, and the caller closes the picker and then hit-tests the main tree as normal.
+///   Measured 2026-08-04: clicking a `<button>` beside an open picker closed the picker
+///   *and* fired that button's own `click`, leaving focus on it.
+///
+/// Implementing only the first and assuming it covered the second is what would make
+/// every click that closes a dropdown mysteriously do nothing else.
+///
+/// `offset` is the anchor shift the overlay is drawn with, undone here rather than
+/// applied to every box — the pointer is one number and the boxes are many, which is the
+/// same trade the transform inversion makes.
+///
+/// Eight arguments, for the reason [`Painter::paint_overlay`] has eight: [`hit_test`]'s seven
+/// plus the offset.
+#[allow(clippy::too_many_arguments)]
+pub fn hit_overlay(
+    painter: &Painter,
+    tables: &Tables,
+    geometry: Geometry,
+    state: &InputState,
+    root: usize,
+    offset: [f32; 2],
+    px: f32,
+    py: f32,
+) -> Option<i32> {
+    let (px, py) = (px - offset[0], py - offset[1]);
+
+    // The overlay's own box decides whether the press is its at all, and it is asked
+    // before the walk rather than inferred from the walk's answer: "the point is in the
+    // picker but not on an option" and "the point is somewhere else entirely" are
+    // opposite outcomes, and a walk that returns -1 for both cannot tell them apart.
+    let [bx, by, w, h] = *geometry.bounds.get(root)?;
+    if px < bx || py < by || px >= bx + w || py >= by + h {
+        return None;
+    }
+
+    Some(hit_walk(painter, tables, geometry, state, root, px, py))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hit_walk(
+    painter: &Painter,
+    tables: &Tables,
+    geometry: Geometry,
+    state: &InputState,
+    root: usize,
+    px: f32,
+    py: f32,
+) -> i32 {
     let count = geometry.bounds.len();
     let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
     let flags = tables.u8s(NODES, protocol::nodes::FLAGS);
@@ -2360,6 +2615,15 @@ pub fn hit_test(
         budget -= 1;
 
         if node >= count || hidden.get(node).copied().unwrap_or(0) != 0 {
+            continue;
+        }
+
+        // An overlay is hit-tested by its own walk, *before* this one — see
+        // [`hit_overlay`]. Skipping it here is not only about order: this walk prunes a
+        // subtree whose parent's box does not contain the point, and a picker hangs below
+        // its select's box, so every option in it is unreachable from here anyway. The
+        // `node != root` shape matches paint's, and for the same reason.
+        if node != root && flags.get(node).copied().unwrap_or(0) & protocol::flags::OVERLAY != 0 {
             continue;
         }
 

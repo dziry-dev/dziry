@@ -60,22 +60,40 @@ h6 { font-weight: 700; font-size: 10.72px; margin-block-start: 24.9776px; margin
 /* Form controls — structure, not appearance.
 
    ua-structure.ts gives a select the button and selectedcontent that a browser
-   would build in a shadow tree. These rules are the other half of that: the parts
-   a browser hides, hidden. Without them a select renders its options stacked
-   underneath the closed control, which is not a styling choice anyone would make
-   — it is the widget leaking its internals.
+   would build in a shadow tree, and the ::picker(select) box its options live in.
+   This rule is the other half of that: the picker is taken out of flow, so a
+   closed select is exactly as tall as its button and the options sit over the page
+   rather than stacked underneath the control.
 
-   The options are hidden rather than positioned because the picker is a popover
-   with anchor positioning in the spec, and dziri has no overlay layer yet
-   (ROADMAP B1). Hiding them renders the *closed* control correctly, which is most
-   of what a form looks like; showing them in flow renders nothing correctly.
-   Revisit every line here when the overlay lands.
+   The options used to be display:none instead, because there was no overlay layer
+   to draw them in (ROADMAP B1). That rendered the *closed* control correctly and
+   nothing else; the layer exists now, so they are positioned.
 
-   Appearance — borders, radii, the tick on a checkbox — is deliberately absent.
-   That is a decision about how dziri's controls look, it belongs in a theme
-   rather than in the sheet that makes elements behave like themselves, and
-   html-coverage has nothing to say about it. */
-select option, select optgroup { display: none }
+   Out of flow is also what makes opening one free. The picker is laid out whether
+   or not it is showing, and the engine decides whether to *paint* it — the same
+   split ::placeholder uses, and it buys the same thing: no relayout when it opens,
+   so a dropdown cannot jank on the frame it appears.
+
+   Which is why there is deliberately no display rule keyed on :open. Visibility
+   belongs to the engine for the reason NodeFlags.PLACEHOLDER gives: were it an
+   authored property, display:block on a picker would leave a dropdown hanging open
+   over the page with no way to close it. :open is still there to style with —
+   borders, colours, a transform — it just does not decide what is drawn.
+
+   No inset either, and that one is a limitation rather than a choice: the spec
+   anchors a picker with top:anchor(bottom), dziri's nearest spelling would be
+   top:100%, and css.ts refuses percentage lengths. (No backticks in this comment,
+   and that is not a style choice — the whole sheet is a template literal, so one
+   would end the string. It has now cost two builds.) So the engine offsets the
+   overlay by its select's own box, which it can do because it has both rects. An
+   author's own top/left still shift it from there — they move where Taffy puts the
+   box, and the anchor offset is applied on top.
+
+   Appearance — the picker's background and border, radii, the tick on a checkbox —
+   is deliberately absent. That is a decision about how dziri's controls look, it
+   belongs in a theme rather than in the sheet that makes elements behave like
+   themselves, and html-coverage has nothing to say about it. */
+select::picker(select) { position: absolute }
 
 /* Chrome's sheet gives the picker's button no border of its own; the border
    belongs to the select. Stated so an author styling select does not get a

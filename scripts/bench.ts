@@ -129,6 +129,7 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     generated: m.generated,
     editableBoxes: m.editableBoxes,
     placeholders: m.placeholders,
+    overlays: m.overlays,
     textBindings: m.textBindings,
     handlers: m.handlers,
     lists: m.lists,

@@ -51,6 +51,27 @@ mod keys {
     /// A printable key's keycode *is* its Unicode scalar, so `a` is 0x61 — lower case, and
     /// SDL reports the same keycode whether or not Ctrl is held.
     pub const A: i32 = 0x61;
+    pub const UP: i32 = SCANCODE_MASK | 82;
+    pub const DOWN: i32 = SCANCODE_MASK | 81;
+    /// ASCII CR, unmasked — like Backspace and Delete, and unlike every arrow here.
+    pub const RETURN: i32 = 13;
+    /// ASCII ESC, also unmasked. Checked against `sdl3::keyboard::Keycode` in `select.rs`.
+    pub const ESCAPE: i32 = 27;
+}
+
+/// Where a point landed, once the overlay layer has had its turn.
+///
+/// The two are not "found something" and "found nothing" — they are two different
+/// *surfaces*, and conflating them is the mistake ROADMAP B1 warns about. A press inside
+/// an open picker belongs to the picker even when it lands on none of its options; a press
+/// outside dismisses the picker **and** goes on to activate whatever it hit.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Hit {
+    /// Inside the open overlay. The innermost interactive node there, or -1 for the
+    /// picker's own padding — either way the press goes no further.
+    InOverlay(i32),
+    /// Not in any overlay, so this is the main tree's answer.
+    Tree(i32),
 }
 
 /// The bits of SDL's modifier mask this engine reads.
@@ -65,10 +86,11 @@ mod mod_bits {
 
 use crate::layout::LayoutTree;
 use crate::paint::{
-    editable_run_of, hit_test, is_scrollable, scrollable_at, Bar, BarHover, Geometry, InputState,
-    Painter,
+    editable_run_of, hit_overlay, hit_test, is_scrollable, scrollable_at, Bar, BarHover, Geometry,
+    InputState, Painter,
 };
-use crate::protocol::{self, event_kind};
+use crate::protocol::{self, control_kind, event_kind};
+use crate::select;
 use crate::tables::{Capacities, Diff, SpanDesc, Tables};
 use crate::text::Measurer;
 use crate::window::{RawInput, Window};
@@ -204,6 +226,17 @@ pub struct Engine {
     /// rather than the host: with nothing staged, nothing hovered and nothing
     /// animating, a tick is an event-queue drain and no pixels at all.
     needs_paint: bool,
+    /// Something the engine itself changed needs a relayout on the next tick.
+    ///
+    /// A commit from Bun is the usual reason to relay out and `Diff` reports it; this is
+    /// for the ones the engine causes, where there is no diff to notice. Committing a
+    /// `<select>` is the only one today: the closed button's width comes from the chosen
+    /// option's label, so the string changing is a layout change with nothing in the tables
+    /// to show it.
+    ///
+    /// A flag rather than a call at the change site, because those sites are inside
+    /// `pump_input` where a layout failure has nowhere to be returned to.
+    relayout_pending: bool,
     last_frame_ms: f32,
     /// When the event watcher last drew mid-pump, for coalescing a live resize.
     last_live_repaint: std::time::Instant,
@@ -311,6 +344,7 @@ impl Engine {
             frame: 0,
             fresh: true,
             needs_paint: true,
+            relayout_pending: false,
             last_frame_ms: 0.0,
             last_live_repaint: std::time::Instant::now(),
             scroll: vec![[0.0; 2]; caps.nodes as usize],
@@ -413,7 +447,8 @@ impl Engine {
         let diff = self.tables.commit();
         self.resync(&diff)?;
 
-        if self.fresh || diff.any {
+        if self.fresh || diff.any || self.relayout_pending {
+            self.relayout_pending = false;
             self.relayout()?;
             self.needs_paint = true;
         }
@@ -636,6 +671,7 @@ impl Engine {
         self.tree.compute(
             &self.tables,
             &mut self.measurer,
+            self.painter.label_redirects(),
             self.width as f32,
             self.height as f32,
         )?;
@@ -801,7 +837,11 @@ impl Engine {
             self.tree.apply_styles_of(&self.tables, &restyle)?;
         }
 
-        // A stale *measurement* has three causes, and they narrow differently.
+        // A stale *measurement* has three causes **that a commit can produce**, and they
+        // narrow differently. There is a fourth that no diff can show, so it is not here:
+        // a `<select>`'s label redirect changes which node's slot a run reads without
+        // changing any slot or any byte, and `Engine::choose_option` marks that node dirty
+        // itself. Worth knowing before reading this list as exhaustive.
         let mut stale = diff.changed_texts.clone();
         if diff.string_bytes && diff.changed_strings.is_empty() {
             // Bytes rewritten underneath unchanged `(offset, length)` slots.
@@ -882,18 +922,39 @@ impl Engine {
         // Clear first: the root only covers the window if its own background is
         // opaque, and an unpainted frame should not show the last one.
         canvas.clear(Color::from(clear));
-        painter.paint(
-            canvas,
-            tables,
-            Geometry {
+        let geometry = Geometry {
+            bounds: tree.bounds(),
+            scroll,
+            extent: tree.overflow(),
+        };
+        painter.paint(canvas, tables, geometry, state, measurer, *root);
+
+        // Then the open picker, over everything — which is the whole of ROADMAP B1's
+        // "an overlay layer painted after the main tree". No stacking contexts and no
+        // `z-index` arithmetic: the subtree stays where it is in the tree and only its
+        // turn in the walk moves. `Painter::paint` left it out; this is where it lands.
+        //
+        // Nothing to do on a frame with nothing open, which is almost all of them, and
+        // opening one relayouts nothing — the picker is positioned absolutely and laid
+        // out whether or not it shows, so this really is a paint-only decision.
+        let picker = painter.open_picker();
+        if picker >= 0 {
+            let offset = select::anchor_offset(tree.bounds(), painter.open_select(), picker);
+            let geometry = Geometry {
                 bounds: tree.bounds(),
                 scroll,
                 extent: tree.overflow(),
-            },
-            state,
-            measurer,
-            *root,
-        );
+            };
+            painter.paint_overlay(
+                canvas,
+                tables,
+                geometry,
+                state,
+                measurer,
+                picker as usize,
+                offset,
+            );
+        }
     }
 
     fn present(&mut self) -> Result<(), EngineError> {
@@ -1001,6 +1062,15 @@ impl Engine {
                     let shift = mods & mod_bits::SHIFT != 0;
                     let ctrl = mods & mod_bits::CTRL != 0;
                     let select_all = ctrl && keycode == keys::A;
+
+                    // The picker gets the key first and consumes what it uses, which has to
+                    // come before the caret: an open picker's arrows are its own, and a
+                    // select is not a text field so there is no caret to compete with — but
+                    // Escape and Enter would otherwise be forwarded to a host that has no
+                    // way to know a picker was up.
+                    if self.picker_key(keycode) {
+                        continue;
+                    }
 
                     if select_all {
                         self.select_all();
@@ -1171,16 +1241,52 @@ impl Engine {
             // override exists to stand in for a mouse, and a screenshot taken with
             // `--hover` should not also decide that no bar is under the cursor.
             bar: self.state.bar,
+            // And an open picker is not an input override either. It is real state with a
+            // real subtree behind it, so it belongs to whatever opened it — a screenshot
+            // taken with `--focus` must not silently close a picker the flags opened.
+            open: self.state.open,
         };
         self.needs_paint = true;
     }
 
+    /// The topmost node at `(x, y)`, overlay included, or -1.
+    ///
+    /// What "under the pointer" means to a caller who is not deciding what a press does —
+    /// hover, and the FFI query the harnesses use. The press path wants
+    /// [`Engine::hit_point`] instead, because it has to tell an overlay miss from a tree
+    /// miss.
     pub fn hit_test(&self, x: f32, y: f32) -> i32 {
+        match self.hit_point(x, y) {
+            Hit::InOverlay(node) => node,
+            Hit::Tree(node) => node,
+        }
+    }
+
+    /// The overlay layer first, then the tree — see [`Hit`].
+    fn hit_point(&self, x: f32, y: f32) -> Hit {
         // The painter and the state come along because a transform can live in a
         // variant slot: `hover:scale-105` is only visible through the resolved
         // style, and hit-testing the base box would miss exactly the case
         // transforms are most used for.
-        hit_test(
+        let picker = self.painter.open_picker();
+        if picker >= 0 {
+            let offset =
+                select::anchor_offset(self.tree.bounds(), self.painter.open_select(), picker);
+            if let Some(node) = hit_overlay(
+                &self.painter,
+                &self.tables,
+                self.geometry(),
+                &self.state,
+                picker as usize,
+                offset,
+                x,
+                y,
+            ) {
+                return Hit::InOverlay(node);
+            }
+        }
+
+        Hit::Tree(hit_test(
             &self.painter,
             &self.tables,
             self.geometry(),
@@ -1188,7 +1294,67 @@ impl Engine {
             self.root,
             x,
             y,
-        )
+        ))
+    }
+
+    /// Opens `select`'s picker and moves focus into it.
+    ///
+    /// Focus goes to an `<option>`, not to the select, which is measured rather than
+    /// invented: while a picker is open Chromium's `activeElement` is an `<option>`. That
+    /// one fact is what lets the *pending highlight* ROADMAP B1 asks for be `state.focused`
+    /// and nothing else — arrowing moves focus, `option:focus` draws the highlight, and
+    /// Escape discards it by doing what closing always does.
+    ///
+    /// It lands on the committed option so arrowing starts from the current choice, which
+    /// is what makes Down-then-Enter mean "the next one" rather than "the second one".
+    fn open_picker_of(&mut self, select: i32) -> bool {
+        // A disabled select does not open, and this is the one place that has to be said.
+        // `press_is_swallowed` asks about the node the pointer hit, and a disabled select's
+        // *button* is not itself disabled — deliberately, since a disabled control's label
+        // still presses — so the press arrives here perfectly ordinarily. Every other
+        // activation is refused inside `Controls::activate`; opening is the one that is not.
+        if self.painter.control_is_disabled(select) {
+            return false;
+        }
+        let nodes = self.tree.bounds().len();
+        if !self.painter.open_select_picker(&self.tables, select, nodes) {
+            return false;
+        }
+        self.state.open = select;
+
+        let landing = match self.painter.selected_option(&self.tables, nodes) {
+            n if n >= 0 => n,
+            _ => {
+                let mut options = Vec::new();
+                self.painter.open_options(&self.tables, nodes, &mut options);
+                options.first().copied().unwrap_or(select)
+            }
+        };
+        self.state.focused = landing;
+        self.needs_paint = true;
+        true
+    }
+
+    /// Closes the open picker, putting focus back on the select.
+    ///
+    /// The restore is unconditional, and that is the measured shape: **both** exits put
+    /// `activeElement` back on the SELECT — Enter and Escape alike — so it is what closing
+    /// does rather than something specific to cancelling. ROADMAP B1 wrote it as "restore
+    /// focus to the trigger on dismissal", which is the same rule stated narrowly.
+    ///
+    /// Returns the select that was open, or -1. The caller needs it: a press that dismissed
+    /// a picker must not be allowed to re-open the same one, or the second click of a
+    /// toggle would close and immediately reopen it.
+    fn close_open_picker(&mut self) -> i32 {
+        let select = self.painter.open_select();
+        if select < 0 {
+            return -1;
+        }
+        self.painter.close_picker();
+        self.state.open = -1;
+        self.state.focused = select;
+        self.needs_paint = true;
+        select
     }
 
     /// Where a node's content currently sits, `[x, y]`, both >= 0.
@@ -1224,6 +1390,87 @@ impl Engine {
         Some((node, self.tables.string(slot).chars().count()))
     }
 
+    /// The keyboard half of a `<select>`. Returns whether the key was consumed.
+    ///
+    /// Two states, and the interesting one is the first:
+    ///
+    /// **Closed and focused**: ArrowDown or ArrowUp **opens the picker** rather than walking
+    /// the value. That refutes the belief carried over from legacy selects, and it was
+    /// measured before any of this was written — `probes/select-picker.html`, both arrows
+    /// opened it with no `input` and no `change`. Convenient as well as correct: keyboard
+    /// opening is then the same path as the click rather than a second mechanism.
+    ///
+    /// **Open**: arrows move the highlight, Enter commits, Escape closes with the value
+    /// untouched. The highlight is `state.focused` on an `<option>` and nothing else, which
+    /// is the whole reason the "pending highlight" ROADMAP B1 asks for costs no state: it is
+    /// already there, and `option:focus` is how a stylesheet draws it.
+    ///
+    /// Every key here is consumed rather than also forwarded. An arrow with a picker open
+    /// fires `keydown` and *nothing* else in a browser — no `input`, no `change`, and the
+    /// value does not move — so a host that also received it could only act on a key the
+    /// engine had already claimed.
+    fn picker_key(&mut self, keycode: i32) -> bool {
+        let vertical = keycode == keys::DOWN || keycode == keys::UP;
+
+        if self.painter.open_select() < 0 {
+            if !vertical {
+                return false;
+            }
+            let target = self.activates_of(self.state.focused);
+            if target < 0 || self.painter.control_kind(&self.tables, target) != control_kind::SELECT
+            {
+                return false;
+            }
+            return self.open_picker_of(target);
+        }
+
+        if keycode == keys::ESCAPE {
+            // The highlight goes with it, because the highlight *is* focus and closing puts
+            // focus back on the select. Nothing else to discard, which is the payoff of not
+            // having given the picker a second piece of state.
+            self.close_open_picker();
+            return true;
+        }
+
+        if keycode == keys::RETURN {
+            let option = self.state.focused;
+            // Coordinates a key press does not have. Zero rather than the last pointer
+            // position: a host reading `x`/`y` off a keyboard commit is reading something
+            // that does not exist, and a stale pointer would look like a real answer.
+            self.choose_option(option, 0.0, 0.0);
+            return true;
+        }
+
+        if !vertical {
+            return false;
+        }
+
+        let nodes = self.tree.bounds().len();
+        let mut options = Vec::new();
+        self.painter.open_options(&self.tables, nodes, &mut options);
+        if options.is_empty() {
+            return true;
+        }
+
+        let at = options.iter().position(|&o| o == self.state.focused);
+        let next = match (at, keycode == keys::DOWN) {
+            // Clamped at both ends rather than wrapping. A browser's picker stops at the
+            // last option; wrapping would make a long list feel like it had lost the user's
+            // place. An unfocused picker starts at the first option going down and the last
+            // going up, which is what an arrow into a fresh list means.
+            (Some(i), true) => (i + 1).min(options.len() - 1),
+            (Some(i), false) => i.saturating_sub(1),
+            (None, true) => 0,
+            (None, false) => options.len() - 1,
+        };
+        let landing = options[next];
+        if landing != self.state.focused {
+            self.state.focused = landing;
+            self.needs_paint = true;
+        }
+        true
+    }
+
     /// Handles an arrow, Home or End if there is a caret. Returns whether it was consumed.
     ///
     /// Consumed is not the same as moved: an arrow at the end of the text is *handled* and
@@ -1250,6 +1497,23 @@ impl Engine {
             self.needs_paint = true;
         }
         true
+    }
+
+    /// The open `<select>` and the option it shows, or `(-1, -1)` with nothing open.
+    ///
+    /// The pair rather than either alone, because "is a picker open" and "on what" are asked
+    /// together by everything that asks at all — a test, a screenshot harness, and the
+    /// `:open`/`option:checked` story a reviewer is checking.
+    pub fn open_selection(&self) -> (i32, i32) {
+        let select = self.painter.open_select();
+        if select < 0 {
+            return (-1, -1);
+        }
+        (
+            select,
+            self.painter
+                .selected_option(&self.tables, self.tree.bounds().len()),
+        )
     }
 
     /// The selected range in `field`'s text run, in document order, or `None`.
@@ -1424,7 +1688,36 @@ impl Engine {
             return;
         }
 
-        let hit = self.hit_test(x, y);
+        // The overlay layer takes its turn before the tree, and the two outcomes are
+        // different rules rather than degrees of the same one — see [`Hit`].
+        let hit = match self.hit_point(x, y) {
+            // Inside the open picker. The press is the picker's: it focuses the option
+            // under it and reaches nothing beneath, and none of the text-field work below
+            // applies. Committing happens on the release, in `mouse_up`.
+            Hit::InOverlay(node) => {
+                if node >= 0 {
+                    self.state.pressed = node;
+                    self.state.focused = node;
+                }
+                self.needs_paint = true;
+                self.events.push(Event {
+                    kind: event_kind::MOUSE_DOWN,
+                    node,
+                    x,
+                    y,
+                    ..Default::default()
+                });
+                return;
+            }
+            Hit::Tree(node) => node,
+        };
+
+        // Outside an open picker, so this press dismisses it — and then carries on, which
+        // is the measured half that is easy to miss. Clicking a `<button>` beside an open
+        // picker closed the picker *and* fired that button's own `click`, leaving focus on
+        // it (2026-08-04). Returning here instead would make every click that closes a
+        // dropdown mysteriously do nothing else.
+        let dismissed = self.close_open_picker();
 
         // A disabled control receives no button events at all — not a click that gets
         // ignored, no events. Measured, `probes/control-activation.html`: pressing one
@@ -1442,6 +1735,31 @@ impl Engine {
         self.state.pressed = hit;
         self.state.focused = hit;
         self.needs_paint = true;
+
+        // A `<select>` opens on the **press**, and this is the one control that does.
+        // Measured, `probes/select-picker.html`: the press alone opened the picker before
+        // any release, which is the opposite of a checkbox — whose bit flips during the
+        // click, after `mouseup`. So the two cannot share a trigger point, and
+        // `activate_control` stays where it is on the release.
+        //
+        // `dismissed` is what makes it a toggle rather than a stutter: the press that
+        // closed a picker has already landed on the select that owned it, and without this
+        // it would immediately reopen the thing it just shut.
+        let target = self.activates_of(hit);
+        if target >= 0
+            && target != dismissed
+            && self.painter.control_kind(&self.tables, target) == control_kind::SELECT
+            && self.open_picker_of(target)
+        {
+            self.events.push(Event {
+                kind: event_kind::MOUSE_DOWN,
+                node: hit,
+                x,
+                y,
+                ..Default::default()
+            });
+            return;
+        }
 
         // The caret goes where the press landed, not where the release does — measured
         // for the *selection* case in `probes/caret-and-selection.html`, where a press at
@@ -1504,6 +1822,26 @@ impl Engine {
             // if the drag finished somewhere else.
             self.state.bar = self.bar_hover_at(x, y, false);
             self.needs_paint = true;
+            return;
+        }
+
+        // A release inside the open picker chooses, and it deliberately does not ask what
+        // was pressed. The gesture people actually use is one motion — press the select,
+        // drag down, let go over a choice — so the press landed on the select and the
+        // release on an option, and the `hit == pressed` rule below would reject it. A
+        // separate click on an already-open picker takes the same path.
+        if let Hit::InOverlay(node) = self.hit_point(x, y) {
+            self.choose_option(node, x, y);
+            self.state.pressed = -1;
+            self.state.hovered = node;
+            self.needs_paint = true;
+            self.events.push(Event {
+                kind: event_kind::MOUSE_UP,
+                node,
+                x,
+                y,
+                ..Default::default()
+            });
             return;
         }
 
@@ -1585,6 +1923,84 @@ impl Engine {
             y,
             ..Default::default()
         });
+    }
+
+    /// The control a press on `node` operates, or -1. `nodes.activates`, as the compiler
+    /// filled it.
+    fn activates_of(&self, node: i32) -> i32 {
+        if node < 0 {
+            return -1;
+        }
+        self.tables
+            .i32s(protocol::Table::Nodes as usize, protocol::nodes::ACTIVATES)
+            .get(node as usize)
+            .copied()
+            .unwrap_or(-1)
+    }
+
+    /// Commits `option` as the open select's choice and closes the picker.
+    ///
+    /// A no-op for anything that is not an option, which is what makes it safe to call for
+    /// a release on the picker's own padding: that press was consumed by the overlay and
+    /// must leave it open, since nothing was chosen.
+    ///
+    /// The event order is measured: committing fires **`input` then `change`**, once, and
+    /// navigating fires neither. dziri emits `CHANGE` and not yet an `INPUT` — `onInput` is
+    /// A3's and an event nothing can subscribe to would be dead weight — so the pair is
+    /// deliberately half-delivered rather than invented. `Activation::changed` carries the
+    /// other measured half: re-committing the option already selected is not a change.
+    fn choose_option(&mut self, option: i32, x: f32, y: f32) {
+        if option < 0 || self.painter.control_kind(&self.tables, option) != control_kind::OPTION {
+            return;
+        }
+        let nodes = self.tree.bounds().len();
+        let Some(act) = self.painter.activate_control(&self.tables, option) else {
+            return;
+        };
+        let select = self.painter.open_select();
+
+        // Before the close, which clears `open_select`.
+        let relabelled = self
+            .painter
+            .commit_selection(&self.tables, select, act.node, nodes);
+        self.close_open_picker();
+
+        // The fourth cause of a stale measurement, and the only one `resync` cannot see.
+        // The three it enumerates are all *table* changes — a changed text slot, moved
+        // string bytes, a rewritten slot — and a redirect is none of them: the node's slot
+        // index is unchanged and so are the bytes in it. Only the mapping moved, and it
+        // moved on this side of the boundary. Taffy re-measures a leaf only when it is
+        // dirty, so without this the label is drawn at its old width.
+        if relabelled >= 0 {
+            self.tree.mark_dirty(relabelled as usize);
+        }
+
+        self.events.push(Event {
+            kind: event_kind::CLICK,
+            node: act.node,
+            x,
+            y,
+            ..Default::default()
+        });
+        if act.changed {
+            self.events.push(Event {
+                kind: event_kind::CHANGE,
+                node: act.node,
+                a: 1,
+                x,
+                y,
+                ..Default::default()
+            });
+        }
+
+        // The label just changed, so the closed control's *box* has to change with it — its
+        // width came from the old string. Deferred to `tick` rather than done here, because
+        // this runs inside `pump_input` where a layout failure has nowhere to go; `tick`
+        // already relayouts for a commit and this is the same kind of reason.
+        //
+        // It is also the *only* relayout a picker costs, and it is on a discrete user
+        // action. Opening one costs none at all: the picker was laid out the whole time.
+        self.relayout_pending = true;
     }
 
     /// A node's two scrollbars, `(horizontal, vertical)`, exactly as this frame draws

@@ -207,7 +207,7 @@ export class Uploader {
    * same work twice with less information.
    */
   uploadNodes(): void {
-    const { nodes, interactive, generated, editableBoxes, placeholders } = this.#ui;
+    const { nodes, interactive, generated, editableBoxes, placeholders, overlays } = this.#ui;
     const t = this.#tables.nodes;
     const count = Math.min(nodes.count, t.kind.length);
 
@@ -241,6 +241,7 @@ export class Uploader {
       if (findRow(generated, i) >= 0) flags |= NodeFlags.GENERATED;
       if (findRow(editableBoxes, i) >= 0) flags |= NodeFlags.EDITABLE;
       if (findRow(placeholders, i) >= 0) flags |= NodeFlags.PLACEHOLDER;
+      if (findRow(overlays, i) >= 0) flags |= NodeFlags.OVERLAY;
       // Anything with text needs measuring; that is exactly what the old measure
       // pass did, for TEXT nodes and for button labels alike.
       if (nodes.text[i]! >= 0) flags |= NodeFlags.MEASURABLE;
@@ -394,6 +395,7 @@ export class Uploader {
     t.kind.set(controls.kind.subarray(0, n));
     t.group.set(controls.group.subarray(0, n));
     t.flags.set(controls.flags.subarray(0, n));
+    t.label.set(controls.label.subarray(0, n));
 
     t.node.fill(NO_CONTROL_NODE, n);
     t.kind.fill(0, n);
@@ -401,6 +403,9 @@ export class Uploader {
     // group-mate — `-1` is already "no group" for a nameless radio.
     t.group.fill(-1, n);
     t.flags.fill(0, n);
+    // A spare row that named node 0 as its label would let a commit repoint a real
+    // node's string, so this is a `-1` fill for the reason `activates` is.
+    t.label.fill(-1, n);
   }
 
   uploadLists(): void {

@@ -140,6 +140,16 @@ export type Props = {
   required?: boolean;
   multiple?: boolean;
   selected?: boolean;
+  /**
+   * `<optgroup label=…>`, and nothing renders it yet.
+   *
+   * Here because it is a real attribute a selector can test — `optgroup[label]` — and
+   * because leaving it out made a legal `<optgroup>` a type error, which is worse than
+   * an attribute that only the cascade can see. Drawing the label needs a generated box
+   * whose text comes from an attribute, which is exactly what `::placeholder` already
+   * does; it is a small job and it is not done.
+   */
+  label?: string;
   /** `<label for=…>`; spelled `htmlFor` because `for` is a reserved word. */
   htmlFor?: string;
   /**
@@ -632,11 +642,12 @@ export function toDocument(exported: Node | Node[]): Element {
  * checkbox its tick is CSS on a generated box, and what will give it its
  * checked-ness is A3.
  *
- * `select` is deliberately included even though its picker cannot open yet. The
- * closed control — the button and the selected option's text — is most of what a
- * form looks like, and the picker needs the overlay layer (ROADMAP B1). Rendering
- * the closed state correctly is better than rendering nothing, and it is what
- * Blitz does not do: it stubs `<select>` with `option { display: none }`.
+ * `select` was included before its picker could open, on the grounds that the
+ * closed control is most of what a form looks like and rendering it correctly beat
+ * rendering nothing — which is what Blitz does not do, stubbing `<select>` with
+ * `option { display: none }`. That bet paid off: the picker opens as of protocol
+ * v18 and the closed control needed no changes to get there, because the parts
+ * `ua-structure.ts` already built are the parts a picker hangs off.
  */
 type Tag =
   | "body"

@@ -852,6 +852,17 @@ every select — only one can be open — so it costs nothing per select and not
 also the measured basis for A3's `onChange`/`onInput` split: both fire, in that order, only on
 commit.
 
+**Update, 2026-08-06, when this was implemented: it needs *neither* integer.** The measurement is
+unchanged and the conclusion drawn from it was too weak. Both pieces of state already existed. The
+committed selection is `CHECKED` on an option, because committing one *is* a radio set — check it,
+clear its group — so `Controls::clear_group` is the code that runs. And the highlight is **focus**,
+which follows from the finding in the section just above rather than from anything new: if
+`activeElement` is an `<option>` while the picker is open, then arrowing through the picker *is*
+moving focus. So `option:focus` draws the highlight and Escape discards it by doing what closing
+always does. Recorded because the shape of the error is worth remembering — the measurement was
+right, and the design read off it invented state the measurements themselves said was already
+there. Only dziri emits `CHANGE` today; `INPUT` waits for A3's `onInput` to have a subscriber.
+
 ### A dismissing click still reaches what it hit
 
 Clicking a `<button>` outside an open picker closed the picker **and fired that button's own

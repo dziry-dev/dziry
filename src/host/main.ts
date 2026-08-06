@@ -298,7 +298,52 @@ export async function runMain(options: MainOptions): Promise<void> {
       engine.clickNodeTimes(node, clicks);
     }
 
-    engine.setInputState(numberFlag("--hover"), -1, numberFlag("--focus"));
+    /**
+     * `--open <node>` — press a `<select>` so its picker is showing in the shot.
+     *
+     * A press and not a click, deliberately, and it is the one gesture where that
+     * distinction is visible from out here: a picker opens on `mouse_down` and the release
+     * has nothing to do with it. Measured — the press alone opened it before any release,
+     * which is the opposite of a checkbox. `--click` would work too, since the release
+     * lands on the button and a select declines activation, but it would be spelling the
+     * gesture wrong and would quietly start passing if the trigger point ever moved.
+     *
+     * The highlight in the picture is the engine's own: opening focuses the committed
+     * option, and `option:focus` is what draws it. So this needs no `--focus`, and would be
+     * *made wrong* by one.
+     */
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] !== "--open") continue;
+      const node = Number(argv[i + 1]);
+      if (!Number.isInteger(node) || node < 0) {
+        throw new Error(`--open takes a node id, got "${argv[i + 1]}"`);
+      }
+      frame();
+      const [x, y, w, h] = engine.bounds(node);
+      engine.mouseDown(x + w / 2, y + h / 2);
+    }
+
+    /**
+     * The declared input state, and **only when something declared one.**
+     *
+     * This used to run unconditionally, which quietly undid every gesture above it: with
+     * no flags it is `setInputState(-1, -1, -1)`, so the focus a `--click` had just
+     * acquired was reset before the shot and a clicked field rendered with no focus ring.
+     * `controls-caret`'s comment recorded that as the harness rather than the engine and
+     * said it was worth fixing when `--click` and `--focus` next needed to compose.
+     *
+     * They do now. A picker's highlight *is* `state.focused` on an `<option>` — that is the
+     * whole reason it costs no extra state — so a shot of an open picker cannot survive its
+     * focus being cleared, and there is no `--focus` value to pass instead: the option the
+     * engine chose is the thing under test.
+     *
+     * Skipping it changes one existing picture, `controls-caret`, which now shows the focus
+     * ring a clicked field really has. That golden was wrong in a way its own comment
+     * described.
+     */
+    if (argv.includes("--hover") || argv.includes("--focus")) {
+      engine.setInputState(numberFlag("--hover"), -1, numberFlag("--focus"));
+    }
     frame();
 
     await Bun.write(screenshotPath, engine.readPng());

@@ -31,7 +31,15 @@
  * excluded from layout exactly as they are at run time.
  */
 import { expect, test } from "bun:test";
-import { Align, Display, FlexWrap, Position } from "../protocol/generated.ts";
+import {
+  Align,
+  ControlFlags,
+  ControlKind,
+  Display,
+  FlexWrap,
+  NodeKind,
+  Position,
+} from "../protocol/generated.ts";
 import { INITIAL_STYLE, type CompiledUi, type StyleField } from "../ir.ts";
 import { Engine } from "./host.ts";
 import { NUMBER_FIELDS, Uploader, capacitiesFor } from "./upload.ts";
@@ -542,6 +550,241 @@ test("a triple click selects everything in the field", () => {
   engine.close();
 });
 
+/**
+ * The `<select>`s on the Controls route, found by their controls rows rather than by id.
+ *
+ * By structure for the reason `shownEditables` is: node ids move every time the demo's copy
+ * changes, and a test that hardcodes one does not fail — it measures a different node. Each
+ * select is returned with the parts a gesture needs: the button to press, the picker box the
+ * options are laid out in, and the options themselves.
+ *
+ * `overlays` supplies the picker rather than "the last child", because that ordering is
+ * deliberately not meaningful — the box is out of flow *and* out of the paint walk, so where
+ * it sits among its siblings says nothing. The engine finds it by the same flag.
+ */
+function shownSelects(engine: Engine, ui: CompiledUi) {
+  const kinds = ui.controls.kind;
+  const nodes = ui.controls.node;
+  const out: {
+    node: number;
+    button: number;
+    picker: number;
+    /** The `<selectedcontent>`'s text run — the node a commit repoints. */
+    label: number;
+    /** Each option, with the run holding its own label. */
+    options: { node: number; label: number }[];
+    disabled: boolean;
+  }[] = [];
+
+  /** The `controls.label` of a node, or -1 — the same column the engine reads. */
+  const labelOf = (node: number) => {
+    const row = [...nodes].indexOf(node);
+    return row >= 0 ? ui.controls.label[row]! : -1;
+  };
+
+  for (let row = 0; row < ui.controls.count; row++) {
+    if (kinds[row] !== ControlKind.SELECT) continue;
+    const node = nodes[row]!;
+    if (engine.bounds(node)[2] === 0) continue;
+
+    const children: number[] = [];
+    for (let c = ui.nodes.firstChild[node]!; c >= 0; c = ui.nodes.nextSibling[c]!) children.push(c);
+
+    const picker = children.find((c) => generated.overlays.includes(c));
+    expect(picker, `select ${node} has no ::picker(select) box`).toBeDefined();
+
+    // Every option in the picker's subtree, so an `<optgroup>`'s are included — they are
+    // the select's own options and a direct-child scan would miss them.
+    const options: { node: number; label: number }[] = [];
+    const walk = (n: number) => {
+      for (let c = ui.nodes.firstChild[n]!; c >= 0; c = ui.nodes.nextSibling[c]!) {
+        const at = [...nodes].indexOf(c);
+        if (at >= 0 && kinds[at] === ControlKind.OPTION) {
+          options.push({ node: c, label: ui.controls.label[at]! });
+        }
+        walk(c);
+      }
+    };
+    walk(picker!);
+
+    out.push({
+      node,
+      button: children.find((c) => ui.nodes.kind[c] === NodeKind.BUTTON) ?? -1,
+      picker: picker!,
+      label: labelOf(node),
+      options,
+      disabled: (ui.controls.flags[row]! & ControlFlags.DISABLED) !== 0,
+    });
+  }
+  return out;
+}
+
+/** The first enabled select with more than one option, so choosing can change something. */
+function pickableSelect(engine: Engine, ui: CompiledUi) {
+  const found = shownSelects(engine, ui).find((s) => !s.disabled && s.options.length > 1);
+  expect(found, "the Controls route needs an enabled select with two or more options").toBeDefined();
+  return found!;
+}
+
+/** The centre of a node, shifted by the anchor offset the engine draws an overlay with. */
+function overlayCentre(engine: Engine, select: number, picker: number, node: number) {
+  const [px, py] = engine.bounds(picker);
+  const [sx, sy, , sh] = engine.bounds(select);
+  const [x, y, w, h] = engine.bounds(node);
+  return [x + w / 2 + (sx - px), y + h / 2 + (sy + sh - py)] as [number, number];
+}
+
+/**
+ * A press opens the picker — on the press, not the click.
+ *
+ * The trigger point is the whole assertion. Measured, `probes/select-picker.html`: the press
+ * alone opened it before any release, which is the opposite of a checkbox whose bit flips
+ * during the click. So this presses and asserts *before* releasing, which is the only way to
+ * tell the two apart from out here — a full click would pass either way.
+ */
+test("pressing a select opens its picker, before any release", () => {
+  const { engine, ui } = load("controls", 1400);
+
+  const select = pickableSelect(engine, ui);
+  expect(engine.openSelect()).toBeNull();
+
+  const [x, y, w, h] = engine.bounds(select.button);
+  engine.mouseDown(x + w / 2, y + h / 2);
+
+  const open = engine.openSelect();
+  expect(open).not.toBeNull();
+  expect(open!.select).toBe(select.node);
+
+  // And the picker's own options are reachable by the pointer, which they are not in the
+  // main walk: `hit_test` prunes a subtree whose parent's box does not contain the point,
+  // and a picker hangs below its select's box. This is the overlay walk being asked first.
+  for (const { node } of select.options) {
+    expect(engine.hitTest(...overlayCentre(engine, select.node, select.picker, node))).toBe(node);
+  }
+
+  engine.close();
+});
+
+/**
+ * Choosing an option commits it, closes the picker, and changes what the closed button reads.
+ *
+ * The label is the part that could not work by accident. The engine cannot write the string —
+ * Bun owns the tables — so it redirects the `<selectedcontent>`'s run at the chosen option's,
+ * and both paint *and layout* have to honour that: the assertion on the button's width is
+ * what catches a version where only paint did, which would draw the new text in a box
+ * measured for the old one.
+ */
+test("choosing an option commits it, closes the picker and relabels the button", () => {
+  const { engine, ui } = load("controls", 1400);
+
+  const select = pickableSelect(engine, ui);
+  expect(select.label, "the select's <selectedcontent> needs a run to relabel").toBeGreaterThan(-1);
+  const [bx, by, bw, bh] = engine.bounds(select.button);
+
+  engine.mouseDown(bx + bw / 2, by + bh / 2);
+  const committed = engine.openSelect()!.option;
+  expect(committed).toBeGreaterThanOrEqual(0);
+
+  // A different option, and one whose label is a different *width* — the assertion below is
+  // that layout re-measured the run, and two equally wide strings would make it vacuous.
+  // Which is the trap the button itself is: it has a fixed `width: 220px` in the demo's CSS,
+  // so measuring the button would prove nothing whatever the label said.
+  const before = engine.bounds(select.label)[2];
+  const target = select.options.find(
+    (o) => o.node !== committed && o.label >= 0 && engine.bounds(o.label)[2] !== before,
+  );
+  expect(target, "two options with differently-sized labels are needed").toBeDefined();
+  const want = engine.bounds(target!.label)[2];
+
+  engine.mouseUp(...overlayCentre(engine, select.node, select.picker, target!.node));
+  expect(engine.openSelect(), "committing closes it").toBeNull();
+  engine.tick();
+
+  // The closed control was re-laid-out for the chosen option's string, to the same width
+  // that option's own run has. This is the assertion that fails if only *paint* honours the
+  // redirect: the new text would be drawn inside a box measured for the old one.
+  expect(engine.bounds(select.label)[2]).toBeCloseTo(want, 1);
+  expect(engine.bounds(select.label)[2]).not.toBeCloseTo(before, 1);
+
+  // And re-opening reports the new choice, which is `:checked` having moved — the same radio
+  // set a group of `<input type=radio>` does.
+  engine.mouseDown(bx + bw / 2, by + bh / 2);
+  expect(engine.openSelect()!.option).toBe(target!.node);
+
+  engine.close();
+});
+
+/**
+ * A press outside dismisses the picker **and still activates what it hit.**
+ *
+ * Two rules about two different clicks, and ROADMAP B1 warns they are easy to conflate:
+ * implementing "the overlay consumes the press" and assuming it covered dismissal makes
+ * every click that closes a dropdown mysteriously do nothing else. Measured 2026-08-04 —
+ * clicking a `<button>` beside an open picker closed the picker *and* fired that button's own
+ * `click`, leaving focus on it. So this asserts the focus moved, not merely that the picker
+ * closed.
+ */
+test("a press outside an open picker dismisses it and still reaches what it hit", () => {
+  const { engine, ui } = load("controls", 1400);
+
+  const select = pickableSelect(engine, ui);
+  const [bx, by, bw, bh] = engine.bounds(select.button);
+  engine.mouseDown(bx + bw / 2, by + bh / 2);
+  expect(engine.openSelect()).not.toBeNull();
+
+  // A checkbox somewhere else on the page — a real target, so "it still reached something"
+  // is checkable rather than inferred from the absence of a picker.
+  const box = [...ui.controls.node].find(
+    (n, row) =>
+      ui.controls.kind[row] === ControlKind.CHECKBOX &&
+      (ui.controls.flags[row]! & ControlFlags.DISABLED) === 0 &&
+      engine.bounds(n)[2] > 0,
+  );
+  expect(box, "the Controls route needs an enabled checkbox").toBeDefined();
+
+  const [cx, cy, cw, ch] = engine.bounds(box!);
+  engine.mouseDown(cx + cw / 2, cy + ch / 2);
+  engine.mouseUp(cx + cw / 2, cy + ch / 2);
+
+  expect(engine.openSelect(), "the press dismissed it").toBeNull();
+  expect(engine.hitTest(cx + cw / 2, cy + ch / 2)).toBe(box!);
+
+  engine.close();
+});
+
+/** A second press on the same select closes it rather than reopening it. */
+test("pressing an open select again closes it", () => {
+  const { engine, ui } = load("controls", 1400);
+
+  const select = pickableSelect(engine, ui);
+  const [x, y, w, h] = engine.bounds(select.button);
+
+  engine.mouseDown(x + w / 2, y + h / 2);
+  expect(engine.openSelect()).not.toBeNull();
+
+  // The press dismisses *and* lands on the select — which without the guard would reopen
+  // the thing it just shut, and a toggle would be a stutter.
+  engine.mouseUp(x + w / 2, y + h / 2);
+  engine.mouseDown(x + w / 2, y + h / 2);
+  expect(engine.openSelect()).toBeNull();
+
+  engine.close();
+});
+
+/** A disabled select does not open, though its button is not itself disabled. */
+test("a disabled select's picker does not open", () => {
+  const { engine, ui } = load("controls", 1400);
+
+  const off = shownSelects(engine, ui).find((s) => s.disabled);
+  expect(off, "the Controls route needs a disabled select").toBeDefined();
+
+  const [x, y, w, h] = engine.bounds(off!.button);
+  engine.mouseDown(x + w / 2, y + h / 2);
+  expect(engine.openSelect()).toBeNull();
+
+  engine.close();
+});
+
 test("a layout-affecting style patch reaches the engine", () => {
   const { engine, ui, uploader, patches } = load();
 
@@ -644,6 +887,7 @@ test("a capacity request is a power of two", () => {
     generated: generated.generated,
     editableBoxes: generated.editableBoxes,
     placeholders: generated.placeholders,
+    overlays: generated.overlays,
     textBindings: [],
     handlers: [],
     lists: generated.lists,

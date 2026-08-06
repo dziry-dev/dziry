@@ -636,37 +636,85 @@ Phases B and C, which together exceed the compiler and runtime combined.
 
 ## Phase B — interactive surfaces
 
-### B1 · Layering and dismissal
-- An overlay layer painted after the main tree — far simpler than DOM portals, with no stacking
-  contexts and no `z-index` arithmetic.
-- **Hit-testing must respect layers**: a click on an overlay must not reach nodes beneath it.
-  Easy to get wrong with a single paint tree.
+### B1 · Layering and dismissal — **done for the `<select>` picker**, protocol v18
+
+The layer exists and one thing uses it. What follows is what the plan got right, what it got
+wrong, and what is left.
+
+- **"An overlay layer painted after the main tree" — right, and smaller than expected.** It is
+  one node flag, `NodeFlags.OVERLAY`. A `::picker(select)` box is an ordinary child of its
+  select, so it inherits, cascades and lays out with no special case; the flag moves only its
+  *turn* in the walk. The main pass skips a flagged node and a second pass starts *on* it,
+  which is one condition — `node != root && OVERLAY` — serving both directions. No stacking
+  contexts and no `z-index` arithmetic, as predicted.
+- **Hit-testing must respect layers** — done, and the reason is stronger than "order". A click
+  on an overlay must not reach nodes beneath it, *and* `hit_test` prunes a subtree whose
+  parent's box does not contain the point — which a picker hanging below its select never does.
+  So without the overlay walk the options are not merely hit-tested in the wrong order, they
+  are unreachable.
+- **Not anticipated, and it is the nicest part: opening costs no relayout.** The picker is
+  `position: absolute` and laid out whether or not it shows, so showing it is a pure paint
+  decision — the same split `::placeholder` uses. Which also settles who owns visibility: it is
+  the engine's, not a `display` an author writes, or `display: block` on a picker would leave a
+  dropdown hanging over the page with no way to close it. Committing *does* relayout, once,
+  because the closed button's width comes from the chosen label.
 - **A click *outside* the overlay dismisses it *and* activates what it hit.** Measured, 2026-08-04,
   BROWSER-FACTS.md — clicking a `<button>` beside an open picker closed the picker and fired that
   button's own `click`, leaving focus on it. This is a different rule from the bullet above, about a
   different click, and the two are easy to conflate: implementing "the overlay consumes the press"
   and assuming it covered dismissal makes every click that closes a dropdown mysteriously do
   nothing else. Both rules, not one.
-- Dismissal: click-outside, Escape, scroll-outside.
-- Focus scopes: trap, **restore focus to the trigger on dismissal**, focus stack. Measured and
-  slightly wider than written: focus moves *into* the picker while it is open (an `<option>` holds
-  it, not the select), and **both** exits restore it to the trigger — Escape and Enter alike. So the
-  restore is what closing does, not something specific to cancelling.
+- Dismissal: click-outside and Escape ship. **`scroll-outside` does not** — a wheel over the page
+  leaves the picker up.
+- Focus scopes: **restore focus to the trigger** ships, and is the only one of the three that
+  turned out to be needed. Measured and slightly wider than written: focus moves *into* the
+  picker while it is open (an `<option>` holds it, not the select), and **both** exits restore it
+  to the trigger — Escape and Enter alike. So the restore is what closing does, not something
+  specific to cancelling. A *trap* and a *focus stack* are unbuilt and currently unmotivated:
+  there is nowhere else for focus to go while a picker is open, and one integer restores it.
 
 **Measured before writing any of it** (`probes/select-picker.html`, and the probe runner gained key
 injection to make it possible — a synthetic `KeyboardEvent` is untrusted and performs no default
-action, so nothing about what a key *does* was measurable before). Three findings change the design:
+action, so nothing about what a key *does* was measurable before). Three findings changed the
+design, and all three are now built:
 
 1. **A picker opens on `mousedown`, not on the click** — the opposite of a checkbox, whose bit flips
    during the click, after `mouseup`. So `Engine::mouse_down` opens a picker while `activate_control`
-   stays on the release; they cannot share a trigger point.
-2. **A picker needs two pieces of state**: the committed selection and a *pending highlight*. An
-   arrow key with the picker open moves the highlight and fires no `input`/`change`; Enter commits
-   and fires both, in that order; Escape closes with the value untouched. One integer each, and the
-   highlight belongs to the open picker rather than to every select, since only one can be open.
+   stays on the release; they cannot share a trigger point. Built that way, and
+   `ControlKind::SELECT` is the one kind `Controls::activate` deliberately declines.
+2. ~~**A picker needs two pieces of state**: the committed selection and a *pending highlight*.~~
+   **It needs neither, and that is the one thing the plan got wrong.** Both already existed. The
+   committed selection is `CHECKED` on an option, because committing one *is* a radio set —
+   `Controls::clear_group` is the code that runs. And the highlight is **focus**, which follows
+   directly from the measurement in the bullet above: if `activeElement` is an `<option>` while
+   the picker is open, then arrowing through the picker *is* moving focus. So `option:focus`
+   draws the highlight and Escape discards it by doing what closing always does. The finding was
+   right about the behaviour and wrong about the cost: zero new fields, not two integers.
 3. **An arrow key on a closed, focused select opens the picker** rather than walking the value —
    which refutes the belief carried over from legacy selects. Keyboard opening is then the same path
-   as the click rather than a second mechanism.
+   as the click rather than a second mechanism. Built as exactly that.
+
+What is genuinely new state is one integer for which select is open — narrower than the plan's
+"one integer each", because only one popover can be open at a time — plus one per-node **label
+redirect**, so a closed button can read the chosen option's string without the engine writing
+into Bun's tables. The redirect is consulted by paint *and by layout*, because a closed select's
+width comes from its label as much as its pixels do.
+
+**Owed:** the NOTES.md ledger entry for the open picker and the redirect, in the same terms as
+the ones already there. The argument is in `select.rs`'s header; NOTES.md holds another session's
+uncommitted work. This is now the second such debt — A5's caret and selection entry is still
+owed too.
+
+Still open, and none of it blocks a second overlay user:
+
+- **Collision handling.** A picker near the window's bottom edge hangs off it rather than
+  flipping above its select, and a wide one runs off the right. That is B2's, deliberately: a
+  half-version here would be a second placement engine to delete. The anchor offset is computed
+  from the two rects layout produced, because the spec's `top: anchor(bottom)` has no dziri
+  spelling — `top: 100%` would be it, and `css.ts` refuses percentage lengths.
+- **Nothing but a picker uses the layer yet.** A tooltip or a popover would be the test of
+  whether the flag generalises; the design says it should, and that is untested.
+- `<optgroup>` labels do not render, and there is no type-to-select.
 
 ### B2 · Positioning
 Adapter for `@floating-ui/core`, which is platform-agnostic by design (built that way for React

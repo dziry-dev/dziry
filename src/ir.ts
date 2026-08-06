@@ -330,10 +330,29 @@ export type ControlTable = {
   node: Int32Array;
   /** `ControlKind`. */
   kind: Uint8Array;
-  /** Radio group id, interned per `(form, name)`, or -1. */
+  /**
+   * Radio group id, interned per `(form, name)` — or per `<select>` for an option — or -1.
+   *
+   * The two share a column because committing an option *is* a radio set: check it,
+   * clear everything else in its group. Interning differs only in the key, since an
+   * option's group is its select rather than a `name` attribute.
+   */
   group: Int32Array;
   /** `ControlFlags` — the authored initial state. */
   flags: Uint8Array;
+  /**
+   * The text-run node carrying this control's label, or -1.
+   *
+   * Filled for a `SELECT` — the run inside its `<selectedcontent>` — and for each
+   * `OPTION`. Nothing else has a label the engine needs to know about, so nothing else
+   * fills it.
+   *
+   * It exists because committing an option has to change what the closed control reads,
+   * and the engine cannot write the string: Bun owns the tables. So the engine keeps its
+   * own slot override, and this column is how it knows *which* two slots to swap — the
+   * select's run and the chosen option's.
+   */
+  label: Int32Array;
 };
 
 export function emptyControlTable(): ControlTable {
@@ -343,6 +362,7 @@ export function emptyControlTable(): ControlTable {
     kind: new Uint8Array(0),
     group: new Int32Array(0),
     flags: new Uint8Array(0),
+    label: new Int32Array(0),
   };
 }
 
@@ -525,6 +545,18 @@ export type CompiledUi = {
    * the UA sheet, so hiding one is a paint decision with nothing to re-lay-out.
    */
   placeholders: Int32Array;
+  /**
+   * Sorted node ids that root an overlay — today, a `<select>`'s `::picker(select)`.
+   *
+   * Painted after the whole tree and hit-tested before it, which is ROADMAP B1's layer.
+   * Emitted rather than inferred for the reason the four above are: the subtree is an
+   * ordinary child of its select, so nothing about the tree at run time says it should
+   * leave the walk it is in.
+   *
+   * Whether an overlay is *showing* is not here and cannot be — the engine opens it. This
+   * only says which node the layer starts at.
+   */
+  overlays: Int32Array;
   lists: ListTable;
   media: MediaTable;
   tweens: TweenTable;

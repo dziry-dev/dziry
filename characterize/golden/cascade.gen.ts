@@ -135,6 +135,8 @@ export const interactive = new Int32Array([]);
 export const generated = new Int32Array([]);
 export const editableBoxes = new Int32Array([]);
 export const placeholders = new Int32Array([]);
+/** Overlay roots — painted after the tree, hit-tested before it. `::picker(select)`. */
+export const overlays = new Int32Array([]);
 
 /** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [
@@ -253,6 +255,7 @@ export const controls = {
   kind: new Uint8Array([]),
   group: new Int32Array([]),
   flags: new Uint8Array([]),
+  label: new Int32Array([]),
 } satisfies ControlTable;
 
 export const root: number = 0;

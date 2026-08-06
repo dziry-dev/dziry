@@ -20,7 +20,6 @@
  */
 import { Predicate } from "../ir.ts";
 import type { Element } from "./html.ts";
-import { uaChildren } from "./ua-structure.ts";
 import { warnOnce } from "./diagnostics.ts";
 import {
   compareCascade,
@@ -150,9 +149,18 @@ function describeEl(el: Element): string {
  *   - Text runs do not count. A container written across several lines has a text
  *     run after its final element, so counting *nodes* would mean nothing is ever
  *     the last child and `space-y-4` would margin every row including the last.
- *   - Generated boxes do not count either, which is why this walks `uaChildren`
- *     rather than the `children` array `walk` builds: `::before` and `::after` are
- *     in the latter, with real positions.
+ *   - Generated boxes do not count either, which is why this walks the *element's*
+ *     `children` rather than the `children` array `walk` builds: `::before`,
+ *     `::after` and a `::picker(select)` are in the latter, with real positions.
+ *
+ *     Which also means it walks the children **as authored**, before `uaParts`
+ *     splices anything in — and that is deliberate rather than incidental. This used
+ *     to call `uaChildren`, whose only effect here was to put a `<select>`'s
+ *     UA-supplied `<button>` in front of its options and so shift every one of them
+ *     by a position: the first `<option>` matched `:first-child` in a browser and
+ *     did not here. A part a browser builds in a shadow tree is not one of the
+ *     author's siblings, and counting it made a selector about their markup answer a
+ *     question about ours.
  *   - The root, which has no parent, matches all three. That is Selectors 4's
  *     "first among its inclusive siblings" rather than Selectors 3's "first child
  *     of some other element", and it is what Chromium does.
@@ -173,7 +181,7 @@ function positionOf(path: Element[], subject: number): SiblingPos {
   let listAfter = false;
   let found = false;
 
-  for (const child of uaChildren(parent)) {
+  for (const child of parent.children) {
     if (child === el) {
       found = true;
       continue;

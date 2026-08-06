@@ -384,10 +384,18 @@ impl LayoutTree {
     }
 
     /// Lays out into `width` x `height` and publishes absolute bounds.
+    ///
+    /// `labels` is the select layer's text redirect — see [`crate::select::text_slot`].
+    /// Layout needs it and not only paint, because a closed `<select>`'s *width* comes
+    /// from the committed option's label as much as its pixels do: without it the new text
+    /// would be drawn inside a box measured for the old one, which is at its worst when
+    /// the two labels differ most. Empty for a document that has never committed a
+    /// selection, so the common case is a length check per measured node.
     pub fn compute(
         &mut self,
         tables: &Tables,
         measurer: &mut Measurer,
+        labels: &[i32],
         width: f32,
         height: f32,
     ) -> Result<(), EngineError> {
@@ -399,7 +407,6 @@ impl LayoutTree {
         })?;
 
         // Borrowed before the closure so it captures the tables, not `self`.
-        let text = tables.i32s(NODES, protocol::nodes::TEXT);
         let flags = tables.u8s(NODES, protocol::nodes::FLAGS);
         let style_of_node = tables.u16s(NODES, protocol::nodes::STYLE);
         let font_size = tables.f32s(STYLES, protocol::styles::FONT_SIZE);
@@ -486,8 +493,7 @@ impl LayoutTree {
                     return if editable { strut() } else { Size::ZERO };
                 }
 
-                let slot = text.get(node).copied().unwrap_or(-1);
-                let content = tables.string(slot);
+                let content = tables.string(crate::select::text_slot(tables, labels, node));
 
                 if content.is_empty() {
                     return if editable { strut() } else { Size::ZERO };

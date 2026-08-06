@@ -190,9 +190,17 @@ const CONTROLS: Table = {
     {
       name: "group",
       type: "i32",
-      doc: "Radio group id — interned per (form, name) — or -1",
+      doc: "Radio group id — interned per (form, name), or per <select> for an option — or -1",
     },
     { name: "flags", type: "u8", doc: "ControlFlags: the authored initial state" },
+    {
+      name: "label",
+      type: "i32",
+      doc:
+        "The text-run node this control's label lives on, or -1. On a SELECT it is the " +
+        "run inside <selectedcontent>, whose string the engine repoints at the committed " +
+        "option's; on an OPTION it is that option's own run. Nothing else fills it.",
+    },
   ],
 };
 
@@ -816,6 +824,22 @@ export const ENUMS: EnumDef[] = [
       DISABLED: 1 << 4,
 
       /**
+       * This node's popover is showing — a `<select>` whose picker is open.
+       *
+       * The same category as `HOVER` and `FOCUS` rather than as `CHECKED`: it is
+       * an answer the engine already has, because the engine is what opened the
+       * thing. One integer in `InputState` names the open node, and only one
+       * popover can be open at a time — measured, and it is why this needs no
+       * per-node array.
+       *
+       * It reaches `select::picker(select)` through `GENERATED`, which resolves a
+       * generated box's predicates from its parent. So `:open` on the select is
+       * what makes the picker visible, and an author writing
+       * `select:open { border-color: … }` gets the same bit.
+       */
+      OPEN: 1 << 5,
+
+      /**
        * The first bit the *engine* owns rather than the input state.
        *
        * Everything from here up is a global condition — a media query, a colour
@@ -908,9 +932,37 @@ export const ENUMS: EnumDef[] = [
       "`controls.kind`. What a press does to this node, which is the only thing the " +
       "engine needs to know about a control — appearance is the stylesheet's job and " +
       "is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets " +
-      "itself and clears its group, and cannot be unchecked by pointer (measured).",
+      "itself and clears its group, and cannot be unchecked by pointer (measured). " +
+      "`SELECT` opens its picker on the press rather than the release, and `OPTION` " +
+      "commits — which is the same set-self-clear-group `RADIO` does, plus closing.",
     ty: "u8",
-    values: { NONE: 0, CHECKBOX: 1, RADIO: 2 },
+    values: {
+      NONE: 0,
+      CHECKBOX: 1,
+      RADIO: 2,
+      /**
+       * A `<select>`. A press **opens** it, on `mouse_down` and not on the click.
+       *
+       * That is the opposite of every other kind here and it is measured, not
+       * assumed: `probes/select-picker.html` shows the press alone opening the
+       * picker before any release, while a checkbox's bit flips during the click.
+       * So the two cannot share a trigger point, and `Controls::activate` — which
+       * runs on the release — deliberately declines this kind.
+       */
+      SELECT: 3,
+      /**
+       * An `<option>`. Committing one is a radio set: check it, clear its group.
+       *
+       * Which is why `controls.group` is filled for options exactly as it is for
+       * radios, interned per `<select>` rather than per `(form, name)`. The extra
+       * behaviour over `RADIO` is entirely about the picker — close it, restore
+       * focus to the select, mirror the label — and none of that is checkedness.
+       *
+       * Unlike a radio, re-committing the already-selected option is not a change
+       * either, so `Activation::changed` carries the same distinction.
+       */
+      OPTION: 4,
+    },
   },
   {
     name: "Status",
@@ -1026,8 +1078,32 @@ export const ENUMS: EnumDef[] = [
  * added for `host.ts` to check its own constant against at open time. That check is the
  * point: the two had agreed on 56 bytes only because someone kept them in sync, which is
  * precisely the failure this file's header says the generator exists to prevent.
+ *
+ * v18 is the `<select>` picker, and it moves bytes in one place and semantics in three.
+ *
+ * The byte move is `controls.label`: a fifth column, so `SCHEMA_HASH` shifts on its own
+ * and the handshake would catch a stale binary regardless. It is what lets the engine
+ * repoint a `<selectedcontent>`'s string at the committed option's without writing into
+ * host memory, which it must not do — Bun owns the tables.
+ *
+ * The three the hash cannot see, and which are therefore the whole reason this is also a
+ * hand bump:
+ *
+ * - **`NodeFlags.OVERLAY`** (bit 5). A flag bit moves nothing, exactly as with v14's
+ *   `EDITABLE` and v15's `PLACEHOLDER`. An engine without it would paint a picker in tree
+ *   order — under whatever follows the select — and would hit-test its options through
+ *   their select's box, which prunes them entirely. A dropdown that draws behind the page
+ *   and cannot be clicked: a wrong picture with nothing to blame.
+ * - **`Predicate.OPEN`** (bit 5 of a variant mask). Predicate bits are not columns either.
+ *   An engine that never sets it leaves every picker hidden, because the UA sheet's
+ *   visibility rule *is* that bit.
+ * - **`ControlKind.SELECT` and `OPTION`**. Two new enum values, and the header above
+ *   already says enum values are invisible to the hash — retuning what a code means needs
+ *   a bump by hand. Here an old engine would fall through `Controls::activate`'s `_ => None`
+ *   and simply do nothing on a press, which is the benign end of the range and still
+ *   silent.
  */
-export const PROTOCOL_VERSION = 17;
+export const PROTOCOL_VERSION = 18;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
@@ -1091,6 +1167,34 @@ export const NodeFlags = {
    * decision with nothing to re-lay-out.
    */
   PLACEHOLDER: 1 << 4,
+  /**
+   * The root of an overlay: painted **after** the whole tree, and hit-tested
+   * **before** it.
+   *
+   * This is ROADMAP B1's layer, and it is a flag rather than a second tree
+   * because the subtree is already in the right place. A `<select>`'s picker is a
+   * child of the select, so it inherits, cascades and lays out with no special
+   * case; the only thing wrong with painting it in tree order is the *order*. So
+   * the main walk skips a flagged node and the painter revisits it at the end,
+   * which is one branch per node and no stacking contexts to arithmetic over.
+   *
+   * Being out of the main walk is what makes the layer work at all, and both
+   * halves are load-bearing:
+   *
+   * - **Paint.** A picker is drawn over whatever follows the select in document
+   *   order, which in tree order it would be drawn under.
+   * - **Hit-testing.** `hit_test` prunes a subtree whose parent's box does not
+   *   contain the point, and a picker hangs *below* its select's box — so in the
+   *   main walk its options are unreachable by the pointer. The overlay walk
+   *   starts at the flagged node with no such ancestor test.
+   *
+   * The node is laid out either way, always, and is only *drawn* when the engine
+   * says its overlay is showing — the same trick `PLACEHOLDER` uses, and for the
+   * same reason: an absolutely positioned box that layout has already placed can
+   * be shown and hidden as a pure paint decision, with nothing to invalidate.
+   * That is what makes opening a picker cost zero relayout.
+   */
+  OVERLAY: 1 << 5,
 } as const;
 
 /**

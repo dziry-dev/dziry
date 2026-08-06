@@ -16,8 +16,10 @@ import { parseHtml } from "./html.ts";
 import {
   Align,
   compactBits,
+  ControlFlags,
   Display,
   INITIAL_STYLE,
+  Position,
   Predicate,
   UNSET,
   type StyleField,
@@ -368,23 +370,74 @@ test("a select gets its closed button and selected text from the compiler", () =
     ),
   );
 
-  // select > [button, option, option]; button > selectedcontent > "Pro".
+  // select > [button, picker]; button > selectedcontent > "Pro"; picker > two options.
+  //
+  // The options used to be direct children and the UA sheet hid them, because there was
+  // no overlay layer to draw a picker in. They are in one now — which is a structural
+  // change, so this test moved with it rather than being deleted.
   const select = 1;
   const kids: number[] = [];
   for (let n = ui.nodes.firstChild[select]!; n !== -1; n = ui.nodes.nextSibling[n]!) kids.push(n);
-  expect(kids.length).toBe(3);
+  expect(kids.length).toBe(2);
 
   const button = kids[0]!;
   const selectedContent = ui.nodes.firstChild[button]!;
   const label = ui.nodes.firstChild[selectedContent]!;
   expect(ui.strings[ui.nodes.text[label]!]).toBe("Pro");
 
-  // The options are still there and the UA sheet hides them — the picker is an
-  // overlay problem, not a structural one.
+  // `selected`, not the first option — the same decision that marks it `CHECKED`, so the
+  // baked label and the engine's initial selection cannot disagree.
+  const chosen = [...ui.controls.node].findIndex(
+    (_, row) => (ui.controls.flags[row]! & ControlFlags.CHECKED) !== 0,
+  );
+  expect(chosen).toBeGreaterThan(-1);
+  expect(ui.controls.label[chosen]!).toBeGreaterThan(-1);
+
+  // The picker holds the options, and it is an overlay — painted after the tree and
+  // hit-tested before it. `position: absolute` from the UA sheet is what keeps a closed
+  // select exactly as tall as its button.
+  const picker = kids[1]!;
   const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
-  for (const option of kids.slice(1)) {
-    expect(styles.display[ui.nodes.style[option]!]!).toBe(Display.NONE);
+  expect(styles.position[ui.nodes.style[picker]!]!).toBe(Position.ABSOLUTE);
+  expect([...ui.overlays]).toEqual([picker]);
+
+  const options: number[] = [];
+  for (let n = ui.nodes.firstChild[picker]!; n !== -1; n = ui.nodes.nextSibling[n]!) {
+    options.push(n);
   }
+  expect(options.length).toBe(2);
+  // Laid out rather than hidden, which is the whole of the change.
+  for (const option of options) {
+    expect(styles.display[ui.nodes.style[option]!]!).not.toBe(Display.NONE);
+  }
+});
+
+test("a select's option still matches `select > option`", () => {
+  // The picker is spliced in at the *node* level precisely so this keeps working: a
+  // browser's picker is a pseudo-element the light-DOM options render into, not a wrapper
+  // they become children of. Doing it in `uaParts` would have been shorter and would have
+  // silently broken every `select > option` rule an author writes.
+  const ui = toCompiledUi(
+    compile(
+      `<body><select><option>Free</option><option selected>Pro</option></select></body>`,
+      `select > option { width: 3px } select option:first-child { height: 5px }`,
+    ),
+  );
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+
+  const picker = [...ui.overlays][0]!;
+  const options: number[] = [];
+  for (let n = ui.nodes.firstChild[picker]!; n !== -1; n = ui.nodes.nextSibling[n]!) {
+    options.push(n);
+  }
+  expect(options.length).toBe(2);
+  for (const option of options) expect(styles.width[ui.nodes.style[option]!]!).toBe(3);
+
+  // And `:first-child` counts the options as the select's own children, so the first
+  // option is one. Before this, `positionOf` walked the UA-supplied button too and every
+  // option was shifted by a position — so this matched nothing.
+  expect(styles.height[ui.nodes.style[options[0]!]!]!).toBe(5);
+  expect(styles.height[ui.nodes.style[options[1]!]!]!).toBeNaN();
 });
 
 test("an authored select button is left alone", () => {

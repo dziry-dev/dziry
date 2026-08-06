@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 17;
+pub const PROTOCOL_VERSION: u32 = 18;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: u32 = 17;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0xb8a6b92b;
+pub const SCHEMA_HASH: u32 = 0xf2ce59f6;
 
 pub const TABLE_COUNT: usize = 11;
 
@@ -485,10 +485,11 @@ pub mod controls {
     pub const KIND: usize = 1;
     pub const GROUP: usize = 2;
     pub const FLAGS: usize = 3;
+    pub const LABEL: usize = 4;
 
-    pub const FIELD_COUNT: usize = 4;
-    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 1, 4, 1];
-    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["node", "kind", "group", "flags"];
+    pub const FIELD_COUNT: usize = 5;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 1, 4, 1, 4];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["node", "kind", "group", "flags", "label"];
 }
 
 /// Final bounds per node, written by the engine.
@@ -521,6 +522,7 @@ pub mod flags {
     pub const GENERATED: u8 = 1 << 2;
     pub const EDITABLE: u8 = 1 << 3;
     pub const PLACEHOLDER: u8 = 1 << 4;
+    pub const OVERLAY: u8 = 1 << 5;
 }
 
 pub mod control_flags {
@@ -623,6 +625,7 @@ pub mod predicate {
     pub const FOCUS: u32 = 4;
     pub const CHECKED: u32 = 8;
     pub const DISABLED: u32 = 16;
+    pub const OPEN: u32 = 32;
     pub const FIRST_GLOBAL: u32 = 256;
 }
 
@@ -664,11 +667,13 @@ pub mod event_kind {
     pub const CHANGE: u32 = 10;
 }
 
-/// `controls.kind`. What a press does to this node, which is the only thing the engine needs to know about a control — appearance is the stylesheet's job and is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets itself and clears its group, and cannot be unchecked by pointer (measured).
+/// `controls.kind`. What a press does to this node, which is the only thing the engine needs to know about a control — appearance is the stylesheet's job and is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets itself and clears its group, and cannot be unchecked by pointer (measured). `SELECT` opens its picker on the press rather than the release, and `OPTION` commits — which is the same set-self-clear-group `RADIO` does, plus closing.
 pub mod control_kind {
     pub const NONE: u8 = 0;
     pub const CHECKBOX: u8 = 1;
     pub const RADIO: u8 = 2;
+    pub const SELECT: u8 = 3;
+    pub const OPTION: u8 = 4;
 }
 
 /// Return code of every FFI entry point. Negative is failure, and the detail is in `dziri_last_error`.

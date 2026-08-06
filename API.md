@@ -278,10 +278,28 @@ fields. What a press reaches comes from `nodes.activates`, which is the compiler
 synthetic click a browser dispatches at a control when a *label* was clicked — so clicking the words
 beside a checkbox ticks it, and a `<button>` inside that label does not.
 
-Still missing, and named rather than implied: nothing can make a control *become* disabled at run time
-(`disabled` is seeded from the attribute, which is also what a browser does with it), `:indeterminate`
-has no way to be reached, a control inside a `map()` list gets no controls row, and `<select>` still
-cannot open — that one needs the overlay layer, not this machinery.
+A `<select>` **opens**, as of protocol v18. This paragraph used to end by saying it could not, and
+that the missing piece was the overlay layer rather than this machinery — which was right, and the
+layer turned out to be one node flag. A `::picker(select)` box is an ordinary child of its select, so
+it inherits, cascades and lays out with no special case; `NodeFlags.OVERLAY` moves only its *turn* in
+the walk, painted after the tree and hit-tested before it.
+
+Almost none of it is new state, and that is the part worth reading. The picker opens on the **press**
+rather than the click — the opposite of a checkbox, and measured. The committed choice is `:checked`
+on an `<option>`, because committing one *is* a radio set, so `Controls::clear_group` is the code
+that runs. And the *pending highlight* — the thing a browser's Escape throws away — is **focus**,
+because while a picker is open Chromium's `activeElement` is an `<option>` rather than the select.
+That is measured, and it is why `option:focus` draws the highlight, Escape discards it by doing what
+closing always does, and the "two pieces of state" the design called for cost no fields at all. What
+is genuinely new: one integer for which select is open, and one per-node label redirect so the closed
+button can read the chosen option's string without the engine writing into Bun's tables.
+
+Still missing, and named rather than implied: nothing can make a control *become* disabled at run
+time (`disabled` is seeded from the attribute, which is also what a browser does with it),
+`:indeterminate` has no way to be reached, and a control inside a `map()` list gets no controls row.
+For the picker specifically: no collision handling — one near the window's bottom edge hangs off it
+rather than flipping above its select, which is ROADMAP B2's job — no scroll-outside dismissal, no
+`<optgroup>` label rendering, and no type-to-select.
 
 | API | Status | Milestone |
 |---|---|---|
@@ -290,11 +308,19 @@ cannot open — that one needs the overlay layer, not this machinery.
 | checkbox and radio activation, radio groups, label forwarding | **done** — protocol v13. A radio group is keyed on `(form, name)`, measured | A3 |
 | `:indeterminate` | planned — same shape and cost, held back until a control can be in that state | A3 |
 | `::before` / `::after` + `content` | **done** — generated boxes are real emitted nodes; this is what replaces a UA shadow tree | A1 |
-| `::picker(select)` `::picker-icon` `::checkmark` `::marker` | planned — same machinery as `::before`, refused by name until the controls exist | C2 |
+| `::picker(select)` | **done** — protocol v18, and the first *functional* pseudo-element. `::picker` bare is refused: the spec defines the argument so a future control can name a picker of its own, and a shorthand no browser has is a divergence someone copies out of dziri | C2 |
+| `::picker-icon` `::checkmark` `::marker` | planned — same machinery as `::before`, refused by name until the parts they draw exist. The demo's arrow is `select button::after` today, which is the same node either way | C2 |
 | attribute selectors — `[a]` `=` `~=` `\|=` `^=` `$=` `*=`, `i` flag | **done** — `input[type=checkbox]` is how a UA sheet names one control among twenty-two | A1 |
 | `<input>` `<select>` `<option>` `<textarea>` `<label>` … as real tags | **done** — they compile to ordinary boxes; being a tag is not being a widget | C2 |
-| `<select>` closed, with UA-supplied `<button>` + `<selectedcontent>` | **done** — `ua-structure.ts`; the parts a browser builds in a shadow tree, built as nodes | C2 |
-| `<select>` picker (open state) | planned — a popover with anchor positioning; needs the overlay layer | B1 |
+| `<select>` closed, with UA-supplied `<button>` + `<selectedcontent>` | **done** — `ua-structure.ts`; the parts a browser builds in a shadow tree, built as nodes. The `<selectedcontent>`'s text follows the committed option, through a per-node redirect rather than a string write: Bun owns the tables, so the engine repoints *which* node's slot the run reads | C2 |
+| `select > option`, `option:first-child` | **done** — the picker is spliced in at the *node* level, so the options' selector path still ends at the select. A browser's picker is a pseudo-element the light-DOM options render into, not a wrapper they move under, and this keeps that true. `option:first-child` matches the first option now: `positionOf` used to count the UA-supplied `<button>`, which shifted every option by one | A1 |
+| `<select>` picker (open state) | **done** — protocol v18. Opens on the press (measured; the opposite of a checkbox), commits on the release or Enter, dismisses on Escape or an outside press — and that press **still activates what it hit**, which is a second measured rule and not the same as "the overlay consumes its own presses" | B1 |
+| the overlay layer — paint after, hit-test before | **done** — `NodeFlags.OVERLAY`, and it is a flag rather than a second tree because the subtree is already in the right place: only its turn in the walk moves. Both halves are load-bearing and for different reasons — in tree order a picker draws *under* what follows its select, and `hit_test` prunes on the parent's box, which a picker hangs below | B1 |
+| opening a picker costs no relayout | **done** — the box is `position: absolute` and laid out whether or not it shows, so showing it is a pure paint decision. The same split `::placeholder` uses. Committing *does* relayout, once, because the closed button's width comes from the chosen label | B1 |
+| `:open` | **done** — one integer for the document, because only one popover can be open at a time (measured). Reaches `select::picker(select)` through `GENERATED`, so it means "the picker of an open select" | B1 |
+| anchor positioning, collision handling | **half done** — the engine offsets a picker onto its select's bottom edge from the two rects layout produced, because the spec's `top: anchor(bottom)` has no dziri spelling (`top: 100%` would be it, and percentage lengths are refused). It does **not** flip or shift near a window edge; that is B2's `@floating-ui/core` adapter | B2 |
+| `<optgroup>` | **half done** — its options are the select's own: they arrow, highlight and commit like any other, and the group is descended into rather than scanned past. The `label` attribute is accepted, selectable by `[label]`, and **not rendered** — that wants a generated box whose text comes from an attribute, which is exactly what `::placeholder` already does | C2 |
+| scroll-outside dismissal, type-to-select | planned — click-outside and Escape both work; a wheel over the page leaves the picker up | B1 |
 | `accent-color` `caret-color` `appearance` | **done** — `STYLE_FIELDS`, checked in `conformance` and `spec-audit` | A1 |
 | `resize`, `field-sizing: content` | **non-goal** — see ROADMAP C2; in `css-coverage`'s `OUT_OF_SCOPE_NAMES` | — |
 | `<Input>` | planned | C2 · Tier 1b (needs A5) |
@@ -316,7 +342,7 @@ cannot open — that one needs the overlay layer, not this machinery.
 | `::selection` | **done** — protocol v17. Two inherited colours on the originating element's row, not a node: a selection is a range inside a box rather than a box. The default is a **stated convention** in dziri's UA sheet, because Chromium does not expose its own highlight colour to script | A1 |
 | clipboard, IME, double-click-then-drag by word | planned — a drag after a double click extends by character | A5 |
 | a `<label>` click focusing a text field | planned — `activates` forwards to control kinds only, and a text field is not one | A3 |
-| the caret and selection as a ledger entry | **half done** — the state is built and the argument is in `caret.rs`'s header; the NOTES.md entry ROADMAP A5 asks for is still owed. Both fail the compile-time gate at question 3: neither is declared and both are unbounded, so they are engine-owned interaction state beside `hovered` and `focused` | A5 |
+| the caret, selection and open picker as ledger entries | **half done** — the state is built and each argument is in its own module header (`caret.rs`, `select.rs`); the NOTES.md entries ROADMAP A5 and B1 ask for are still owed, and the picker has now made it two. All of them fail the compile-time gate at question 3: nothing declares them and none is bounded, so they are engine-owned interaction state beside `hovered` and `focused`. The picker's is the narrowest of the three — one integer for the whole document, because only one can be open | A5 · B1 |
 
 *The Milestone column above uses ROADMAP's phase labels. The table under Status uses `M`-numbers,
 and the two vocabularies have no mapping anywhere in the repo — worth reconciling, but inventing one

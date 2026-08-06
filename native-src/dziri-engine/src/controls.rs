@@ -167,7 +167,18 @@ impl Controls {
                     changed: true,
                 })
             }
-            control_kind::RADIO => {
+            // An option commits on the **release**, which is why it is here beside the
+            // radio rather than on the press with its select. The gesture is one motion —
+            // press the select, drag down, let go over a choice — so the open happens on
+            // the way down and the commit on the way up, and a click on an already-open
+            // picker takes the same path.
+            //
+            // Sharing the radio arm is not a shortcut: committing an option *is* checking
+            // one member of a group and clearing the rest, down to "re-committing the
+            // current choice is not a change". Everything that differs — closing the
+            // picker, restoring focus, repointing the label — is the select layer's, and
+            // none of it is checkedness.
+            control_kind::RADIO | control_kind::OPTION => {
                 // A radio cannot be unchecked by pointer, so a press on a checked one
                 // is not a change — it fires `click` and nothing else. Measured.
                 if self.state(target) & control_flags::CHECKED != 0 {
@@ -191,7 +202,37 @@ impl Controls {
                     changed: true,
                 })
             }
+            // A `SELECT` deliberately does nothing here, and it is the one kind that
+            // reaches this arm rather than being absent from the table. Its behaviour is
+            // on the **press**: measured, `probes/select-picker.html` — the press alone
+            // opened the picker before any release, which is the opposite of a checkbox,
+            // whose bit flips during the click. So `Engine::mouse_down` opens it and this
+            // function, which runs on the release, has nothing left to do.
+            //
+            // Putting it here anyway would make a select feel a frame late in exactly the
+            // gesture people use most, and would then *close* on the release of the press
+            // that opened it.
             _ => None,
+        }
+    }
+
+    /// What kind of control `node` is, or `NONE` for "not one".
+    ///
+    /// Public because the select layer asks it of nodes it is walking past — "is this an
+    /// option" is the same question as "does it have a row saying OPTION", and the binary
+    /// search that answers it already lives here. A second copy over there would be a
+    /// second place to get the sortedness contract wrong.
+    pub fn kind_of(&self, tables: &Tables, node: i32) -> u8 {
+        if node < 0 {
+            return control_kind::NONE;
+        }
+        match self.row_of(tables, node) {
+            Some(row) => tables
+                .u8s(CONTROLS, protocol::controls::KIND)
+                .get(row)
+                .copied()
+                .unwrap_or(control_kind::NONE),
+            None => control_kind::NONE,
         }
     }
 

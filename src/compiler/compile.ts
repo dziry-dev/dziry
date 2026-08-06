@@ -31,7 +31,7 @@ import { parseCss, Origin, type Pseudo, type PseudoElement } from "./css.ts";
 import { EMPTY_VARS, extendVarEnv, substituteVars, type VarEnv } from "./values.ts";
 import { parseContent, parseInlineStyle } from "./properties.ts";
 import { UA_SHEET } from "./ua-sheet.ts";
-import { uaChildren } from "./ua-structure.ts";
+import { optionsOf, uaParts, type UaParts } from "./ua-structure.ts";
 import {
   collectDecls,
   hasPseudoElementRule,
@@ -85,6 +85,14 @@ type BuiltNode = {
   /** A `::placeholder` box, painted only while its field is empty. */
   placeholder?: true;
   /**
+   * The root of an overlay: painted after the tree and hit-tested before it.
+   *
+   * A `<select>`'s `::picker(select)` box, and nothing else yet. See
+   * `NodeFlags.OVERLAY` for why the subtree stays where it is and only its *order*
+   * moves.
+   */
+  overlay?: true;
+  /**
    * A text run inside an editable field, which is one line high even with no text.
    *
    * Set on the *run* rather than on the field because layout measures the run and the
@@ -123,6 +131,7 @@ export const PREDICATE_PSEUDO: Array<[number, Pseudo]> = [
   [Predicate.FOCUS, "focus"],
   [Predicate.CHECKED, "checked"],
   [Predicate.DISABLED, "disabled"],
+  [Predicate.OPEN, "open"],
 ];
 
 /**
@@ -244,23 +253,36 @@ export type BuiltControl = {
   node: number;
   /** `ControlKind`. */
   kind: number;
-  /** Radio group id, or -1. */
+  /** Radio group id — or the group of a `<select>`'s options — or -1. */
   group: number;
   /** `ControlFlags`. */
   flags: number;
+  /**
+   * The text run holding this control's label, or -1.
+   *
+   * Only a `SELECT` and an `OPTION` fill it, and only because the engine has to swap
+   * one for the other when a selection commits. Resolved after the walk, in
+   * {@link resolveSelectLabels} — the run does not exist yet when the row is pushed.
+   */
+  label: number;
 };
 
 /**
  * `ControlKind` by tag and `type` attribute.
  *
- * Only the two types whose activation *does* something are here. The other twenty
- * input types are still real elements with real UA styling; they simply have no
- * press behaviour for the engine to run, so giving them a row would be a row that
- * means "nothing happens". `select` is deliberately absent too — opening a picker
- * needs the overlay layer, and a `ControlKind.SELECT` that toggled nothing would be
- * a claim this cannot honour.
+ * Only the kinds whose activation *does* something are here. The other twenty input
+ * types are still real elements with real UA styling; they simply have no press
+ * behaviour for the engine to run, so giving them a row would be a row that means
+ * "nothing happens".
+ *
+ * `select` and `option` were absent until the overlay layer existed, on exactly that
+ * ground — a `SELECT` that opened nothing would have been a claim the engine could not
+ * honour. Both are here now, and the pair is deliberate: a select alone would open a
+ * picker whose options could not be chosen.
  */
 function controlKindOf(el: Element): number {
+  if (el.tag === "select") return ControlKind.SELECT;
+  if (el.tag === "option") return ControlKind.OPTION;
   if (el.tag !== "input") return ControlKind.NONE;
   switch ((el.attrs.get("type") ?? "text").toLowerCase()) {
     case "checkbox":
@@ -345,8 +367,22 @@ function isTextEntry(el: Element): boolean {
  * it. dziri can only produce two kinds of it — a control and a `<button>` — so this
  * is that category narrowed to what is reachable, not a general implementation of
  * it.
+ *
+ * **A `<select>`'s own button is exempt**, and it has to be. That button is the closed
+ * control — it is what the user presses to open the picker — so treating it as
+ * independent interactive content stops `activates` propagating into it and the select
+ * becomes unclickable. Which is exactly what happened: the button was the node
+ * `hit_test` returned, its `activates` was -1, and pressing the only visible part of a
+ * `<select>` did nothing at all.
+ *
+ * The exemption covers the authored spelling as well as the UA-supplied one, because in
+ * the spec's model they are the same element — a browser builds it for you unless you
+ * write it, and either way it is the select's part rather than a button that happens to
+ * be inside one. `path` is what tells them apart from a button nested any deeper, which
+ * genuinely is content.
  */
-function ownsItsPress(el: Element): boolean {
+function ownsItsPress(el: Element, path: Element[]): boolean {
+  if (el.tag === "button" && path[path.length - 2]?.tag === "select") return false;
   return el.tag === "button" || el.tag === "a" || controlKindOf(el) !== ControlKind.NONE;
 }
 
@@ -522,6 +558,44 @@ export function compileTree(
    */
   const groupIds = new Map<string, number>();
   const formIds = new Map<Element, number>();
+
+  /**
+   * Per `<option>`, the group its select interned and whether it is the initial pick.
+   *
+   * Filled by [`walkPicker`] before the options are walked, and read when each one
+   * pushes its controls row. A map rather than a lookup off the ancestor path because
+   * the path is the wrong shape for it: an option inside an `<optgroup>` is two levels
+   * down, and "the select two ancestors up" is a rule that quietly breaks the moment a
+   * group is introduced.
+   */
+  const optionRows = new Map<Element, { group: number; chosen: boolean }>();
+
+  /**
+   * The group id shared by one `<select>`'s options.
+   *
+   * The same interning table radios use, so the two can never collide — committing an
+   * option *is* a radio set, and `Controls::clear_group` is the code that runs. The key
+   * is a sentinel rather than a name, because an option's group is its select and a
+   * select has no `name` to key on.
+   */
+  const selectGroups = new Map<Element, number>();
+  const optionGroup = (select: Element): number => {
+    const existing = selectGroups.get(select);
+    if (existing !== undefined) return existing;
+    const id = groupIds.size;
+    groupIds.set(` select${selectGroups.size}`, id);
+    selectGroups.set(select, id);
+    return id;
+  };
+
+  /**
+   * Per control element, the element whose text run is its label.
+   *
+   * For a `<select>` that is its `<selectedcontent>`; for an `<option>` it is the
+   * option itself. Resolved to node ids after the walk by [`resolveControlLabels`],
+   * because the run does not exist yet when the controls row is pushed.
+   */
+  const labelHosts = new Map<Element, Element>();
 
   /**
    * The group id for a radio, or -1 when it has no `name`.
@@ -936,6 +1010,85 @@ export function compileTree(
   }
 
   /**
+   * The `::picker(select)` box for a `<select>`, holding its options.
+   *
+   * Beside [`walkPlaceholder`] rather than inside [`walkPseudoElement`] for the same
+   * reason that one is: `::before` exists *because* a rule gave it `content`, while this
+   * box exists because the markup has options to put somewhere. CSS decides only how it
+   * looks.
+   *
+   * # Three things this box is, and why each matters
+   *
+   * **It is generated**, so its per-node predicates come from its parent — which is what
+   * makes the UA sheet's `select:open::picker(select) { display: … }` mean "the picker of
+   * an open select" rather than "a picker that is itself open", a state nothing could ever
+   * put it in. It is also why the box is never `state.hovered` and never in `interactive`.
+   *
+   * **It is an overlay**, so it is painted after the tree and hit-tested before it. Both
+   * halves are needed and for different reasons: in tree order it would draw *under*
+   * whatever follows the select, and `hit_test` prunes a subtree whose parent's box does
+   * not contain the point — which a picker hanging below its select never does, making
+   * every option unclickable. See `NodeFlags.OVERLAY`.
+   *
+   * **It is laid out whether or not it is showing**, positioned absolutely by the UA
+   * sheet. That is the `::placeholder` trick again and it buys the same thing: opening a
+   * picker is a pure paint decision with nothing to invalidate, so it costs no relayout
+   * and cannot jank. The cost is laying out the options of every closed select, which is
+   * a handful of nodes.
+   *
+   * # What the options' selectors see
+   *
+   * `path` is passed through **unchanged** — it still ends at the select, not at this box
+   * — so `select > option` matches, and so does `option:first-child`. A browser's picker
+   * is a pseudo-element the light-DOM options render into rather than a wrapper they move
+   * under, and this is what keeps that true. It is the whole reason the split happens
+   * here, at the node level, instead of in `uaParts` where it would have been shorter.
+   */
+  function walkPicker(
+    el: Element,
+    path: Element[],
+    ownStyle: ComputedStyle,
+    parentVars: VarEnv,
+    where: string,
+    parent: number,
+    parts: UaParts,
+  ): number {
+    if (parts.picker === null) return -1;
+
+    // Options are marked before any of them is walked, so each one finds its row
+    // waiting when it pushes its controls entry.
+    const group = optionGroup(el);
+    for (const option of optionsOf(parts.picker)) {
+      optionRows.set(option, { group, chosen: option === parts.chosen });
+      labelHosts.set(option, option);
+    }
+    if (parts.selectedContent !== null) labelHosts.set(el, parts.selectedContent);
+
+    const inherited = inheritFrom(ownStyle);
+    const r = resolveVariants(path, el, inherited, parentVars, where, "picker");
+
+    const self = nodes.length;
+    nodes.push({
+      kind: NodeKind.BOX,
+      style: r.styleId,
+      mask: r.mask,
+      run: r.run,
+      text: -1,
+      parent,
+      children: [],
+      generated: true,
+      overlay: true,
+    });
+
+    for (const option of parts.picker) {
+      const child = walkChild(option, path, ownStyle, self, r.vars);
+      if (child !== -1) nodes[self]!.children.push(child);
+    }
+
+    return self;
+  }
+
+  /**
    * Whether the sheet mentions `::selection` at all, so the common document pays nothing.
    *
    * The resolution below is one extra cascade per *element*, not per editable — `::selection`
@@ -1021,7 +1174,7 @@ export function compileTree(
       text: -1,
       parent,
       children: [],
-      ...(ownsItsPress(el) ? { ownsPress: true as const } : {}),
+      ...(ownsItsPress(el, path) ? { ownsPress: true as const } : {}),
       // A text-entry element is one line high on its own account, bound or not — a
       // browser does not ask whether anything owns the value before giving the box a
       // height. When it *is* bound the generated run below carries the floor instead,
@@ -1052,15 +1205,29 @@ export function compileTree(
     if (el.tag === "label") labelEls.push({ el, node: self });
     const controlKind = controlKindOf(el);
     if (needsControlRow(el)) {
+      // Set by `walkPicker` before this option was walked, so it is here for every
+      // option that belongs to a select. An `<option>` written outside one has no row
+      // and is in no group, which is what a browser does with it: nothing.
+      const option = optionRows.get(el);
       controls.push({
         node: self,
         kind: controlKind,
-        group: controlKind === ControlKind.RADIO ? radioGroup(el, path) : -1,
+        group:
+          controlKind === ControlKind.RADIO
+            ? radioGroup(el, path)
+            : (option?.group ?? -1),
         // Presence, not value: `<input checked>` and `checked=""` both mean checked,
         // which is what `parseAttributes` already normalises to.
+        //
+        // An option is `CHECKED` when it is the one the closed control shows, which is
+        // `selected` or — when nothing is — the first. Deriving it from `uaParts.chosen`
+        // rather than from the attribute is what keeps the baked label and the engine's
+        // initial selection from disagreeing: they are the same decision, made once.
         flags:
-          (el.attrs.has("checked") ? ControlFlags.CHECKED : 0) |
+          (el.attrs.has("checked") || option?.chosen === true ? ControlFlags.CHECKED : 0) |
           (el.attrs.has("disabled") ? ControlFlags.DISABLED : 0),
+        // Not knowable yet — the run is a child and children have not been walked.
+        label: -1,
       });
     }
 
@@ -1082,7 +1249,8 @@ export function compileTree(
     // button while `::before` was a child node, and the two have no way to sit
     // beside each other. Rare enough to be worth the extra node rather than a
     // second layout path.
-    const kids = uaChildren(el);
+    const parts = uaParts(el);
+    const kids = parts.children;
     const onlyText =
       kids.length === 1 && kids[0]!.type === "text" ? (kids[0] as { value: string }).value : null;
 
@@ -1131,6 +1299,13 @@ export function compileTree(
     // Last, and it does not matter: absolutely positioned, so it is out of flow and its
     // position among the siblings changes nothing about where anything is drawn.
     if (placeholder !== -1) nodes[self]!.children.push(placeholder);
+
+    // Also last, and for the same reason plus one more: the picker is out of flow *and*
+    // out of the paint walk entirely, so where it sits among its siblings decides
+    // nothing at all. It has to come after the options' own ancestors are styled, which
+    // is why it is here rather than beside `before`.
+    const picker = walkPicker(el, path, style, vars, where, self, parts);
+    if (picker !== -1) nodes[self]!.children.push(picker);
 
     return self;
   }
@@ -1324,6 +1499,7 @@ export function compileTree(
   }
 
   resolveActivation(nodes, nodeOfEl, controls, labelEls, warnings);
+  resolveControlLabels(nodes, nodeOfEl, controls, labelHosts);
 
   return {
     strings,
@@ -1433,6 +1609,52 @@ function resolveActivation(
     if (n.ownsPress) continue;
     const inherited = nodes[parent]!.activates;
     if (inherited !== undefined) n.activates = inherited;
+  }
+}
+
+/**
+ * Fills `controls.label` — the text run whose string a control's label lives in.
+ *
+ * A separate pass for the reason [`resolveActivation`] is one: the answer is a *child*
+ * of the node whose row wants it, and a row is pushed before its children are walked.
+ *
+ * What the engine does with it is swap two slots. Committing an option has to change
+ * what the closed control reads, and the engine cannot write the string — Bun owns the
+ * tables — so it keeps a per-node slot override and points the select's run at the
+ * chosen option's. Two node ids per select is all that takes, and this is where they
+ * come from.
+ *
+ * A control with no run leaves -1: an empty `<option></option>`, or a `<select>` whose
+ * button the author wrote without a `<selectedcontent>` in it. Both are legal markup and
+ * both mean "nothing to mirror", which the engine reads as "leave the label alone".
+ */
+function resolveControlLabels(
+  nodes: BuiltNode[],
+  nodeOfEl: Map<Element, number>,
+  controls: BuiltControl[],
+  labelHosts: Map<Element, Element>,
+): void {
+  if (labelHosts.size === 0) return;
+
+  /** The first text run among a node's children, or -1. */
+  const runIn = (node: number): number => {
+    for (const child of nodes[node]!.children) {
+      if (nodes[child]!.kind === NodeKind.TEXT) return child;
+    }
+    return -1;
+  };
+
+  const byNode = new Map<number, number>();
+  for (const [control, host] of labelHosts) {
+    const controlNode = nodeOfEl.get(control);
+    const hostNode = nodeOfEl.get(host);
+    if (controlNode === undefined || hostNode === undefined) continue;
+    byNode.set(controlNode, runIn(hostNode));
+  }
+
+  for (const row of controls) {
+    const run = byNode.get(row.node);
+    if (run !== undefined) row.label = run;
   }
 }
 
@@ -1569,6 +1791,13 @@ function buildPlaceholders(nodes: BuiltNode[]): Int32Array {
   return new Int32Array(out.sort((a, b) => a - b));
 }
 
+/** Overlay roots — `::picker(select)` boxes. Sorted, for the same binary search. */
+function buildOverlays(nodes: BuiltNode[]): Int32Array {
+  const out: number[] = [];
+  for (let i = 0; i < nodes.length; i++) if (nodes[i]!.overlay) out.push(i);
+  return new Int32Array(out.sort((a, b) => a - b));
+}
+
 function buildInteractive(
   nodes: BuiltNode[],
   handlers: BuiltHandler[],
@@ -1696,6 +1925,7 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     generated: buildGenerated(result.nodes),
     editableBoxes: buildEditableBoxes(result.nodes),
     placeholders: buildPlaceholders(result.nodes),
+    overlays: buildOverlays(result.nodes),
     // Bindings are resolved and emitted only on the generated-module path; the
     // in-memory IR is used by tests and the variant probe, which are static.
     textBindings: [],
@@ -1725,6 +1955,7 @@ function controlTable(controls: BuiltControl[]): CompiledUi["controls"] {
     kind: Uint8Array.from(controls, (c) => c.kind),
     group: Int32Array.from(controls, (c) => c.group),
     flags: Uint8Array.from(controls, (c) => c.flags),
+    label: Int32Array.from(controls, (c) => c.label),
   };
 }
 
@@ -2155,6 +2386,8 @@ export const interactive = ${typedArray("Int32Array", interactive)};
 export const generated = ${typedArray("Int32Array", [...buildGenerated(nodes)])};
 export const editableBoxes = ${typedArray("Int32Array", [...buildEditableBoxes(nodes)])};
 export const placeholders = ${typedArray("Int32Array", [...buildPlaceholders(nodes)])};
+/** Overlay roots — painted after the tree, hit-tested before it. \`::picker(select)\`. */
+export const overlays = ${typedArray("Int32Array", [...buildOverlays(nodes)])};
 
 ${localsSource}/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [
@@ -2273,6 +2506,7 @@ export const controls = {
   kind: ${typedArray("Uint8Array", controlRows.map((c) => c.kind))},
   group: ${typedArray("Int32Array", controlRows.map((c) => c.group))},
   flags: ${typedArray("Uint8Array", controlRows.map((c) => c.flags))},
+  label: ${typedArray("Int32Array", controlRows.map((c) => c.label))},
 } satisfies ControlTable;
 
 export const root: number = ${root};

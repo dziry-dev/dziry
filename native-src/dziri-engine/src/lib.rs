@@ -27,6 +27,7 @@ pub mod error;
 pub mod layout;
 pub mod paint;
 pub mod protocol;
+pub mod select;
 pub mod tables;
 pub mod text;
 pub mod window;
@@ -626,6 +627,35 @@ pub unsafe extern "C" fn dziri_engine_selection(handle: Handle, field: i32, out:
         unsafe {
             *out = start;
             *out.add(1) = end;
+        }
+        status::OK
+    })
+}
+
+/// Writes the open `<select>` and the option it currently shows to `out`, as two `i32`.
+///
+/// `(-1, -1)` when no picker is open; `(select, -1)` for an open picker whose select has no
+/// checked option, which only a `<select>` with no options can be.
+///
+/// Exposed for the reason `dziri_engine_selection` is: both halves are engine state that
+/// reaches Bun only as an event, so from outside there is otherwise no way to ask. Without it
+/// a test of the picker could only assert on pixels — and "the dropdown is open" and "the
+/// dropdown is open on the right option" are the two things a golden is worst at telling
+/// apart, since a highlight is a few pixels of background.
+///
+/// # Safety
+/// `out` must be writable for two `i32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_open_select(handle: Handle, out: *mut i32) -> i32 {
+    if out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        let (select, option) = engine.open_selection();
+        // SAFETY: the caller promises two writable `i32`, checked non-null above.
+        unsafe {
+            *out = select;
+            *out.add(1) = option;
         }
         status::OK
     })

@@ -49,9 +49,30 @@
  * There is no clipboard, and no IME. A double-click-then-drag extends by character rather
  * than by word. `accent-color` still resolves with nothing to paint.
  *
- * A `<select>` renders closed. Its picker is a popover with anchor positioning in
- * the spec, and that needs the overlay layer (ROADMAP B1), so the options are
- * `display: none` for now. The closed control is most of what a form looks like.
+ * A `<select>` **opens**, as of protocol v18 — this paragraph used to say the options were
+ * `display: none` because the picker needed an overlay layer. That layer is one node flag:
+ * a `::picker(select)` box is an ordinary child of its select, so it inherits and lays out
+ * with no special case, and `NodeFlags.OVERLAY` moves only its *turn* — painted after the
+ * tree, hit-tested before it. Both halves are needed, and for different reasons; the flag's
+ * own comment says which.
+ *
+ * Almost nothing about it is new state. The picker opens on the **press**, not the click,
+ * which is the opposite of a checkbox and is measured. The committed choice is `:checked` on
+ * an option, because committing one *is* a radio set. And the pending highlight an arrow key
+ * moves is **focus** — measured, since Chromium's `activeElement` while a picker is open is
+ * an `<option>` rather than the select — so `option:focus` draws it, Escape discards it by
+ * doing what closing always does, and the "two pieces of state" ROADMAP B1 asks for cost no
+ * fields at all. What is genuinely new is one integer for which select is open, and one
+ * redirect per committed label so the closed button can read the chosen option's string
+ * without the engine writing into Bun's tables.
+ *
+ * Opening costs **no relayout**: the picker is positioned absolutely and laid out whether or
+ * not it shows, so showing it is a pure paint decision — the same trick `::placeholder` uses.
+ *
+ * Still honestly missing there: the picker does not flip or shift when it would run off the
+ * window, which is collision handling and belongs to ROADMAP B2's `@floating-ui` adapter.
+ * Scrolling outside does not dismiss it, `<optgroup>` labels do not render, and there is no
+ * type-to-select.
  */
 import { signal } from "dziri";
 
@@ -177,13 +198,14 @@ export default function Controls() {
       </div>
 
       <div className={CARD}>
-        <div className={H}>select — closed</div>
+        <div className={H}>select — it opens</div>
         <div className={SUB}>
-          just a select and its options — the closed button and the selected option&apos;s text are
-          the compiler&apos;s job, exactly as a browser builds them, except they are ordinary nodes
-          rather than a shadow tree · the arrow is an ::after box on that button · the picker is a
-          popover with anchor positioning in the spec and needs the overlay layer, so the options
-          are hidden by the UA sheet for now
+          click it, or focus it and press an arrow — which opens the picker rather than walking the
+          value, and that is measured, not the legacy behaviour · arrows move the highlight, Enter
+          commits, Escape leaves the value alone, and a click outside dismisses and still activates
+          what it hit · the closed button and the selected option&apos;s text are the
+          compiler&apos;s job, exactly as a browser builds them, except they are ordinary nodes
+          rather than a shadow tree · the arrow is an ::after box on that button
         </div>
         <div className="flex flex-row gap-4">
           <select>
@@ -197,13 +219,19 @@ export default function Controls() {
         </div>
         <div className={SUB}>
           and the same control written out longhand, which is the spec&apos;s opt-in form for
-          customizing the internals — it compiles to the identical tree
+          customizing the internals — it compiles to the identical tree · the picker below it holds
+          an &lt;optgroup&gt;, whose options are still the select&apos;s own: they arrow and commit
+          like any other, though the group&apos;s label does not render yet
         </div>
         <select>
           <button>
             <selectedcontent>Written by hand</selectedcontent>
           </button>
           <option>Written by hand</option>
+          <optgroup label="grouped">
+            <option>Inside an optgroup</option>
+            <option>And another</option>
+          </optgroup>
         </select>
       </div>
 

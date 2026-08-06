@@ -54,10 +54,16 @@ Ship **4 new render archetypes** and **12 of 22 input keywords**:
 7. **`label` with `for=`** — compile-time association, click forwarding. No paint.
 8. **`form` + `onSubmit`** — a callback, no navigation, no entry-list serialisation.
 
-**Defer `select`/`option`/`optgroup`/`datalist` to the overlay phase (B1).** Servo and Chromium
-independently concluded the popup must leave the engine because it has to escape window bounds.
-Blitz still has no `<select>` at all and stubs it with `option { display: none }`.
-`ROADMAP.md:474-478` already cut Select from v1.
+**Defer `select`/`option`/`optgroup` to the overlay phase (B1).** Servo and Chromium independently
+concluded the popup must leave the engine because it has to escape window bounds. Blitz still has
+no `<select>` at all and stubs it with `option { display: none }`.
+
+**Done, protocol v18** — and the recommendation held: the picker waited for the layer, and the
+layer turned out to be one node flag rather than a subsystem. The reasoning about escaping window
+bounds was right about the requirement and wrong about the cost; dziri's picker is an ordinary
+child node whose *turn in the paint walk* moves, not a second tree. `datalist` is still deferred
+and is now the odd one out here — it needs the same layer plus a filtered list, and nothing wants
+it yet.
 
 **Defer indefinitely:** `date`, `month`, `week`, `time`, `datetime-local`, `number`, `range`,
 `color`, `file` — 9 keywords, 6 dedicated widgets. Blitz has none of them.
@@ -222,17 +228,25 @@ expressed today, because the properties and the state selectors it needs do not 
 
 ### 2.7 What "interactive" means today
 
-- Five predicates exist: `HOVER`, `ACTIVE`, `FOCUS`, and — since protocol v9 — `CHECKED` and
-  `DISABLED` (`native-src/dziri-engine/src/protocol.rs:448-455`). The compiler resolves all five;
-  the engine only *sets* the first three, so the last two are compiled and never live.
-  Nothing at all for selected, indeterminate, expanded, invalid.
+- Five predicates existed when this was written: `HOVER`, `ACTIVE`, `FOCUS`, and — since protocol
+  v9 — `CHECKED` and `DISABLED`. The compiler resolved all five; the engine only *set* the first
+  three, so the last two were compiled and never live. **Out of date on both counts.** `CHECKED`
+  and `DISABLED` are live as of v13, and `OPEN` joined them as a sixth in v18 — so "expanded",
+  named below as having nothing at all, is the one that arrived: `:open` on a `<select>` whose
+  picker is showing. Still nothing for selected, indeterminate or invalid.
 - Ten event kinds exist: `NONE, QUIT, RESIZE, MOUSE_MOVE, MOUSE_DOWN, MOUSE_UP, CLICK, KEY_DOWN,
   TEXT_INPUT, FOCUS` (`native-src/dziri-engine/src/protocol.rs:295-306`). No wheel, no drag, no
   double-click, no composition/IME events.
 - A node is interactive if it is a `BUTTON`, has a state style, or has a click handler
   (`src/compiler/compile.ts:884`).
-- Hit-testing is a rectangle containment walk of the live tree (`paint.rs:314-368`). Correct, but
-  there are no sub-node hit regions — a `<select>` arrow or a slider thumb has nowhere to live.
+- Hit-testing is a rectangle containment walk of the live tree. Correct, and the "no sub-node hit
+  regions" claim beside it **has been overtaken rather than fixed**: a `<select>`'s arrow and its
+  options are ordinary nodes now, because pseudo-elements generate real nodes rather than
+  paint-time rects. So they had somewhere to live all along, once `::before`/`::after` existed.
+  What the walk did need was a second entry point: it prunes a subtree whose parent's box does not
+  contain the point, and a picker hangs *below* its select — so every option was unreachable until
+  the overlay layer gave it its own walk (`NodeFlags.OVERLAY`, v18). A slider thumb is still
+  unbuilt, but nothing structural is now in its way.
 - Keyboard was a click-and-type stopgap when this was written: `typeInto` appended text and deleted
   on Backspace, and the doc comment on `bindValue` said so — *"No caret, no selection."* **Both of
   those are now out of date.** The engine owns a caret and an `(anchor, focus)` selection, every
@@ -909,7 +923,7 @@ repo does not have (§2.7):
 | Tab order, Enter/Space activation, `:focus-visible` | none; scheduled A3 (`ROADMAP.md:364-378`) |
 | Working `TEXT_INPUT` | **broken** — `SDL_StartTextInput` never called (`ARCHITECTURE-REVIEW.md:70`, §3 item 10) |
 | Caret, selection, clipboard, IME | none; scheduled A5 (`ROADMAP.md:392-394`) |
-| Overlay layer for popups | none; scheduled B1 (`ROADMAP.md:411-418`) |
+| Overlay layer for popups | **exists** — `NodeFlags.OVERLAY`, v18. Painted after the tree, hit-tested before it; a `<select>`'s picker is the only user so far |
 | Drag (mouse-move while pressed) | `MOUSE_MOVE`/`MOUSE_DOWN`/`MOUSE_UP` exist, no drag gesture |
 
 ---
@@ -940,7 +954,7 @@ Deferred, in order:
 | --- | --- | --- |
 | After list markers | `ul`/`ol`/`li` markers, `details`/`summary` | one feature unlocks six elements |
 | After A5 (images) | `img`, `input[type=image]` | needs decode + cache |
-| After B1 (overlay) | `select`, `option`, `optgroup`, `datalist` | the popup must escape window bounds — Servo and Chromium both concluded this independently. `ROADMAP.md:474-478` already cut Select from v1. |
+| ~~After B1 (overlay)~~ **done, v18** | `select`, `option`, `optgroup` | the popup must escape window bounds — Servo and Chromium both concluded this independently. Correct, and cheaper than expected: the layer is one node flag. `datalist` still deferred |
 | After A4 (scrolling) | `select` list box, `textarea` | need scroll containers |
 | Indefinitely | `date`, `month`, `week`, `time`, `datetime-local`, `number`, `range`, `color`, `file` | 9 keywords, 6 dedicated widgets. Blitz has none of them after ~2 years. |
 | Never | 10 table elements, `audio`/`video`/`iframe`/`embed`/`object`, `marquee` and the other 28 obsolete | committed non-goals (`ROADMAP.md:213-214`) |

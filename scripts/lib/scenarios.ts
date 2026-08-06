@@ -207,12 +207,14 @@ export const SCENARIOS: Scenario[] = [
    * `caret-color`. That is the case worth pinning: a caret at 0 is where an off-by-one in
    * the padding or the border would put it somewhere obviously wrong.
    *
-   * **This frame shows no focus ring, and that is the harness rather than the engine.**
-   * `main.ts` runs every `--click` and *then* calls `setInputState(--hover, -1, --focus)`,
-   * so with no `--focus` flag the focus the click just acquired is reset to -1 before the
-   * shot. The caret survives because it is not keyed on focus. Worth knowing before
-   * reading this picture as "a clicked field does not look focused", and worth fixing when
-   * `--click` and `--focus` next need to compose.
+   * **This frame used to show no focus ring, and that was the harness rather than the
+   * engine.** `main.ts` ran every `--click` and *then* called
+   * `setInputState(--hover, -1, --focus)`, so with no `--focus` flag the focus the click had
+   * just acquired was reset to -1 before the shot; the caret survived only because it is not
+   * keyed on focus. This comment said it was worth fixing when `--click` and `--focus` next
+   * needed to compose, and `controls-picker` is that moment — a picker's highlight *is*
+   * focus, and there is no value to pass instead. The declared state is now applied only
+   * when a flag declares one, so this picture gained the ring a clicked field really has.
    */
   {
     name: "controls-caret",
@@ -274,5 +276,27 @@ export const SCENARIOS: Scenario[] = [
    * regression in the rewrite shows up as text rather than as a passing build. Taller
    * than the rest because the point is the whole list.
    */
+  /**
+   * An open `<select>` picker — the overlay layer, rendered.
+   *
+   * The one frame that can catch what the numbers cannot. `openSelect()` says a picker is
+   * open and on which option; it says nothing about whether the box was drawn *over* the
+   * cards below it or under them, whether the anchor put it against the select's bottom edge
+   * or somewhere inside it, or whether the highlight landed on the committed option. All
+   * three are one screenshot.
+   *
+   * Node 318 is the button of the first select on the page. `--open` presses it rather than
+   * clicking it, because a picker opens on `mouse_down` — measured, and the opposite of a
+   * checkbox — so the release is not part of the gesture under test.
+   *
+   * No `--focus`, deliberately, and it would break the picture: opening moves focus onto the
+   * committed `<option>` and `option:focus` is what draws the highlight, so declaring a focus
+   * here would overwrite the engine's own answer with the harness's.
+   */
+  {
+    name: "controls-picker",
+    args: ["--route", "controls", "--size", "1040x1400", "--open", "318"],
+  },
+
   { name: "reactivity", args: ["--route", "reactivity", "--size", "1040x1400"] },
 ];

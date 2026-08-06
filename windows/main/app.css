@@ -214,8 +214,9 @@ input[type="text"]:focus {
     background: #1e1e21;
 }
 
-/* A select, closed. The structure is MDN's customizable-select model: ordinary
-   children, a `<button>` holding `<selectedcontent>`, then the options. */
+/* A select. The structure is MDN's customizable-select model: ordinary children,
+   a `<button>` holding `<selectedcontent>`, then the options — which the compiler
+   puts in a `::picker(select)` box, styled further down. */
 select {
     appearance: none;
     background: #18181b;
@@ -256,6 +257,73 @@ select:disabled { background: #27272a; }
    `ControlKind`, so nothing can disable one at run time and the attribute and the
    state cannot disagree. */
 select[disabled] button { color: #52525b; }
+
+/* `:open` — live, and the engine owns it. Only one picker can be open at a time,
+   so it is one integer in `InputState` rather than a bit per select. */
+select:open { border-color: #71717a; }
+
+/* The picker.
+
+   The UA sheet gives this box `position: absolute` and *nothing else*, which is
+   the same division of labour every other control here follows: structure in the
+   sheet that makes elements behave like themselves, appearance in a theme. So
+   every colour below is this page's decision and not dziri's.
+
+   Nothing here says whether it is visible, and there is deliberately nothing to
+   say: the engine paints an overlay only while it is open, exactly as it paints a
+   `::placeholder` only while its field is empty. `display: block` written here
+   would not open a picker — it would be ignored — and that is the point, because
+   the alternative is a dropdown an author can leave hanging over the page with no
+   way to close it.
+
+   No `top` either. The engine offsets the box onto its select's bottom edge from
+   the two rects layout produced, because the spec's `top: anchor(bottom)` has no
+   dziri spelling — `top: 100%` would be it, and percentage lengths are refused. A
+   `top` here would *add* to that, so this is where a gap would go. */
+select::picker(select) {
+    background: #1f1f23;
+    border-width: 1px;
+    border-color: #3f3f46;
+    border-radius: 6px;
+    padding: 4px;
+    gap: 1px;
+    width: 220px;
+    /* The ring machinery, used as a drop shadow: a picker floats over content, so
+       it needs an edge that reads against whatever it covers. `box-shadow` here is
+       the concentric-band subset a style row can hold — no blur, which is why this
+       is a crisp halo rather than a soft shadow, and the honest limit to state. */
+    box-shadow: 0 0 0 4px #00000059;
+}
+
+/* The options, reached as `select option` — not as `::picker(select) option`.
+
+   Two reasons, and the second is the interesting one. A pseudo-element is only
+   supported on the *subject* of a selector here, as `::before` always has been. And
+   `select option` is the right spelling anyway: a browser's picker is a
+   pseudo-element the light-DOM options render *into*, not a wrapper they become
+   children of, so `select > option` matches in Chromium and it matches here — the
+   compiler splices the picker in at the node level precisely to keep that true. */
+select option {
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    color: #d4d4d8;
+    flex-direction: row;
+    align-items: center;
+}
+
+/* The pointer highlight and the keyboard one are different states, and both are
+   ordinary predicates. `:hover` is where the mouse is; `:focus` is the *pending*
+   highlight an arrow key moves — measured, because while a picker is open
+   Chromium's `activeElement` is an `<option>` rather than the select, which is
+   what lets the highlight be focus rather than a third piece of state. */
+select option:hover { background: #3f3f46; color: #fafafa; }
+select option:focus { background: #1d4ed8; color: #ffffff; }
+
+/* And `:checked` is the committed choice, which is engine state for the same
+   reason a checkbox's is: committing an option *is* checking one member of a
+   group and clearing the rest. */
+select option:checked { color: #93c5fd; }
 
 /* Quotes — `::before` and `::after` around real content, so their position in
    the child chain is visible rather than asserted.
