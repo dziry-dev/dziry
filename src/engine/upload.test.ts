@@ -658,8 +658,20 @@ test("pressing a select opens its picker, before any release", () => {
   // And the picker's own options are reachable by the pointer, which they are not in the
   // main walk: `hit_test` prunes a subtree whose parent's box does not contain the point,
   // and a picker hangs below its select's box. This is the overlay walk being asked first.
-  for (const { node } of select.options) {
-    expect(engine.hitTest(...overlayCentre(engine, select.node, select.picker, node))).toBe(node);
+  //
+  // **Aimed at each option's own text run, not at the option's centre**, and that is the
+  // point of this loop rather than an incidental detail. `hit_test` returns the innermost
+  // *interactive* node, and a run under a control is interactive — the compiler gives it an
+  // `activates` so the `<span>` beside a checkbox can reach the box. So the pointer lands on
+  // the run, and a picker that only understood options declined to commit when you clicked
+  // an option's label, which is most of an option. Exactly the defect the buttons had.
+  //
+  // Asserting the *run* is hit rather than the option is deliberate: that is what hit-testing
+  // truthfully answers, and resolving it to a control is the caller's job. The commit test
+  // below is what proves the resolution happens.
+  for (const { node, label } of select.options) {
+    const aim = label >= 0 ? label : node;
+    expect(engine.hitTest(...overlayCentre(engine, select.node, select.picker, aim))).toBe(aim);
   }
 
   engine.close();
@@ -696,7 +708,12 @@ test("choosing an option commits it, closes the picker and relabels the button",
   expect(target, "two options with differently-sized labels are needed").toBeDefined();
   const want = engine.bounds(target!.label)[2];
 
-  engine.mouseUp(...overlayCentre(engine, select.node, select.picker, target!.node));
+  // Released over the option's **text**, which is where a user actually clicks and where this
+  // silently did nothing: the release resolved to the run, whose control kind is `NONE`, so
+  // the commit was declined. Aiming at the option's centre instead would land on the same
+  // run in a real tree and pass either way only by luck of layout — so aim at the run on
+  // purpose and let `option_at` resolve it.
+  engine.mouseUp(...overlayCentre(engine, select.node, select.picker, target!.label));
   expect(engine.openSelect(), "committing closes it").toBeNull();
   engine.tick();
 

@@ -217,6 +217,14 @@ input[type="text"]:focus {
 /* A select. The structure is MDN's customizable-select model: ordinary children,
    a `<button>` holding `<selectedcontent>`, then the options — which the compiler
    puts in a `::picker(select)` box, styled further down. */
+/* The width lives on the **select**, not on its button.
+   It was on the button, and that was wrong in a way the page showed: a `<select>`
+   is a flex item, so one placed directly in a column card *stretches*, and its
+   border box ran the full width of the card with a 220px button sitting inside it.
+   The two selects in a `flex-row` above looked right only because a row shrinks
+   its items to content. Sizing the control itself makes a select the same width
+   wherever it is put — and the picker follows it, because the UA sheet stretches a
+   picker across its select rather than giving it a width of its own. */
 select {
     appearance: none;
     background: #18181b;
@@ -225,6 +233,7 @@ select {
     border-radius: 6px;
     flex-direction: row;
     align-items: center;
+    width: 220px;
 }
 
 select:hover { border-color: #52525b; }
@@ -238,7 +247,7 @@ select button {
     background: #00000000;
     font-size: 13px;
     color: #e4e4e7;
-    width: 220px;
+    flex-grow: 1;
 }
 
 /* The arrow. `::picker-icon` is what CSS calls this once a picker exists; until
@@ -287,7 +296,6 @@ select::picker(select) {
     border-radius: 6px;
     padding: 4px;
     gap: 1px;
-    width: 220px;
     /* The ring machinery, used as a drop shadow: a picker floats over content, so
        it needs an edge that reads against whatever it covers. `box-shadow` here is
        the concentric-band subset a style row can hold — no blur, which is why this

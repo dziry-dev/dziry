@@ -235,6 +235,9 @@ const VK: Record<string, number> = {
   // key code (0x41), and the runner suppresses `text` when a modifier other than Shift is
   // held — see `driveMouse`.
   a: 65,
+  // `F4` opens a closed `<select>` on Windows, and `Alt+ArrowDown` is the other spelling —
+  // both worth measuring rather than assuming, since dziri only implements the plain arrows.
+  F4: 115,
 };
 async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<void> {
   const ready = `new Promise((res) => {

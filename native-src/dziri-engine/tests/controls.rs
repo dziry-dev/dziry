@@ -589,3 +589,232 @@ fn an_unscrolled_pickers_position_is_unchanged() {
     );
     assert_eq!(engine.hit_test(50.0, 90.0), 3);
 }
+
+/// The keyboard half of a `<select>` — which had **no test at all** until this.
+///
+/// Not an oversight in one file: `pump_input` returns immediately when there is no window, so
+/// until `Engine::key_down` was extracted nothing headless could press a key, and every
+/// keyboard behaviour in the engine was documented on the strength of code no test had run.
+/// Keyboard operability is the half of accessibility dziri claims — ROADMAP's Accessibility
+/// table says keyboard yes, assistive tech not yet — so untestable was the wrong state for it.
+mod keyboard {
+    use super::*;
+    use dziri_engine::engine::keys;
+
+    /// Node 2 is the select, 3 its picker, 4 and 5 the two options. Both options share a
+    /// group, so committing behaves as the radio set it is.
+    fn two_option_select() -> Engine {
+        let mut engine = Engine::new(&config(6, 4)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            for slot in 0..4 {
+                init_style(t, slot);
+            }
+            t.set_u32(STYLES, styles::BG, 1, GREY);
+            t.set_f32(STYLES, styles::HEIGHT, 1, 40.0);
+            t.set_u8(STYLES, styles::POSITION, 2, 1 /* absolute */);
+            t.set_f32(STYLES, styles::WIDTH, 2, 100.0);
+            t.set_f32(STYLES, styles::HEIGHT, 2, 40.0);
+            t.set_u32(STYLES, styles::BG, 3, WHITE);
+            t.set_f32(STYLES, styles::HEIGHT, 3, 20.0);
+
+            node(t, 0, 0, -1);
+            node(t, 1, 0, 0);
+            node(t, 2, 1, 0);
+            node(t, 3, 2, 2);
+            node(t, 4, 3, 3);
+            node(t, 5, 3, 3);
+            t.set_u8(
+                NODES,
+                nodes::FLAGS,
+                3,
+                protocol::flags::OVERLAY | protocol::flags::INTERACTIVE,
+            );
+
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 2);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 2, 3);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 3, 4);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, 4, 5);
+
+            control(t, 0, 2, control_kind::SELECT, -1, 0);
+            control(t, 1, 4, control_kind::OPTION, 7, control_flags::CHECKED);
+            control(t, 2, 5, control_kind::OPTION, 7, 0);
+            pad_controls(t, 3);
+            pad_variants(t, 0);
+        }
+        engine.tick().expect("tick");
+        engine
+    }
+
+    /// Focus the select the only way anything can today: by clicking it.
+    ///
+    /// **This is the honest limit of dziri's keyboard story and it deserves a comment rather
+    /// than a helper name that hides it.** There is no Tab order (ROADMAP A3), so a `<select>`
+    /// cannot be *reached* from the keyboard at all — every test below therefore starts with a
+    /// pointer, which means the keyboard behaviour they prove is only available to someone who
+    /// can already use a mouse. That is not keyboard accessible, and no amount of correct
+    /// arrow handling makes it so.
+    fn focus_by_clicking(engine: &mut Engine) {
+        engine.mouse_down(50.0, 20.0);
+        engine.mouse_up(50.0, 20.0);
+        engine.tick().expect("tick");
+        // The press opened it, since a select opens on `mouse_down`. Escape closes it and
+        // leaves focus on the select, which is the state these tests start from.
+        engine.key_down(keys::ESCAPE, 0);
+        engine.tick().expect("tick");
+        assert_eq!(
+            engine.open_selection().0,
+            -1,
+            "closed, ready to open by key"
+        );
+    }
+
+    /// Every measured way to open a closed select, and the one that does not.
+    ///
+    /// Measured 2026-08-06, Chromium 151: ArrowDown, ArrowUp, Space, F4 and Alt+ArrowDown all
+    /// open one; **Enter does not**. Enter was asserted to, which is what prompted the
+    /// measurement — and it is reserved for committing a highlight, so a key that also opened
+    /// would make Down-then-Enter ambiguous.
+    #[test]
+    fn the_measured_keys_open_a_closed_select_and_enter_does_not() {
+        for key in [keys::DOWN, keys::UP, keys::SPACE, keys::F4] {
+            let mut engine = two_option_select();
+            focus_by_clicking(&mut engine);
+            engine.key_down(key, 0);
+            engine.tick().expect("tick");
+            assert_eq!(engine.open_selection().0, 2, "key {key} should open it");
+        }
+
+        let mut engine = two_option_select();
+        focus_by_clicking(&mut engine);
+        engine.key_down(keys::RETURN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(
+            engine.open_selection().0,
+            -1,
+            "Enter leaves a closed select closed — measured, and the opposite was assumed"
+        );
+    }
+
+    /// Arrows move the highlight and commit nothing; Enter is what commits.
+    #[test]
+    fn arrows_move_the_highlight_and_enter_commits() {
+        let mut engine = two_option_select();
+        focus_by_clicking(&mut engine);
+
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(
+            engine.open_selection(),
+            (2, 4),
+            "opening lands on the committed option, so Down-then-Enter means the next one"
+        );
+
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(
+            engine.open_selection(),
+            (2, 4),
+            "the highlight moved and nothing committed — an arrow fires no change"
+        );
+
+        engine.key_down(keys::RETURN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.open_selection().0, -1, "Enter closed it");
+
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(
+            engine.open_selection().1,
+            5,
+            "Enter committed the highlight"
+        );
+    }
+
+    /// Escape closes with the value untouched, which is the point of the highlight being
+    /// separable from the selection.
+    #[test]
+    fn escape_discards_the_highlight() {
+        let mut engine = two_option_select();
+        focus_by_clicking(&mut engine);
+
+        engine.key_down(keys::DOWN, 0);
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        engine.key_down(keys::ESCAPE, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.open_selection().0, -1, "Escape closed it");
+
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(
+            engine.open_selection().1,
+            4,
+            "and the value is the one it started with"
+        );
+    }
+
+    /// Clamped at both ends rather than wrapping. A browser's picker stops at the last
+    /// option; wrapping would make a long list feel like it had lost the user's place.
+    #[test]
+    fn the_highlight_clamps_at_both_ends() {
+        let mut engine = two_option_select();
+        focus_by_clicking(&mut engine);
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+
+        for _ in 0..5 {
+            engine.key_down(keys::DOWN, 0);
+        }
+        engine.key_down(keys::RETURN, 0);
+        engine.tick().expect("tick");
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.open_selection().1, 5, "clamped at the last option");
+
+        for _ in 0..5 {
+            engine.key_down(keys::UP, 0);
+        }
+        engine.key_down(keys::RETURN, 0);
+        engine.tick().expect("tick");
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.open_selection().1, 4, "and at the first");
+    }
+
+    /// Whether the host was told about a key. `drain_events` fills a caller-owned buffer and
+    /// returns how many it wrote, so a test needs somewhere for them to land.
+    fn forwarded_a_key(engine: &mut Engine) -> bool {
+        let mut out = [dziri_engine::engine::Event::default(); 16];
+        let n = engine.drain_events(&mut out);
+        out[..n]
+            .iter()
+            .any(|e| e.kind == protocol::event_kind::KEY_DOWN)
+    }
+
+    /// A key the picker claims is not forwarded; one it does not claim still reaches the host.
+    ///
+    /// The distinction is measured: an arrow with a picker open fires `keydown` and *nothing
+    /// else* — no `input`, no `change`, and the value does not move — so a host that also
+    /// received it could act on a key the engine had already handled.
+    #[test]
+    fn a_claimed_key_is_not_forwarded_and_an_unclaimed_one_is() {
+        let mut engine = two_option_select();
+        focus_by_clicking(&mut engine);
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        let _ = forwarded_a_key(&mut engine);
+
+        engine.key_down(keys::DOWN, 0);
+        assert!(
+            !forwarded_a_key(&mut engine),
+            "an arrow in an open picker is the engine's"
+        );
+
+        engine.key_down(0x7a, 0);
+        assert!(
+            forwarded_a_key(&mut engine),
+            "a key the engine does not claim reaches the host"
+        );
+    }
+}

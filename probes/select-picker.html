@@ -141,6 +141,25 @@
     ["ArrowDown while closed + focused", { key: "ArrowDown" }],
     ["ArrowUp while closed + focused", { key: "ArrowUp" }],
 
+    // The other keys a closed select is expected to open on, and the reason this section
+    // exists: **Enter** was asserted to open one, and the arrows above are the only
+    // opening keys anything here had measured. Space, F4 and Alt+ArrowDown come along
+    // because they are the rest of the set authors reach for, and finding out which of
+    // them work costs one run rather than four.
+    //
+    // Each is preceded by an Escape so the picker is closed going in — otherwise the
+    // second key in the list would be measuring what a key does to an *open* picker,
+    // which is a different question already answered above.
+    ["--- Escape, then Enter on a closed select", { key: "Escape" }],
+    ["Enter while closed + focused", { key: "Enter" }],
+    ["Escape (in case Enter opened it)", { key: "Escape" }],
+    ["Space while closed + focused", { key: " " }],
+    ["Escape (in case Space opened it)", { key: "Escape" }],
+    ["F4 while closed + focused", { key: "F4" }],
+    ["Escape (in case F4 opened it)", { key: "Escape" }],
+    ["Alt+ArrowDown while closed + focused", { key: "ArrowDown", modifiers: 1 }],
+    ["Escape (in case Alt+Down opened it)", { key: "Escape" }],
+
     // The legacy control, for the one question it can answer. Its openness is browser
     // chrome and unobservable, but its *value* and its events are not — so "does an
     // arrow key on a closed native select change the value directly", which is what

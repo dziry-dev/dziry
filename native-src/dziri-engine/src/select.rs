@@ -462,6 +462,12 @@ mod tests {
 
         assert_eq!(Keycode::Return.to_ll().0 as i32, 13);
         assert_eq!(Keycode::Escape.to_ll().0 as i32, 27);
+
+        // The other measured opening keys. Space is its own ASCII scalar and F4 is a masked
+        // scancode, so the pair spans both numbering schemes in this module — which is
+        // exactly where a recalled constant goes wrong.
+        assert_eq!(Keycode::Space.to_ll().0 as i32, 32);
+        assert_eq!(Keycode::F4.to_ll().0 as i32, SCANCODE_MASK | 61);
     }
 
     #[test]

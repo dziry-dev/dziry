@@ -80,20 +80,33 @@ h6 { font-weight: 700; font-size: 10.72px; margin-block-start: 24.9776px; margin
    over the page with no way to close it. :open is still there to style with —
    borders, colours, a transform — it just does not decide what is drawn.
 
-   No inset either, and that one is a limitation rather than a choice: the spec
+   No *vertical* inset, and that one is a limitation rather than a choice: the spec
    anchors a picker with top:anchor(bottom), dziri's nearest spelling would be
    top:100%, and css.ts refuses percentage lengths. (No backticks in this comment,
    and that is not a style choice — the whole sheet is a template literal, so one
    would end the string. It has now cost two builds.) So the engine offsets the
    overlay by its select's own box, which it can do because it has both rects. An
-   author's own top/left still shift it from there — they move where Taffy puts the
-   box, and the anchor offset is applied on top.
+   author's own top still shifts it from there — it moves where Taffy puts the box,
+   and the anchor offset is applied on top.
+
+   left:0 and right:0 *are* here, and they do a job worth naming: an absolutely
+   positioned box with both inline insets set is stretched to its containing block,
+   so a picker comes out exactly as wide as its select. That is the spec's
+   min-inline-size:anchor-size(self-inline) reached with two plain lengths instead
+   of a function dziri does not have — and unlike a width in a theme it cannot drift,
+   because there is no second number to keep in step. A picker narrower than the
+   control it belongs to was the visible bug this replaced.
+
+   It is a *minimum* in the spec and a fixed size here: a picker whose longest
+   option is wider than the select will not grow to fit it. That wants max-content
+   sizing against a floor, which is min-inline-size, and dziri has the field but no
+   percentage or anchor-size value to put in it.
 
    Appearance — the picker's background and border, radii, the tick on a checkbox —
    is deliberately absent. That is a decision about how dziri's controls look, it
    belongs in a theme rather than in the sheet that makes elements behave like
    themselves, and html-coverage has nothing to say about it. */
-select::picker(select) { position: absolute }
+select::picker(select) { position: absolute; left: 0; right: 0 }
 
 /* Chrome's sheet gives the picker's button no border of its own; the border
    belongs to the select. Stated so an author styling select does not get a

@@ -694,6 +694,13 @@ design, and all three are now built:
    which refutes the belief carried over from legacy selects. Keyboard opening is then the same path
    as the click rather than a second mechanism. Built as exactly that.
 
+A fourth, measured later (2026-08-06) when Enter was asserted to open a closed select:
+**Space, F4 and Alt+ArrowDown open one too, and Enter does not.** Enter leaves it closed and
+fires only `keydown`. That is the useful answer rather than the inconvenient one — Enter is
+what commits a highlight, so a key that also opened would make Down-then-Enter ambiguous. All
+five opening keys are built; Alt+ArrowDown needed no case of its own, because the branch that
+opens one ignores the modifier mask.
+
 What is genuinely new state is one integer for which select is open — narrower than the plan's
 "one integer each", because only one popover can be open at a time — plus one per-node **label
 redirect**, so a closed button can read the chosen option's string without the engine writing

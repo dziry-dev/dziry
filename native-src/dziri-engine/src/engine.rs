@@ -36,7 +36,13 @@ use crate::error::EngineError;
 /// is why these are large numbers rather than an enum. Written out because `window.rs`
 /// flattens the keycode to an `i32` at the boundary, so by the time the engine sees one
 /// there is no `Keycode` left to match on.
-mod keys {
+/// The SDL keycodes the engine matches on.
+///
+/// `pub` so an integration test can press a key by name rather than by number. A test that
+/// spelled `1 << 30 | 81` itself would be asserting against its own copy of the constant,
+/// which is exactly the class of agreement `caret.rs` and `select.rs` check against
+/// `sdl3::keyboard::Keycode` rather than trust.
+pub mod keys {
     const SCANCODE_MASK: i32 = 1 << 30;
     pub const RIGHT: i32 = SCANCODE_MASK | 79;
     pub const LEFT: i32 = SCANCODE_MASK | 80;
@@ -53,6 +59,9 @@ mod keys {
     pub const A: i32 = 0x61;
     pub const UP: i32 = SCANCODE_MASK | 82;
     pub const DOWN: i32 = SCANCODE_MASK | 81;
+    /// Opens a closed `<select>`, along with the arrows and Alt+ArrowDown. Measured.
+    pub const SPACE: i32 = 32;
+    pub const F4: i32 = SCANCODE_MASK | 61;
     /// ASCII CR, unmasked — like Backspace and Delete, and unlike every arrow here.
     pub const RETURN: i32 = 13;
     /// ASCII ESC, also unmasked. Checked against `sdl3::keyboard::Keycode` in `select.rs`.
@@ -79,9 +88,13 @@ enum Hit {
 /// `SDL_KMOD_*`, written out for the reason `keys` is: `window.rs` flattens the mask to a
 /// `u16` at the boundary, so there is no `Mod` left to call `.intersects()` on. Both sides of
 /// each pair, because a user may hold either.
-mod mod_bits {
+pub mod mod_bits {
     pub const SHIFT: u16 = 0x0001 | 0x0002; // LSHIFT | RSHIFT
     pub const CTRL: u16 = 0x0040 | 0x0080; // LCTRL | RCTRL
+                                           // No `ALT`. `Alt+ArrowDown` opens a closed `<select>` — measured — but it needs no bit
+                                           // here, because the branch that opens one ignores the modifier mask entirely, so a bare
+                                           // arrow and an Alt-held arrow take the same path. A constant nothing read would imply a
+                                           // distinction the code does not make.
 }
 
 use crate::layout::LayoutTree;
@@ -1056,68 +1069,7 @@ impl Engine {
                 } => self.mouse_down_with(x, y, clicks, shift),
                 RawInput::MouseUp { x, y } => self.mouse_up(x, y),
 
-                RawInput::KeyDown { keycode, mods } => {
-                    // Caret and selection movement is handled here and **not forwarded**,
-                    // which is the whole point of both being engine state: an arrow key costs
-                    // a repaint of one rect and no round trip to Bun, so it stays responsive
-                    // while app code is busy. Forwarding as well would also invite a host to
-                    // move the caret a second time.
-                    //
-                    // Anything else goes on to the host untouched — Backspace still edits
-                    // the value there, because the value is a signal and only Bun owns it.
-                    let shift = mods & mod_bits::SHIFT != 0;
-                    let ctrl = mods & mod_bits::CTRL != 0;
-                    let select_all = ctrl && keycode == keys::A;
-
-                    // The picker gets the key first and consumes what it uses, which has to
-                    // come before the caret: an open picker's arrows are its own, and a
-                    // select is not a text field so there is no caret to compete with — but
-                    // Escape and Enter would otherwise be forwarded to a host that has no
-                    // way to know a picker was up.
-                    if self.picker_key(keycode) {
-                        continue;
-                    }
-
-                    if select_all {
-                        self.select_all();
-                    } else if !self.move_caret(keycode, shift) {
-                        // `b` is the **caret** and `c` is the **anchor**, not the modifier mask
-                        // `b` used to be. The mask is read on this side now — Shift decides
-                        // whether an arrow extends — and the host needs the two offsets
-                        // instead: splicing a range takes both ends, and one number cannot
-                        // carry them.
-                        self.events.push(Event {
-                            kind: event_kind::KEY_DOWN,
-                            node: self.state.focused,
-                            a: keycode,
-                            b: self.painter.caret_index().map_or(-1, |i| i as i32),
-                            c: self.painter.caret_anchor().map_or(-1, |i| i as i32),
-                            ..Default::default()
-                        });
-
-                        // Backspace removes the character before the caret, so the caret
-                        // moves back over it — the same optimism as typing, and the same
-                        // reason: waiting for Bun to republish would leave the caret a frame
-                        // behind the text.
-                        //
-                        // Delete (SDL 127, checked in `caret.rs`) is forwarded on this same
-                        // path and deliberately gets **no** shift: it removes the character
-                        // *after* the caret, so the caret does not move. Shifting it here
-                        // would be the forward-delete version of the fast-typing bug — the
-                        // caret sliding for an edit on the other side of it.
-                        //
-                        // **Over a live range both keys erase the range and nothing more**, so
-                        // both land at its start — measured, and it means the direction is only
-                        // consulted on a collapsed caret. `shift_caret` reads the range itself,
-                        // which is why Delete now calls it at all: with a range live it is not
-                        // a no-op.
-                        if keycode == keys::BACKSPACE {
-                            self.shift_caret(-1, 0);
-                        } else if keycode == keys::DELETE && self.painter.caret_range().is_some() {
-                            self.shift_caret(0, 0);
-                        }
-                    }
-                }
+                RawInput::KeyDown { keycode, mods } => self.key_down(keycode, mods),
 
                 RawInput::Text { text } => {
                     // `b` carries where to insert. Without it the host can only append,
@@ -1405,6 +1357,81 @@ impl Engine {
         Some((node, self.tables.string(slot).chars().count()))
     }
 
+    /// One key press, with SDL's modifier mask.
+    ///
+    /// A method rather than an arm inside `pump_input` so that something other than a real
+    /// SDL window can drive it. That is not a refactor for tidiness: **`pump_input` returns
+    /// immediately when there is no window**, so before this existed no test could press a
+    /// key at all, and every keyboard behaviour in the engine — the caret's arrows, Home and
+    /// End, Shift+Arrow, Ctrl+A, and a picker's arrows, Enter and Escape — was reachable
+    /// only by a human with a mouse and a window. Each of them was documented as working on
+    /// the strength of code that had never once been executed.
+    ///
+    /// Keyboard operability is the half of accessibility dziri claims (see ROADMAP's
+    /// Accessibility table: keyboard yes, assistive tech not yet), so "untestable" was the
+    /// wrong state for it to be in.
+    ///
+    /// Caret and selection movement is handled here and **not forwarded**, which is the
+    /// whole point of both being engine state: an arrow key costs a repaint of one rect and
+    /// no round trip to Bun, so it stays responsive while app code is busy. Forwarding as
+    /// well would also invite a host to move the caret a second time.
+    ///
+    /// Anything else goes on to the host untouched — Backspace still edits the value there,
+    /// because the value is a signal and only Bun owns it.
+    pub fn key_down(&mut self, keycode: i32, mods: u16) {
+        let shift = mods & mod_bits::SHIFT != 0;
+        let ctrl = mods & mod_bits::CTRL != 0;
+        let select_all = ctrl && keycode == keys::A;
+
+        // The picker gets the key first and consumes what it uses, which has to come before
+        // the caret: an open picker's arrows are its own, and a select is not a text field so
+        // there is no caret to compete with — but Escape and Enter would otherwise be
+        // forwarded to a host that has no way to know a picker was up.
+        if self.picker_key(keycode) {
+            return;
+        }
+
+        if select_all {
+            self.select_all();
+            return;
+        }
+        if self.move_caret(keycode, shift) {
+            return;
+        }
+
+        // `b` is the **caret** and `c` is the **anchor**, not the modifier mask `b` used to
+        // be. The mask is read on this side now — Shift decides whether an arrow extends —
+        // and the host needs the two offsets instead: splicing a range takes both ends, and
+        // one number cannot carry them.
+        self.events.push(Event {
+            kind: event_kind::KEY_DOWN,
+            node: self.state.focused,
+            a: keycode,
+            b: self.painter.caret_index().map_or(-1, |i| i as i32),
+            c: self.painter.caret_anchor().map_or(-1, |i| i as i32),
+            ..Default::default()
+        });
+
+        // Backspace removes the character before the caret, so the caret moves back over it
+        // — the same optimism as typing, and the same reason: waiting for Bun to republish
+        // would leave the caret a frame behind the text.
+        //
+        // Delete (SDL 127, checked in `caret.rs`) is forwarded on this same path and
+        // deliberately gets **no** shift: it removes the character *after* the caret, so the
+        // caret does not move. Shifting it here would be the forward-delete version of the
+        // fast-typing bug — the caret sliding for an edit on the other side of it.
+        //
+        // **Over a live range both keys erase the range and nothing more**, so both land at
+        // its start — measured, and it means the direction is only consulted on a collapsed
+        // caret. `shift_caret` reads the range itself, which is why Delete now calls it at
+        // all: with a range live it is not a no-op.
+        if keycode == keys::BACKSPACE {
+            self.shift_caret(-1, 0);
+        } else if keycode == keys::DELETE && self.painter.caret_range().is_some() {
+            self.shift_caret(0, 0);
+        }
+    }
+
     /// The keyboard half of a `<select>`. Returns whether the key was consumed.
     ///
     /// Two states, and the interesting one is the first:
@@ -1428,7 +1455,19 @@ impl Engine {
         let vertical = keycode == keys::DOWN || keycode == keys::UP;
 
         if self.painter.open_select() < 0 {
-            if !vertical {
+            // Every measured way to open a closed one: the arrows, Space, F4 and
+            // Alt+ArrowDown. Measured 2026-08-06 rather than assumed, and the measurement
+            // refuted the obvious guess — **Enter does not open a picker**, in either
+            // spelling. It stays closed and fires only `keydown`.
+            //
+            // Which is a good thing rather than an inconvenience: Enter is what *commits* a
+            // highlight, so a key that both opened and committed would make Down-then-Enter
+            // ambiguous. The belief that Enter opens one comes from a legacy select inside a
+            // `<form>`, where Enter submits and the response looks like activation, and from
+            // macOS, where a native select really does open on Enter. Neither is the
+            // `base-select` model dziri copies. See BROWSER-FACTS.md.
+            let opens = vertical || keycode == keys::SPACE || keycode == keys::F4;
+            if !opens {
                 return false;
             }
             let target = self.activates_of(self.state.focused);
@@ -1436,6 +1475,15 @@ impl Engine {
             {
                 return false;
             }
+            // **Alt+ArrowDown needs no case of its own**: this branch ignores the modifier
+            // mask, so an arrow with Alt held takes the same path a bare arrow does. Which is
+            // why `picker_key` does not take `mods` at all — a parameter that only ever went
+            // unread would suggest a distinction the measurement does not draw.
+            //
+            // The honest cost of ignoring it: Ctrl+ArrowDown opens one too, and that is
+            // **not measured**. It is named here rather than guessed at, because guessing
+            // would mean either swallowing a key combination the host might want or
+            // inventing a refusal a browser may not make.
             return self.open_picker_of(target);
         }
 
@@ -1710,9 +1758,18 @@ impl Engine {
             // under it and reaches nothing beneath, and none of the text-field work below
             // applies. Committing happens on the release, in `mouse_up`.
             Hit::InOverlay(node) => {
-                if node >= 0 {
-                    self.state.pressed = node;
-                    self.state.focused = node;
+                // The option rather than whatever node under it the pointer landed on, so
+                // that pressing an option's *text* focuses the option. `option:focus` is how
+                // the highlight is drawn and `FOCUS` is an exact node match rather than a
+                // chain — unlike hover — so focusing the run would leave the highlight off
+                // the very option the user is pointing at.
+                let target = match self.option_at(node) {
+                    option if option >= 0 => option,
+                    _ => node,
+                };
+                if target >= 0 {
+                    self.state.pressed = target;
+                    self.state.focused = target;
                 }
                 self.needs_paint = true;
                 self.events.push(Event {
@@ -1846,7 +1903,10 @@ impl Engine {
         // release on an option, and the `hit == pressed` rule below would reject it. A
         // separate click on an already-open picker takes the same path.
         if let Hit::InOverlay(node) = self.hit_point(x, y) {
-            self.choose_option(node, x, y);
+            // Through `option_at`, so releasing over an option's text commits it. A release on
+            // the picker's own padding resolves to -1 and leaves it open, which is right:
+            // consumed by the overlay, nothing chosen.
+            self.choose_option(self.option_at(node), x, y);
             self.state.pressed = -1;
             self.state.hovered = node;
             self.needs_paint = true;
@@ -1953,6 +2013,30 @@ impl Engine {
             .unwrap_or(-1)
     }
 
+    /// The `<option>` a hit inside a picker refers to, or -1.
+    ///
+    /// `hit_test` returns the innermost **interactive** node, and an option's text run is one:
+    /// the compiler gives every node under a control an `activates` pointing at it, and
+    /// `buildInteractive` makes anything with `activates` hittable so that the `<span>` beside
+    /// a checkbox can reach the box. So a press on an option's *label* — which is most of an
+    /// option — arrives here as the run, not the option.
+    ///
+    /// That is the same defect the buttons had, and it is worth naming as such: clicking the
+    /// text of a thing did not operate the thing. `Controls::activate` never had the problem
+    /// because it resolves `activates` itself; the picker paths checked the kind of the node
+    /// they were handed instead, saw `NONE` on a text run, and silently declined to commit.
+    ///
+    /// Resolved here rather than inside `hit_overlay` on purpose: hit-testing should keep
+    /// answering "what is under the pointer", and *what that means* is the caller's question.
+    fn option_at(&self, node: i32) -> i32 {
+        let target = self.activates_of(node);
+        if target >= 0 && self.painter.control_kind(&self.tables, target) == control_kind::OPTION {
+            target
+        } else {
+            -1
+        }
+    }
+
     /// Commits `option` as the open select's choice and closes the picker.
     ///
     /// A no-op for anything that is not an option, which is what makes it safe to call for
@@ -1965,6 +2049,9 @@ impl Engine {
     /// deliberately half-delivered rather than invented. `Activation::changed` carries the
     /// other measured half: re-committing the option already selected is not a change.
     fn choose_option(&mut self, option: i32, x: f32, y: f32) {
+        // Already resolved to an option by every caller — `option_at` for the pointer,
+        // `state.focused` for Enter — so this is the cheap guard against -1 and against a
+        // focused thing that is not an option at all.
         if option < 0 || self.painter.control_kind(&self.tables, option) != control_kind::OPTION {
             return;
         }

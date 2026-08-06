@@ -880,6 +880,38 @@ belief** that arrowing a closed select in Chrome walks the value directly; that 
 behaviour, and `base-select` does not inherit it. Convenient for dziri: keyboard opening is then the
 same path as the click, not a second mechanism.
 
+### Which keys open a closed select: Space, F4 and Alt+ArrowDown — **not Enter**
+
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · same probe, extended.** Asked because
+Enter was asserted to open a closed `<select>`, and the arrows were the only opening keys
+anything here had measured.
+
+| key, on a closed + focused select | `:open` after |
+|---|---|
+| ArrowDown | **open** |
+| ArrowUp | **open** |
+| Space | **open** |
+| F4 | **open** |
+| Alt+ArrowDown | **open** |
+| **Enter** | **closed — nothing happens** |
+
+Identical across two consecutive runs. Each row is preceded by an Escape, so every key is
+measured against a genuinely closed picker rather than against the state the previous key
+left.
+
+**So Enter does not open a picker, and the belief that it does is worth understanding rather
+than just contradicted.** Two things feed it. On a *legacy* select — the native-popup kind —
+Enter inside a `<form>` submits, which is a visible response and easy to read as activation.
+And on macOS, Enter and Space both open a native select, so the expectation is correct on one
+platform and for one control. Neither is the model dziri copies: `base-select` on Chromium is,
+and there Enter is reserved for *committing* a highlight, which is what the section above
+measured. A key that both opened and committed would make Down-then-Enter ambiguous.
+
+**Bearing on dziri.** Space, F4 and Alt+ArrowDown join the arrows as opening keys, which is
+three more rows in `Engine::picker_key` and no new state — they are the same "open it" path.
+Enter deliberately stays a commit-only key. The plain-arrow behaviour was already built on the
+earlier measurement and is unchanged.
+
 ### The legacy control: what could not be measured, recorded as a limitation
 
 A plain `<select>` beside it was clicked and arrowed, and produced **no value change and no events
