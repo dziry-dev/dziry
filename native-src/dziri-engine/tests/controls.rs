@@ -346,6 +346,21 @@ fn clicking_a_labels_text_ticks_the_box_beside_it() {
         WHITE,
         "and the box ticked anyway, because the span forwards to it"
     );
+
+    // **Focus went to the box, not to the span that was hit.** Measured 2026-08-04 and
+    // unimplemented until A3 needed it: clicking a label leaves `:focus` on the control,
+    // and the label never holds focus at all.
+    //
+    // It stayed invisible while the pointer was the only way to focus anything, because
+    // nothing else had an opinion about where focus should be. Tab does — it lands on the
+    // control — and `:focus` is an exact node match rather than a chain, so a click and a
+    // Tab that disagreed would make `input:focus` match only one of the two ways of
+    // getting there.
+    assert_eq!(
+        engine.focused(),
+        1,
+        "the control, not the span — a label never holds focus"
+    );
 }
 
 /// A radio sets itself and clears its group, and re-clicking it is not a change.
@@ -703,7 +718,11 @@ mod keyboard {
 
         engine.key_down(keys::RETURN, 0);
         engine.tick().expect("tick");
-        assert_eq!(engine.open_selection().0, 2, "Enter on a closed select opens it");
+        assert_eq!(
+            engine.open_selection().0,
+            2,
+            "Enter on a closed select opens it"
+        );
         assert_eq!(engine.focused(), 4, "and lands on the committed option");
 
         engine.key_down(keys::DOWN, 0);
@@ -739,12 +758,20 @@ mod keyboard {
         engine.tick().expect("tick");
         engine.key_down(keys::DOWN, 0);
         engine.tick().expect("tick");
-        assert_eq!(engine.focused(), 5, "highlight moved off the committed option");
+        assert_eq!(
+            engine.focused(),
+            5,
+            "highlight moved off the committed option"
+        );
 
         engine.key_down(keys::TAB, 0);
         engine.tick().expect("tick");
         assert_eq!(engine.open_selection().0, -1, "Tab closed the picker");
-        assert_eq!(engine.focused(), 2, "focus is back on the select, not on the next stop");
+        assert_eq!(
+            engine.focused(),
+            2,
+            "focus is back on the select, not on the next stop"
+        );
     }
 
     /// Home and End jump to the ends of the list. Measured 2026-08-06 in the run that
@@ -966,7 +993,11 @@ mod tab_order {
     #[test]
     fn tab_walks_document_order_and_wraps() {
         let mut engine = four_stops();
-        assert_eq!(engine.focused(), -1, "nothing is focused when a window opens");
+        assert_eq!(
+            engine.focused(),
+            -1,
+            "nothing is focused when a window opens"
+        );
         assert_eq!(
             tab(&mut engine, 5, false),
             vec![1, 2, 3, 4, 1],
@@ -1106,5 +1137,183 @@ mod tab_order {
             vec![4, 1, 2, 3],
             "document order, which is now 4 1 2 3 — a sorted table would say 1 2 3 4"
         );
+    }
+}
+
+/// Enter and Space on a focused control — ROADMAP A3's activation, measured per kind.
+///
+/// Every assertion here has a row in `probes/keyboard-activation.html`, and the two that
+/// would most easily have been implemented backwards are the ones about *when*: Enter
+/// fires on the press and Space on the release. The engine had no release to fire on
+/// until this landed, so a plausible implementation would have put both on `key_down`,
+/// passed every test anyone thought to write, and shipped a control that is not the one
+/// browsers ship.
+mod activation {
+    use super::*;
+    use dziri_engine::engine::keys;
+
+    /// Root, a button (1) and a checkbox (2), both tab stops.
+    fn button_and_checkbox() -> Engine {
+        let mut engine = Engine::new(&config(3, 2)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            init_style(t, 0);
+            init_style(t, 1);
+            t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+
+            node(t, 0, 0, -1);
+            node(t, 1, 1, 0);
+            node(t, 2, 1, 0);
+            for i in 1..3 {
+                t.set_u8(
+                    NODES,
+                    nodes::FLAGS,
+                    i,
+                    protocol::flags::INTERACTIVE | protocol::flags::TAB_STOP,
+                );
+            }
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, 1, 2);
+
+            control(t, 0, 1, control_kind::BUTTON, -1, 0);
+            control(t, 1, 2, control_kind::CHECKBOX, -1, 0);
+            pad_controls(t, 2);
+            pad_variants(t, 0);
+        }
+        engine.tick().expect("tick");
+        engine
+    }
+
+    /// Every event the engine has queued, as `(kind, node)`.
+    fn drained(engine: &mut Engine) -> Vec<(u32, i32)> {
+        let mut out = [dziri_engine::engine::Event::default(); 16];
+        let n = engine.drain_events(&mut out);
+        out[..n].iter().map(|e| (e.kind, e.node)).collect()
+    }
+
+    /// Focus the first tab stop and throw away the events that got us there.
+    fn focus_first(engine: &mut Engine) {
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        drained(engine);
+    }
+
+    #[test]
+    fn enter_clicks_a_button_on_the_press() {
+        let mut engine = button_and_checkbox();
+        focus_first(&mut engine);
+        assert_eq!(engine.focused(), 1);
+
+        engine.key_down(keys::RETURN, 0);
+        engine.tick().expect("tick");
+        let events = drained(&mut engine);
+
+        // Both, in this order. A browser fires `keydown` *and* the synthesised click — the
+        // key event is not swallowed by the activation, unlike an open picker's keys.
+        assert_eq!(
+            events,
+            vec![
+                (protocol::event_kind::KEY_DOWN, 1),
+                (protocol::event_kind::CLICK, 1),
+            ],
+        );
+    }
+
+    #[test]
+    fn space_clicks_a_button_on_the_release_and_not_on_the_press() {
+        let mut engine = button_and_checkbox();
+        focus_first(&mut engine);
+
+        engine.key_down(keys::SPACE, 0);
+        engine.tick().expect("tick");
+        let pressed = drained(&mut engine);
+        assert!(
+            !pressed
+                .iter()
+                .any(|&(k, _)| k == protocol::event_kind::CLICK),
+            "the press must not activate; measured, Space waits for the release"
+        );
+
+        engine.key_up(keys::SPACE);
+        engine.tick().expect("tick");
+        assert_eq!(drained(&mut engine), vec![(protocol::event_kind::CLICK, 1)]);
+    }
+
+    /// Space ticks a checkbox on the release, and both a `CLICK` and a `CHANGE` come out —
+    /// which is the same pair a pointer produces, because a keyboard activation really is
+    /// a click.
+    #[test]
+    fn space_ticks_a_focused_checkbox() {
+        let mut engine = button_and_checkbox();
+        focus_first(&mut engine);
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        drained(&mut engine);
+        assert_eq!(engine.focused(), 2, "the checkbox");
+
+        engine.key_up(keys::SPACE);
+        engine.tick().expect("tick");
+        assert_eq!(
+            drained(&mut engine),
+            vec![
+                (protocol::event_kind::CLICK, 2),
+                (protocol::event_kind::CHANGE, 2),
+            ],
+        );
+
+        // And again, back off — a checkbox toggles, so the second release unticks it.
+        engine.key_up(keys::SPACE);
+        engine.tick().expect("tick");
+        assert_eq!(
+            drained(&mut engine),
+            vec![
+                (protocol::event_kind::CLICK, 2),
+                (protocol::event_kind::CHANGE, 2),
+            ],
+        );
+    }
+
+    /// **Enter does nothing to a checkbox.** Measured, and the asymmetry that makes Enter
+    /// and Space two rules rather than one "activate" key.
+    #[test]
+    fn enter_does_not_tick_a_checkbox() {
+        let mut engine = button_and_checkbox();
+        focus_first(&mut engine);
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        drained(&mut engine);
+
+        engine.key_down(keys::RETURN, 0);
+        engine.tick().expect("tick");
+        let events = drained(&mut engine);
+        assert!(
+            !events
+                .iter()
+                .any(|&(k, _)| k == protocol::event_kind::CLICK),
+            "no click, so no activation"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|&(k, _)| k == protocol::event_kind::CHANGE),
+            "and nothing changed"
+        );
+        // The key still reaches the host, which is the difference between "not activated"
+        // and "swallowed".
+        assert!(events
+            .iter()
+            .any(|&(k, _)| k == protocol::event_kind::KEY_DOWN));
+    }
+
+    /// Nothing focused is not an error, and it must not activate anything.
+    #[test]
+    fn a_key_with_nothing_focused_activates_nothing() {
+        let mut engine = button_and_checkbox();
+        engine.key_down(keys::RETURN, 0);
+        engine.key_up(keys::SPACE);
+        engine.tick().expect("tick");
+        assert!(!drained(&mut engine)
+            .iter()
+            .any(|&(k, _)| k == protocol::event_kind::CLICK),);
     }
 }

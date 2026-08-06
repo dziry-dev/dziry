@@ -202,6 +202,19 @@ impl Controls {
                     changed: true,
                 })
             }
+            // A button and a link change no state, so the `Activation` they return is
+            // entirely about the event: `changed: false` means no `CHANGE`, and the
+            // `CLICK` the caller emits *is* the activation.
+            //
+            // They are here rather than being left to fall through to `_ => None` because
+            // the keyboard needs to know they are activatable at all. The pointer never
+            // did — a click is emitted on whatever was hit, control or not — which is why
+            // neither kind existed until Enter and Space needed a dispatch.
+            control_kind::BUTTON | control_kind::LINK => Some(Activation {
+                node: target,
+                checked: false,
+                changed: false,
+            }),
             // A `SELECT` deliberately does nothing here, and it is the one kind that
             // reaches this arm rather than being absent from the table. Its behaviour is
             // on the **press**: measured, `probes/select-picker.html` — the press alone
@@ -329,6 +342,38 @@ impl Controls {
         }
         self.set(node, checked);
     }
+}
+
+/// Whether **Enter** activates a control of this kind, and whether it does so on the press.
+///
+/// Measured, `probes/keyboard-activation.html`, and the table is not symmetric with
+/// [`space_activates`] in either direction — which is the whole reason both exist:
+///
+/// | kind | Enter | Space |
+/// |---|---|---|
+/// | button | yes, on **press** | yes, on **release** |
+/// | link | yes, on press | **no** — it scrolls the page |
+/// | checkbox, radio | **no** | yes, on release |
+/// | select | opens the picker (`Engine::picker_key`, before this is reached) |
+/// | anything else, including a focusable `<div>` | no | no |
+///
+/// Kept here beside `activate` rather than in `focus.rs` on purpose. `focus.rs` owns
+/// *where focus goes*; this owns *what a key means once it is there*. Keeping the two
+/// apart is what makes a new keyboard-operable control one arm in `activate` plus one row
+/// in each of these, instead of another hand-rolled key handler in `engine.rs` — the
+/// fourth of which was what prompted the question.
+pub fn enter_activates(kind: u8) -> bool {
+    matches!(kind, control_kind::BUTTON | control_kind::LINK)
+}
+
+/// Whether **Space** activates a control of this kind. Always on the *release*.
+///
+/// See [`enter_activates`] for the measured table and for why the two are separate.
+pub fn space_activates(kind: u8) -> bool {
+    matches!(
+        kind,
+        control_kind::BUTTON | control_kind::CHECKBOX | control_kind::RADIO
+    )
 }
 
 #[cfg(test)]

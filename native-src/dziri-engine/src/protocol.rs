@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 19;
+pub const PROTOCOL_VERSION: u32 = 20;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: u32 = 19;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x79617ad7;
+pub const SCHEMA_HASH: u32 = 0xf9c01697;
 
 pub const TABLE_COUNT: usize = 11;
 
@@ -675,6 +675,8 @@ pub mod control_kind {
     pub const RADIO: u8 = 2;
     pub const SELECT: u8 = 3;
     pub const OPTION: u8 = 4;
+    pub const BUTTON: u8 = 5;
+    pub const LINK: u8 = 6;
 }
 
 /// Return code of every FFI entry point. Negative is failure, and the detail is in `dziri_last_error`.

@@ -232,7 +232,11 @@ mod tests {
         let stops = [3, 7, 9];
         assert_eq!(step(&stops, -1, false), 3);
         assert_eq!(step(&stops, -1, true), 9);
-        assert_eq!(step(&stops, 42, false), 3, "a node outside the set enters at the top");
+        assert_eq!(
+            step(&stops, 42, false),
+            3,
+            "a node outside the set enters at the top"
+        );
         assert_eq!(step(&stops, 42, true), 9);
     }
 

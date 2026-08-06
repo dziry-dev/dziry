@@ -291,10 +291,29 @@ export type BuiltControl = {
  * ground — a `SELECT` that opened nothing would have been a claim the engine could not
  * honour. Both are here now, and the pair is deliberate: a select alone would open a
  * picker whose options could not be chosen.
+ *
+ * `button` and `a[href]` join them for the keyboard and for nothing else. A pointer
+ * press does not need either: a `CLICK` is emitted on whatever was hit, control or not.
+ * A *key* press has no "whatever was hit" — it has a focused node — so what Enter and
+ * Space mean there has to be looked up, and the measured answers differ per kind in a way
+ * nothing else in the tables encodes. See `ControlKind.BUTTON`.
+ *
+ * **`path` is here for the `<select>`'s own button**, which must not get a kind. That
+ * button is the closed control: give it a row and its `activates` points at itself, so a
+ * press on the only visible part of a select emits a button click instead of opening the
+ * picker. That exact bug has been fixed once already, in `ownsItsPress` — the same
+ * exemption for a different reason, which is why both spell it out rather than sharing a
+ * helper that would hide two unrelated arguments behind one name.
  */
-function controlKindOf(el: Element): number {
+function controlKindOf(el: Element, path: Element[] = []): number {
   if (el.tag === "select") return ControlKind.SELECT;
   if (el.tag === "option") return ControlKind.OPTION;
+  if (el.tag === "button") {
+    return path[path.length - 2]?.tag === "select" ? ControlKind.NONE : ControlKind.BUTTON;
+  }
+  // An `<a>` with no destination is not focusable, so no key can reach it and a row
+  // would describe a state that cannot happen. Same condition the tab-stop set uses.
+  if (el.tag === "a") return el.attrs.has("href") ? ControlKind.LINK : ControlKind.NONE;
   if (el.tag !== "input") return ControlKind.NONE;
   switch ((el.attrs.get("type") ?? "text").toLowerCase()) {
     case "checkbox":
@@ -333,8 +352,8 @@ const DISABLEABLE = new Set(["input", "select", "textarea", "button"]);
  * The row's `kind` stays `NONE`, so `Controls::activate` still declines it and no
  * behaviour is invented for a text field. Only the `DISABLED` flag is load-bearing.
  */
-function needsControlRow(el: Element): boolean {
-  if (controlKindOf(el) !== ControlKind.NONE) return true;
+function needsControlRow(el: Element, path: Element[] = []): boolean {
+  if (controlKindOf(el, path) !== ControlKind.NONE) return true;
   return DISABLEABLE.has(el.tag) && el.attrs.has("disabled");
 }
 
@@ -395,7 +414,7 @@ function isTextEntry(el: Element): boolean {
  */
 function ownsItsPress(el: Element, path: Element[]): boolean {
   if (el.tag === "button" && path[path.length - 2]?.tag === "select") return false;
-  return el.tag === "button" || el.tag === "a" || controlKindOf(el) !== ControlKind.NONE;
+  return el.tag === "button" || el.tag === "a" || controlKindOf(el, path) !== ControlKind.NONE;
 }
 
 /** Tags that are tab stops on their own account, with no attribute needed. */
@@ -1254,8 +1273,8 @@ export function compileTree(
     }
 
     if (el.tag === "label") labelEls.push({ el, node: self });
-    const controlKind = controlKindOf(el);
-    if (needsControlRow(el)) {
+    const controlKind = controlKindOf(el, path);
+    if (needsControlRow(el, path)) {
       // Set by `walkPicker` before this option was walked, so it is here for every
       // option that belongs to a select. An `<option>` written outside one has no row
       // and is in no group, which is what a browser does with it: nothing.

@@ -478,10 +478,33 @@ predicates, so the variants the compiler had been emitting since C2 phase 0 are 
 The engine owns that state, and `controls.rs` opens with why that is the gate answered honestly
 rather than a shortcut: nobody declared the answer, so there is no signal to be the authority.
 
-What is still missing from A3, and none of it is blocked by the above: tab walking,
-`:focus-visible` as a bit distinct from `:focus`, Enter/Space through the click dispatch,
-`onChange`/`onInput` reaching a handler (the engine queues a `CHANGE` event and no host consumes it
-yet), and a way for a control to *become* disabled at run time.
+**Keyboard traversal and activation have landed** (protocol v19 and v20, `focus.rs`). Tab and
+Shift+Tab walk the live tree over a compile-time set (`NodeFlags.TAB_STOP`); a radio group is one
+stop on its checked member; `disabled`, `display:none` and route-hidden subtrees drop out at run
+time; Enter activates a button or a link on the press and Space activates a button, checkbox or
+radio on the **release**, through `Controls::activate` and the same `CLICK` the pointer emits.
+
+Three things that landed with it and were not in the plan:
+
+- **`Engine::key_up` had to exist.** Space activates on the release, measured, and the engine
+  could only see presses. One entry point, and without it every Space would have been a press
+  and every one of them a different control from the one browsers ship.
+- **`ControlKind::BUTTON` and `LINK`.** The pointer never needed them — a click is emitted on
+  whatever was hit — so "activation is already kind-dispatched" was true only for the kinds that
+  change state. Enter and Space have no "whatever was hit"; they have a focused node and a
+  question, and the measured answers differ per kind in a way nothing else encoded.
+- **A click now focuses the control, not the node it landed on.** Measured on 2026-08-04 for
+  labels and unimplemented because nothing made it visible. Giving `<button>` a control row
+  propagated `activates` into its own text run, so a click on a button's words focused the
+  *run* while Tab focused the button — and `:focus` is an exact node match, so `button:focus`
+  matched only one of the two ways of getting there.
+
+Still missing: `:focus-visible` as a bit distinct from `:focus`, `onChange`/`onInput` reaching a
+handler (the engine queues a `CHANGE` event and no host consumes it yet), a focus/blur event kind
+at all (`EventKind::FOCUS` is the *window*'s), `autofocus`, `tabindex` in any form, implicit form
+submission, and a way for a control to *become* disabled at run time. Also unimplemented and now
+named: a keyboard activation has no press/release pairing, so holding Space and tabbing away
+activates whatever is focused at release — a browser cancels.
 
 **Probe before writing Rust.** This was followed for activation and it paid for itself immediately —
 `probes/control-activation.html` found four things that would have been implemented backwards, the

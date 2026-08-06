@@ -152,8 +152,16 @@ test("a node that operates a control is interactive, and a button inside a label
   expect(ui.nodes.activates[span]).toBeGreaterThanOrEqual(0);
   expect([...ui.interactive]).toContain(span);
 
-  // The button owns its own press.
-  expect(ui.nodes.activates[find("b")]).toBe(-1);
+  // The button owns its own press, and what that means got sharper rather than
+  // changing: it used to be `-1`, "operates nothing", because a `<button>` had no
+  // control row at all. It has one now — `ControlKind.BUTTON`, so Enter and Space can be
+  // dispatched on kind like every other activation — so the button operates *itself*.
+  //
+  // The claim being tested is the same one and is now stated directly: whatever the
+  // button operates, it is not the checkbox beside it.
+  const button = find("b");
+  expect(ui.nodes.activates[button]).toBe(button);
+  expect(ui.nodes.activates[button]).not.toBe(find("c"));
 });
 
 test("a page with no controls emits no rows and no activation", () => {

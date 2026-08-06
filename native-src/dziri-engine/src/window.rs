@@ -83,6 +83,19 @@ pub enum RawInput {
         keycode: i32,
         mods: u16,
     },
+    /// The release.
+    ///
+    /// Here because **Space activates a control on the release, not on the press** —
+    /// measured, `probes/keyboard-activation.html`: a button, a checkbox and a radio all
+    /// wait for `keyup`, while Enter and the arrows fire on `keydown`. Until this existed
+    /// the engine could only see presses, so implementing Space would have meant
+    /// implementing a different control from the one browsers ship.
+    ///
+    /// No `mods`: nothing reads them on a release, and a field that is always ignored
+    /// invites a reader to think a distinction is being drawn.
+    KeyUp {
+        keycode: i32,
+    },
     Text {
         text: String,
     },
@@ -476,6 +489,13 @@ impl Window {
                     // width and `i32` is what crosses the boundary.
                     keycode: code.to_ll().0 as i32,
                     mods: keymod.bits(),
+                }),
+
+                SdlEvent::KeyUp {
+                    keycode: Some(code),
+                    ..
+                } => out.push(RawInput::KeyUp {
+                    keycode: code.to_ll().0 as i32,
                 }),
 
                 SdlEvent::TextInput { text, .. } => out.push(RawInput::Text { text }),

@@ -962,6 +962,32 @@ export const ENUMS: EnumDef[] = [
        * either, so `Activation::changed` carries the same distinction.
        */
       OPTION: 4,
+      /**
+       * A `<button>`. Activating one changes no state — the `CLICK` event *is* the
+       * activation — so it is here for the keyboard and for nothing else.
+       *
+       * Measured, `probes/keyboard-activation.html`: Enter activates a button on
+       * **keydown** and Space on **keyup**, and both dispatch a real `click`. The
+       * pointer path never needed this row, because a click is emitted on whatever
+       * was hit whether or not it is a control. The keyboard has nothing equivalent
+       * to "whatever was hit" — it has a focused node and a question about what a
+       * key means there — and that question is answered by kind.
+       *
+       * Which is also why a plain `<div>` cannot be given a row and made
+       * keyboard-operable: measured, neither key activates a focusable div, so
+       * activation is a property of the kind and this table is where kinds live.
+       */
+      BUTTON: 5,
+      /**
+       * An `<a href>`. Enter activates it; **Space does not** — measured, and the
+       * one asymmetry that makes a link a different kind from a button rather than
+       * a synonym for one. (Space scrolls the page in a browser, which dziri does
+       * not implement and should not fake.)
+       *
+       * A link with no `href` gets no row, matching the tab-stop set: it is not
+       * focusable, so there is no state in which a key could reach it.
+       */
+      LINK: 6,
     },
   },
   {
@@ -1117,8 +1143,22 @@ export const ENUMS: EnumDef[] = [
  *
  * An engine without the bit finds no tab stops and Tab does nothing, which is the same
  * failure as having no keyboard at all — silent, but not a wrong picture.
+ *
+ * v20 is the other half of A3's keyboard: **`ControlKind.BUTTON` and `ControlKind.LINK`**.
+ * Enum values, invisible to the hash, hand-bumped for the reason the header gives.
+ *
+ * Neither changes anything about the pointer, and that is the point worth recording. A
+ * click is emitted on whatever was hit, control or not, so `<button>` never needed a row.
+ * The keyboard has no "whatever was hit" — it has a focused node and a question about what
+ * a key means there — and the measured answer differs per kind in a way that cannot be
+ * derived from anything already in the tables: Enter activates a button and a link, Space
+ * activates a button and *not* a link, and neither key activates a focusable `<div>`.
+ *
+ * An old engine sees two kinds it has no arm for, falls through `Controls::activate`'s
+ * `_ => None`, and a keyboard activation does nothing — while the pointer keeps working,
+ * because it never went through here.
  */
-export const PROTOCOL_VERSION = 19;
+export const PROTOCOL_VERSION = 20;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

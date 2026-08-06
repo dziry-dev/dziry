@@ -138,6 +138,9 @@ export const placeholders = new Int32Array([]);
 /** Overlay roots — painted after the tree, hit-tested before it. `::picker(select)`. */
 export const overlays = new Int32Array([]);
 
+/** Nodes Tab can reach, sorted. The set; the order is a live walk of the tree. */
+export const tabStops = new Int32Array([]);
+
 /** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [
 

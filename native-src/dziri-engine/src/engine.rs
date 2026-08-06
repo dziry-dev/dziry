@@ -27,6 +27,7 @@ use skia_safe::{
 };
 
 use crate::caret::Motion;
+use crate::controls;
 use crate::error::EngineError;
 use crate::focus;
 
@@ -1074,6 +1075,8 @@ impl Engine {
 
                 RawInput::KeyDown { keycode, mods } => self.key_down(keycode, mods),
 
+                RawInput::KeyUp { keycode } => self.key_up(keycode),
+
                 RawInput::Text { text } => {
                     // `b` carries where to insert. Without it the host can only append,
                     // which is what it did: clicking into the middle of a field and typing
@@ -1442,6 +1445,105 @@ impl Engine {
         } else if keycode == keys::DELETE && self.painter.caret_range().is_some() {
             self.shift_caret(0, 0);
         }
+
+        // Enter activates a button or a link **on the press**, and *after* the `KEY_DOWN`
+        // above rather than instead of it. Both orderings are measured: a browser fires
+        // `keydown` and then the synthesised `click`, and it fires both — the key event is
+        // not swallowed by the activation the way an open picker's keys are.
+        //
+        // Space is deliberately absent. It activates on the *release*, which is
+        // `key_up`'s, and putting it here would be a one-word difference in the code and a
+        // different control: press-and-move-away could no longer cancel.
+        if keycode == keys::RETURN {
+            self.activate_focused(keys::RETURN);
+        }
+    }
+
+    /// A key coming back up. Space is the only one that means anything.
+    ///
+    /// **Space activates on the release**, measured: a button, a checkbox and a radio all
+    /// wait for `keyup` while Enter and the arrows fire on `keydown`. That asymmetry is why
+    /// this function exists at all — until it did, the engine could only see presses, so
+    /// every Space in this repo would have been a press and every one of them wrong.
+    ///
+    /// **No press/release pairing**, and that is a simplification rather than a rule. The
+    /// pointer path remembers what was pressed, so dragging off a button cancels it; this
+    /// reads `state.focused` at release time, so holding Space, tabbing away and releasing
+    /// activates whatever is focused *now*. A browser cancels instead. Unmeasured either
+    /// way, cheap to add when something needs it — one field, set on the press — and named
+    /// here so it is a known divergence and not a thing nobody noticed.
+    pub fn key_up(&mut self, keycode: i32) {
+        if keycode == keys::SPACE {
+            self.activate_focused(keys::SPACE);
+        }
+    }
+
+    /// Activates the focused control the way a click does. Returns whether it did.
+    ///
+    /// **A keyboard activation really is a click** — measured, and it is what lets this be
+    /// the same three events the pointer emits rather than a parallel vocabulary. Every
+    /// activation in `probes/keyboard-activation.html` dispatched a real `click`, which is
+    /// the claim ROADMAP A3 made and had not checked.
+    ///
+    /// Coordinates are zero, as they are for a keyboard commit in `choose_option`, and for
+    /// the same reason: a host reading `x`/`y` off a key press is reading something that
+    /// does not exist, and the last pointer position would look like an answer.
+    ///
+    /// The one thing a browser has here that dziri does not: its synthesised click carries
+    /// `detail: 0` where a pointer's carries 1, which is how libraries tell them apart.
+    /// dziri's `CLICK` has no such field, so the two are **indistinguishable to a host**.
+    /// Named rather than fixed, because nothing needs the difference yet and inventing a
+    /// field for it would be inventing a use.
+    fn activate_focused(&mut self, key: i32) -> bool {
+        let node = self.state.focused;
+        if node < 0 {
+            return false;
+        }
+
+        let kind = self.painter.control_kind(&self.tables, node);
+        let wanted = match key {
+            keys::RETURN => controls::enter_activates(kind),
+            keys::SPACE => controls::space_activates(kind),
+            _ => false,
+        };
+        if !wanted {
+            return false;
+        }
+
+        // A disabled control receives nothing at all, which is the same rule the pointer
+        // follows — and it is belt and braces here, since a disabled control is not a tab
+        // stop and so cannot be reached by the keyboard in the first place. `activate`
+        // refuses one too; this stops the `CLICK` below being emitted anyway.
+        if self.painter.control_is_disabled(node) {
+            return false;
+        }
+
+        // Before the click event, matching the pointer path and for the measured reason
+        // recorded there: a `click` handler sees the *new* checkedness.
+        let activation = self.painter.activate_control(&self.tables, node);
+
+        self.events.push(Event {
+            kind: event_kind::CLICK,
+            node,
+            ..Default::default()
+        });
+
+        if let Some(act) = activation {
+            self.needs_paint = true;
+            // No forwarded second click, unlike the pointer path. That one exists because
+            // a *label* can be what got clicked, and a label is not focusable — so the
+            // node the key reached and the control it operates are always the same here.
+            debug_assert_eq!(act.node, node, "a focused control activates itself");
+            if act.changed {
+                self.events.push(Event {
+                    kind: event_kind::CHANGE,
+                    node: act.node,
+                    a: i32::from(act.checked),
+                    ..Default::default()
+                });
+            }
+        }
+        true
     }
 
     /// Moves focus to the next tab stop, or the previous one with Shift held.
@@ -1908,9 +2010,25 @@ impl Engine {
             return;
         }
 
-        // Clicking is the only way to acquire focus for now; keyboard traversal is A3.
+        // **Focus goes to the control the press operates, not to the node it landed on.**
+        //
+        // Measured, and the measurement predates this by two days: clicking a *label* left
+        // `:focus` on the control and the label never held focus at all. It was
+        // unimplemented because nothing had made the difference visible — until
+        // `ControlKind::BUTTON` gave a `<button>` a control row, which propagated
+        // `activates` into its own text run and so made the run hit-testable. From then on
+        // a click on a button's words focused the *run*, while Tab focused the button, and
+        // `button:focus` matched only one of the two. `:focus` is an exact node match, not
+        // a chain — also measured — so there is no ancestor rule to save it.
+        //
+        // `pressed` deliberately keeps the hit node: `:active` *is* chain-based, so it
+        // reaches the button from its run on its own, and a press is genuinely on the thing
+        // under the cursor.
         self.state.pressed = hit;
-        self.state.focused = hit;
+        self.state.focused = match self.activates_of(hit) {
+            control if control >= 0 => control,
+            _ => hit,
+        };
         self.needs_paint = true;
 
         // A `<select>` opens on the **press**, and this is the one control that does.
