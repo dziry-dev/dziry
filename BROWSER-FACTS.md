@@ -1533,3 +1533,30 @@ focused field to its form's default button.
 press fires `click, input, change` on the newly focused radio — on keydown. Two consequences for
 A3's roving-tabindex generalisation: navigation inside a group is not merely focus movement for
 this kind, and the wrap differs from a `<select>` picker, which clamps (measured above).
+
+---
+
+## Tab with a picker open is Escape
+
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/select-picker.html`. Two identical
+consecutive runs.** Asked because the engine has to do *something* and all three armchair answers
+are defensible, which is the signature of a question that should not be answered from the armchair.
+
+| step | `:open` | `value` | `activeElement` |
+|---|---|---|---|
+| picker open, highlight arrowed to `ent` | open | `pro` | `OPTION:ent` |
+| **Tab** | **closed** | `pro` — unchanged | **the `<select>`** |
+| Shift+Tab from there | closed | `pro` | `BODY` — the ordinary previous stop |
+
+So Tab **closes the picker, discards the highlight, restores focus to the select, and does not
+advance the tab order.** It is Escape with a different keycode, and the Tab is consumed.
+
+The two rejected answers are worth naming, because each is what a plausible implementation order
+gives you for free. Letting Tab through to the focus walk leaves a dropdown hanging over a page
+whose focus has moved somewhere else — the visible one. Closing *and* advancing feels tidy and
+costs a keystroke: a user tabbing out of a select they opened by accident ends up two stops from
+where they think they are.
+
+**Bearing on dziri.** One more keycode in `picker_key`'s Escape branch, and the ordering inside
+`Engine::key_down` becomes load-bearing rather than incidental: the picker is offered the key
+before the tab walk sees it, so an open picker claims Tab and a closed one does not.

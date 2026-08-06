@@ -206,6 +206,14 @@
     ["Home in the picker", { key: "Home" }],
     ["End in the picker", { key: "End" }],
 
+    // **Tab with the picker open.** Asked because the engine has to do *something* and
+    // all three candidates are defensible from the armchair — consume it, close and move,
+    // or move and leave the picker hanging — which is the signature of a question that
+    // should be measured instead. Does it commit the highlight on the way out, the way
+    // Enter does, or discard it the way Escape does?
+    ["Tab with the picker open", { key: "Tab" }],
+    ["Shift+Tab back", { key: "Tab", modifiers: 8 }],
+
     // The legacy control, for the one question it can answer. Its openness is browser
     // chrome and unobservable, but its *value* and its events are not — so "does an
     // arrow key on a closed native select change the value directly", which is what

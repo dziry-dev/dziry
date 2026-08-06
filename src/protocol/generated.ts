@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 18;
+export const PROTOCOL_VERSION = 19;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 18;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xf2ce59f6;
+export const SCHEMA_HASH = 0x79617ad7;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -487,6 +487,7 @@ export const NodeFlags = {
   EDITABLE: 1 << 3,
   PLACEHOLDER: 1 << 4,
   OVERLAY: 1 << 5,
+  TAB_STOP: 1 << 6,
 } as const;
 
 export const ControlFlags = {

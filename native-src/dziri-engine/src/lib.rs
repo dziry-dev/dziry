@@ -24,6 +24,7 @@ pub mod caret;
 pub mod controls;
 pub mod engine;
 pub mod error;
+pub mod focus;
 pub mod layout;
 pub mod paint;
 pub mod protocol;

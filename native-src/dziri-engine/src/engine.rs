@@ -28,6 +28,7 @@ use skia_safe::{
 
 use crate::caret::Motion;
 use crate::error::EngineError;
+use crate::focus;
 
 /// SDL keycodes for the keys that move a caret.
 ///
@@ -66,6 +67,8 @@ pub mod keys {
     pub const RETURN: i32 = 13;
     /// ASCII ESC, also unmasked. Checked against `sdl3::keyboard::Keycode` in `select.rs`.
     pub const ESCAPE: i32 = 27;
+    /// ASCII HT, unmasked — the fourth of the control characters SDL reports bare.
+    pub const TAB: i32 = 9;
 }
 
 /// Where a point landed, once the overlay layer has had its turn.
@@ -1391,6 +1394,15 @@ impl Engine {
             return;
         }
 
+        // Tab moves focus, and it comes before the caret for the same reason the picker
+        // does: a Tab inside a text field belongs to the tab order, not to the text. It is
+        // *after* the picker, because an open picker claims Tab as a dismissal — measured,
+        // and the ordering here is the whole of that rule.
+        if keycode == keys::TAB {
+            self.move_focus(shift);
+            return;
+        }
+
         if select_all {
             self.select_all();
             return;
@@ -1430,6 +1442,46 @@ impl Engine {
         } else if keycode == keys::DELETE && self.painter.caret_range().is_some() {
             self.shift_caret(0, 0);
         }
+    }
+
+    /// Moves focus to the next tab stop, or the previous one with Shift held.
+    ///
+    /// ROADMAP A3's tab walk. The **set** comes from `NodeFlags::TAB_STOP`, which the
+    /// compiler emitted and nothing here re-derives; the **order** is this walk, because
+    /// document order is a property of the tree right now and a keyed reorder changes it.
+    /// See `focus.rs` for why that split is the whole design.
+    ///
+    /// Rebuilt per press rather than cached. It is O(nodes) — 984 on the demo — for an
+    /// event that happens at human speed, and a cache would need invalidating on every
+    /// republish, route change and list splice, which is three chances to be stale in
+    /// exactly the case the live walk exists for.
+    ///
+    /// **The caret goes with the focus.** A caret left blinking in a field that no longer
+    /// has focus is the visible half of a focus model that forgot to be a *move* rather
+    /// than an *arrival* — two carets on screen, and the user typing into neither.
+    ///
+    /// No event is emitted, matching the pointer path, which also focuses silently.
+    /// `EventKind::FOCUS` is the *window*'s focus and already taken, so a host cannot
+    /// observe element focus at all today. Named because it is a gap rather than a
+    /// decision: `onFocus`/`onBlur` need an event kind of their own.
+    fn move_focus(&mut self, backward: bool) {
+        let mut stops = Vec::new();
+        focus::tab_stops(
+            &self.painter,
+            &self.tables,
+            self.geometry(),
+            &self.state,
+            self.root,
+            &mut stops,
+        );
+
+        let next = focus::step(&stops, self.state.focused, backward);
+        if next < 0 || next == self.state.focused {
+            return;
+        }
+        self.state.focused = next;
+        self.painter.clear_caret();
+        self.needs_paint = true;
     }
 
     /// The keyboard half of a `<select>`. Returns whether the key was consumed.
@@ -1498,7 +1550,16 @@ impl Engine {
             return self.open_picker_of(target);
         }
 
-        if keycode == keys::ESCAPE {
+        // **Tab is Escape while a picker is open**, and it is consumed rather than passed on
+        // to the tab walk. Measured 2026-08-06 rather than chosen: the picker closes, the
+        // highlight is discarded with the value untouched, focus returns to the select, and
+        // focus does *not* advance to the next stop.
+        //
+        // Worth having measured, because all three armchair answers — consume it, close and
+        // move on, move and leave the picker hanging — are defensible and two of them are
+        // wrong. The one a keyboard user would notice is the third: a dropdown left open over
+        // a page whose focus has moved somewhere else.
+        if keycode == keys::ESCAPE || keycode == keys::TAB {
             // The highlight goes with it, because the highlight *is* focus and closing puts
             // focus back on the select. Nothing else to discard, which is the payoff of not
             // having given the picker a second piece of state.

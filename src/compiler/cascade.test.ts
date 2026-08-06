@@ -17,6 +17,7 @@ import {
   Align,
   compactBits,
   ControlFlags,
+  NodeKind,
   Display,
   INITIAL_STYLE,
   Position,
@@ -438,6 +439,69 @@ test("a select's option still matches `select > option`", () => {
   // option was shifted by a position — so this matched nothing.
   expect(styles.height[ui.nodes.style[options[0]!]!]!).toBe(5);
   expect(styles.height[ui.nodes.style[options[1]!]!]!).toBeNaN();
+});
+
+test("the tab-stop set is the measured one, not the interactive one", () => {
+  // ROADMAP A3's compile-time half. Written against `probes/tab-order.html` and, more to
+  // the point, written against the three places the tab-stop set and the *interactive*
+  // set disagree — because deriving one from the other is the obvious shortcut and each
+  // of these is a case where it silently gives the wrong answer.
+  const ui = toCompiledUi(
+    compile(
+      `<body>` +
+        `<a href="/x">linked</a>` +
+        `<a>bare</a>` +
+        `<button>press</button>` +
+        `<input type="checkbox">` +
+        `<select><option>Free</option><option selected>Pro</option></select>` +
+        `<div>plain</div>` +
+        `<span>words</span>` +
+        `</body>`,
+      "",
+    ),
+  );
+
+  // Body's children in document order, which is the order they are written above. Node
+  // ids are not usable directly here because every element with text has a run between
+  // it and its next sibling.
+  const kids: number[] = [];
+  for (let n = ui.nodes.firstChild[0]!; n !== -1; n = ui.nodes.nextSibling[n]!) kids.push(n);
+  const [linked, bare, button, checkbox, select, div, span] = kids as [
+    number, number, number, number, number, number, number,
+  ];
+  const stops = [...ui.tabStops];
+
+  expect(stops).toContain(linked);
+  expect(stops).toContain(button);
+  expect(stops).toContain(checkbox);
+
+  // A link with no destination is not focusable at all — not by Tab, not by script — and
+  // it *is* interactive content for a label's purposes. So the two sets differ here, and
+  // the compiler asks about `href` rather than about the tag.
+  expect(stops).not.toContain(bare);
+
+  // A select is **one** stop. Its UA-supplied `<button>` is what the pointer hits, and it
+  // is not in the tab order — measured, and the reason this cannot be derived from
+  // `ownsPress`, which exempts the same button for an unrelated reason.
+  expect(stops).toContain(select);
+  const uaButton = ui.nodes.firstChild[select]!;
+  expect(ui.nodes.kind[uaButton]!).toBe(NodeKind.BUTTON);
+  expect(stops).not.toContain(uaButton);
+
+  // An `<option>` is a control with a kind and a row of its own, and Tab never visits one.
+  // A picker's list is arrowed.
+  const picker = [...ui.overlays][0]!;
+  for (let n = ui.nodes.firstChild[picker]!; n !== -1; n = ui.nodes.nextSibling[n]!) {
+    expect(stops).not.toContain(n);
+  }
+
+  // And nothing that is merely a box.
+  for (const node of [0, div, span]) expect(stops).not.toContain(node);
+
+  // Sorted, because `findRow` binary-searches it. **Not** because it is the order — node
+  // ids are document order today, which is exactly what would make a sequence read off
+  // this array look correct until the first keyed reorder.
+  expect(stops).toEqual([...stops].sort((a, b) => a - b));
 });
 
 test("an authored select button is left alone", () => {

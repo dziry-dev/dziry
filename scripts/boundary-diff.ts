@@ -163,6 +163,7 @@ if (LIVE) {
       editableBoxes: ui.editableBoxes,
       placeholders: ui.placeholders,
       overlays: ui.overlays,
+      tabStops: ui.tabStops,
       textBindings: ui.textBindings,
       handlers: ui.handlers,
       lists: ui.lists,

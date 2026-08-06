@@ -557,6 +557,20 @@ export type CompiledUi = {
    * only says which node the layer starts at.
    */
   overlays: Int32Array;
+  /**
+   * Sorted node ids Tab can reach — ROADMAP A3's focusable **set**.
+   *
+   * The set and not the order. A node is a tab stop because of what it is, which no
+   * reorder changes; where it lands in the order is document order in the live tree,
+   * which a reorder changes constantly. So this crosses the boundary as a set and the
+   * engine walks `firstChild`/`nextSibling` for the sequence.
+   *
+   * Sorted, like the four above, because that is what `findRow`'s binary search wants —
+   * and sortedness here says nothing about tab order. Node ids happen to be in document
+   * order today, which makes this array *look* like the answer to "in what sequence".
+   * It is not, and A3's own bullet names the case where reading it that way breaks.
+   */
+  tabStops: Int32Array;
   lists: ListTable;
   media: MediaTable;
   tweens: TweenTable;

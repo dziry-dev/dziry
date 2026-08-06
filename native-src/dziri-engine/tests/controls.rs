@@ -724,6 +724,29 @@ mod keyboard {
         );
     }
 
+    /// **Tab with a picker open is Escape**, and it does not advance the tab order.
+    ///
+    /// Measured 2026-08-06 rather than chosen, because all three armchair answers are
+    /// defensible: consume it, close and move on, or move and leave the picker up. Chromium
+    /// closes, discards the highlight with the value untouched, returns focus to the select
+    /// and stops there. The wrong one is visible — a dropdown hanging over a page whose
+    /// focus has already moved somewhere else.
+    #[test]
+    fn tab_closes_an_open_picker_without_advancing_focus() {
+        let mut engine = two_option_select();
+        focus_by_clicking(&mut engine);
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 5, "highlight moved off the committed option");
+
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.open_selection().0, -1, "Tab closed the picker");
+        assert_eq!(engine.focused(), 2, "focus is back on the select, not on the next stop");
+    }
+
     /// Home and End jump to the ends of the list. Measured 2026-08-06 in the run that
     /// settled the clamp, and absent until then — a list that answers arrows but not Home is
     /// one a keyboard user notices immediately.
@@ -878,6 +901,210 @@ mod keyboard {
         assert!(
             forwarded_a_key(&mut engine),
             "a key the engine does not claim reaches the host"
+        );
+    }
+}
+
+/// Tab and Shift+Tab over the live tree — ROADMAP A3's focus walk.
+///
+/// Every fixture here builds the *set* by hand, as the compiler would: `TAB_STOP` on the
+/// nodes that are stops and nothing else. What is being tested is the other half — that
+/// the order is a walk, and that the three run-time exclusions the compiler cannot see
+/// are applied by the engine.
+mod tab_order {
+    use super::*;
+    use dziri_engine::engine::keys;
+
+    /// A root with four tab stops as its children, in document order 1..=4.
+    ///
+    /// Style slot 1 is the ordinary one; slot 2 is `display: none`, used by one test and
+    /// built here so every fixture has the same table shape.
+    fn four_stops() -> Engine {
+        let mut engine = Engine::new(&config(5, 3)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            for slot in 0..3 {
+                init_style(t, slot);
+            }
+            t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+            t.set_u8(STYLES, styles::DISPLAY, 2, display::NONE);
+
+            node(t, 0, 0, -1);
+            for i in 1..5 {
+                node(t, i, 1, 0);
+                t.set_u8(
+                    NODES,
+                    nodes::FLAGS,
+                    i,
+                    protocol::flags::INTERACTIVE | protocol::flags::TAB_STOP,
+                );
+            }
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+            for i in 1..4 {
+                t.set_i32(NODES, nodes::NEXT_SIBLING, i, (i + 1) as i32);
+            }
+
+            pad_controls(t, 0);
+            pad_variants(t, 0);
+        }
+        engine.tick().expect("tick");
+        engine
+    }
+
+    /// Press Tab `n` times and collect where focus landed after each.
+    fn tab(engine: &mut Engine, n: usize, backward: bool) -> Vec<i32> {
+        let mods = if backward { 1 << 0 } else { 0 };
+        let mut seen = Vec::new();
+        for _ in 0..n {
+            engine.key_down(keys::TAB, mods);
+            engine.tick().expect("tick");
+            seen.push(engine.focused());
+        }
+        seen
+    }
+
+    #[test]
+    fn tab_walks_document_order_and_wraps() {
+        let mut engine = four_stops();
+        assert_eq!(engine.focused(), -1, "nothing is focused when a window opens");
+        assert_eq!(
+            tab(&mut engine, 5, false),
+            vec![1, 2, 3, 4, 1],
+            "the first Tab enters at the top, and the fifth wraps"
+        );
+    }
+
+    /// Wrapping is a deliberate divergence, not the absence of a rule.
+    ///
+    /// A browser hands focus to its own chrome at the end of the document — measured as
+    /// one stop on `BODY` before the cycle restarted — and dziri has no chrome to hand it
+    /// to. The alternative is focus falling off the end with no keyboard way back.
+    #[test]
+    fn shift_tab_walks_the_same_list_backwards() {
+        let mut engine = four_stops();
+        assert_eq!(
+            tab(&mut engine, 5, true),
+            vec![4, 3, 2, 1, 4],
+            "the first Shift+Tab enters at the bottom"
+        );
+    }
+
+    /// `disabled` leaves the tab order and `readonly` does not — measured, and the two are
+    /// easy to conflate. Only the first is expressible today, and it costs nothing because
+    /// the engine already owns the bit for `:disabled`.
+    #[test]
+    fn a_disabled_control_is_skipped() {
+        let mut engine = four_stops();
+        {
+            let t = engine.tables_mut();
+            control(t, 0, 2, control_kind::CHECKBOX, -1, control_flags::DISABLED);
+            pad_controls(t, 1);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(
+            tab(&mut engine, 4, false),
+            vec![1, 3, 4, 1],
+            "node 2 is disabled, so the order steps over it"
+        );
+    }
+
+    /// A node the user cannot see must not be a tab stop, and `display: none` is the case
+    /// the compiler structurally cannot answer — it is a layout fact, and the same fact
+    /// paint reads. Both answers come from one function so they cannot drift.
+    #[test]
+    fn a_display_none_node_is_not_in_the_order() {
+        let mut engine = four_stops();
+        {
+            let t = engine.tables_mut();
+            t.set_u16(NODES, nodes::STYLE, 3, 2);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(tab(&mut engine, 4, false), vec![1, 2, 4, 1]);
+    }
+
+    /// A route that is not showing takes its whole subtree with it.
+    ///
+    /// The demo has thirteen such routes on the first frame. Without this the tab order
+    /// walks into pages the user cannot see and cannot leave — a keyboard trap arrived at
+    /// by omission rather than by a wrong rule.
+    #[test]
+    fn a_hidden_subtree_is_not_in_the_order() {
+        let mut engine = four_stops();
+        {
+            let t = engine.tables_mut();
+            t.set_u8(NODES, nodes::HIDDEN, 2, 1);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(tab(&mut engine, 4, false), vec![1, 3, 4, 1]);
+    }
+
+    /// **A radio group is one tab stop, and it is the checked member.**
+    ///
+    /// Measured, `probes/tab-order.html`: a group with nothing checked stops on its first
+    /// member; a group with a checked member stops on that one, skipping earlier siblings.
+    /// This is ARIA's roving tabindex reached from the platform rather than from the
+    /// pattern, and it is the first of the five controls A3 wants the mechanism for.
+    #[test]
+    fn a_radio_group_is_one_stop_on_the_checked_member() {
+        let mut engine = four_stops();
+        {
+            let t = engine.tables_mut();
+            control(t, 0, 1, control_kind::RADIO, 7, 0);
+            control(t, 1, 2, control_kind::RADIO, 7, control_flags::CHECKED);
+            control(t, 2, 3, control_kind::RADIO, 7, 0);
+            pad_controls(t, 3);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(
+            tab(&mut engine, 3, false),
+            vec![2, 4, 2],
+            "three radios are one stop, on the checked one, and node 4 is the next"
+        );
+    }
+
+    /// With nothing checked the stop is the group's **first** member — which is a
+    /// different rule from "the checked one", not a special case of it, and the one that
+    /// decides where focus lands in a form nobody has filled in yet.
+    #[test]
+    fn an_unchecked_radio_group_stops_on_its_first_member() {
+        let mut engine = four_stops();
+        {
+            let t = engine.tables_mut();
+            control(t, 0, 2, control_kind::RADIO, 7, 0);
+            control(t, 1, 3, control_kind::RADIO, 7, 0);
+            pad_controls(t, 2);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(tab(&mut engine, 3, false), vec![1, 2, 4]);
+    }
+
+    /// The order is a walk, so re-parenting a node moves it in the order — which is the
+    /// entire reason the order is not a sorted table of ids.
+    ///
+    /// Node 4 is spliced to the front of the sibling list, keeping its id. Ids are still
+    /// ascending, so anything reading the *set* as a sequence would answer 1,2,3,4 and be
+    /// wrong. A5's keyed lists reorder exactly like this.
+    #[test]
+    fn the_order_follows_the_tree_and_not_the_node_ids() {
+        let mut engine = four_stops();
+        {
+            let t = engine.tables_mut();
+            // 4 first, then 1, 2, 3.
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 4);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, 4, 1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, 3, -1);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(
+            tab(&mut engine, 4, false),
+            vec![4, 1, 2, 3],
+            "document order, which is now 4 1 2 3 — a sorted table would say 1 2 3 4"
         );
     }
 }

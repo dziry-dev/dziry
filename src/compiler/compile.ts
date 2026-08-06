@@ -114,6 +114,18 @@ type BuiltNode = {
    * it is a fact about the *element* and `resolveActivation` works on nodes.
    */
   ownsPress?: true;
+  /**
+   * Tab can reach this node.
+   *
+   * Deliberately *not* derived from `ownsPress` or from `activates`, even though the
+   * three overlap heavily. Each of the three exclusions measured in
+   * `probes/tab-order.html` is a case where they disagree: an `<a>` with no `href` owns
+   * its press and is not focusable, a `<select>`'s button is what the pointer hits and
+   * is not a stop, and an `<option>` is a control with a row of its own that Tab never
+   * visits. Deriving one from another would encode "interactive" and "reachable" as the
+   * same idea, which is exactly what the measurements say they are not.
+   */
+  tabStop?: true;
 };
 
 /**
@@ -384,6 +396,44 @@ function isTextEntry(el: Element): boolean {
 function ownsItsPress(el: Element, path: Element[]): boolean {
   if (el.tag === "button" && path[path.length - 2]?.tag === "select") return false;
   return el.tag === "button" || el.tag === "a" || controlKindOf(el) !== ControlKind.NONE;
+}
+
+/** Tags that are tab stops on their own account, with no attribute needed. */
+const TAB_STOP_TAGS = new Set(["input", "textarea", "select"]);
+
+/**
+ * Whether Tab can reach this element — the compile-time half of ROADMAP A3's focus model.
+ *
+ * Measured, `probes/tab-order.html`, and written against that table rather than against
+ * the neighbouring [`ownsItsPress`], which it resembles closely enough to be tempting.
+ * The two disagree in three places and every one of them is a real difference:
+ *
+ * - **`<a>` needs an `href`.** A link with no destination is not focusable at all — not
+ *   by Tab, not by script. It is still interactive content for a label's purposes, which
+ *   is why the function above does not ask.
+ * - **A `<select>`'s own button is not a stop**, so a select is one stop rather than two.
+ *   The same exemption `ownsItsPress` makes, for a different reason: there it stops
+ *   `activates` being blocked, here it stops the tab order visiting the control twice.
+ *   The shared spelling is not a shared cause, so it is written out in both places.
+ * - **`<option>` is excluded by being absent from the tag set**, despite having a control
+ *   kind and a row. A picker's list is arrowed, never tabbed.
+ *
+ * `controlKindOf` is deliberately not consulted. A plain `<input type="text">` has no
+ * control kind — a press on it does nothing a control table would describe — and it is
+ * of course a tab stop. Focusability is a property of the *tag*, and treating it as a
+ * property of controlness would silently exclude every text field in the language.
+ *
+ * Not asked here, because none of it is compile-time: `disabled` (a live predicate bit),
+ * `display:none` and `visibility:hidden` (layout facts the engine's walk already skips),
+ * and which member of a radio group carries the group's single stop (the checked one).
+ *
+ * `tabindex` is unsupported, so nothing can add itself to the set or remove itself from
+ * it. That is the gap to close first if a custom widget ever needs the keyboard.
+ */
+function isTabStop(el: Element, path: Element[]): boolean {
+  if (el.tag === "a") return el.attrs.has("href");
+  if (el.tag === "button") return path[path.length - 2]?.tag !== "select";
+  return TAB_STOP_TAGS.has(el.tag);
 }
 
 export type CompileResult = {
@@ -1175,6 +1225,7 @@ export function compileTree(
       parent,
       children: [],
       ...(ownsItsPress(el, path) ? { ownsPress: true as const } : {}),
+      ...(isTabStop(el, path) ? { tabStop: true as const } : {}),
       // A text-entry element is one line high on its own account, bound or not — a
       // browser does not ask whether anything owns the value before giving the box a
       // height. When it *is* bound the generated run below carries the floor instead,
@@ -1798,6 +1849,21 @@ function buildOverlays(nodes: BuiltNode[]): Int32Array {
   return new Int32Array(out.sort((a, b) => a - b));
 }
 
+/**
+ * Nodes Tab can reach. Sorted, for the same binary search — **not** for the order.
+ *
+ * Worth the sentence because this array is the one place the set/order distinction is
+ * easiest to lose: sorted node ids are document order today, so anything that read this
+ * as a tab sequence would work, pass its tests, and break on the first keyed reorder.
+ * The engine never reads it as a sequence; it asks `findRow` whether a node it is
+ * already walking is in the set.
+ */
+function buildTabStops(nodes: BuiltNode[]): Int32Array {
+  const out: number[] = [];
+  for (let i = 0; i < nodes.length; i++) if (nodes[i]!.tabStop) out.push(i);
+  return new Int32Array(out.sort((a, b) => a - b));
+}
+
 function buildInteractive(
   nodes: BuiltNode[],
   handlers: BuiltHandler[],
@@ -1926,6 +1992,7 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     editableBoxes: buildEditableBoxes(result.nodes),
     placeholders: buildPlaceholders(result.nodes),
     overlays: buildOverlays(result.nodes),
+    tabStops: buildTabStops(result.nodes),
     // Bindings are resolved and emitted only on the generated-module path; the
     // in-memory IR is used by tests and the variant probe, which are static.
     textBindings: [],
@@ -2388,6 +2455,9 @@ export const editableBoxes = ${typedArray("Int32Array", [...buildEditableBoxes(n
 export const placeholders = ${typedArray("Int32Array", [...buildPlaceholders(nodes)])};
 /** Overlay roots — painted after the tree, hit-tested before it. \`::picker(select)\`. */
 export const overlays = ${typedArray("Int32Array", [...buildOverlays(nodes)])};
+
+/** Nodes Tab can reach, sorted. The set; the order is a live walk of the tree. */
+export const tabStops = ${typedArray("Int32Array", [...buildTabStops(nodes)])};
 
 ${localsSource}/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [

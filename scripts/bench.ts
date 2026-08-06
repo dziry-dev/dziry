@@ -130,6 +130,7 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     editableBoxes: m.editableBoxes,
     placeholders: m.placeholders,
     overlays: m.overlays,
+    tabStops: m.tabStops,
     textBindings: m.textBindings,
     handlers: m.handlers,
     lists: m.lists,

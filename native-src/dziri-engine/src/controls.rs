@@ -236,6 +236,23 @@ impl Controls {
         }
     }
 
+    /// The group `node` belongs to, or -1 for "none" — a checkbox, or an unnamed radio.
+    ///
+    /// The same column `activate` reads to clear a group, asked as a question instead of
+    /// inline, because the tab walk needs it for a different reason: a group is one tab
+    /// stop, so the walk has to know which stops belong to the same one before it can
+    /// decide which single member survives.
+    pub fn group_of(&self, tables: &Tables, node: i32) -> i32 {
+        match self.row_of(tables, node) {
+            Some(row) => tables
+                .i32s(CONTROLS, protocol::controls::GROUP)
+                .get(row)
+                .copied()
+                .unwrap_or(-1),
+            None => -1,
+        }
+    }
+
     /// The control a press on `node` operates, or `None`.
     fn target_of(&self, tables: &Tables, node: i32) -> Option<i32> {
         if !self.any || node < 0 {

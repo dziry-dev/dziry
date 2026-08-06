@@ -905,6 +905,7 @@ test("a capacity request is a power of two", () => {
     editableBoxes: generated.editableBoxes,
     placeholders: generated.placeholders,
     overlays: generated.overlays,
+    tabStops: generated.tabStops,
     textBindings: [],
     handlers: [],
     lists: generated.lists,

@@ -1102,8 +1102,23 @@ export const ENUMS: EnumDef[] = [
  *   a bump by hand. Here an old engine would fall through `Controls::activate`'s `_ => None`
  *   and simply do nothing on a press, which is the benign end of the range and still
  *   silent.
+ *
+ * v19 is ROADMAP A3's keyboard: **`NodeFlags.TAB_STOP`** (bit 6). A flag bit again, so it
+ * moves nothing and the hash cannot see it — the third such bump, and the pattern is by now
+ * the ordinary case rather than the exception.
+ *
+ * What it carries is the half of the focus model that is genuinely compile-time. The *set*
+ * of nodes Tab can reach is a function of the markup: a `<button>`, an `<a>` with an `href`,
+ * a form control, and nothing else. The *order* is not — it is document order in the live
+ * tree, which a reorder changes — so the engine walks for it. Measured before it was
+ * written, `probes/tab-order.html`, and the measurement is what forced the split: node ids
+ * are strictly document order today, so a sorted table of tab stops would look right and
+ * would be wrong for exactly the case A3's own bullet warns about.
+ *
+ * An engine without the bit finds no tab stops and Tab does nothing, which is the same
+ * failure as having no keyboard at all — silent, but not a wrong picture.
  */
-export const PROTOCOL_VERSION = 18;
+export const PROTOCOL_VERSION = 19;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
@@ -1195,6 +1210,42 @@ export const NodeFlags = {
    * That is what makes opening a picker cost zero relayout.
    */
   OVERLAY: 1 << 5,
+  /**
+   * Tab can reach this node.
+   *
+   * The compile-time half of ROADMAP A3's focus model, and the split is the point: the
+   * **set** is a table, the **order** is a walk. A node is a tab stop because of what it
+   * is — `<button>`, `<a href>`, a form control — which the compiler knows and no
+   * reordering can change. Where it sits in the order is document order in the *live*
+   * tree, which a reorder changes constantly, so the engine walks `firstChild`/
+   * `nextSibling` for it rather than reading an index from here.
+   *
+   * Measured, `probes/tab-order.html`, and the measurement is why the set is not simply
+   * "is it interactive":
+   *
+   * - **An `<a>` with no `href` is not focusable.** `INTERACTIVE` does not care, because
+   *   hit-testing a link without a destination is still meaningful; Tab does.
+   * - **A `<select>` is one tab stop, not two.** Its `<button>` is `INTERACTIVE` — it is
+   *   what the pointer hits — and it is not a stop. So this bit cannot be derived from
+   *   that one, in either direction.
+   * - **An `<option>` is never a stop**, even though it is a control with a kind and a
+   *   row of its own. A picker's list is arrowed, not tabbed.
+   *
+   * Three exclusions the compiler deliberately does *not* apply, because they are not
+   * compile-time facts and the engine already has each of them:
+   *
+   * - `:disabled` — a live predicate bit, so the walk asks what the cascade asks.
+   * - `display:none` and `visibility:hidden` — layout facts. The walk skips what paint
+   *   skips, which costs nothing because both are already tested per node.
+   * - Which member of a radio group holds the group's single stop — that is the *checked*
+   *   one, which is live state by definition.
+   *
+   * `tabindex` is unsupported, and this bit is deliberately one bit rather than two
+   * because of it. `tabindex="-1"` is the only thing measured that separates
+   * focusable-by-pointer from reachable-by-Tab; with no `tabindex` there is nothing to
+   * separate, and a second bit would sit unread. When `tabindex` lands, it needs one.
+   */
+  TAB_STOP: 1 << 6,
 } as const;
 
 /**

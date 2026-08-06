@@ -896,6 +896,33 @@ impl Painter {
         self.controls.kind_of(tables, node)
     }
 
+    /// The radio group `node` belongs to, or -1.
+    ///
+    /// For the tab walk, which collapses a group to the single stop it is. Exposed
+    /// beside `control_kind` rather than reached through `controls` directly, because
+    /// `Controls` is private to the painter and the alternative is handing every caller
+    /// the whole table to ask one question of.
+    pub fn control_group(&self, tables: &Tables, node: i32) -> i32 {
+        self.controls.group_of(tables, node)
+    }
+
+    /// `node`'s live control state — the `CHECKED`/`DISABLED` bits, as they are *now*.
+    pub fn control_state(&self, node: i32) -> u8 {
+        self.controls.state(node)
+    }
+
+    /// Whether `node`'s resolved `display` is `none`.
+    ///
+    /// Resolved rather than base, so a node hidden only in one of its states is hidden
+    /// then and not otherwise — the same read the paint walk makes, exposed because the
+    /// tab walk has to skip exactly what paint skips. A node the user cannot see must
+    /// not be a tab stop, and the two answers coming from one function is what keeps
+    /// them from drifting.
+    pub fn display_is_none(&self, tables: &Tables, node: usize, state: &InputState) -> bool {
+        let blend = self.blend_for(tables, node, state);
+        display_of(tables, blend.to) == display::NONE
+    }
+
     /// The `<select>` whose picker is open, or -1.
     pub fn open_select(&self) -> i32 {
         self.selects.open()
