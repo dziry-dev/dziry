@@ -1,0 +1,176 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>keyboard-activation</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  #stage { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; width: 900px }
+  #stage > * { flex: none }
+</style>
+<h3>what do Enter and Space do to a focused control, and in what order?</h3>
+<div id="stage"></div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * The question dziri needs answered.
+   *
+   * ROADMAP A3 claims "Enter/Space is wiring, not new behaviour" — that activation
+   * is already kind-dispatched in `Controls::activate` and merely unreachable from
+   * the keyboard. That claim rests on three things nobody has measured here:
+   *
+   *   1. **Which key, on which kind.** If Enter and Space did the same thing
+   *      everywhere, one arm would do. They do not: a button takes both, a checkbox
+   *      takes only one, and a link takes the other — and getting it backwards is
+   *      the kind of bug nobody files, they just stop using the keyboard.
+   *
+   *   2. **keydown or keyup.** dziri has exactly one hook, `Engine::key_down`. If any
+   *      of these activates on release, that hook is the wrong one and `key_up` has
+   *      to exist before the wiring can be faithful. This is the finding most likely
+   *      to change code, and it is invisible from the outside: both keys arrive in
+   *      the same step, so only the recorded *order* of events tells them apart.
+   *
+   *   3. **Whether a synthetic `click` really fires.** "Through the same dispatch as
+   *      a click" is only free if the platform agrees that a keyboard activation *is*
+   *      a click. If it is, dziri's Enter handler ends at "call the click path" and
+   *      every future control inherits keyboard support the day it gets pointer
+   *      support. If it is not, the two paths diverge forever.
+   *
+   * The radio group is the fourth question and the one that generalises: arrows
+   * inside a group are supposed to move focus *and* change the value in one press,
+   * which is unlike every other key here and is what makes roving tabindex a
+   * behaviour rather than a focus policy.
+   */
+
+  const stage = document.getElementById("stage");
+  stage.innerHTML = `
+    <button id="btn">button</button>
+    <input id="check" type="checkbox">
+    <input id="r1" type="radio" name="g">
+    <input id="r2" type="radio" name="g">
+    <input id="r3" type="radio" name="g">
+    <a id="link" href="#x">link</a>
+    <div id="div0" tabindex="0">div[0]</div>
+    <form id="form">
+      <input id="ftext" type="text" size="6">
+      <button id="fsubmit">go</button>
+    </form>
+  `;
+
+  const el = (id) => document.getElementById(id);
+  const centre = (node) => {
+    const r = node.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  };
+  const name = (a) => (!a || a === document.body ? "BODY" : a.tagName.toLowerCase() + (a.id ? "#" + a.id : ""));
+
+  /**
+   * One ordered log for the whole stage, not one per element.
+   *
+   * The order *across* elements is half the answer — implicit submission is a
+   * keydown on a text field producing a click on a button that was never touched —
+   * and per-element lists would show two unrelated fragments instead of one
+   * sequence. Each entry is tagged with the target so nothing is ambiguous.
+   */
+  const fired = [];
+  const EVENTS = ["keydown", "keypress", "keyup", "click", "input", "change", "submit"];
+  const watch = (node) => {
+    for (const n of EVENTS) {
+      node.addEventListener(n, (e) => {
+        if (n === "submit") e.preventDefault();          // or the page navigates and the probe dies
+        if (n === "click" && node.id === "link") e.preventDefault();
+        // `detail` is how libraries tell a keyboard activation from a real click:
+        // a synthesised one carries 0. Recorded so dziri knows whether the two are
+        // distinguishable downstream, since its own CLICK event has no such field.
+        fired.push(`${node.id}:${n}` + (n === "click" ? `(detail=${e.detail})` : ""));
+      });
+    }
+  };
+  for (const id of ["btn", "check", "r1", "r2", "r3", "link", "div0", "ftext", "fsubmit", "form"]) watch(el(id));
+
+  const drain = () => {
+    const s = fired.join(" ") || "none";
+    fired.length = 0;
+    return s;
+  };
+
+  /** Which radio is checked, as one short string, so a whole group reads at a glance. */
+  const radios = () => ["r1", "r2", "r3"].map((id) => (el(id).checked ? id.toUpperCase() : ".")).join("");
+
+  const row = (label) =>
+    log(
+      label.padEnd(30) +
+        " active=" + name(document.activeElement).padEnd(12) +
+        " check=" + (el("check").checked ? "on " : "off") +
+        " radios=" + radios() +
+        "  " + drain(),
+    );
+
+  const plan = [
+    // Every control is focused by *clicking* it, which is deliberate: a click is the
+    // only focus source dziri has today, and it also means each section starts from
+    // the state a user would really be in. The click's own events are drained by the
+    // row it prints, so the key press that follows reports only its own.
+    ["click the button", { ...centre(el("btn")), down: 1, up: 1 }],
+    ["Enter on button", { key: "Enter" }],
+    ["Space on button", { key: " " }],
+
+    ["click the checkbox", { ...centre(el("check")), down: 1, up: 1 }],
+    ["Enter on checkbox", { key: "Enter" }],
+    ["Space on checkbox", { key: " " }],
+
+    // The group is entered by **Tab, not by a click**, and the group starts with
+    // nothing checked. Both are deliberate. Clicking a radio checks it, so a probe
+    // that clicks its way in can only ever measure an already-decided group — and
+    // "Space on an unchecked radio", the one press that tells you whether Space
+    // *selects* or merely re-confirms, becomes unaskable. Arriving by Tab also
+    // measures which member of an untouched group the tab stop lands on, which is
+    // half of the roving-tabindex rule.
+    ["Tab from checkbox into the group", { key: "Tab" }],
+    ["Space on an unchecked radio", { key: " " }],
+    ["ArrowRight in group", { key: "ArrowRight" }],
+    ["ArrowDown in group", { key: "ArrowDown" }],
+    ["ArrowUp in group", { key: "ArrowUp" }],
+    ["ArrowLeft in group", { key: "ArrowLeft" }],
+    // Does an arrow wrap at the end of a group, or stop? Two more presses past r1
+    // going backwards answers it without needing to know the group size here.
+    ["ArrowLeft again (wrap?)", { key: "ArrowLeft" }],
+    ["Space on a checked radio", { key: " " }],
+    ["Enter on a radio", { key: "Enter" }],
+
+    ["click the link", { ...centre(el("link")), down: 1, up: 1 }],
+    ["Enter on link", { key: "Enter" }],
+    ["Space on link", { key: " " }],
+
+    // A div with tabindex is the control dziri does *not* have a ControlKind for, and
+    // the answer decides whether keyboard activation is a property of the kind or of
+    // focusability. If a div gets no click from Enter, then activation is per-kind and
+    // dziri's dispatch table is the right shape.
+    ["click div[tabindex=0]", { ...centre(el("div0")), down: 1, up: 1 }],
+    ["Enter on div", { key: "Enter" }],
+    ["Space on div", { key: " " }],
+
+    // Implicit submission: a keydown on a text field, producing a click on a button
+    // nobody touched. This is `onSubmit` on `bind:value` in ROADMAP A3, and it is the
+    // one activation that crosses elements.
+    ["click the text field", { ...centre(el("ftext")), down: 1, up: 1 }],
+    ["Enter in a form field", { key: "Enter" }],
+    ["Space in a form field", { key: " " }],
+  ];
+
+  window.__probeMouse = plan.map(([, p]) => p);
+  const labels = plan.map(([l]) => l);
+
+  row("initial");
+  window.__probeStep = (i) => row(labels[i] ?? `step ${i}`);
+
+  window.__probeMouseDone = () => {
+    log("");
+    log("Reading the order column: a `click` printed *before* the `keyup` means the");
+    log("control activates on press; one printed after it means the control activates");
+    log("on release, and dziri's key_down-only hook cannot reproduce it.");
+    report();
+  };
+
+  document.title = "ready";
+</script>

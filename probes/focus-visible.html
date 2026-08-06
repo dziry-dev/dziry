@@ -1,0 +1,158 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>focus-visible</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  #stage { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; height: 60px }
+  #stage > * { flex: none }
+  /* The customizable-select opt-in, for the same reason select-picker.html gives:
+     a native picker is browser chrome, so nothing inside it has a computed style
+     and `option:focus-visible` would be unanswerable. */
+  #sel, #sel::picker(select) { appearance: base-select }
+</style>
+<h3>when does :focus-visible match — and does a ring follow?</h3>
+<div id="stage"></div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * The question dziri needs answered.
+   *
+   * ROADMAP A3 wants `:focus-visible` as a bit distinct from `:focus`, "the
+   * difference between polished and broken". That is a *rule*, and nobody has
+   * written down what the rule is. The two candidate rules people state from memory
+   * are both wrong in a way that shows:
+   *
+   *   "keyboard focus is visible, mouse focus is not" — then clicking into a text
+   *   field would leave it ringless while you type in it, and
+   *
+   *   "it matches whenever :focus does, on a control that takes keys" — then every
+   *   click on a button would draw a ring, which is the thing the pseudo-class was
+   *   invented to stop.
+   *
+   * So it is per-control-kind *and* per-modality, and that is a two-dimensional
+   * table nobody should assert. This measures the whole grid.
+   *
+   * `outline` is carried alongside because it is the consequence: `:focus-visible`
+   * matching is only interesting if the UA sheet hangs a ring on it, and dziri has
+   * to decide whether the ring is its own default or something an author opts into.
+   */
+
+  const stage = document.getElementById("stage");
+  stage.innerHTML = `
+    <button id="start">start</button>
+    <button id="btn">button</button>
+    <input id="text" type="text" size="6">
+    <input id="check" type="checkbox">
+    <input id="radio" type="radio" name="g">
+    <a id="link" href="#x">link</a>
+    <div id="div" tabindex="0">div[0]</div>
+    <select id="sel">
+      <button><selectedcontent></selectedcontent></button>
+      <option value="a" selected>A</option>
+      <option value="b">B</option>
+    </select>
+  `;
+
+  const el = (id) => document.getElementById(id);
+  const centre = (node) => {
+    const r = node.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  };
+
+  const name = (a) => {
+    if (!a || a === document.body) return "BODY";
+    return a.tagName.toLowerCase() + (a.id ? "#" + a.id : "");
+  };
+  const yn = (b) => (b ? "YES" : "no ");
+
+  const row = (label) => {
+    const a = document.activeElement;
+    const cs = a && a !== document.body ? getComputedStyle(a) : null;
+    // `outlineStyle: none` and a zero width are two different ways for a UA to say
+    // "no ring", and Chromium uses both depending on the element, so both are shown.
+    const ring = cs ? `${cs.outlineStyle} ${cs.outlineWidth} ${cs.outlineColor.replace(/\s+/g, "")}` : "-";
+    log(
+      label.padEnd(32) +
+        " active=" + name(a).padEnd(14) +
+        " :focus=" + yn(a?.matches?.(":focus")) +
+        " :focus-visible=" + yn(a?.matches?.(":focus-visible")) +
+        "  outline=" + ring,
+    );
+  };
+
+  // Deliberately in this order: every mouse case first, so the pointer modality is
+  // established and stays established, then one click on #start and nothing but Tab
+  // after it. Interleaving the two would measure the *transition* rule — which is a
+  // third question — rather than either steady state.
+  const plan = [
+    ["--- pointer ---", { ...centre(el("start")), down: 1, up: 1 }],
+    ["click button", { ...centre(el("btn")), down: 1, up: 1 }],
+    ["click text field", { ...centre(el("text")), down: 1, up: 1 }],
+    ["click checkbox", { ...centre(el("check")), down: 1, up: 1 }],
+    ["click radio", { ...centre(el("radio")), down: 1, up: 1 }],
+    ["click link", { ...centre(el("link")), down: 1, up: 1 }],
+
+    // The picker's own highlight, and it has to sit *here*, inside the pointer
+    // section. dziri draws the highlight with `option:focus` (measured in
+    // select-picker.html: the activeElement while a picker is open is an <option>),
+    // so whether that focus is *visible* focus decides whether a ring lands on the
+    // highlighted row as well as a fill.
+    //
+    // The first version of this probe asked it last, after nine Tabs. Every row it
+    // produced said YES — which measured the keyboard modality those Tabs had
+    // established, not the picker. A mouse-opened picker is only observable while
+    // the pointer is still the last thing the user touched.
+    ["click the select (picker opens)", { ...centre(el("sel")), down: 1, up: 1 }],
+    ["ArrowDown inside the picker", { key: "ArrowDown" }],
+    ["Escape (close the picker)", { key: "Escape" }],
+
+    ["click div[tabindex=0]", { ...centre(el("div")), down: 1, up: 1 }],
+
+    // Does typing retroactively make a mouse-focused element visible? The spec's
+    // heuristic is written in terms of the *interaction that caused the focus*, which
+    // would say no — but it also says an element that "supports keyboard input"
+    // matches, and a div with tabindex arguably does. Cheap to settle.
+    //
+    // Last in the section, because whichever way it goes it ends the pointer modality
+    // and every row after it would be measuring the aftermath.
+    ["type 'a' on the focused div", { key: "a" }],
+
+    ["--- keyboard ---", { ...centre(el("start")), down: 1, up: 1 }],
+    ["Tab 1", { key: "Tab" }],
+    ["Tab 2", { key: "Tab" }],
+    ["Tab 3", { key: "Tab" }],
+    ["Tab 4", { key: "Tab" }],
+    ["Tab 5", { key: "Tab" }],
+    ["Tab 6", { key: "Tab" }],
+    ["Tab 7", { key: "Tab" }],
+
+    // Back the other way, because Shift+Tab is a separate code path in every engine
+    // and "it is Tab with a flag" is an assumption, not an observation.
+    ["Shift+Tab 1", { key: "Tab", modifiers: 8 }],
+    ["Shift+Tab 2", { key: "Tab", modifiers: 8 }],
+  ];
+
+  window.__probeMouse = plan.map(([, p]) => p);
+  const labels = plan.map(([l]) => l);
+
+  row("initial (nothing focused)");
+  window.__probeStep = (i) => row(labels[i] ?? `step ${i}`);
+
+  window.__probeMouseDone = () => {
+    log("");
+    // A separate, smaller question with a separate answer: which of these is
+    // focusable *at all* by script, as opposed to reachable by Tab. The two sets
+    // differ and dziri's compile-time table is the second one.
+    log("script-focusable (el.focus() then activeElement === el):");
+    for (const id of ["btn", "text", "check", "radio", "link", "div", "sel"]) {
+      const node = el(id);
+      node.focus();
+      log("  " + id.padEnd(8) + (document.activeElement === node ? "yes" : "no"));
+    }
+    report();
+  };
+
+  document.title = "ready";
+</script>

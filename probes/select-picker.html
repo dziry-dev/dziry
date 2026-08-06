@@ -69,7 +69,12 @@
   const open = () => (s.matches(":open") ? "open" : "closed");
   const act = () => {
     const a = document.activeElement;
-    return a === document.body ? "BODY" : a.tagName + (a.id ? "#" + a.id : "");
+    if (a === document.body) return "BODY";
+    // An option prints its value, not just its tag. "OPTION" was enough while the
+    // question was *whether* focus goes into the picker; it is not enough to answer
+    // where an arrow lands, because every row of the list reads the same.
+    if (a.tagName === "OPTION") return "OPTION:" + a.value;
+    return a.tagName + (a.id ? "#" + a.id : "");
   };
 
   // Event log, so "did it fire" is answered by observation and not by inference from
@@ -139,6 +144,16 @@
     ["refocus the select (opens it)", { ...centre(s), down: 1, up: 1 }],
     ["Escape to close, keeping focus", { key: "Escape" }],
     ["ArrowDown while closed + focused", { key: "ArrowDown" }],
+    // This Escape is a correction, added 2026-08-06. Without it the ArrowUp below ran
+    // against the picker the ArrowDown had just *opened*, so it measured an in-picker
+    // move (pro -> free) and not the opening it was captioned as. The recorded table
+    // carried "ArrowUp, closed + focused | open" on the strength of it — a fact nobody
+    // had measured, sitting in a row that looked like they had.
+    //
+    // The same shape as the Enter mistake in the section below it: the state a step
+    // runs against is set by the step before, and a caption that names an intended
+    // state is not evidence the state was there.
+    ["Escape (make it genuinely closed)", { key: "Escape" }],
     ["ArrowUp while closed + focused", { key: "ArrowUp" }],
 
     // The other keys a closed select is expected to open on, and the reason this section
@@ -159,6 +174,37 @@
     ["Escape (in case F4 opened it)", { key: "Escape" }],
     ["Alt+ArrowDown while closed + focused", { key: "ArrowDown", modifiers: 1 }],
     ["Escape (in case Alt+Down opened it)", { key: "Escape" }],
+
+    // **Does the arrow wrap at the end of the list, or stop?**
+    //
+    // dziri clamps, and the comment in `Engine::picker_key` states that a browser's
+    // picker "stops at the last option" as though it were measured. It was not — the
+    // rows above only ever pressed an arrow twice on a three-option list, which cannot
+    // reach an end. An assertion of fact with no measurement behind it is exactly what
+    // this file exists to stop, so it is asked now.
+    //
+    // It matters beyond the picker: ROADMAP A3's "one tab stop, arrows inside it" wants
+    // one mechanism for radio group, tab strip, menu, listbox and this. A radio group
+    // *wraps* (measured, keyboard-activation.html: ArrowLeft off the first lands on the
+    // last). If a picker clamps, then wrapping is per-kind and the generalisation carries
+    // a flag; if it wraps too, the shared code is simply shorter.
+    //
+    // Four presses down a three-option list, from a picker opened fresh, so the last two
+    // are both against the end.
+    ["--- wrap: Escape, then open fresh", { key: "Escape" }],
+    ["open with ArrowDown", { key: "ArrowDown" }],
+    ["Down 1", { key: "ArrowDown" }],
+    ["Down 2", { key: "ArrowDown" }],
+    ["Down 3 (at the end?)", { key: "ArrowDown" }],
+    ["Down 4 (wrapped?)", { key: "ArrowDown" }],
+    ["Up 1", { key: "ArrowUp" }],
+    ["Up 2", { key: "ArrowUp" }],
+    ["Up 3 (at the start?)", { key: "ArrowUp" }],
+    ["Up 4 (wrapped?)", { key: "ArrowUp" }],
+    // Home and End are the other two keys a listbox is expected to answer, and dziri
+    // implements neither. One press each says whether that is a gap or a non-issue.
+    ["Home in the picker", { key: "Home" }],
+    ["End in the picker", { key: "End" }],
 
     // The legacy control, for the one question it can answer. Its openness is browser
     // chrome and unobservable, but its *value* and its events are not — so "does an

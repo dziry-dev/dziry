@@ -1,0 +1,153 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>tab-order</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  #stage { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; width: 900px }
+  #stage > * { flex: none }
+  #gone { display: none }
+  #invisible { visibility: hidden }
+  #sel, #sel::picker(select) { appearance: base-select }
+</style>
+<h3>what is a tab stop, and in what order?</h3>
+<div id="stage"></div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * The question dziri needs answered.
+   *
+   * ROADMAP A3 says the *set* of focusable nodes is compile-time and only the
+   * *order* is a live walk. Both halves need measuring and neither is obvious:
+   *
+   *   The set. dziri has fifteen tags. Which of them are tab stops with no author
+   *   markup at all, and what removes one — `disabled`, `display:none`,
+   *   `visibility:hidden`, `tabindex="-1"`? Each of those is a different mechanism
+   *   in the engine: two are compile-time (the tag, the attribute), one is a
+   *   run-time predicate bit that already exists (`:disabled`), and two are layout
+   *   facts the compiler cannot see. Getting the split wrong means either a
+   *   compile-time table that has to be patched at run time — which is the thing
+   *   the whole design is trying to avoid — or a keyboard trap.
+   *
+   *   The order. Document order is the answer everyone gives. It is also *not* the
+   *   whole answer, because positive `tabindex` jumps the queue, and because a
+   *   composed control (a `<select>` with its shadow `<button>`) has to decide
+   *   whether it is one stop or two. dziri builds that button as a real compile-time
+   *   node, so if a browser exposes it as its own tab stop, dziri gets that for free
+   *   and should not; if it does not, dziri has to suppress it.
+   *
+   * The radio group is here for the bullet it settles directly: "one tab stop,
+   * arrows inside it". Three radios with none checked, and a second group of three
+   * with the middle one checked, answer both halves of the roving-tabindex rule —
+   * how many stops a group is, and *which* member the stop lands on.
+   */
+
+  const stage = document.getElementById("stage");
+  // Every candidate in one flow, in source order, each with an id that prints. The
+  // labels are deliberately short: the table is read as a column.
+  stage.innerHTML = `
+    <button id="start">start</button>
+    <a id="a-href" href="#x">a[href]</a>
+    <a id="a-bare">a bare</a>
+    <button id="btn">button</button>
+    <button id="btn-dis" disabled>btn disabled</button>
+    <input id="text" type="text" size="4">
+    <input id="text-dis" type="text" size="4" disabled>
+    <input id="text-ro" type="text" size="4" readonly>
+    <textarea id="area" rows="1" cols="4"></textarea>
+    <input id="check" type="checkbox">
+    <label id="label" for="check">label</label>
+    <input id="r1" type="radio" name="g1">
+    <input id="r2" type="radio" name="g1">
+    <input id="r3" type="radio" name="g1">
+    <input id="s1" type="radio" name="g2">
+    <input id="s2" type="radio" name="g2" checked>
+    <input id="s3" type="radio" name="g2">
+    <select id="sel">
+      <button><selectedcontent></selectedcontent></button>
+      <option value="a" selected>A</option>
+      <option value="b">B</option>
+    </select>
+    <div id="div">div</div>
+    <div id="div0" tabindex="0">div[0]</div>
+    <div id="div-1" tabindex="-1">div[-1]</div>
+    <div id="div3" tabindex="3">div[3]</div>
+    <span id="span">span</span>
+    <p id="p">p</p>
+    <img id="img" width="10" height="10" alt="">
+    <button id="gone">display:none</button>
+    <button id="invisible">visibility:hidden</button>
+    <button id="last">last</button>
+  `;
+
+  const el = (id) => document.getElementById(id);
+  const centre = (node) => {
+    const r = node.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  };
+  const name = (a) => {
+    if (!a || a === document.body) return "BODY";
+    if (a === document.documentElement) return "HTML";
+    return a.tagName.toLowerCase() + (a.id ? "#" + a.id : "");
+  };
+
+  // Enough Tabs to walk past the end of the stage, so "where does it go after the
+  // last stop" is answered rather than assumed. Headless Chrome has no address bar
+  // to escape into, so it should wrap — worth seeing, since a wrap and a dead stop
+  // look identical from inside the page if you only send as many Tabs as you expect
+  // stops.
+  const TABS = 24;
+
+  const plan = [["click start", { ...centre(el("start")), down: 1, up: 1 }]];
+  for (let i = 1; i <= TABS; i++) plan.push([`Tab ${String(i).padStart(2)}`, { key: "Tab" }]);
+  // And back, far enough to prove the reverse walk is the same list reversed rather
+  // than its own order.
+  for (let i = 1; i <= 6; i++) plan.push([`Shift+Tab ${i}`, { key: "Tab", modifiers: 8 }]);
+
+  window.__probeMouse = plan.map(([, p]) => p);
+  const labels = plan.map(([l]) => l);
+
+  const seen = [];
+  const row = (label) => {
+    const a = document.activeElement;
+    seen.push(name(a));
+    log(label.padEnd(16) + " active=" + name(a));
+  };
+
+  window.__probeStep = (i) => row(labels[i] ?? `step ${i}`);
+
+  window.__probeMouseDone = () => {
+    log("");
+
+    /**
+     * The other half: focusable-by-script, which is a different set from
+     * reachable-by-Tab and the difference is exactly `tabindex="-1"`. dziri needs
+     * both — the pointer path focuses whatever it hits, and the Tab path walks a
+     * subset — so measuring only the walk would leave the click rule to memory.
+     */
+    log("script-focusable (el.focus(); activeElement === el):");
+    const ids = [
+      "a-href", "a-bare", "btn", "btn-dis", "text", "text-dis", "text-ro", "area",
+      "check", "label", "r1", "sel", "div", "div0", "div-1", "div3", "span", "p",
+      "img", "gone", "invisible",
+    ];
+    for (const id of ids) {
+      const node = el(id);
+      node.focus();
+      const got = document.activeElement === node;
+      const tabbed = seen.includes(name(node));
+      log(
+        "  " + id.padEnd(11) +
+          " focus()=" + (got ? "yes" : "no ").padEnd(4) +
+          " reached-by-Tab=" + (tabbed ? "yes" : "no"),
+      );
+    }
+
+    log("");
+    log("tab walk, in order: " + seen.slice(1, TABS + 1).join(" -> "));
+    report();
+  };
+
+  document.title = "ready";
+</script>

@@ -669,31 +669,89 @@ mod keyboard {
         );
     }
 
-    /// Every measured way to open a closed select, and the one that does not.
+    /// Every measured way to open a closed select.
     ///
-    /// Measured 2026-08-06, Chromium 151: ArrowDown, ArrowUp, Space, F4 and Alt+ArrowDown all
-    /// open one; **Enter does not**. Enter was asserted to, which is what prompted the
-    /// measurement — and it is reserved for committing a highlight, so a key that also opened
-    /// would make Down-then-Enter ambiguous.
+    /// Measured 2026-08-06, Chromium 151: ArrowDown, ArrowUp, **Enter**, Space, F4 and
+    /// Alt+ArrowDown all open one.
+    ///
+    /// This test previously asserted the opposite for Enter, and named it as a refuted
+    /// assumption, because the probe that "measured" it dispatched Enter with no text and
+    /// Blink never ran its activation path. Both the test and the engine were written to a
+    /// broken instrument, and the test passing is what made that comfortable — the assertion
+    /// was faithful to the engine and the engine was faithful to nothing. Kept in the same
+    /// shape, with the row corrected, so the loop stays the list of measured opening keys.
     #[test]
-    fn the_measured_keys_open_a_closed_select_and_enter_does_not() {
-        for key in [keys::DOWN, keys::UP, keys::SPACE, keys::F4] {
+    fn every_measured_key_opens_a_closed_select() {
+        for key in [keys::DOWN, keys::UP, keys::RETURN, keys::SPACE, keys::F4] {
             let mut engine = two_option_select();
             focus_by_clicking(&mut engine);
             engine.key_down(key, 0);
             engine.tick().expect("tick");
             assert_eq!(engine.open_selection().0, 2, "key {key} should open it");
         }
+    }
 
+    /// Enter means two things, and which one is decided by state rather than by the key.
+    ///
+    /// The pair worth asserting together: the same keycode that opens a closed picker commits
+    /// an open one. Separately each looks like an ordinary row; together they are the reason
+    /// the "a key cannot both open and commit" argument was wrong.
+    #[test]
+    fn enter_opens_a_closed_picker_and_commits_an_open_one() {
         let mut engine = two_option_select();
         focus_by_clicking(&mut engine);
+
+        engine.key_down(keys::RETURN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.open_selection().0, 2, "Enter on a closed select opens it");
+        assert_eq!(engine.focused(), 4, "and lands on the committed option");
+
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 5, "the arrow moved the highlight");
+        assert_eq!(
+            engine.open_selection().1,
+            4,
+            "and committed nothing — an arrow fires no change"
+        );
+
         engine.key_down(keys::RETURN, 0);
         engine.tick().expect("tick");
         assert_eq!(
             engine.open_selection().0,
             -1,
-            "Enter leaves a closed select closed — measured, and the opposite was assumed"
+            "the second Enter committed and closed, rather than reopening"
         );
+    }
+
+    /// Home and End jump to the ends of the list. Measured 2026-08-06 in the run that
+    /// settled the clamp, and absent until then — a list that answers arrows but not Home is
+    /// one a keyboard user notices immediately.
+    #[test]
+    fn home_and_end_jump_to_the_ends_of_the_picker() {
+        let mut engine = two_option_select();
+        focus_by_clicking(&mut engine);
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+
+        engine.key_down(keys::END, 0);
+        engine.tick().expect("tick");
+        let last = engine.focused();
+
+        engine.key_down(keys::HOME, 0);
+        engine.tick().expect("tick");
+        let first = engine.focused();
+
+        assert_ne!(first, last, "Home and End land on different options");
+        assert!(first < last, "Home lands earlier in the list than End");
+
+        // End again from the end is a no-op rather than a wrap — the same clamp the arrows
+        // use, asserted here because Home/End take a different branch to reach it.
+        engine.key_down(keys::END, 0);
+        engine.tick().expect("tick");
+        engine.key_down(keys::END, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), last, "End is idempotent");
     }
 
     /// Arrows move the highlight and commit nothing; Enter is what commits.
@@ -712,10 +770,15 @@ mod keyboard {
 
         engine.key_down(keys::DOWN, 0);
         engine.tick().expect("tick");
+        // Both halves, because this line used to assert only the second while its message
+        // claimed the first. `open_selection().1` is the *committed* option and cannot move
+        // on an arrow, so "the highlight moved" was being proven by a number incapable of
+        // showing it. `focused` is the highlight; the pair says what the message says.
+        assert_eq!(engine.focused(), 5, "the highlight moved");
         assert_eq!(
             engine.open_selection(),
             (2, 4),
-            "the highlight moved and nothing committed — an arrow fires no change"
+            "and nothing committed — an arrow fires no change"
         );
 
         engine.key_down(keys::RETURN, 0);

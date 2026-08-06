@@ -882,6 +882,12 @@ same path as the click, not a second mechanism.
 
 ### Which keys open a closed select: Space, F4 and Alt+ArrowDown — **not Enter**
 
+> **SUPERSEDED, 2026-08-06 (same day, later).** The Enter row of this table measured the *probe
+> runner*, not the browser. **Enter does open a closed select.** The rest of the table stands and
+> was re-measured. Left in place unedited, because the reasoning below was built on it and a
+> deleted claim cannot be traced — see "Enter opens a closed select after all" at the end of this
+> file for what went wrong and what it cost.
+
 **Measured 2026-08-06 · Chromium 151 (via Edge 151) · same probe, extended.** Asked because
 Enter was asserted to open a closed `<select>`, and the arrows were the only opening keys
 anything here had measured.
@@ -1240,3 +1246,290 @@ is what makes the two style fields worth having: the default is a guess, and ove
 Double-click-then-drag extends by *word* in Chrome, and a shift+double-click extends to a word
 boundary. Neither is measured here and neither is implemented; a drag after a double click extends
 by character.
+
+---
+
+## Enter opens a closed select after all — and what a textless key event cost
+
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/select-picker.html`, after a fix to
+`scripts/probe.ts`. Two identical consecutive runs.** This **corrects** "Which keys open a closed
+select: Space, F4 and Alt+ArrowDown — *not Enter*", recorded earlier the same day.
+
+| key, on a closed + focused select | recorded first | re-measured with the fixed runner |
+|---|---|---|
+| ArrowDown | open | open |
+| ArrowUp | open | open — but see below, it had never actually been measured |
+| Space | open | open |
+| F4 | open | open |
+| Alt+ArrowDown | open | open |
+| **Enter** | **closed — nothing happens** | **open** |
+
+Every other row is unchanged. Enter still commits an open picker, firing `input` then `change`, so
+Enter is now **both** an opening key and a committing key — which the earlier write-up argued was
+impossible without ambiguity. It is not ambiguous, because the two readings are separated by state
+rather than by key: closed means open it, open means commit the highlight.
+
+### The instrument, not the browser
+
+CDP's `Input.dispatchKeyEvent` treats a `keyDown` carrying no `text` as a **`rawKeyDown`**:
+listeners fire, but no character event is generated. Blink's activation path for Enter hangs off
+that character event. The runner added `text` only when the key name was one character long — so
+`" "` got it and `"Enter"` did not, and every Enter this repo has ever dispatched was inert.
+
+**The tell was a missing `keypress`.** In the run that caught it, a plain `<button>` produced
+`keydown, keyup` on Enter and `keydown, keypress, keyup, click` on Space. A browser in which Enter
+does not activate a button is not a browser, and the only structural difference between the two
+keys was the one this runner treats specially. Fixed by a `TEXT` map in `scripts/probe.ts` sending
+`\r`; re-running turned three inert Enters into activations at once — button, form submission, and
+this select.
+
+### What the wrong measurement cost, recorded because the shape repeats
+
+1. A finding was written here as fact, with a table and a "identical across two consecutive runs"
+   — which it was. **Repeatability is not validity.** A broken instrument is perfectly repeatable.
+2. Code was written to it: `Engine::picker_key` grew a comment explaining why Enter is excluded.
+3. **An explanation was invented to fit it.** The write-up said the belief that Enter opens a select
+   comes from legacy form submission and from macOS. Neither was measured; both were produced to
+   make a wrong measurement feel principled. This is the worst of the three, because it made the
+   error *more* convincing, and it contradicted a user who was simply right.
+
+A measurement that refutes a widely held belief is the highest-value output of a probe, and it is
+also the one that most deserves a second instrument pointed at it. The rule that follows: when a
+probe refutes something *everybody* believes, test the harness on a case whose answer is not in
+doubt before recording. `Enter activates a button` was that case and it was one line away.
+
+### `ArrowUp` had never been measured either
+
+Separate defect in the same table, found while re-running. The `ArrowUp while closed + focused`
+step ran immediately after `ArrowDown while closed + focused`, which had *opened* the picker — so
+it measured an in-picker move (`pro` → `free`) and was captioned as an opening. The recorded fact
+"ArrowUp opens a closed select" was read off a row that never tested it.
+
+With an Escape inserted first, **ArrowUp does open a closed select**, and focus lands on the
+committed option rather than one above it. The conclusion survives; it just now has a measurement
+under it. Both defects are the same mistake: *the state a step runs against is set by the step
+before, and a caption naming the intended state is not evidence the state was there.*
+
+### The picker clamps at both ends; Home and End work
+
+**Same probe, same runs.** Four presses down a three-option list, from `pro`:
+
+| press | focused option |
+|---|---|
+| open with ArrowDown | `pro` (the committed one) |
+| Down ×1 | `ent` |
+| Down ×2, ×3, ×4 | `ent` — **clamped, no wrap** |
+| Up ×1 | `pro` |
+| Up ×2, ×3, ×4 | `free` — **clamped** |
+| Home | `free` |
+| End | `ent` |
+
+**A picker clamps and a radio group wraps** (the group is measured below: ArrowLeft off the first
+member lands on the last). So the two are *not* the same navigation rule, and ROADMAP A3's "one tab
+stop, arrows inside it" generalisation carries a per-kind wrap flag rather than one shared walk.
+Cheap — it is a bool on the arm that already dispatches on `ControlKind` — but it had to be known
+before the shared code was written, which is why it was asked now.
+
+`Engine::picker_key` already clamps, and its comment asserted that browsers do too. That assertion
+was true and unmeasured; it is measured now. **Home and End are a real gap** — dziri handles
+neither in a picker, and both work here.
+
+---
+
+## What is a tab stop, and in what order
+
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/tab-order.html`, real Tab and
+Shift+Tab through `Input.dispatchKeyEvent`. Two identical consecutive runs.** Asked before writing
+any of A3, because the ROADMAP's claim that the focusable **set** is compile-time while only the
+**order** is a live walk is only worth building if the set really is a function of the markup.
+
+### The set
+
+`focus()` is script focus; the Tab column is what the walk reached.
+
+| candidate | `focus()` | reached by Tab |
+|---|---|---|
+| `<a href>` | yes | yes |
+| `<a>` with no href | **no** | no |
+| `<button>` | yes | yes |
+| `<button disabled>` | **no** | no |
+| `<input type=text>` | yes | yes |
+| `<input disabled>` | **no** | no |
+| `<input readonly>` | **yes** | **yes** |
+| `<textarea>` | yes | yes |
+| `<input type=checkbox>` | yes | yes |
+| `<label>` | **no** | no |
+| `<input type=radio>` | yes | yes (one per group — see below) |
+| `<select>` | yes | yes — **one stop, not two** |
+| `<div>` | no | no |
+| `<div tabindex="0">` | yes | yes |
+| `<div tabindex="-1">` | **yes** | **no** |
+| `<div tabindex="3">` | yes | yes — but out of order, see below |
+| `<span>`, `<p>`, `<img>` | no | no |
+| `display:none` button | no | no |
+| `visibility:hidden` button | no | no |
+
+Four things dziri has to act on:
+
+1. **`tabindex="-1"` splits the two sets**, and it is the only thing that does. Everything else is
+   focusable-and-tabbable or neither. So dziri needs two bits, or one bit plus one predicate — not
+   one "focusable" flag.
+2. **`readonly` stays in the order; `disabled` leaves it.** These are easy to conflate and the
+   engine already distinguishes them: `:disabled` is a live predicate bit, so the tab walk asks the
+   same question the cascade does, and a control that becomes disabled at run time leaves the order
+   for free.
+3. **`display:none` and `visibility:hidden` both remove a node** — and neither is visible to the
+   compiler. This is the one part of the set that cannot be a compile-time table: a hidden subtree
+   is a *layout* fact. dziri's out is that the engine already knows, because a node that is not
+   laid out has no box; the walk skips what has no box, which costs nothing and is the same test
+   `hit_test` makes.
+4. **A `<select>` is one tab stop.** Its shadow `<button>` never appears in the walk, and
+   `activeElement` reports the `<select>` itself. dziri builds that button as a real compile-time
+   node in `ua-structure.ts`, so it would be a second stop by default — it has to be suppressed
+   explicitly, and "the UA-generated parts of a control are not tab stops" is the rule to write
+   rather than a special case for `select`.
+
+### The order
+
+Starting from a `<button>` in the middle of the document and pressing Tab past the end:
+
+```
+start -> a[href] -> button -> input -> input[readonly] -> textarea -> checkbox
+      -> radio(g1 first) -> radio(g2 checked) -> select -> div[tabindex=0] -> last
+      -> BODY -> div[tabindex=3] -> start -> …
+```
+
+- **Document order** for everything with `tabindex="0"` or none, exactly as claimed.
+- **Positive `tabindex` sorts ahead of the whole group**, and it is reached *after* the wrap, not
+  where it sits in the document — `div[tabindex="3"]` is the first stop of the next cycle. dziri
+  has no reason to support positive `tabindex`, and this is the argument for saying so out loud:
+  supporting it means the order is no longer a walk at all, it is a sort with a walk as its
+  tiebreak.
+- **One stop lands on `BODY`** at the end of the cycle. That is the document boundary — in a real
+  browser it is where focus leaves for the address bar. dziri has no browser chrome to leave to,
+  so it wraps directly; worth naming as a deliberate divergence rather than an oversight.
+- **A radio group is one stop, and it is the checked member.** `g1` (nothing checked) stopped on
+  its first radio; `g2` (middle one checked) stopped on the *checked* one, skipping the first.
+  This is roving tabindex, and it is measured rather than assumed.
+- **Shift+Tab is the same list reversed.** No separate order.
+
+---
+
+## When `:focus-visible` matches
+
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/focus-visible.html`. Two identical
+consecutive runs.** ROADMAP A3 wants `:focus-visible` as a bit distinct from `:focus` and never
+said what the rule is.
+
+| focused by | element | `:focus` | `:focus-visible` | UA `outline` |
+|---|---|---|---|---|
+| click | `<button>` | yes | **no** | `none` |
+| click | `<input type=text>` | yes | **YES** | `auto 1px` |
+| click | checkbox, radio | yes | **no** | `none` |
+| click | `<a href>` | yes | **no** | `none` |
+| click | `<div tabindex=0>` | yes | **no** | `none` |
+| click | a `<select>`, focus lands on an `<option>` | yes | **no** | `none` |
+| **keystroke on a mouse-focused div** | same `<div tabindex=0>` | yes | **YES** | `auto 1px` |
+| ArrowDown inside a mouse-opened picker | `<option>` | yes | **YES** | `auto 1px` |
+| Tab / Shift+Tab | every one of them | yes | **YES** | `auto 1px` |
+
+So it is **not** "keyboard focus is visible and mouse focus is not". Three rules, and the third is
+the one nobody states:
+
+1. **Focus arriving from the keyboard is visible.** Every Tab arrival, no exceptions found.
+2. **Focus arriving from a pointer is not — unless the control takes text.** A clicked text field
+   is visible focus; a clicked button, checkbox, radio, link and `tabindex` div are not. The
+   distinction is *does typing go here*, not *is it a form control*.
+3. **Typing makes the current element visible, retroactively.** A div focused by mouse — not
+   visible — became visible when a key was pressed, without focus moving. So the bit is not
+   decided once at focus time; a keystroke re-evaluates it for whatever is focused now.
+
+**Bearing on dziri.** `:focus-visible` is a live predicate bit like `:checked`, and it is set by
+**modality**, not by the focus event: the engine keeps one "last input was a key" flag, sets the
+bit when focus moves while that flag is on, and re-sets it for the currently focused node on any
+keystroke. Clearing it is what a pointer press does. That is one bool and two assignments, and it
+falls out of the fact that `Engine::mouse_down` and `Engine::key_down` are already the only two
+entry points.
+
+Rule 2 is the one that needs a per-kind answer, and dziri's `ControlKind` already has it: the kinds
+that take text are exactly the ones a pointer press should mark visible.
+
+**The UA ring hangs off `:focus-visible`, not `:focus`.** Unfocused-visible elements compute
+`outline-style: none`; visible ones compute `outline: auto 1px`. So a default ring is a UA-sheet
+rule keyed on the new predicate, not something the engine paints — which keeps it overridable by an
+author in the ordinary cascade, the same argument `::placeholder`'s colour is in `ua-sheet.ts` for.
+dziri has no `outline` property and no `auto` outline width, so the ring it draws will be a
+divergence in *appearance*; the trigger is what this measures.
+
+---
+
+## What Enter and Space do to a focused control
+
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/keyboard-activation.html`, with the
+fixed runner. Two identical consecutive runs.** ROADMAP A3 claims Enter/Space is "wiring, not new
+behaviour" because `Controls::activate` already dispatches on kind. Two of the three assumptions
+under that claim turn out to hold and one does not.
+
+Order within a row is the order the events fired. A `click` **before** `keyup` means the control
+activated on press; after it means on release.
+
+| control | key | events |
+|---|---|---|
+| `<button>` | Enter | `keydown, keypress, click(detail=0), keyup` — **press** |
+| `<button>` | Space | `keydown, keypress, keyup, click(detail=0)` — **release** |
+| checkbox | Enter | `keydown, keypress, keyup` — nothing |
+| checkbox | Space | `keydown, keypress, keyup, click, input, change` — **release** |
+| radio, unchecked | Space | `keydown, keypress, keyup, click, input, change` — **release**, and it selects |
+| radio, already checked | Space | `keydown, keypress, keyup` — **no click at all** |
+| radio | Enter | nothing |
+| radio group | Arrow | `keydown, click, input, change, keyup` — **press**, moves focus *and* selects |
+| `<a href>` | Enter | `keydown, click(detail=0), keyup` — **press**, and **no `keypress`** |
+| `<a href>` | Space | `keydown, keypress, keyup` — nothing (it scrolls) |
+| `<div tabindex=0>` | Enter | nothing |
+| `<div tabindex=0>` | Space | nothing |
+| text field in a form | Enter | `keydown, keypress,` **`submit-button click(detail=0), submit`**`, keyup` — **press** |
+| text field in a form | Space | types a space (`input`) |
+
+### Space activates on release, and dziri has no hook for it
+
+**This is the finding that changes code.** `Engine::key_down` is the engine's only key entry point
+— extracted during B1 precisely so keyboard behaviour could be tested at all — and *every* Space
+activation in the table happens on `keyup`. A button, a checkbox and a radio all wait for the
+release. Enter and the arrows do not: those fire on press.
+
+So A3 needs `Engine::key_up` before Enter/Space wiring can be faithful, and the split is not
+arbitrary trivia — it is what makes press-and-drag-away cancel an activation, the keyboard
+equivalent of the mouse rule this repo already measured ("pressing a control and releasing away
+from it focused it without toggling it"). Implementing Space on keydown would be a one-character
+difference in the code and a different control.
+
+### Activation is per-kind, and a focusable div gets nothing
+
+Neither key activates `<div tabindex="0">`. So keyboard activation is a property of the control
+kind, not of being focusable — which confirms the shape of `Controls::activate`'s dispatch and
+means dziri's `ControlKind::NONE` nodes correctly do nothing. It also means ARIA's
+`role="button"` + `tabindex` pattern gets keyboard support from *script*, never from the platform;
+any framework offering it is implementing this table by hand.
+
+### A keyboard activation really is a click
+
+Every activation above dispatched a real `click`, and dziri can therefore route Enter/Space into
+the same path as a pointer press — the claim A3 makes, now measured. `detail` is `0` for a
+synthesised click and `1` for a pointer one, which is how libraries tell them apart; dziri's
+`CLICK` event has no such field, so the two are **indistinguishable to a host** today. Worth naming
+before someone needs the difference.
+
+### Implicit submission crosses elements
+
+Enter in a text field inside a `<form>` produced a `click` **on the submit button**, then `submit`,
+all before `keyup`. Nothing touched that button. This is ROADMAP A3's `onSubmit` on `bind:value`,
+and it is the only activation measured here where the key's target and the activated control are
+different nodes — so it cannot be a row in the same per-kind dispatch; it is a lookup from the
+focused field to its form's default button.
+
+### Arrows in a radio group move focus and change the value in one press
+
+`ArrowRight`/`ArrowDown` go forward, `ArrowLeft`/`ArrowUp` back, **wrapping at both ends**, and each
+press fires `click, input, change` on the newly focused radio — on keydown. Two consequences for
+A3's roving-tabindex generalisation: navigation inside a group is not merely focus movement for
+this kind, and the wrap differs from a `<select>` picker, which clamps (measured above).

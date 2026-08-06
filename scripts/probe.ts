@@ -239,6 +239,29 @@ const VK: Record<string, number> = {
   // both worth measuring rather than assuming, since dziri only implements the plain arrows.
   F4: 115,
 };
+
+/**
+ * Named keys that nevertheless carry text, and why this map has to exist.
+ *
+ * CDP treats a `keyDown` with no `text` as a **`rawKeyDown`**: listeners see it, but
+ * no character event is generated. For most named keys that is exactly right — Escape
+ * must not arrive as five characters. Enter is the exception, and the exception was
+ * silent: Blink's activation path for a `<button>` hangs off the char event, so a
+ * textless Enter produced `keydown, keyup` and *nothing else*. No `keypress`, no
+ * `click`, no implicit form submission.
+ *
+ * That is not a browser behaviour, it is a missing field, and it reads exactly like a
+ * finding — "Enter does not activate a button" is a sentence this repo nearly wrote
+ * down. The tell was comparative: Space activated and Enter did not, and Space differs
+ * only in being one character long, which is the condition the `text` rule below tests.
+ * Any probe measuring Enter before this map existed measured the runner.
+ *
+ * `\r` rather than `\n` because that is what Blink expects from the platform layer, and
+ * it is what Puppeteer's own key table sends. Tab is deliberately *not* here: it already
+ * moves focus without text, and giving it any would risk inserting a tab character into
+ * whatever field the walk lands in.
+ */
+const TEXT: Record<string, string> = { Enter: "\r" };
 async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<void> {
   const ready = `new Promise((res) => {
     let waited = 0;
@@ -291,7 +314,9 @@ async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<vo
         // selecting all. Shift is exempt because Shift+A really does produce a character.
         ...(step.key.length === 1 && ((step.modifiers ?? 0) & ~8) === 0
           ? { text: step.key }
-          : {}),
+          : TEXT[step.key] !== undefined && ((step.modifiers ?? 0) & ~8) === 0
+            ? { text: TEXT[step.key] }
+            : {}),
         ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
       };
       await cdp.send("Input.dispatchKeyEvent", { ...key, type: "keyDown" }, sessionId);

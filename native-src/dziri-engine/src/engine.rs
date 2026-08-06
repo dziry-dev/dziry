@@ -1442,8 +1442,12 @@ impl Engine {
     /// opened it with no `input` and no `change`. Convenient as well as correct: keyboard
     /// opening is then the same path as the click rather than a second mechanism.
     ///
-    /// **Open**: arrows move the highlight, Enter commits, Escape closes with the value
-    /// untouched. The highlight is `state.focused` on an `<option>` and nothing else, which
+    /// **Open**: arrows move the highlight and Home/End jump to its ends, Enter commits,
+    /// Escape closes with the value untouched. Enter therefore appears in both states, and
+    /// that is not a conflict — closed means open it, open means commit — but it is the one
+    /// key whose meaning this function decides by state rather than by code.
+    ///
+    /// The highlight is `state.focused` on an `<option>` and nothing else, which
     /// is the whole reason the "pending highlight" ROADMAP B1 asks for costs no state: it is
     /// already there, and `option:focus` is how a stylesheet draws it.
     ///
@@ -1455,18 +1459,25 @@ impl Engine {
         let vertical = keycode == keys::DOWN || keycode == keys::UP;
 
         if self.painter.open_select() < 0 {
-            // Every measured way to open a closed one: the arrows, Space, F4 and
-            // Alt+ArrowDown. Measured 2026-08-06 rather than assumed, and the measurement
-            // refuted the obvious guess — **Enter does not open a picker**, in either
-            // spelling. It stays closed and fires only `keydown`.
+            // Every measured way to open a closed one: the arrows, Enter, Space, F4 and
+            // Alt+ArrowDown.
             //
-            // Which is a good thing rather than an inconvenience: Enter is what *commits* a
-            // highlight, so a key that both opened and committed would make Down-then-Enter
-            // ambiguous. The belief that Enter opens one comes from a legacy select inside a
-            // `<form>`, where Enter submits and the response looks like activation, and from
-            // macOS, where a native select really does open on Enter. Neither is the
-            // `base-select` model dziri copies. See BROWSER-FACTS.md.
-            let opens = vertical || keycode == keys::SPACE || keycode == keys::F4;
+            // **Enter was excluded here, and that was wrong.** A first measurement said a
+            // closed select ignores Enter, and this branch carried a paragraph explaining
+            // why that was principled — that Enter is reserved for committing, so a key
+            // doing both would make Down-then-Enter ambiguous. The measurement was an
+            // artifact of the probe runner dispatching Enter with no text, so Blink never
+            // ran its activation path, and the explanation was invented to fit it. Corrected
+            // 2026-08-06 the same day; both the wrong finding and its cost are recorded in
+            // BROWSER-FACTS.md rather than quietly deleted.
+            //
+            // The ambiguity the old comment feared does not exist, because the two readings
+            // of Enter are separated by *state* and not by key: this branch only runs when
+            // the picker is closed, and the commit below only when it is open.
+            let opens = vertical
+                || keycode == keys::RETURN
+                || keycode == keys::SPACE
+                || keycode == keys::F4;
             if !opens {
                 return false;
             }
@@ -1504,7 +1515,17 @@ impl Engine {
             return true;
         }
 
-        if !vertical {
+        // Home and End jump to the ends of the list, measured 2026-08-06 in the same run
+        // that settled the clamp. They were a real gap: a picker is a list, and a list that
+        // answers arrows but not Home is one a keyboard user notices immediately.
+        //
+        // They are claimed *before* the caret sees them, which is what the ordering in
+        // `key_down` already guarantees — an open picker consumes its keys. A select with a
+        // text field elsewhere on the page must not scroll that field's caret to its start
+        // because a dropdown happened to be open.
+        let home = keycode == keys::HOME;
+        let end = keycode == keys::END;
+        if !vertical && !home && !end {
             return false;
         }
 
@@ -1516,15 +1537,24 @@ impl Engine {
         }
 
         let at = options.iter().position(|&o| o == self.state.focused);
-        let next = match (at, keycode == keys::DOWN) {
-            // Clamped at both ends rather than wrapping. A browser's picker stops at the
-            // last option; wrapping would make a long list feel like it had lost the user's
-            // place. An unfocused picker starts at the first option going down and the last
-            // going up, which is what an arrow into a fresh list means.
-            (Some(i), true) => (i + 1).min(options.len() - 1),
-            (Some(i), false) => i.saturating_sub(1),
-            (None, true) => 0,
-            (None, false) => options.len() - 1,
+        let next = match (home, end) {
+            (true, _) => 0,
+            (_, true) => options.len() - 1,
+            _ => match (at, keycode == keys::DOWN) {
+                // Clamped at both ends rather than wrapping — measured 2026-08-06, four
+                // presses down a three-option list, and it stops. Worth having measured
+                // rather than reasoned about, because **a radio group wraps** under the
+                // same arrow keys. The two are not one navigation rule, which is a
+                // constraint on A3's "one tab stop, arrows inside it": that generalisation
+                // carries a per-kind wrap flag.
+                //
+                // An unfocused picker starts at the first option going down and the last
+                // going up, which is what an arrow into a fresh list means.
+                (Some(i), true) => (i + 1).min(options.len() - 1),
+                (Some(i), false) => i.saturating_sub(1),
+                (None, true) => 0,
+                (None, false) => options.len() - 1,
+            },
         };
         let landing = options[next];
         if landing != self.state.focused {
@@ -1562,7 +1592,21 @@ impl Engine {
         true
     }
 
+    /// The focused node, or `-1`.
+    ///
+    /// Exists because **the picker's highlight had no observer**. The highlight *is* focus, so
+    /// `open_selection` below reports the committed option and nothing reported the pending
+    /// one — which let a keyboard test assert "the highlight moved" while checking a number
+    /// that cannot move when it does. The assertion was true and it was not about the
+    /// highlight. A piece of state with no accessor gets described by whatever is nearest.
+    pub fn focused(&self) -> i32 {
+        self.state.focused
+    }
+
     /// The open `<select>` and the option it shows, or `(-1, -1)` with nothing open.
+    ///
+    /// **The option it shows is the *committed* one**, not the highlight — `selected_option`
+    /// reads `CHECKED`. For the pending highlight, ask `focused`.
     ///
     /// The pair rather than either alone, because "is a picker open" and "on what" are asked
     /// together by everything that asks at all — a test, a screenshot harness, and the

@@ -490,6 +490,45 @@ sharpest being that `:active` follows a label to its control from anywhere in th
 actually resolves to, are the same kind of question and nobody should assert them from memory.
 Run the probes, record the answers in BROWSER-FACTS.md, then implement against that.
 
+#### Done, 2026-08-06 — and it changed the plan in four places
+
+`probes/tab-order.html`, `probes/focus-visible.html` and `probes/keyboard-activation.html`, all in
+BROWSER-FACTS.md. What they settled, in the order it bears on the work:
+
+1. **Space activates on `keyup`; Enter and the arrows on `keydown`.** A button, a checkbox and a
+   radio all wait for the release. `Engine::key_down` is the engine's only key entry point, so
+   **`Engine::key_up` has to exist before Enter/Space wiring can be faithful** — and this is not
+   trivia: press-then-move-away cancelling an activation is the keyboard twin of the mouse rule
+   already measured and already implemented. The bullet above called Enter/Space "wiring, not new
+   behaviour". It is wiring plus one new entry point.
+2. **The focusable set is a compile-time table with one run-time exception, and it is not
+   `:disabled`.** `disabled` leaves the tab order and `readonly` stays in it — both already known
+   to the engine as predicate bits, so both are free. `display:none` and `visibility:hidden` also
+   remove a node, and *those* the compiler cannot see. The out is that the walk skips what has no
+   box, which is the test `hit_test` already makes. `tabindex="-1"` is the one thing that splits
+   focusable from tabbable, so the table needs two bits rather than one.
+3. **A `<select>` is one tab stop, and a radio group is one tab stop landing on the checked
+   member.** dziri builds a select's `<button>` as a real compile-time node, so it would be a
+   second stop by default. The rule to write is "UA-generated parts of a control are not tab
+   stops", not a special case for `select`.
+4. **`:focus-visible` is a modality bit, not a focus bit** — set when focus arrives from the
+   keyboard, *and* re-set on any keystroke for whatever is focused, *and* set by a pointer press on
+   a control that takes text. One bool and two assignments, because `mouse_down` and `key_down` are
+   already the only two entry points. The UA ring hangs off it rather than off `:focus`, so it is a
+   `ua-sheet.ts` rule and stays overridable in the ordinary cascade.
+
+And one constraint on the generalisation below: **a radio group wraps at both ends, a `<select>`
+picker clamps.** Same arrow keys, different rule, both measured. So "one tab stop, arrows inside
+it" carries a per-kind wrap flag — cheap, since it sits on the arm that already dispatches on
+`ControlKind`, but it had to be known before the shared code was written rather than discovered
+by the second caller.
+
+Two more that are smaller but would each have been guessed wrong. **A `<div tabindex="0">` gets no
+activation from either key** — so keyboard activation is a property of the kind, not of being
+focusable, which confirms the shape of `Controls::activate`'s dispatch. And **implicit submission
+crosses elements**: Enter in a text field clicks its form's submit button, a node nothing touched,
+so `onSubmit` is a lookup from field to form and cannot be a row in the per-kind table.
+
 ### A4 · Scrolling
 - Scroll model, wheel and trackpad, scrollbars, `overflow` semantics, clipping to the container.
 - **Nested scroll containers** — a scrollable list inside a scrollable panel is where layout
@@ -715,11 +754,21 @@ design, and all three are now built:
    as the click rather than a second mechanism. Built as exactly that.
 
 A fourth, measured later (2026-08-06) when Enter was asserted to open a closed select:
-**Space, F4 and Alt+ArrowDown open one too, and Enter does not.** Enter leaves it closed and
-fires only `keydown`. That is the useful answer rather than the inconvenient one — Enter is
-what commits a highlight, so a key that also opened would make Down-then-Enter ambiguous. All
-five opening keys are built; Alt+ArrowDown needed no case of its own, because the branch that
-opens one ignores the modifier mask.
+**ArrowDown, ArrowUp, Enter, Space, F4 and Alt+ArrowDown all open one.** All six are built;
+Alt+ArrowDown needed no case of its own, because the branch that opens one ignores the modifier
+mask, and Home/End were added at the same time — a picker is a list, and it answered arrows but
+not Home.
+
+**Enter was recorded here as *not* opening one, and that was wrong.** The probe dispatched Enter
+with no `text`, so CDP sent a raw key event, Blink never ran its activation path, and three
+Enters across three probes were inert. The wrong finding then acquired a justification — that
+Enter is reserved for committing, so a key doing both would be ambiguous — which was invented to
+fit it and is false: the two readings are separated by *state*, not by key, and `picker_key`
+already branches on exactly that. Corrected the same day; BROWSER-FACTS.md keeps the original
+table, the correction and what the mistake cost, because a deleted claim cannot be traced. The
+user who said Enter should open a select was right, and was told otherwise with a fabricated
+explanation. **Repeatability is not validity** — the bad measurement was identical across two
+runs, as a broken instrument always is.
 
 What is genuinely new state is one integer for which select is open — narrower than the plan's
 "one integer each", because only one popover can be open at a time — plus one per-node **label
