@@ -939,7 +939,13 @@ impl Engine {
         // out whether or not it shows, so this really is a paint-only decision.
         let picker = painter.open_picker();
         if picker >= 0 {
-            let offset = select::anchor_offset(tree.bounds(), painter.open_select(), picker);
+            let offset = select::overlay_offset(
+                tables,
+                tree.bounds(),
+                scroll,
+                painter.open_select(),
+                picker,
+            );
             let geometry = Geometry {
                 bounds: tree.bounds(),
                 scroll,
@@ -1270,8 +1276,17 @@ impl Engine {
         // transforms are most used for.
         let picker = self.painter.open_picker();
         if picker >= 0 {
-            let offset =
-                select::anchor_offset(self.tree.bounds(), self.painter.open_select(), picker);
+            // The same offset paint uses, ancestor scroll included — see
+            // `select::overlay_offset`. Two different offsets here would put the clickable
+            // options somewhere other than the drawn ones, which is worse than either
+            // mistake alone.
+            let offset = select::overlay_offset(
+                &self.tables,
+                self.tree.bounds(),
+                &self.scroll,
+                self.painter.open_select(),
+                picker,
+            );
             if let Some(node) = hit_overlay(
                 &self.painter,
                 &self.tables,
@@ -2250,6 +2265,16 @@ impl Engine {
     /// A box that cannot move in the requested direction passes the gesture to its
     /// ancestors rather than swallowing it, which is the behaviour every platform
     /// has and the reason this walks *up* from the deepest hit.
+    /// The innermost box at `(px, py)` that could scroll, or `None`.
+    ///
+    /// Exposed so a caller that just scrolled can ask *what* moved and read the offset back.
+    /// It matters because a scroll is clamped to the content: asking for more than there is
+    /// gives less, and a headless caller that aims a press by subtracting what it asked for
+    /// misses by the difference.
+    pub fn scrollable_node_at(&self, px: f32, py: f32) -> Option<usize> {
+        scrollable_at(&self.tables, self.geometry(), self.root, px, py)
+    }
+
     pub fn scroll_at(&mut self, px: f32, py: f32, dx: f32, dy: f32) -> bool {
         let mut node = scrollable_at(&self.tables, self.geometry(), self.root, px, py);
 

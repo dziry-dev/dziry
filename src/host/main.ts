@@ -299,6 +299,73 @@ export async function runMain(options: MainOptions): Promise<void> {
     }
 
     /**
+     * `--scroll <dy>` — scroll the page down by `dy` pixels before anything else.
+     *
+     * Before the gestures, deliberately: `--click` and `--open` aim at a node's laid-out box
+     * in *window* coordinates, so they have to run against the scroll position the shot will
+     * be taken at.
+     *
+     * This flag exists because its absence hid a bug rather than merely being inconvenient.
+     * Every scenario renders into a viewport taller than its content needs, so **nothing in
+     * the golden suite had ever scrolled** — and the `<select>` picker, which is drawn by a
+     * paint pass that starts at the picker rather than at the tree root, inherited none of
+     * the scroll its ancestors had applied. Every frame looked right and the real 1040x700
+     * demo drew the picker a screenful away from its select.
+     *
+     * Aimed at the middle of the window, which is the page for every route here. A scenario
+     * that needs to scroll something nested would want a node id instead.
+     */
+    let pageScroll = 0;
+    for (let i = 0; i < argv.length; i++) {
+      if (argv[i] !== "--scroll") continue;
+      const dy = Number(argv[i + 1]);
+      if (!Number.isFinite(dy)) {
+        throw new Error(`--scroll takes a pixel amount, got "${argv[i + 1]}"`);
+      }
+      frame();
+      const [w, h] = engine.surfaceInfo();
+      // How far the page actually went, which is not necessarily what was asked: a scroll is
+      // clamped to what the content can give. Read back rather than assumed, because every
+      // gesture below aims in *window* coordinates while `bounds` are unscrolled — so an
+      // error here becomes a press that lands somewhere else. See `aimAt`.
+      pageScroll = engine.scroll(w / 2, h / 2, 0, dy)[1];
+      frame();
+    }
+
+    /**
+     * The window coordinates of a node's centre, which is where a pointer would be.
+     *
+     * `bounds` are **unscrolled**, so on a scrolled page they are not where the node is
+     * drawn — and a press aimed at them lands somewhere else entirely, or off-screen. That
+     * is not hypothetical: `--open 318` on a page scrolled 560px aimed at y≈959 while the
+     * button was drawn at 384, hit nothing, and produced a frame with no picker in it that
+     * looked exactly like a broken picker.
+     *
+     * Only the page's own scroll is subtracted. A node inside a *nested* scroller would need
+     * its ancestors' offsets accumulated, which nothing here has yet — so the flags that
+     * cannot do it refuse to combine with `--scroll` rather than quietly missing.
+     */
+    const aimAt = (node: number): [number, number] => {
+      const [x, y, w, h] = engine.bounds(node);
+      return [x + w / 2, y + h / 2 - pageScroll];
+    };
+
+    if (pageScroll !== 0) {
+      const unscrollable = ["--click", "--drag", "--double", "--triple"].filter((f) =>
+        argv.includes(f),
+      );
+      if (unscrollable.length > 0) {
+        throw new Error(
+          `${unscrollable.join(", ")} cannot be combined with --scroll yet.\n` +
+            `  Those aim through Engine's own node-centre helpers, which read unscrolled\n` +
+            `  bounds — so the press would land ${pageScroll}px away from the node and hit\n` +
+            `  nothing. Refused rather than silently missing, which is how the picker's\n` +
+            `  scroll bug produced a plausible-looking empty frame.`,
+        );
+      }
+    }
+
+    /**
      * `--open <node>` — press a `<select>` so its picker is showing in the shot.
      *
      * A press and not a click, deliberately, and it is the one gesture where that
@@ -319,8 +386,7 @@ export async function runMain(options: MainOptions): Promise<void> {
         throw new Error(`--open takes a node id, got "${argv[i + 1]}"`);
       }
       frame();
-      const [x, y, w, h] = engine.bounds(node);
-      engine.mouseDown(x + w / 2, y + h / 2);
+      engine.mouseDown(...aimAt(node));
     }
 
     /**

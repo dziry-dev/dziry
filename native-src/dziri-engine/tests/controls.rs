@@ -422,3 +422,170 @@ fn dragging_off_a_checkbox_does_not_tick_it() {
         "press and release on different nodes is not a click"
     );
 }
+
+// ---------------------------------------------------------------------------
+// The overlay layer, on a page that scrolls
+// ---------------------------------------------------------------------------
+
+/// A scrolling root with a select partway down it, so the picker has a scroll to survive.
+///
+/// The window is 100x100. Layout, unscrolled: a 60px spacer, then the select at 60..80,
+/// then a second spacer that carries the content past the viewport so there is something to
+/// scroll. The picker is out of flow and 20 tall, so it occupies 80..100 when open.
+///
+/// The two spacers are the point. One before the select puts it far enough down that a
+/// scroll moves it visibly; one after makes the content overflow at all. With either
+/// missing the test cannot tell a correct picker from one drawn at its unscrolled position.
+fn scrolling_select() -> Engine {
+    let mut engine = Engine::new(&config(5, 5)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..5 {
+            init_style(t, slot);
+        }
+        t.set_u8(STYLES, styles::OVERFLOW_Y, 0, protocol::overflow::SCROLL);
+        // 1 spacer above, 2 select, 3 picker, 4 spacer below.
+        t.set_u32(STYLES, styles::BG, 1, BLACK);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 60.0);
+        t.set_u32(STYLES, styles::BG, 2, GREY);
+        t.set_f32(STYLES, styles::HEIGHT, 2, 20.0);
+        t.set_u32(STYLES, styles::BG, 3, WHITE);
+        t.set_f32(STYLES, styles::HEIGHT, 3, 20.0);
+        t.set_u8(STYLES, styles::POSITION, 3, 1 /* absolute */);
+        // An explicit width, because an absolutely positioned box with `auto` width and no
+        // insets shrink-wraps its content — and this one's content is nothing, so Taffy
+        // gives it zero and the picker paints an empty rect. The demo's stylesheet sets
+        // `width: 220px` on its picker for the same reason.
+        t.set_f32(STYLES, styles::WIDTH, 3, 100.0);
+        t.set_u32(STYLES, styles::BG, 4, BLACK);
+        t.set_f32(STYLES, styles::HEIGHT, 4, 200.0);
+
+        // **`flex-shrink: 0` on every child, or none of the heights above survive.** The
+        // root is a flex column and `init_style` gives each child CSS's initial shrink of
+        // 1, so 280px of content in a 100px box is *distributed* rather than overflowing —
+        // the select landed at 42.857 and there was nothing to scroll. Overflow is the
+        // whole premise here, so the children have to refuse to shrink.
+        for slot in 1..5 {
+            t.set_f32(STYLES, styles::FLEX_SHRINK, slot, 0.0);
+        }
+
+        node(t, 0, 0, -1);
+        node(t, 1, 1, 0);
+        node(t, 2, 2, 0);
+        node(t, 3, 3, 2);
+        node(t, 4, 4, 0);
+        // `INTERACTIVE` as well as `OVERLAY`, and setting only the latter is what made the
+        // hit assertions below read -1: `node()` had put the interactive bit there and this
+        // line replaced it rather than adding to it.
+        //
+        // In a compiled tree these are two nodes — the picker box is `generated` and
+        // deliberately *not* interactive, while its options are — and `hit_overlay`
+        // returning `Some(-1)` for a press on the box itself is the designed answer:
+        // consumed by the overlay, but nothing chosen. Here one node plays both parts, so it
+        // has to carry both bits.
+        t.set_u8(
+            NODES,
+            nodes::FLAGS,
+            3,
+            protocol::flags::OVERLAY | protocol::flags::INTERACTIVE,
+        );
+
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        t.set_i32(NODES, nodes::NEXT_SIBLING, 1, 2);
+        t.set_i32(NODES, nodes::NEXT_SIBLING, 2, 4);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 2, 3);
+
+        control(t, 0, 2, control_kind::SELECT, -1, 0);
+        control(t, 1, 3, control_kind::OPTION, 0, control_flags::CHECKED);
+        // Every part of a select operates the select, as `resolveActivation` arranges. The
+        // picker here doubles as the option, which keeps the tree to five nodes.
+        pad_controls(t, 2);
+        pad_variants(t, 0);
+    }
+    engine.tick().expect("tick");
+    engine
+}
+
+/// Finishes a scroll glide and reports where the root ended up.
+///
+/// A wheel glides rather than jumping, and the glide is driven by *elapsed time* — so
+/// spinning `tick` in a loop settles nothing: six hundred frames execute in microseconds and
+/// the content barely moves. `advance_scrolls` takes the `dt` directly, which is the same
+/// lever `--advance` gives a golden.
+fn settle(engine: &mut Engine) -> f32 {
+    engine.advance_scrolls(1.0);
+    engine.tick().expect("tick");
+    engine.scroll_of(0)[1]
+}
+
+/// A picker is drawn where its select **is**, not where its unscrolled box says.
+///
+/// The regression the demo found. `bounds` are unscrolled and the main paint walk subtracts
+/// each node's ancestors' scroll as it descends; an overlay pass starts *at* the picker, so
+/// it inherits none of that accumulation. The first version therefore drew the box at its
+/// unscrolled position — and since the demo's window is 1040x700 while its selects sit at
+/// y≈943, reaching one means scrolling, and the picker landed a screenful away. Pressing a
+/// `<select>` looked like it did nothing at all.
+///
+/// Asserted on pixels and on the hit test rather than on the offset, because the offset is
+/// what was wrong: a test that recomputed it would have agreed with the bug.
+#[test]
+fn a_pickers_position_follows_the_scroll_of_the_page_under_it() {
+    let mut engine = scrolling_select();
+    assert_eq!(
+        engine.bounds_of(2).expect("select laid out")[1],
+        60.0,
+        "the select starts at 60 unscrolled"
+    );
+
+    // One notch is 48px, which leaves the select drawn at 12..32 — comfortably in view, and
+    // far enough from its unscrolled 60..80 that the two cannot be confused.
+    engine.scroll_at(50.0, 50.0, 0.0, 48.0);
+    let scrolled = settle(&mut engine);
+    assert_eq!(scrolled, 48.0, "the page scrolled a whole notch");
+
+    let drawn_top = 60.0 - scrolled;
+    engine.mouse_down(50.0, drawn_top + 10.0);
+    engine.tick().expect("tick");
+    assert_eq!(engine.open_selection().0, 2, "the press opened the picker");
+
+    // The picker is white and sits against the select's *drawn* bottom edge, so 32..52.
+    // Before the fix it was drawn at 80..100 and this pixel was the lower spacer's black.
+    let mid = (drawn_top + 20.0 + 10.0) as usize;
+    assert_eq!(
+        pixel(&mut engine, 50, mid),
+        WHITE,
+        "the picker follows the select onto the screen"
+    );
+    assert_eq!(
+        pixel(&mut engine, 50, 90),
+        BLACK,
+        "and is no longer drawn at its unscrolled position"
+    );
+
+    // The pointer has to agree with the pixels, which is the half that makes it usable:
+    // two different offsets would put the clickable options somewhere else entirely.
+    assert_eq!(
+        engine.hit_test(50.0, mid as f32),
+        3,
+        "the option under the pointer is the one drawn there"
+    );
+}
+
+/// The same picker, unscrolled — so a "fix" that subtracted something unconditionally
+/// cannot satisfy both tests.
+#[test]
+fn an_unscrolled_pickers_position_is_unchanged() {
+    let mut engine = scrolling_select();
+
+    engine.mouse_down(50.0, 70.0);
+    engine.tick().expect("tick");
+    assert_eq!(engine.open_selection().0, 2);
+
+    assert_eq!(
+        pixel(&mut engine, 50, 90),
+        WHITE,
+        "the picker occupies 80..100"
+    );
+    assert_eq!(engine.hit_test(50.0, 90.0), 3);
+}

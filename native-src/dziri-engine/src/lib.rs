@@ -632,6 +632,56 @@ pub unsafe extern "C" fn dziri_engine_selection(handle: Handle, field: i32, out:
     })
 }
 
+/// Scrolls the box at `(px, py)` by `(dx, dy)` pixels **and settles the glide**.
+///
+/// The settle is the whole reason this exists rather than exposing `scroll_at`. A wheel
+/// glides, so the position a caller reads back — or screenshots — right after aiming one is
+/// partway through the gesture and depends on how fast the machine ran. Finishing it here
+/// makes a scrolled frame reproducible, which is what a golden needs.
+///
+/// Pixels rather than notches, for the same reason: a notch is 48px today and that is an
+/// engine detail a scenario should not encode.
+///
+/// This exists because the harness could not scroll at all, and that was a structural blind
+/// spot rather than a missing convenience: every golden scenario is taller than the window it
+/// renders into, so nothing ever scrolled, and a picker drawn at its *unscrolled* position
+/// looked correct in every frame while being unusable in the real 1040x700 demo.
+/// `out` receives the offset the scrolled box actually settled at, as two `f32`.
+///
+/// Returned rather than assumed, because a scroll is **clamped to what the content can
+/// give** — asking for 560px of a page with 300px of overflow moves it 300. A caller that
+/// then aims a press by subtracting what it *asked for* misses by the difference, which is
+/// exactly the class of silent miss this whole entry point exists to stop.
+///
+/// # Safety
+/// `out` must be writable for two `f32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_scroll(
+    handle: Handle,
+    px: f32,
+    py: f32,
+    dx: f32,
+    dy: f32,
+    out: *mut f32,
+) -> i32 {
+    if out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        let node = engine.scrollable_node_at(px, py);
+        engine.scroll_at(px, py, dx, dy);
+        // One second of glide, which is past the point every easing here has arrived.
+        engine.advance_scrolls(1.0);
+        let [x, y] = node.map_or([0.0, 0.0], |n| engine.scroll_of(n));
+        // SAFETY: the caller promises two writable `f32`, checked non-null above.
+        unsafe {
+            *out = x;
+            *out.add(1) = y;
+        }
+        status::OK
+    })
+}
+
 /// Writes the open `<select>` and the option it currently shows to `out`, as two `i32`.
 ///
 /// `(-1, -1)` when no picker is open; `(select, -1)` for an open picker whose select has no

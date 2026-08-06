@@ -84,6 +84,7 @@ const SYMBOLS = {
   dziri_engine_bounds: { args: [u32, u32, PTR], returns: i32 },
   dziri_engine_selection: { args: [u32, i32, PTR], returns: i32 },
   dziri_engine_open_select: { args: [u32, PTR], returns: i32 },
+  dziri_engine_scroll: { args: [u32, f32, f32, f32, f32, PTR], returns: i32 },
   dziri_engine_surface_info: { args: [u32, PTR], returns: i32 },
   dziri_engine_read_pixels: { args: [u32, PTR, u32], returns: i32 },
   dziri_engine_encode_png: { args: [u32, PTR], returns: i32 },
@@ -599,6 +600,25 @@ export class Engine {
     );
     const [select, option] = [scratch32[0]!, scratch32[1]!];
     return select < 0 ? null : { select, option };
+  }
+
+  /**
+   * Scrolls whatever box is under `(x, y)` by `(dx, dy)` pixels, glide already settled.
+   *
+   * Settled deliberately: a wheel glides, so the position right after aiming one depends on
+   * how many frames happened to run, and a screenshot of that is not reproducible. Pixels
+   * rather than wheel notches, so a scenario does not encode the engine's 48px notch.
+   *
+   * Returns where the scrolled box actually settled, `[x, y]` — not what was asked for. A
+   * scroll is clamped to what the content can give, so a caller that aims a later press by
+   * subtracting its own request misses by the difference.
+   */
+  scroll(x: number, y: number, dx: number, dy: number): [number, number] {
+    check(
+      engine.dziri_engine_scroll(this.#handle, x, y, dx, dy, ptr(scratch) as Pointer),
+      "dziri_engine_scroll",
+    );
+    return [scratchF32[0]!, scratchF32[1]!];
   }
 
   /** Presses `clicks` times at a node's centre — 2 for a word, 3 for the whole value. */

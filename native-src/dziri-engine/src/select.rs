@@ -311,6 +311,64 @@ pub fn anchor_offset(bounds: &[[f32; 4]], select: i32, picker: i32) -> [f32; 2] 
     [sx - px, (sy + sh) - py]
 }
 
+/// The whole shift an overlay is drawn and hit-tested with: its anchor, less the scroll
+/// its ancestors have applied.
+///
+/// The second term is what [`anchor_offset`] alone cannot know, and leaving it out is a bug
+/// that hides completely on a page that fits. `bounds` are **unscrolled**, and the main
+/// paint walk subtracts each node's ancestors' scroll as it descends — but an overlay pass
+/// starts *at* the picker, so it inherits none of that accumulation and would draw the box
+/// at its unscrolled position. On the demo's 1040x700 window the selects sit at y≈943, so
+/// reaching one means scrolling, and the picker was painted a screenful below where it
+/// belonged: pressing a `<select>` appeared to do nothing at all.
+///
+/// The anchor term is unaffected, which is why it stays a separate function with its own
+/// test: it is a *delta* between two boxes in the same space, so the scroll cancels out of
+/// it. Only the absolute placement needs this.
+///
+/// Deliberately **not** clipped by the scroll container the select sits in. An overlay
+/// escaping its ancestors' clips is the whole point of a popover — a dropdown near the
+/// bottom of a scroll region must not be cut in half by it.
+pub fn overlay_offset(
+    tables: &Tables,
+    bounds: &[[f32; 4]],
+    scroll: &[[f32; 2]],
+    select: i32,
+    picker: i32,
+) -> [f32; 2] {
+    let [dx, dy] = anchor_offset(bounds, select, picker);
+    let [sx, sy] = ancestor_scroll(tables, scroll, picker, bounds.len());
+    [dx - sx, dy - sy]
+}
+
+/// How far `node`'s **strict** ancestors have scrolled, summed per axis.
+///
+/// Strict, and that matches the paint walk exactly: a child's carried offset there is its
+/// parent's carried offset plus the parent's *own* `scroll_of`, so a node's total is the sum
+/// over every ancestor above it and never its own.
+///
+/// Walks `nodes.parent`, which is host memory — hence the budget. It is the one column the
+/// engine reads for an upward walk, as `FrameState::set_input` does for the hover chain.
+fn ancestor_scroll(tables: &Tables, scroll: &[[f32; 2]], node: i32, node_count: usize) -> [f32; 2] {
+    let parents = tables.i32s(NODES, protocol::nodes::PARENT);
+    let mut total = [0.0f32, 0.0];
+    let mut at = node;
+    let mut budget = node_count + 1;
+
+    while let Some(&parent) = parents.get(usize::try_from(at).unwrap_or(usize::MAX)) {
+        if parent < 0 || parent as usize >= node_count || budget == 0 {
+            break;
+        }
+        budget -= 1;
+        if let Some(&[x, y]) = scroll.get(parent as usize) {
+            total[0] += x;
+            total[1] += y;
+        }
+        at = parent;
+    }
+    total
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

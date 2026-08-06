@@ -298,5 +298,36 @@ export const SCENARIOS: Scenario[] = [
     args: ["--route", "controls", "--size", "1040x1400", "--open", "318"],
   },
 
+  /**
+   * An open picker **on a scrolled page, at the demo's own window size.**
+   *
+   * The scenario that would have caught the bug the demo found. Every frame above renders
+   * into a 1400px viewport, which is taller than any route needs — so nothing in this suite
+   * had ever scrolled, and a paint pass that ignored ancestor scroll looked perfect in all of
+   * them. The real window is 1040x700 (`windows/main/index.tsx`), the selects sit at y≈943,
+   * so reaching one *requires* scrolling, and the picker was drawn a screenful below its
+   * select. Pressing a `<select>` appeared to do nothing at all.
+   *
+   * So the size here is not a variation for its own sake — it is the demo's size, which is
+   * the one configuration nothing else in this file exercises.
+   *
+   * 560px of scroll puts the select card comfortably in view. Node 318 is the first select's
+   * button, as in `controls-picker`; `--scroll` runs before it so the press aims at where the
+   * button actually is.
+   */
+  {
+    name: "controls-picker-scrolled",
+    args: [
+      "--route",
+      "controls",
+      "--size",
+      "1040x700",
+      "--scroll",
+      "560",
+      "--open",
+      "318",
+    ],
+  },
+
   { name: "reactivity", args: ["--route", "reactivity", "--size", "1040x1400"] },
 ];
