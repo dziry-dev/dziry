@@ -441,12 +441,32 @@ winit-versus-SDL3 choice reversible.
 
 - Tab / Shift-Tab walking the **live tree**, not the sorted `interactive` array — arena rows are
   numbered by slot, so after a reorder those diverge and tab order must follow what the user sees.
+
+  Worth sharpening, because the obvious design gets it half right: the **set** of focusable
+  nodes is still compile-time and still a table — enumerable, and a set cannot be invalidated
+  by a reorder — while only the **order** has to be a live walk. Node ids *are* strictly
+  document order (measured: 0 of 984 nodes on the demo has a child id below its parent), which
+  makes a sorted focus-order table look correct and makes it wrong for exactly the case this
+  bullet names. Same division `hit_test` already lives by: the compiler says which nodes are
+  hittable, the chains say in what order.
 - Enter/Space activation through the same dispatch as a click, including `dispatchItem`.
 - `onSubmit` on `bind:value`; distinct `onChange` vs `onInput` semantics.
 - `:focus-visible` — ring for keyboard focus only, which is the difference between polished and
   broken.
 - Skip hidden subtrees; autofocus.
 - Tab order over spatial navigation: it is the desktop convention and what Radix implements.
+- **One tab stop, arrows inside it** — ARIA's roving-tabindex pattern, and the generalisation
+  worth building rather than reaching a fourth time. A radio group, a tab strip, a menu, a
+  listbox and a `<select>` picker are all the same mechanism: the group is one stop in the tab
+  order, and arrows navigate within it. The picker built its own version in B1
+  (`Engine::picker_key` plus `open_options` and a hand-rolled clamp), which is the copy to fold
+  in once this exists. What varies per control is only *what an arrow means*, and that is a
+  dispatch on `ControlKind` — already a `u8` in the tables, and already how
+  `Controls::activate` dispatches. So a new keyboard-operable control is one arm plus a row,
+  which is the property to preserve.
+- Activation is **already kind-dispatched and simply unreachable from the keyboard**:
+  `Controls::activate` handles checkbox, radio and option, and a focused checkbox does nothing
+  on Space only because nothing calls it. Enter/Space is wiring, not new behaviour.
 
 **A3 alone unblocks most of forms.** Tier 1a below — Checkbox, Radio, Switch, Toggle, Tabs — needs
 nothing from A5: no text buffer, no IME, no clipboard. Only `Input` waits for A5.
