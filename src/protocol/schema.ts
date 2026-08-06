@@ -840,6 +840,34 @@ export const ENUMS: EnumDef[] = [
       OPEN: 1 << 5,
 
       /**
+       * This node holds focus **and the focus should be visible** — `:focus-visible`.
+       *
+       * The bit `:focus` is not, and the difference is the whole reason it exists:
+       * a ring on every click is the thing the pseudo-class was invented to stop,
+       * and no ring while someone is tabbing is a keyboard user with no idea where
+       * they are.
+       *
+       * Measured, `probes/focus-visible.html`, and the rule is **modality**, not
+       * focus. Three parts, none of which is "keyboard focus is visible and mouse
+       * focus is not":
+       *
+       * 1. Focus arriving from the keyboard is visible. Every Tab arrival, no
+       *    exceptions found.
+       * 2. Focus arriving from a pointer is not — *unless the control takes text*.
+       *    A clicked text field is visible focus; a clicked button, checkbox,
+       *    radio, link and `tabindex` div are not. The distinction is "does typing
+       *    go here", which the engine answers by whether a caret landed.
+       * 3. A keystroke makes the currently focused node visible, retroactively and
+       *    without focus moving. So this is re-evaluated per input, not decided
+       *    once when focus arrives.
+       *
+       * Engine-owned like `HOVER` and `FOCUS`, and cheaper than either: one bool
+       * beside the focused node, written in the two places input enters the engine.
+       * It needs no per-node array because only one node can be focused.
+       */
+      FOCUS_VISIBLE: 1 << 6,
+
+      /**
        * The first bit the *engine* owns rather than the input state.
        *
        * Everything from here up is a global condition — a media query, a colour
@@ -1157,8 +1185,16 @@ export const ENUMS: EnumDef[] = [
  * An old engine sees two kinds it has no arm for, falls through `Controls::activate`'s
  * `_ => None`, and a keyboard activation does nothing — while the pointer keeps working,
  * because it never went through here.
+ *
+ * v21 is **`Predicate.FOCUS_VISIBLE`** (bit 6 of a variant mask). A predicate bit, so not
+ * a column, so invisible to the hash — the same category as v18's `OPEN`.
+ *
+ * An engine that never sets it leaves every `:focus-visible` rule permanently unmatched,
+ * which for the UA sheet's ring means no focus indicator at all. Silent, and the one
+ * failure mode here that is an accessibility failure rather than a cosmetic one: a
+ * keyboard user with no way to tell where they are.
  */
-export const PROTOCOL_VERSION = 20;
+export const PROTOCOL_VERSION = 21;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

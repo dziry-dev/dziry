@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 20;
+export const PROTOCOL_VERSION = 21;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 20;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xf9c01697;
+export const SCHEMA_HASH = 0x89e132b6;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -602,6 +602,7 @@ export const Predicate = {
   CHECKED: 8,
   DISABLED: 16,
   OPEN: 32,
+  FOCUS_VISIBLE: 64,
   FIRST_GLOBAL: 256,
 } as const;
 export type Predicate = (typeof Predicate)[keyof typeof Predicate];

@@ -611,6 +611,17 @@ pub struct InputState {
     pub open: i32,
     /// The scrollbar under the pointer, if the pointer is on one at all.
     pub bar: Option<BarHover>,
+    /// Whether the focused node should *show* its focus — the `:focus-visible` predicate.
+    ///
+    /// A bool rather than a node id, because only one node can be focused: this qualifies
+    /// `focused` and never names anyone else.
+    ///
+    /// Measured, `probes/focus-visible.html`, and it is a **modality** flag rather than a
+    /// property of the focus event. It goes true on any keystroke — which covers both
+    /// arriving by Tab and typing while something is already focused, since both are keys
+    /// — and goes false on a pointer press *unless* the press put a caret somewhere, which
+    /// is the engine's way of asking the measured question: does typing go here.
+    pub focus_visible: bool,
 }
 
 impl InputState {
@@ -621,6 +632,7 @@ impl InputState {
             focused: -1,
             open: -1,
             bar: None,
+            focus_visible: false,
         }
     }
 
@@ -1334,6 +1346,14 @@ fn resolve_slot(
     }
     if subject == state.focused {
         live |= predicate::FOCUS;
+        // `:focus-visible` is a *narrowing* of `:focus`, never a separate condition — it
+        // is the same node, qualified. Which is why one bool suffices and why it is set
+        // here rather than tested independently: nothing can be focus-visible without
+        // being focused, and writing it as its own test would allow a state that cannot
+        // happen.
+        if state.focus_visible {
+            live |= predicate::FOCUS_VISIBLE;
+        }
     }
 
     // `:checked` and `:disabled`, from the state this engine owns. Reserved as

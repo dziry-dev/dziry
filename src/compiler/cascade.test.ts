@@ -832,9 +832,9 @@ test("the IR for one small document is exactly this", () => {
       "    #1 box  style=1",
       '      #2 text "Hi"  style=2',
       "    #3 box  style=3",
-      '      #4 button "Go"  style=4 hover=5',
+      '      #4 button "Go"  style=4 hover=5 focus-visible=6',
       "      #5 box  style=3",
-      '        #6 text "x"  style=6',
+      '        #6 text "x"  style=8',
       "",
       // Seven, not six: the UA sheet gives `h1` a margin, and margins do not
       // inherit — so the heading and its text run are no longer the same computed
@@ -851,7 +851,14 @@ test("the IR for one small document is exactly this", () => {
       // derives which fields are colours from the wire type now instead of naming three of
       // them. Half the palette — both scrollbar colours, `accentColor`, `caretColor` — had
       // been dumping as raw integers.
-      "styles (7 unique)",
+      // Nine, not seven: the UA sheet's `:focus-visible` ring gives the button a second
+      // predicate, and a variant run is the *cross product* of the predicates a node's
+      // rules mention — so `hover` and `focus-visible` together need four slots, of which
+      // two are new. That growth is the cost model of precompiled variants, visible here
+      // in miniature, and it is why the ring rule is scoped to focusable tags rather than
+      // written as a bare `:focus-visible`: universal, it would do this to every node in
+      // the document.
+      "styles (9 unique)",
       "    0  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff " +
         "padT=8 padR=8 padB=8 padL=8 gapRow=4 gapCol=4",
       "    1  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff " +
@@ -862,7 +869,11 @@ test("the IR for one small document is exactly this", () => {
         "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
       "    5  bg=#2244aa fg=#eeeeee borderColor=#abcdef borderWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
         "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
-      "    6  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff",
+      "    6  bg=#123456 fg=#eeeeee borderColor=#abcdef borderWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "ringOuterWidth=2 ringOuterColor=#3390ff selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
+      "    7  bg=#2244aa fg=#eeeeee borderColor=#abcdef borderWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "ringOuterWidth=2 ringOuterColor=#3390ff selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
+      "    8  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff",
       "",
       "strings (3)",
       '    0  "Hi"',

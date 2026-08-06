@@ -1209,6 +1209,13 @@ impl Engine {
             // real subtree behind it, so it belongs to whatever opened it — a screenshot
             // taken with `--focus` must not silently close a picker the flags opened.
             open: self.state.open,
+            // **`--focus` means visible focus.** This override stands in for a keyboard as
+            // much as for a mouse, and it exists so a screenshot can show what an
+            // interaction state looks like — a ring included. Carrying the previous value
+            // instead would make `--focus` render a `:focus-visible` rule or not depending
+            // on whether anything had typed earlier in the run, which is a screenshot
+            // harness that is not reproducible.
+            focus_visible: focused >= 0,
         };
         self.needs_paint = true;
     }
@@ -1385,6 +1392,17 @@ impl Engine {
     /// Anything else goes on to the host untouched — Backspace still edits the value there,
     /// because the value is a signal and only Bun owns it.
     pub fn key_down(&mut self, keycode: i32, mods: u16) {
+        // **Any keystroke makes the focused node's focus visible**, and it is set here —
+        // before anything decides what the key does — because that is what the measurement
+        // says. Focus arriving by Tab is covered by the same line, since Tab is a key.
+        //
+        // The retroactive half is the part worth not simplifying away: a `<div tabindex=0>`
+        // focused by *mouse* did not match `:focus-visible`, and matched it the moment a
+        // key was pressed, with focus never moving. So this is not a property of the focus
+        // event and cannot be set where focus changes; it is a property of how the user is
+        // currently driving the application.
+        self.state.focus_visible = true;
+
         let shift = mods & mod_bits::SHIFT != 0;
         let ctrl = mods & mod_bits::CTRL != 0;
         let select_all = ctrl && keycode == keys::A;
@@ -2101,6 +2119,20 @@ impl Engine {
                 painter.place_caret(tables, geometry, measurer, hit, x);
             }
         }
+
+        // **A pointer press hides focus, unless typing goes where it landed.**
+        //
+        // Measured, `probes/focus-visible.html`: a clicked text field matches
+        // `:focus-visible` and a clicked button, checkbox, radio, link and `tabindex` div
+        // do not. The distinguishing question is not "is it a form control" — three of
+        // those four are — it is *does typing go here*, and the engine has just answered
+        // that by trying to put a caret somewhere. So the caret is the oracle rather than
+        // a second table of kinds that could disagree with it.
+        //
+        // Read back from the painter rather than from `place_caret`'s return, because the
+        // three branches above are three different calls and only one of them reports.
+        self.state.focus_visible = self.painter.caret().is_some();
+
         self.events.push(Event {
             kind: event_kind::MOUSE_DOWN,
             node: hit,

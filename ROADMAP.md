@@ -499,8 +499,16 @@ Three things that landed with it and were not in the plan:
   *run* while Tab focused the button — and `:focus` is an exact node match, so `button:focus`
   matched only one of the two ways of getting there.
 
-Still missing: `:focus-visible` as a bit distinct from `:focus`, `onChange`/`onInput` reaching a
-handler (the engine queues a `CHANGE` event and no host consumes it yet), a focus/blur event kind
+**`:focus-visible` has landed too** (protocol v21), and it is a *modality* bit rather than a focus
+one — measured. It goes true on any keystroke, which covers both arriving by Tab and typing while
+something is already focused; it goes false on a pointer press unless that press placed a caret,
+which is the engine's way of asking the measured question, *does typing go here*. The UA sheet
+hangs a 2px ring on it, scoped to the focusable tags: universal, as Chromium writes it, that one
+rule would give all 986 demo nodes a variant run instead of 62. Scoped it still costs 101 style
+slots, which is the standing price of precomputing states and is recorded in `ua-sheet.ts` rather
+than absorbed quietly.
+
+Still missing: `onChange`/`onInput` reaching a handler (the engine queues a `CHANGE` event and no host consumes it yet), a focus/blur event kind
 at all (`EventKind::FOCUS` is the *window*'s), `autofocus`, `tabindex` in any form, implicit form
 submission, and a way for a control to *become* disabled at run time. Also unimplemented and now
 named: a keyboard activation has no press/release pairing, so holding Space and tabbing away

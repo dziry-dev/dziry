@@ -142,6 +142,61 @@ input::placeholder, textarea::placeholder {
   color: #757575;
 }
 
+/* A focus ring, on keyboard focus only.
+
+   :focus-visible rather than :focus, and that distinction is the entire feature —
+   measured, probes/focus-visible.html. A ring on every click is what the pseudo-class
+   was invented to stop, and no ring while somebody is tabbing is a keyboard user with
+   no idea where they are. Chromium hangs its own ring on exactly this pseudo-class:
+   a focused-but-not-visible element computes outline-style:none, a visible one
+   computes outline:auto 1px.
+
+   This belongs in the UA sheet for the same reason the placeholder colour does, and
+   the argument is stronger here. A placeholder nobody can read is broken; a focus
+   indicator nobody can see is a WCAG 2.4.7 failure, and it is the one default that an
+   app cannot be left to remember. Every element gets it, because every element that
+   can hold focus needs it and the compiler already knows which those are.
+
+   The value is a **stated convention**, like the ::selection colours below and for the
+   same reason: Chromium's outline:auto 1px -webkit-focus-ring-color is unexpressible
+   here twice over. dziri has no outline property at all, no auto width, and the
+   platform colour is not exposed to getComputedStyle. So this is a 2px ring in the
+   same blue ::selection uses — one accent in this file rather than two, since neither
+   is measured and a second invented colour would just be a second thing to keep in
+   step.
+
+   box-shadow, because that is the property dziri has: the ring* fields are the
+   concentric-band subset of it, which is exactly a ring and nothing else. An author's
+   own focus ring writes the same fields and so wins on origin, which is why adding
+   this does not double up any ring already in a theme.
+
+   **Listed per tag rather than written as a bare :focus-visible**, and that is not
+   tidiness — it is the difference between 62 variant rows and 986. Chromium can write
+   the universal form because it resolves style on demand; dziri precompiles one style
+   row per combination of the predicates a node's rules mention, so a rule matching
+   everything gives *every node in the document* a two-entry run, including the 900-odd
+   that can never hold focus. The output is identical either way. The general lesson,
+   worth stating once here: in a UA sheet compiled this way, a state rule has to be
+   scoped to the elements that can be in that state.
+
+   Even scoped it is not free, and the number is worth having rather than hiding: the
+   demo goes from 377 style slots to 478. A variant run is the cross product of the
+   predicates a node's rules mention, so a field that already had :hover and :focus
+   gains slots for every combination with this one, not one slot. That is the standing
+   cost of precomputing states, paid here for the one indicator a keyboard user cannot
+   work without.
+
+   The list is the tab-stop set from compile.ts, minus nothing. If the two ever
+   disagree, this is the copy that is wrong — a focusable element with no ring is the
+   failure, and an unfocusable one with a rule that cannot match is only waste. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  box-shadow: 0 0 0 2px #3390ff;
+}
+
 /* What a selected range looks like when nobody said.
 
    This one is a stated convention rather than a match, and the difference is recorded

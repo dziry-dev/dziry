@@ -141,6 +141,7 @@ export const PREDICATE_PSEUDO: Array<[number, Pseudo]> = [
   [Predicate.HOVER, "hover"],
   [Predicate.ACTIVE, "active"],
   [Predicate.FOCUS, "focus"],
+  [Predicate.FOCUS_VISIBLE, "focus-visible"],
   [Predicate.CHECKED, "checked"],
   [Predicate.DISABLED, "disabled"],
   [Predicate.OPEN, "open"],

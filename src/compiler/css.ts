@@ -20,7 +20,15 @@
 import { CssError, warnOnce } from "./diagnostics.ts";
 import { parseLength, type RegisteredProperty } from "./values.ts";
 
-export type Pseudo = "none" | "hover" | "active" | "focus" | "checked" | "disabled" | "open";
+export type Pseudo =
+  | "none"
+  | "hover"
+  | "active"
+  | "focus"
+  | "focus-visible"
+  | "checked"
+  | "disabled"
+  | "open";
 
 /**
  * Pseudo-classes compiled into precomputed style variants.
@@ -51,6 +59,7 @@ const SUPPORTED_PSEUDO = new Set<string>([
   "hover",
   "active",
   "focus",
+  "focus-visible",
   "checked",
   "disabled",
   "open",

@@ -191,6 +191,24 @@ export const SCENARIOS: Scenario[] = [
     args: ["--route", "controls", "--size", "1040x1400", "--focus", "302"],
   },
   /**
+   * The UA sheet's `:focus-visible` ring, on a control that has no ring of its own.
+   *
+   * Node 321 is the first `<select>`. It is chosen precisely because the demo styles no
+   * ring on it: the two text fields wear `focus:ring-*` classes of their own, so a
+   * scenario aimed at one of those would render an *author's* ring and prove nothing
+   * about the default. `controls-focus` above is that picture, and it is unchanged by
+   * this feature — which is how it should be, and also why it cannot stand in for this.
+   *
+   * A golden rather than a unit test because the failure mode is invisible to one. The
+   * predicate can be live, the variant row can be correct, the ring fields can hold the
+   * right numbers, and the ring can still not be drawn. Rendering is the only assertion
+   * that covers the last step.
+   */
+  {
+    name: "controls-focus-ring",
+    args: ["--route", "controls", "--size", "1040x1400", "--focus", "321"],
+  },
+  /**
    * A caret, which needs a **click** rather than `--focus`.
    *
    * The distinction is the point: `--focus` sets the state directly, and a caret is placed
@@ -285,7 +303,7 @@ export const SCENARIOS: Scenario[] = [
    * or somewhere inside it, or whether the highlight landed on the committed option. All
    * three are one screenshot.
    *
-   * Node 318 is the button of the first select on the page. `--open` presses it rather than
+   * Node 322 is the button of the first select on the page. `--open` presses it rather than
    * clicking it, because a picker opens on `mouse_down` — measured, and the opposite of a
    * checkbox — so the release is not part of the gesture under test.
    *
@@ -295,7 +313,7 @@ export const SCENARIOS: Scenario[] = [
    */
   {
     name: "controls-picker",
-    args: ["--route", "controls", "--size", "1040x1400", "--open", "318"],
+    args: ["--route", "controls", "--size", "1040x1400", "--open", "322"],
   },
 
   /**
@@ -325,7 +343,7 @@ export const SCENARIOS: Scenario[] = [
       "--scroll",
       "560",
       "--open",
-      "318",
+      "322",
     ],
   },
 

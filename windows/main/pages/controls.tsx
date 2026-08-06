@@ -200,20 +200,28 @@ export default function Controls() {
       <div className={CARD}>
         <div className={H}>select — it opens</div>
         <div className={SUB}>
-          click it, or focus it and press ArrowDown, ArrowUp, Space or F4 — all five open the
-          picker rather than walking the value, and every one of them is measured · Enter
-          deliberately does NOT open one: it is the commit key, and a key that did both would make
-          Down-then-Enter ambiguous · arrows move the highlight, Escape leaves the value alone,
-          and a click outside dismisses and still activates what it hit · the closed button and the
-          selected option&apos;s text are the compiler&apos;s job, exactly as a browser builds them,
-          except they are ordinary nodes rather than a shadow tree · the arrow is an ::after box on
-          that button
+          click it, or focus it and press ArrowDown, ArrowUp, Enter, Space or F4 — all six open the
+          picker rather than walking the value, and every one of them is measured · Enter means
+          two things and the state decides which: closed, it opens; open, it commits · arrows move
+          the highlight and Home/End jump to its ends, Escape leaves the value alone, Tab closes
+          without advancing, and a click outside dismisses and still activates what it hit · the
+          closed button and the selected option&apos;s text are the compiler&apos;s job, exactly as
+          a browser builds them, except they are ordinary nodes rather than a shadow tree · the
+          arrow is an ::after box on that button
         </div>
         <div className={SUB}>
-          none of that is reachable without a pointer yet, and the page will not pretend otherwise:
-          there is no Tab order, so a select cannot take focus from the keyboard (ROADMAP A3) ·
-          keyboard operability is most of what accessibility means, so this is a real gap rather
-          than a missing convenience
+          all of it is now reachable without a pointer: Tab and Shift+Tab walk the live tree over a
+          compile-time set of stops, a radio group is one stop on its checked member, and the ring
+          you see on a keyboard-focused control is `:focus-visible` — which a click deliberately
+          does not draw, except on a field where typing goes · Enter activates a button on the
+          press and Space on the release, because that is what browsers do and it was measured
+          rather than guessed
+        </div>
+        <div className={SUB}>
+          still keyboard operability only, which is most of what accessibility means but not all of
+          it: there is no assistive-technology surface yet — no UIAutomation, NSAccessibility or
+          AT-SPI — so a screen reader learns nothing about this page. Named rather than glossed,
+          because &ldquo;accessible&rdquo; would be the wrong word for what is here
         </div>
         <div className="flex flex-row gap-4">
           <select>
