@@ -579,6 +579,15 @@ export type CompiledUi = {
    * It is not, and A3's own bullet names the case where reading it that way breaks.
    */
   tabStops: Int32Array;
+  /**
+   * Nodes claiming `autofocus`, sorted. The engine focuses the first one that is showing.
+   *
+   * A set and not an answer, for the same reason `tabStops` is: the compiler knows who
+   * asked, and which of them is visible on the first frame is runtime state. With thirteen
+   * of fourteen routes hidden at startup, "one autofocus per route" is the natural thing
+   * to write and makes several claims the ordinary case rather than a mistake.
+   */
+  autofocus: Int32Array;
   lists: ListTable;
   media: MediaTable;
   tweens: TweenTable;

@@ -38,6 +38,7 @@ import {
   Display,
   EventKind,
   FlexWrap,
+  NodeFlags,
   NodeKind,
   Position,
 } from "../protocol/generated.ts";
@@ -895,6 +896,53 @@ test("spare style slots hold the initial style, every field of it", () => {
   engine.close();
 });
 
+/**
+ * The link neither side's tests reach: an `autofocus` attribute becoming a flag bit in
+ * shared memory.
+ *
+ * The compiler tests stop at `ui.autofocus`, and the engine's Rust tests start from a
+ * flag they set by hand. Between them sits one line of `uploadNodes`, and a wrong or
+ * missing bit there is silent in both suites — the compiler keeps emitting the right
+ * array and the engine keeps focusing whatever it is told.
+ *
+ * The demo carries no `autofocus`, so this compiles its own markup. That is a deliberate
+ * exception to this file's "the demo is the fixture" rule, which exists so that assertions
+ * run against real emitter output; the emitter is still real here, and the alternative is
+ * putting an `autofocus` into a demo page for no reason but to be measured.
+ */
+test("an autofocus attribute arrives as a flag bit on the right node", async () => {
+  const { compile, toCompiledUi } = await import("../compiler/compile.ts");
+
+  const ui = toCompiledUi(
+    compile(`<body><div>plain</div><input autofocus><button autofocus>also</button></body>`, ""),
+  );
+
+  // Two claims, because one would pass even if the uploader wrote the bit onto a fixed
+  // node — the demo of that bug is a table where every claim lands on node 0.
+  expect(ui.autofocus.length).toBe(2);
+
+  const engine = Engine.open({
+    ...capacitiesFor(ui),
+    width: WIDTH,
+    height: HEIGHT,
+    root: ui.root,
+    windowed: false,
+  });
+  new Uploader(engine, ui).uploadAll();
+
+  const flags = engine.tables.nodes.flags;
+  const flagged: number[] = [];
+  for (let i = 0; i < ui.nodes.count; i++) {
+    if ((flags[i]! & NodeFlags.AUTOFOCUS) !== 0) flagged.push(i);
+  }
+  expect(flagged).toEqual([...ui.autofocus]);
+
+  // And nothing else gained it. A `findRow` that returned a match for every node would
+  // satisfy the assertion above and fail this one.
+  expect(flagged.length).toBeLessThan(ui.nodes.count);
+  engine.close();
+});
+
 test("a capacity request is a power of two", () => {
   const ui: CompiledUi = {
     strings: ["x".repeat(5000)],
@@ -907,6 +955,7 @@ test("a capacity request is a power of two", () => {
     placeholders: generated.placeholders,
     overlays: generated.overlays,
     tabStops: generated.tabStops,
+    autofocus: generated.autofocus,
     textBindings: [],
     handlers: [],
     lists: generated.lists,

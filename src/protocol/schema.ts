@@ -159,7 +159,14 @@ const NODES: Table = {
     {
       name: "flags",
       type: "u8",
-      doc: "Bit 0 interactive, bit 1 measurable text, bit 2 generated (predicates come from parent)",
+      // Named rather than listed. This doc said "bit 0 interactive, bit 1 measurable, bit 2
+      // generated" for five bits' worth of additions after that stopped being the whole
+      // set — a copy of a list is a copy that drifts, and nothing checks it.
+      //
+      // **Full as of v24.** `AUTOFOCUS` is bit 7 and a `u8` has no bit 8, so the next flag
+      // widens this column, which unlike every flag addition so far *is* a layout change:
+      // visible to the hash, and every offset after `flags` moves.
+      doc: "See NodeFlags. Bits 0-7, all assigned",
     },
     {
       name: "activates",
@@ -1261,8 +1268,23 @@ export const ENUMS: EnumDef[] = [
  * An old engine emits neither and `onFocus`/`onBlur` never run: the same silent shape as
  * every other missing event, and the reason the pair arrives together with its handlers
  * rather than ahead of them.
+ *
+ * v24 adds **`NodeFlags.AUTOFOCUS`** (bit 7). A flag bit, invisible to the hash, hand-bumped
+ * for the fourth time — see the bit's own comment for why `autofocus` travels as a per-node
+ * flag when the compiler has already resolved it to a single id.
+ *
+ * It ships with a change to something the hash cannot see either, and this one is not a
+ * flag: `InputState::focus_visible` now starts **true** rather than false. Measured
+ * (`probes/focus-without-interaction.html`) — before any interaction Chromium treats focus
+ * as visible, which is why an autofocused field opens wearing a ring. The two belong in one
+ * version because separating them ships a feature whose whole visible behaviour is wrong:
+ * `autofocus` with the old start value focuses silently and draws nothing.
+ *
+ * An old engine ignores the bit and nothing is focused at startup — the pre-v24 behaviour
+ * exactly, so this is the one bump here whose failure mode is not a wrong picture but an
+ * older correct one.
  */
-export const PROTOCOL_VERSION = 23;
+export const PROTOCOL_VERSION = 24;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
@@ -1384,12 +1406,45 @@ export const NodeFlags = {
    * - Which member of a radio group holds the group's single stop — that is the *checked*
    *   one, which is live state by definition.
    *
-   * `tabindex` is unsupported, and this bit is deliberately one bit rather than two
-   * because of it. `tabindex="-1"` is the only thing measured that separates
-   * focusable-by-pointer from reachable-by-Tab; with no `tabindex` there is nothing to
-   * separate, and a second bit would sit unread. When `tabindex` lands, it needs one.
+   * **`tabindex` is supported and still needs only this bit**, which is worth recording
+   * because this comment predicted otherwise. The prediction was that `tabindex="-1"`
+   * separates focusable-by-pointer from reachable-by-Tab, so supporting it would need a
+   * second bit for the difference. It does separate them — and the second set turned out
+   * to be empty anyway, because a pointer press focuses whatever it hits without
+   * consulting any flag. So "not a tab stop" is the whole meaning of `tabindex="-1"` here
+   * and one bit says it. A positive `tabindex` does not reorder anything; see
+   * [`tabIndexOf`] in `compile.ts` for why that is structural rather than unfinished.
    */
   TAB_STOP: 1 << 6,
+
+  /**
+   * This node asked for focus when the document first appears. `autofocus`.
+   *
+   * A flag rather than a scalar, and the reason it could not have been a scalar is the
+   * interesting half. The compiler cannot resolve `autofocus` to one id: measured
+   * (`probes/autofocus-hidden.html`), an unfocusable claim is walked past rather than
+   * honoured, and in dziri thirteen of a page's fourteen routes are hidden on the first
+   * frame — so several claims are the normal case and which one is showing is runtime
+   * state. The engine walks the flagged nodes and takes the first that is visible.
+   *
+   * Even for a single claim a flag is the right channel, because **the alternatives all
+   * run through one host.** The engine config is built in `host/main.ts` and
+   * `window-host.ts` builds its own, so a config field wired through the first would
+   * silently never fire under the screenshot host — a failure this repo has already had
+   * once. On the node table it arrives the same way for both, because neither is involved.
+   *
+   * Applied **once per document**, latched in the engine. Measured
+   * (`probes/focus-without-interaction.html`, 2026-08-07): inserting an element carrying
+   * `autofocus` after load moves nothing in Chromium. So this is a startup event, not a
+   * property re-checked whenever a node appears — which matters here more than in a
+   * browser, because Bun republishes these tables on every signal change and an unlatched
+   * flag would drag the caret back to the autofocused field each time a counter ticked.
+   *
+   * The same measurement settled what it looks like: focus arriving from `autofocus`
+   * matches `:focus-visible`, and *not* by special-casing — programmatic focus inherits
+   * the ambient modality bit, and that bit starts set. See `InputState::focus_visible`.
+   */
+  AUTOFOCUS: 1 << 7,
 } as const;
 
 /**

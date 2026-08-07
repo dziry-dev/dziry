@@ -93,6 +93,41 @@ pub fn group_members(
     });
 }
 
+/// Every node claiming `autofocus` that is actually showing, in document order.
+///
+/// The first one wins and the rest are fallbacks, which is measured rather than assumed:
+/// `probes/autofocus-hidden.html` put three claims in one document, the first two
+/// unfocusable, and Chromium focused the third. So an unfocusable claim does not abort
+/// autofocus and does not win it — the list is walked.
+///
+/// **dziri needs the fallback far more than a browser does.** A page here has fourteen
+/// routes and thirteen of them are hidden on the first frame, so "every route's form
+/// focuses its own first field" — the obvious thing to write — produces fourteen claims of
+/// which exactly one is showing. Picking the first claim in the markup would focus an
+/// invisible node on thirteen of the fourteen routes; picking the first *showing* one is
+/// right on all fourteen, and needs no rule about routes at all.
+///
+/// That is also why the compiler emits every candidate instead of resolving to one. Which
+/// claim is showable is runtime state, and it is the only part of `autofocus` that is.
+pub fn autofocus_candidates(
+    painter: &Painter,
+    tables: &Tables,
+    geometry: Geometry,
+    state: &InputState,
+    root: usize,
+    out: &mut Vec<i32>,
+) {
+    showing_nodes(
+        painter,
+        tables,
+        geometry,
+        state,
+        root,
+        protocol::flags::AUTOFOCUS,
+        out,
+    );
+}
+
 /// Every focusable node in document order, before a group is collapsed to one stop.
 fn focusable_nodes(
     painter: &Painter,
@@ -100,6 +135,33 @@ fn focusable_nodes(
     geometry: Geometry,
     state: &InputState,
     root: usize,
+    out: &mut Vec<i32>,
+) {
+    showing_nodes(
+        painter,
+        tables,
+        geometry,
+        state,
+        root,
+        protocol::flags::TAB_STOP,
+        out,
+    );
+}
+
+/// Nodes carrying `want`, in document order, skipping everything the user cannot reach.
+///
+/// The walk is shared by the tab order and by `autofocus` because the *exclusions* are the
+/// same question — a hidden route, a `display:none` subtree and a disabled control are
+/// unreachable whoever is asking — and only the flag differs. Keeping them one function is
+/// what stops the two answers drifting, which would show up as focus landing somewhere Tab
+/// swears is not in the order.
+fn showing_nodes(
+    painter: &Painter,
+    tables: &Tables,
+    geometry: Geometry,
+    state: &InputState,
+    root: usize,
+    want: u8,
     out: &mut Vec<i32>,
 ) {
     out.clear();
@@ -137,7 +199,7 @@ fn focusable_nodes(
             continue;
         }
 
-        if flags.get(node).copied().unwrap_or(0) & protocol::flags::TAB_STOP != 0
+        if flags.get(node).copied().unwrap_or(0) & want != 0
             && !painter.control_is_disabled(node as i32)
         {
             out.push(node as i32);

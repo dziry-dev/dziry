@@ -237,6 +237,15 @@ pub struct Engine {
     /// The tree has never been built; the first tick must rebuild regardless of
     /// what the diff says.
     fresh: bool,
+    /// `autofocus` has had its one chance. Set even when nothing claimed it.
+    ///
+    /// The latch is the feature, not an optimisation. Bun republishes the node table
+    /// whenever any signal changes, so the `AUTOFOCUS` bit is present on every commit for
+    /// the life of the process; without this, every counter tick would drag the caret back
+    /// to the autofocused field. Measured in Chromium too — an element carrying
+    /// `autofocus` inserted after load moves nothing — but dziri needs it for a reason a
+    /// browser does not have.
+    autofocus_done: bool,
     /// Something changed since the last frame was presented.
     ///
     /// Event-driven repaint, kept as an optimisation now that the engine paints
@@ -360,6 +369,7 @@ impl Engine {
             poisoned: false,
             frame: 0,
             fresh: true,
+            autofocus_done: false,
             needs_paint: true,
             relayout_pending: false,
             last_frame_ms: 0.0,
@@ -469,6 +479,16 @@ impl Engine {
             self.relayout()?;
             self.needs_paint = true;
         }
+
+        // **After the relayout, and that is a requirement rather than a preference.**
+        // Choosing the autofocus node means asking which claims are showing, which is a
+        // walk over geometry — and before the first relayout there is no geometry, so the
+        // walk finds nothing and the one chance is spent on an empty answer.
+        //
+        // Still inside the same frame, and still ahead of `set_input_chains` and `draw`,
+        // so the ring is in the *first* painted frame rather than the second. That matches
+        // where Chromium puts it: measured, autofocus lands during a rendering step.
+        self.apply_autofocus(diff.any);
 
         // The one place wall-clock time enters the frame, and after the relayout
         // because the clamp above can move a target this then has to chase.
@@ -1195,6 +1215,7 @@ impl Engine {
 
     /// Headless state overrides, so interaction styles can be verified without a
     /// mouse — the engine-side equivalent of `--hover` and `--focus`.
+    ///
     pub fn set_input_state(&mut self, hovered: i32, pressed: i32, focused: i32) {
         self.state = InputState {
             hovered,
@@ -1911,6 +1932,64 @@ impl Engine {
             });
         }
         true
+    }
+
+    /// Gives `autofocus` its one chance, on the first tick that has a tree to look at.
+    ///
+    /// Deliberately *not* gated on `fresh`, which is set again by a resize and by a
+    /// capacity change — either would hand autofocus a second turn and pull the caret out
+    /// of whatever the user was typing in when the window was dragged.
+    ///
+    /// The candidate list is walked rather than indexed, and it is a list rather than a
+    /// single id, because the only part of `autofocus` that is not compile-time is which
+    /// claim is *showing*. See `focus::autofocus_candidates`, which is also where the
+    /// measurement for taking the first showing one rather than the first one lives.
+    fn apply_autofocus(&mut self, committed: bool) {
+        // `committed` is the guard, and getting it wrong was a real bug caught by a real
+        // test. The obvious guard — "is the node table empty" — is never true: the table is
+        // allocated at capacity and zero-filled, so a tick that runs before the host has
+        // uploaded anything sees a full table of zeroed flags, finds no claim, and spends
+        // the one chance on a document that has not arrived. Whether that tick happens is
+        // a matter of which of two threads runs first.
+        //
+        // So the question is not "is there a table" but "has a commit ever brought one in",
+        // which is exactly what the diff reports.
+        if self.autofocus_done || !committed {
+            return;
+        }
+        self.autofocus_done = true;
+
+        // **Only when nothing has focus yet**, which is one rule covering three things that
+        // would otherwise each need their own: a `--focus` override the harness applied
+        // before this tick, a press that arrived in the same tick (`pump_input` runs first),
+        // and any future caller that focuses something during startup. All three are
+        // someone saying explicitly where focus goes, and `autofocus` is the default for
+        // when nobody did.
+        //
+        // The chance is spent either way — set above, before the early return. Deferring it
+        // would mean autofocus lay in wait and fired the moment the user next clicked
+        // something and released focus, which is not a default, it is an ambush.
+        if self.state.focused >= 0 {
+            return;
+        }
+
+        let mut candidates = Vec::new();
+        focus::autofocus_candidates(
+            &self.painter,
+            &self.tables,
+            self.geometry(),
+            &self.state,
+            self.root,
+            &mut candidates,
+        );
+        if let Some(&node) = candidates.first() {
+            // Straight to `set_focus`, so the pair of focus events fires exactly as it does
+            // for a click or a Tab — a host validating on blur must not have to special-case
+            // where the first focus came from. `focus_visible` is deliberately untouched:
+            // measured, focus that the user did not request inherits the modality bit, and
+            // at startup that bit is already true.
+            self.set_focus(node);
+        }
     }
 
     /// Whether `node` is a checked control.

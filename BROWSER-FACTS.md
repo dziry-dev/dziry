@@ -1613,3 +1613,119 @@ returns only `INTERACTIVE` nodes — so a plain div is not hit and focus clears 
 div with an `onClick` *is* interactive and would take focus where a browser would not. Named
 rather than fixed: making it match means gating focus on the tab-stop set, which would also stop a
 click focusing a `tabindex="-1"` element, and that is a behaviour worth keeping.
+
+---
+
+## Focus the user did not ask for: `autofocus` and script `focus()`
+
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/focus-without-interaction.html`.
+Two byte-identical consecutive runs.** ROADMAP A3 held `autofocus` back for exactly one
+unmeasured question: focus arriving without an interaction has no modality, so does it match
+`:focus-visible` or not? The answer turned out to be a property of the *bit*, not of `autofocus`.
+
+`#auto` is a `<button>` on purpose. A text field matches `:focus-visible` under every modality
+(measured 2026-08-06, `focus-visible.html`), so an autofocused `<input>` would answer YES for a
+reason unrelated to autofocus. A button is the kind whose answer can vary.
+
+| step | `activeElement` | `:focus-visible` | UA `outline` |
+|---|---|---|---|
+| module script runs (deferred, post-parse) | **BODY** | – | – |
+| after a tick | **BODY** | – | – |
+| after a frame | `button#auto` | **YES** | `auto 1px` |
+| insert `<button autofocus>` after load | *unchanged* — `button#auto` | – | – |
+| `focus()` start / div / check / text, **no interaction yet** | each | **YES** ×4 | `auto 1px` |
+| click start | `button#start` | **no** | `none` |
+| → `focus()` div, then `focus()` start | each | **no** | `none` |
+| Tab | `button#auto` | **YES** | `auto 1px` |
+| → `focus()` div, then `focus()` start | each | **YES** | `auto 1px` |
+| `focus()` the already-focused element | unchanged | unchanged | unchanged |
+
+### Four findings
+
+1. **`autofocus` lands at the frame, not at the parse.** *(Partly superseded the same
+   day — the timing half is a race. See "autofocus on something that cannot be focused".)* A deferred module script — which runs
+   after parsing — sees `BODY`, and so does a tick later. Focus appears only after a rendering
+   step, which is where the spec puts "flush autofocus candidates". (This says *by* the first
+   frame, not *in* it; the probe cannot distinguish those.)
+
+2. **`autofocus` is once per document.** Inserting an element carrying `autofocus` after load
+   moved nothing. This is the cheap answer and it is the true one: a startup-only single-shot,
+   not a property re-checked whenever a node appears.
+
+3. **Script `focus()` inherits the ambient modality — it neither sets nor clears it.** The
+   *identical* call yields a ring after Tab and no ring after a click. So `:focus-visible` is not
+   a property of the focus change at all; the focus change simply carries the current bit along.
+
+4. **Before any interaction, the bit is already set.** With nothing clicked and nothing typed,
+   all four script-focused elements matched, including a `<div tabindex=0>`. So the initial state
+   is *visible*, and finding 3 fully explains finding 1: **`autofocus` is not special-cased.** It
+   inherits the startup bit like every other unrequested focus.
+
+### Bearing on dziri
+
+The design question ROADMAP A3 was holding this for is answered, and it costs one initializer.
+dziri already implements the other three halves of the rule correctly: a keystroke sets the bit
+(`engine.rs` `key_down`), a pointer press clears it unless it placed a caret, and `set_focus`
+does not touch it — which is finding 3, already right.
+
+What is wrong is `paint.rs`'s `focus_visible: false` at construction. Chromium's start value is
+**true**. It is unobservable today, because `state.focused` starts at `-1` and a ring needs
+something to sit on; it becomes observable the instant `autofocus` exists, and it is the whole
+difference between an autofocused field opening with a ring and opening without one.
+
+**One deliberate non-divergence.** dziri's `--focus` screenshot override sets `focus_visible =
+focused >= 0` rather than carrying the live bit, so a golden is reproducible. That is a harness
+rule, not a behaviour, and finding 3 does not touch it.
+
+---
+
+## `autofocus` on something that cannot be focused
+
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/autofocus-hidden.html`.
+Two runs, agreeing on the answer and disagreeing on the timing — see the correction below.**
+
+Asked because the section above left it open and dziri's router makes it the common case, not
+the corner: a page here is fourteen routes with thirteen `hidden` on the first frame, so "each
+route's form focuses its own first field" produces fourteen claims of which one is showing.
+
+One document, three claims, ordered so that each possible rule lands focus somewhere different:
+`#hidden` inside `display:none`, `#inert` inside `<fieldset disabled>`, then `#visible`.
+
+| | result |
+|---|---|
+| after a frame | `input#visible`, `:focus-visible` **YES** |
+| `focus()` on `#hidden` | nothing — `activeElement` unchanged |
+| `focus()` on `#inert` | nothing — `activeElement` unchanged |
+
+1. **An unfocusable claim is walked past.** It does not win and it does not abort the
+   feature: focus landed on the third element, so Chromium takes the first candidate it can
+   actually focus.
+2. **"Unfocusable" needs no autofocus-specific rule.** Neither element could be focused by
+   script either, so the skip falls out of the ordinary focusability test. One rule, not two.
+
+### Bearing on dziri
+
+This is what made `autofocus` a per-node flag on a *set* of nodes rather than a single resolved
+id. The compiler marks everyone who asked; `focus::autofocus_candidates` walks the tree — the
+same walk, and literally the same function, as the tab order — and takes the first claim that is
+not inside a hidden route, not `display:none`, and not disabled. Getting this wrong would have
+put the keyboard on an invisible node on thirteen routes out of fourteen, with the ring drawn
+somewhere the user cannot see, which is worse than focusing nothing.
+
+The engine still spends the one chance on the first frame even when every claim is hidden. A
+route appearing later does not pull focus into it — by then the user is somewhere, and moving
+their caret is a worse failure than never having focused at all. That part is dziri's rule; a
+browser has no equivalent situation.
+
+> **Correction to the section above, same day.** It reported that `autofocus` "lands at the
+> frame, not at the parse", on the strength of two runs in which a deferred module script saw
+> `BODY`. This probe's two runs disagree on exactly that: the first saw `input#visible` already
+> focused when the module script ran, the second saw `BODY` until a frame later. Both reached
+> the same final state.
+>
+> So the sharp claim is wrong and the useful one survives: **focus is in place by the first
+> rendered frame, but whether it beats a deferred script is a race.** The flush is a rendering
+> step, and whether a rendering step has happened before the first script depends on load
+> timing. Nothing built on this changed — dziri applies autofocus inside the frame either way —
+> but "measured twice, identical" clearly did not mean "not racy", which is worth remembering
+> the next time two runs agree.

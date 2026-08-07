@@ -178,6 +178,19 @@ export type Props = {
    * still gets a stop, in document order; see `tabIndexOf` in the compiler.
    */
   tabindex?: number | string;
+  /**
+   * Focus this element when the window first appears. One per document wins.
+   *
+   * A boolean because that is what the HTML attribute is — its presence is the whole
+   * value — and the compiler warns rather than guessing if a second element claims it or
+   * if the element cannot hold focus at all.
+   *
+   * It fires exactly once. An element carrying `autofocus` that appears later, from a
+   * list growing or a route showing, does not steal the caret: measured in Chromium
+   * (`probes/focus-without-interaction.html`), and a stronger requirement here than
+   * there, since dziri republishes its tables whenever any signal changes.
+   */
+  autofocus?: boolean;
   readOnly?: boolean;
   required?: boolean;
   multiple?: boolean;

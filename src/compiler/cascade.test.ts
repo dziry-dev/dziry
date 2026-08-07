@@ -541,6 +541,54 @@ test("tabindex overrides the tag rule in both directions", () => {
   expect(stops).not.toContain(bogus);
 });
 
+test("autofocus keeps every focusable claim and refuses the rest", () => {
+  // Three claims, two kept. The compiler deliberately does *not* choose between the two
+  // focusable ones: measured, a browser walks to the next claim when one cannot be
+  // focused, and in dziri "cannot be focused right now" usually means "on a hidden route",
+  // which no compile-time answer can know. So this emits the candidates and the engine
+  // walks them.
+  const result = compile(
+    `<body>` +
+      `<div autofocus>not focusable</div>` +
+      `<input autofocus>` +
+      `<button autofocus>also a claim</button>` +
+      `</body>`,
+    "",
+  );
+  const ui = toCompiledUi(result);
+
+  const kids: number[] = [];
+  for (let n = ui.nodes.firstChild[0]!; n !== -1; n = ui.nodes.nextSibling[n]!) kids.push(n);
+  const [, input, button] = kids as [number, number, number];
+
+  expect([...ui.autofocus]).toEqual([input, button]);
+
+  // The `<div>` is the one refusal, and it is refused for a reason no runtime state can
+  // change: it cannot hold focus at all, on any route, ever.
+  const warnings = result.warnings.join("\n");
+  expect(warnings).toMatch(/autofocus on <div> does nothing/);
+  // And the second focusable claim is *not* a warning. It is the fallback.
+  expect(warnings).not.toMatch(/<button>/);
+});
+
+test("autofocus takes the wider focusable set, not the tab-stop set", () => {
+  // The one case where the two sets differ, and the reason `resolveAutofocus` does not
+  // just reuse `isTabStop`. `tabindex="-1"` is focusable by script and unreachable by Tab;
+  // a browser will autofocus it. Reusing the stop set would drop it silently.
+  const result = compile(`<body><div tabindex="-1" autofocus>reachable by script</div></body>`, "");
+  const ui = toCompiledUi(result);
+
+  const div = ui.nodes.firstChild[0]!;
+  expect([...ui.autofocus]).toEqual([div]);
+  expect([...ui.tabStops]).not.toContain(div);
+  expect(result.warnings.join("\n")).not.toMatch(/autofocus/);
+});
+
+test("no autofocus is an empty table, not a sentinel", () => {
+  const ui = toCompiledUi(compile(`<body><button>plain</button></body>`, ""));
+  expect([...ui.autofocus]).toEqual([]);
+});
+
 test("an authored select button is left alone", () => {
   // The spec's opt-in form for customizing the internals. Overwriting it would
   // make `appearance: base-select` pointless.

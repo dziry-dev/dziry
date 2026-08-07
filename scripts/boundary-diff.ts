@@ -164,6 +164,7 @@ if (LIVE) {
       placeholders: ui.placeholders,
       overlays: ui.overlays,
       tabStops: ui.tabStops,
+      autofocus: ui.autofocus,
       textBindings: ui.textBindings,
       handlers: ui.handlers,
       lists: ui.lists,

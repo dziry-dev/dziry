@@ -141,6 +141,9 @@ export const overlays = new Int32Array([]);
 /** Nodes Tab can reach, sorted. The set; the order is a live walk of the tree. */
 export const tabStops = new Int32Array([]);
 
+/** Nodes claiming `autofocus`, sorted. The engine focuses the first one showing. */
+export const autofocus = new Int32Array([]);
+
 /** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [
 

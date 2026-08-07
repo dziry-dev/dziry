@@ -621,6 +621,14 @@ pub struct InputState {
     /// arriving by Tab and typing while something is already focused, since both are keys
     /// — and goes false on a pointer press *unless* the press put a caret somewhere, which
     /// is the engine's way of asking the measured question: does typing go here.
+    ///
+    /// **Starts true**, which is not an arbitrary default. Measured
+    /// (`probes/focus-without-interaction.html`, 2026-08-07): before any interaction at
+    /// all, Chromium matches `:focus-visible` on everything script focuses, including a
+    /// `<div tabindex=0>`. So the rule is one bit with three edges and no special cases —
+    /// a keystroke sets it, a pointer press clears it, and a focus change *carries it
+    /// along* rather than deciding it. `autofocus` opening with a ring is that rule, not
+    /// a rule of its own.
     pub focus_visible: bool,
 }
 
@@ -632,7 +640,7 @@ impl InputState {
             focused: -1,
             open: -1,
             bar: None,
-            focus_visible: false,
+            focus_visible: true,
         }
     }
 

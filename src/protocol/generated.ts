@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 23;
+export const PROTOCOL_VERSION = 24;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 23;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xd21f66e0;
+export const SCHEMA_HASH = 0xe772a183;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -129,7 +129,7 @@ export const F = {
     nextSibling: 5,
     list: 6, // Index into the list table, or -1
     hidden: 7, // Non-zero excludes the subtree entirely
-    flags: 8, // Bit 0 interactive, bit 1 measurable text, bit 2 generated (predicates come from parent)
+    flags: 8, // See NodeFlags. Bits 0-7, all assigned
     activates: 9, // The control node a press here operates, or -1
   },
   /** Resolved style values. Patches write field values in place. */
@@ -488,6 +488,7 @@ export const NodeFlags = {
   PLACEHOLDER: 1 << 4,
   OVERLAY: 1 << 5,
   TAB_STOP: 1 << 6,
+  AUTOFOCUS: 1 << 7,
 } as const;
 
 export const ControlFlags = {

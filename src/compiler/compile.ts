@@ -126,6 +126,16 @@ type BuiltNode = {
    * same idea, which is exactly what the measurements say they are not.
    */
   tabStop?: true;
+
+  /**
+   * This node asked to be focused when the document first appears — `autofocus`.
+   *
+   * A claim, not the answer. Several nodes can carry it and the engine picks the first
+   * that is *showing*, which is the only part of the question that is not compile-time:
+   * with fourteen routes and thirteen hidden, "which claim is visible" changes with the
+   * URL. See `resolveAutofocus`.
+   */
+  autofocus?: true;
 };
 
 /**
@@ -631,6 +641,13 @@ export function compileTree(
   const textBindings: BuiltTextBinding[] = [];
   const handlers: BuiltHandler[] = [];
   const lists: BuiltList[] = [];
+  /** Everything carrying `autofocus`, in document order. At most one survives. */
+  const autofocusCandidates: {
+    node: number;
+    tag: string;
+    focusable: boolean;
+    where: string;
+  }[] = [];
   /**
    * Where each list splices into its container, recorded while walking and
    * resolved once every container's child array is final.
@@ -1312,6 +1329,20 @@ export function compileTree(
       );
     }
 
+    // Collected rather than resolved. Which claim wins depends on which is showing, and
+    // that is not known until the engine has a layout — see `resolveAutofocus`.
+    if (el.attrs.has("autofocus")) {
+      autofocusCandidates.push({
+        node: self,
+        tag: el.tag,
+        // Focusable is wider than tabbable by exactly `tabindex="-1"`, and `autofocus`
+        // is the first thing in dziri that needs the wider set: a browser will autofocus
+        // an element script can focus, whether or not Tab can reach it.
+        focusable: isTabStop(el, path) || tabIndexOf(el) !== null,
+        where,
+      });
+    }
+
     if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "", kind: "click" });
     if (el.onChange) handlers.push({ node: self, ref: el.onChange, name: "", kind: "change" });
     if (el.onFocus) handlers.push({ node: self, ref: el.onFocus, name: "", kind: "focus" });
@@ -1631,6 +1662,7 @@ export function compileTree(
 
   resolveActivation(nodes, nodeOfEl, controls, labelEls, warnings);
   resolveControlLabels(nodes, nodeOfEl, controls, labelHosts);
+  resolveAutofocus(nodes, autofocusCandidates, warnings);
 
   return {
     strings,
@@ -1944,6 +1976,59 @@ function buildTabStops(nodes: BuiltNode[]): Int32Array {
   return new Int32Array(out.sort((a, b) => a - b));
 }
 
+/**
+ * Marks every element that can hold focus and asked for it, and warns about the rest.
+ *
+ * **Every** one, not the winner. Choosing is the engine's job, and the reason is a
+ * measurement plus a fact about dziri. Measured (`probes/autofocus-hidden.html`): an
+ * unfocusable claim neither wins nor aborts — Chromium walks past it to the next. And in
+ * dziri a page is fourteen routes with thirteen hidden on the first frame, so several
+ * claims are normal and which of them is *showing* is the only thing that decides, which
+ * is runtime state. Resolving here would either pick a hidden node or need a compile-time
+ * model of routing that would be wrong the first time anything navigated.
+ *
+ * So the only claims refused here are the ones no runtime state can rescue: an element
+ * that cannot hold focus at all. That is silent in a browser and is a genuine mistake —
+ * `autofocus` is a global attribute, so it parses happily on a `<div>` and does nothing
+ * there forever. The fix is one word, and nobody guesses it from silence.
+ *
+ * Note what is *not* warned about: two focusable claims. That used to warn "the first
+ * claimed it", which was true of the first draft and false of this one — with the walk,
+ * a second claim is a fallback rather than a loser.
+ */
+function resolveAutofocus(
+  nodes: BuiltNode[],
+  candidates: { node: number; tag: string; focusable: boolean; where: string }[],
+  warnings: string[],
+): void {
+  for (const c of candidates) {
+    if (c.focusable) {
+      nodes[c.node]!.autofocus = true;
+      continue;
+    }
+    warnings.push(
+      `autofocus on <${c.tag}> does nothing: the element cannot hold focus.\n` +
+        `    autofocus is a global attribute, so it parses anywhere, but only a focusable\n` +
+        `    element is ever focused. Add tabindex="0" to make it one.\n` +
+        `    ${c.where}`,
+    );
+  }
+}
+
+/**
+ * Every node claiming `autofocus`, ascending. Usually empty, occasionally one per route.
+ *
+ * Sorted for `findRow`'s binary search in `upload.ts`, which is the same reason the other
+ * six sets are sorted — and here sortedness is also the document order the engine's walk
+ * needs, though the engine does not rely on that: it re-derives the order from the tree,
+ * for exactly the reason `buildTabStops` gives.
+ */
+function buildAutofocus(nodes: BuiltNode[]): Int32Array {
+  const out: number[] = [];
+  for (let i = 0; i < nodes.length; i++) if (nodes[i]!.autofocus) out.push(i);
+  return new Int32Array(out);
+}
+
 function buildInteractive(
   nodes: BuiltNode[],
   handlers: BuiltHandler[],
@@ -2073,6 +2158,7 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     placeholders: buildPlaceholders(result.nodes),
     overlays: buildOverlays(result.nodes),
     tabStops: buildTabStops(result.nodes),
+    autofocus: buildAutofocus(result.nodes),
     // Bindings are resolved and emitted only on the generated-module path; the
     // in-memory IR is used by tests and the variant probe, which are static.
     textBindings: [],
@@ -2538,6 +2624,9 @@ export const overlays = ${typedArray("Int32Array", [...buildOverlays(nodes)])};
 
 /** Nodes Tab can reach, sorted. The set; the order is a live walk of the tree. */
 export const tabStops = ${typedArray("Int32Array", [...buildTabStops(nodes)])};
+
+/** Nodes claiming \`autofocus\`, sorted. The engine focuses the first one showing. */
+export const autofocus = ${typedArray("Int32Array", [...buildAutofocus(nodes)])};
 
 ${localsSource}/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [

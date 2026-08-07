@@ -209,6 +209,7 @@ export class Uploader {
   uploadNodes(): void {
     const { nodes, interactive, generated, editableBoxes, placeholders, overlays, tabStops } =
       this.#ui;
+    const { autofocus } = this.#ui;
     const t = this.#tables.nodes;
     const count = Math.min(nodes.count, t.kind.length);
 
@@ -244,6 +245,11 @@ export class Uploader {
       if (findRow(placeholders, i) >= 0) flags |= NodeFlags.PLACEHOLDER;
       if (findRow(overlays, i) >= 0) flags |= NodeFlags.OVERLAY;
       if (findRow(tabStops, i) >= 0) flags |= NodeFlags.TAB_STOP;
+      // A claim, and possibly one of several — the engine picks the first that is showing.
+      // Set on every upload, not only the first: the engine latches the *event*, because
+      // that is where "has this document started yet" is known. The uploader runs again on
+      // every signal change and cannot tell a fresh document from a counter ticking.
+      if (findRow(autofocus, i) >= 0) flags |= NodeFlags.AUTOFOCUS;
       // Anything with text needs measuring; that is exactly what the old measure
       // pass did, for TEXT nodes and for button labels alike.
       if (nodes.text[i]! >= 0) flags |= NodeFlags.MEASURABLE;

@@ -1,0 +1,159 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>focus-without-interaction</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  #stage { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; height: 40px }
+  #stage > * { flex: none }
+</style>
+<h3>when focus arrives without the user asking, does it look focused?</h3>
+<!--
+  This markup is static and in the initial parse, which is the whole reason this is a
+  separate file from focus-visible.html. `autofocus` is only honoured while a document
+  is loading, so it cannot be tested from a stage that script builds — and putting it
+  into focus-visible.html's markup would focus something at load and change every row
+  of the table already recorded from it.
+
+  #auto is a <button> deliberately. focus-visible.html measured that a text field
+  matches :focus-visible under every modality including the mouse, so an autofocused
+  <input> would answer YES for a reason that has nothing to do with autofocus. A button
+  is the kind whose answer varies, so it is the kind that can carry information.
+-->
+<div id="stage">
+  <button id="start">start</button>
+  <button id="auto" autofocus>autofocus</button>
+  <input id="text" type="text" size="6">
+  <input id="check" type="checkbox">
+  <div id="div" tabindex="0">div[0]</div>
+</div>
+<div id="late"></div>
+<script type="module">
+  import { log, tick, frame, report } from "./_harness.js";
+
+  /**
+   * The question dziri needs answered, and why it is not obvious.
+   *
+   * `:focus-visible` is implemented here as a *modality* bit: set by a keystroke,
+   * cleared by a pointer press. Focus that arrives from `autofocus` or from a script
+   * calling `.focus()` has no modality — the user did not do anything. So the bit is
+   * whatever it happened to be already, and at page load it has never been anything.
+   *
+   * Three rules are all defensible and they disagree on the visible outcome:
+   *
+   *   - unrequested focus is not visible focus, so an autofocused field opens ringless;
+   *   - unrequested focus inherits whatever the last interaction was, so it depends;
+   *   - unrequested focus is *keyboard* focus, on the grounds that a caret you did not
+   *     place is exactly the case a sighted keyboard user needs marked.
+   *
+   * Whichever Chromium implements is one assignment in `set_focus`. The cost is entirely
+   * in knowing which, and the visible consequence is large: every dziri page with an
+   * autofocused field either opens wearing a ring or does not.
+   *
+   * The second half — script `.focus()` — is the same question with a different cause,
+   * and dziri needs it too because a runtime `focus()` API is coming. It is asked here
+   * rather than in focus-visible.html because that probe's script-focus block runs after
+   * nine Tabs, so it can only ever report the keyboard answer.
+   */
+
+  const el = (id) => document.getElementById(id);
+  const name = (a) => (!a || a === document.body ? "BODY" : a.tagName.toLowerCase() + (a.id ? "#" + a.id : ""));
+  const yn = (b) => (b ? "YES" : "no ");
+
+  const row = (label) => {
+    const a = document.activeElement;
+    const cs = a && a !== document.body ? getComputedStyle(a) : null;
+    const ring = cs ? `${cs.outlineStyle} ${cs.outlineWidth} ${cs.outlineColor.replace(/\s+/g, "")}` : "-";
+    log(
+      label.padEnd(38) +
+        " active=" + name(a).padEnd(14) +
+        " :focus=" + yn(a?.matches?.(":focus")) +
+        " :focus-visible=" + yn(a?.matches?.(":focus-visible")) +
+        "  outline=" + ring,
+    );
+  };
+
+  // --- 1. autofocus, before any input has ever reached the page ----------------------
+  //
+  // Sampled three times because the spec runs "flush autofocus candidates" from the
+  // update-the-rendering steps, not from parsing — so a deferred module script like this
+  // one can legitimately observe the pre-focus state, and reporting only the frame-later
+  // reading would hide that autofocus is a render-time effect rather than a parse-time
+  // one. dziri cares: its tree arrives before the first frame either way, but "which
+  // frame" decides whether the first painted frame already has the ring.
+  log("=== autofocus (no input has reached the page) ===");
+  row("module script runs");
+  await tick();
+  row("after a tick");
+  await frame();
+  row("after a frame");
+  log("");
+
+  // --- 2. does autofocus fire for an element inserted after load? -------------------
+  //
+  // The load-bearing question for dziri, and the cheaper answer is the better one. If
+  // autofocus is a once-per-document effect, it is a single compile-time field consulted
+  // at startup and never again. If a later insertion also steals focus, then every list
+  // row appended at run time has to be checked for it, and a `<For>` over rows carrying
+  // autofocus would fight over the caret.
+  log("=== autofocus on an element inserted after load ===");
+  el("late").innerHTML = '<button id="lateBtn" autofocus>late</button>';
+  row("inserted, sync");
+  await frame();
+  row("inserted, after a frame");
+  log("");
+
+  // --- 3. script focus(), still before any input --------------------------------------
+  log("=== el.focus() from script, no interaction yet ===");
+  for (const id of ["start", "div", "check", "text"]) {
+    el(id).focus();
+    row("focus() " + id);
+  }
+  log("");
+
+  // --- 4. the same script focus() under each established modality ---------------------
+  //
+  // Driven through the runner because only a trusted event sets the modality: a synthetic
+  // one runs listeners and performs no default action, so a dispatched click here would
+  // measure nothing. Each step's hook re-runs the *identical* script focus, which is what
+  // isolates inheritance — if the three rows differ, the only variable is what the user
+  // touched last.
+  const centre = (node) => {
+    const r = node.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  };
+
+  const plan = [
+    ["click start (pointer modality)", { ...centre(el("start")), down: 1, up: 1 }, () => {
+      el("div").focus();
+      row("  then focus() div");
+      el("start").focus();
+      row("  then focus() start");
+    }],
+    ["Tab (keyboard modality)", { key: "Tab" }, () => {
+      el("div").focus();
+      row("  then focus() div");
+      el("start").focus();
+      row("  then focus() start");
+    }],
+    // Focus what is already focused. focus-event-order.html measured that this fires no
+    // events at all; the open part is whether it also leaves the modality bit alone, which
+    // is the difference between a re-focus being invisible and it silently clearing a ring.
+    ["focus() the already-focused element", { key: "Tab" }, () => {
+      const a = document.activeElement;
+      a.focus();
+      row("  refocus " + name(a));
+    }],
+  ];
+
+  window.__probeMouse = plan.map(([, step]) => step);
+  window.__probeStep = (i) => {
+    const [label, , after] = plan[i] ?? [];
+    row(label ?? `step ${i}`);
+    after?.();
+  };
+  window.__probeMouseDone = () => report();
+
+  log("=== el.focus() after a real interaction ===");
+  document.title = "ready";
+</script>

@@ -1,0 +1,63 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>autofocus-hidden</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  .gone { display: none }
+</style>
+<h3>what happens to autofocus on something that is not showing?</h3>
+<!--
+  One document, three claims, and the order is the instrument.
+
+  `autofocus` is once per document, so the three candidates cannot be tested separately
+  without three documents. Putting the two unshowable ones *first* turns one page into a
+  three-way discriminator, because each possible rule lands focus somewhere different:
+
+    focus on #hidden   -> a display:none element can still be autofocused
+    focus on #inert    -> hidden is skipped but the walk stops at the next unfocusable one
+    focus on #visible  -> unfocusable candidates are skipped and the walk continues
+    focus on nothing   -> the first candidate wins or nothing does, showable or not
+
+  dziri needs this because its router hides thirteen of fourteen routes on the first
+  frame with the `hidden` column. If a browser skips, an `autofocus` written on a route
+  the user has not navigated to is harmless. If it does not skip, dziri would open with
+  focus on an invisible node and a ring drawn nowhere — and the keyboard would be
+  somewhere the user cannot see, which is the worst outcome of the four.
+-->
+<div class="gone"><input id="hidden" autofocus></div>
+<fieldset disabled style="border:0;padding:0;margin:0">
+  <input id="inert" autofocus>
+</fieldset>
+<input id="visible" autofocus>
+<script type="module">
+  import { log, tick, frame, report } from "./_harness.js";
+
+  const name = (a) => (!a || a === document.body ? "BODY" : a.tagName.toLowerCase() + (a.id ? "#" + a.id : ""));
+  const row = (label) => {
+    const a = document.activeElement;
+    log(label.padEnd(26) + " active=" + name(a).padEnd(16) +
+        " :focus-visible=" + (a?.matches?.(":focus-visible") ? "YES" : "no"));
+  };
+
+  log("=== three autofocus claims: display:none, disabled, showing ===");
+  row("module script runs");
+  await tick();
+  row("after a tick");
+  await frame();
+  row("after a frame");
+  log("");
+
+  // The separate, smaller question underneath: is a display:none element focusable by
+  // script at all? If it is not, then "skipped" needs no autofocus-specific rule — it
+  // falls out of the same focusability test everything else uses, which is one rule for
+  // dziri instead of two.
+  log("script focus(), same elements:");
+  for (const id of ["hidden", "inert", "visible"]) {
+    const node = document.getElementById(id);
+    node.focus();
+    log("  focus() " + id.padEnd(9) + " -> " + name(document.activeElement));
+  }
+
+  report();
+</script>

@@ -1634,3 +1634,263 @@ mod group_arrows {
         assert_eq!(checked(&engine), vec![2], "and nothing was selected");
     }
 }
+
+/// `autofocus`: the one focus that happens before the user does anything.
+///
+/// Kept together with the pointer and keyboard tests rather than in a file of its own,
+/// because the claim under test is the same one those make — that a state change reaches
+/// the raster surface — and it reuses their fixture to say so.
+mod autofocus {
+    use super::*;
+
+    /// A window-filling box that is black at rest and white when it has visible focus,
+    /// plus an unstyled second node to move the flag onto.
+    fn ringed(flagged: usize) -> Engine {
+        let mut engine = Engine::new(&config(2, 2)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            init_style(t, 0);
+            init_style(t, 1);
+            t.set_u32(STYLES, styles::BG, 0, BLACK);
+            t.set_u32(STYLES, styles::BG, 1, WHITE);
+
+            node(t, 0, 0, -1);
+            node(t, 1, 0, 0);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+            variant(t, 0, 0, predicate::FOCUS_VISIBLE, 0, 0, 1);
+            pad_variants(t, 1);
+            pad_controls(t, 0);
+
+            let flags = protocol::flags::INTERACTIVE | protocol::flags::AUTOFOCUS;
+            t.set_u8(NODES, nodes::FLAGS, flagged, flags);
+        }
+        engine
+    }
+
+    /// The whole feature in one assertion, at the pixel: a document opens with its
+    /// autofocused node focused **and wearing a ring**, with no input of any kind.
+    ///
+    /// Deliberately a pixel and not just `focused()`. Four things have to hold and only
+    /// the surface tests all four — the flag has to be read off the node table, focus has
+    /// to be set, `focus_visible` has to start true, and the predicate has to resolve. Any
+    /// one of them failing leaves `focused()` looking perfect on three of the four.
+    #[test]
+    fn an_autofocused_node_opens_focused_and_visibly_so() {
+        let mut engine = ringed(0);
+        engine.tick().expect("tick");
+
+        assert_eq!(engine.focused(), 0, "focused before any input");
+        assert_eq!(
+            centre(&mut engine),
+            WHITE,
+            "and :focus-visible matched — measured, the modality bit starts set, so focus \
+             nobody asked for is still visible focus"
+        );
+    }
+
+    /// Without the flag nothing is focused, which is the control case for the above: a
+    /// `focus_visible` that starts true must not draw a ring on a document that has none.
+    #[test]
+    fn nothing_is_focused_when_nothing_claims_it() {
+        let mut engine = Engine::new(&config(2, 2)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            init_style(t, 0);
+            init_style(t, 1);
+            t.set_u32(STYLES, styles::BG, 0, BLACK);
+            t.set_u32(STYLES, styles::BG, 1, WHITE);
+            node(t, 0, 0, -1);
+            node(t, 1, 0, 0);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+            variant(t, 0, 0, predicate::FOCUS_VISIBLE, 0, 0, 1);
+            pad_variants(t, 1);
+            pad_controls(t, 0);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(engine.focused(), -1);
+        assert_eq!(centre(&mut engine), BLACK, "no focus, no ring");
+    }
+
+    /// The latch, and the reason it exists is dziri's rather than the browser's.
+    ///
+    /// Bun republishes the node table whenever any signal changes, so the `AUTOFOCUS` bit
+    /// is present on every commit for the life of the process. Re-reading it would drag
+    /// the caret back every time an unrelated counter ticked. Moving the flag to a
+    /// different node between ticks is the sharpest way to ask: if the second tick
+    /// consults the table at all, focus lands on node 1.
+    #[test]
+    fn autofocus_fires_once_even_though_the_flag_never_goes_away() {
+        let mut engine = ringed(0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 0);
+
+        {
+            let t = engine.tables_mut();
+            t.set_u8(NODES, nodes::FLAGS, 0, protocol::flags::INTERACTIVE);
+            t.set_u8(
+                NODES,
+                nodes::FLAGS,
+                1,
+                protocol::flags::INTERACTIVE | protocol::flags::AUTOFOCUS,
+            );
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(
+            engine.focused(),
+            0,
+            "the second commit's autofocus claim was ignored — the chance is spent"
+        );
+    }
+
+    /// The case that decided the design: a claim on a hidden route is walked past.
+    ///
+    /// Node 1 claims first and is inside a subtree the router has hidden — which on the
+    /// demo is the state of thirteen routes out of fourteen. Honouring the first claim
+    /// would put the keyboard on an invisible node and draw the ring nowhere, which is
+    /// worse than not focusing at all. Measured in Chromium first
+    /// (`probes/autofocus-hidden.html`): unfocusable claims are skipped, not obeyed and
+    /// not fatal.
+    #[test]
+    fn a_claim_that_is_not_showing_loses_to_one_that_is() {
+        let mut engine = Engine::new(&config(4, 2)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            init_style(t, 0);
+            init_style(t, 1);
+            t.set_u32(STYLES, styles::BG, 0, BLACK);
+            t.set_u32(STYLES, styles::BG, 1, WHITE);
+
+            // 0 root, 1 a hidden route holding 2, 3 a showing sibling.
+            node(t, 0, 0, -1);
+            node(t, 1, 0, 0);
+            node(t, 2, 0, 1);
+            node(t, 3, 0, 0);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, 1, 3);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 1, 2);
+            t.set_u8(NODES, nodes::HIDDEN, 1, 1);
+
+            let claim = protocol::flags::INTERACTIVE | protocol::flags::AUTOFOCUS;
+            t.set_u8(NODES, nodes::FLAGS, 2, claim);
+            t.set_u8(NODES, nodes::FLAGS, 3, claim);
+
+            variant(t, 0, 0, predicate::FOCUS_VISIBLE, 0, 0, 1);
+            pad_variants(t, 1);
+            pad_controls(t, 0);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(
+            engine.focused(),
+            3,
+            "the hidden route's claim was skipped, not obeyed"
+        );
+    }
+
+    /// And when every claim is hidden, nothing is focused — the chance is still spent.
+    ///
+    /// The other half of the rule, and the one that says a skipped claim is not deferred:
+    /// showing that route later must not suddenly pull focus into it, because by then the
+    /// user is somewhere and moving their caret is a worse failure than never having
+    /// focused anything.
+    #[test]
+    fn a_hidden_claim_with_no_alternative_focuses_nothing() {
+        let mut engine = Engine::new(&config(4, 2)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            init_style(t, 0);
+            init_style(t, 1);
+            t.set_u32(STYLES, styles::BG, 0, BLACK);
+            t.set_u32(STYLES, styles::BG, 1, WHITE);
+            node(t, 0, 0, -1);
+            node(t, 1, 0, 0);
+            node(t, 2, 0, 1);
+            node(t, 3, 0, 0);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, 1, 3);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 1, 2);
+            t.set_u8(NODES, nodes::HIDDEN, 1, 1);
+            t.set_u8(
+                NODES,
+                nodes::FLAGS,
+                2,
+                protocol::flags::INTERACTIVE | protocol::flags::AUTOFOCUS,
+            );
+            variant(t, 0, 0, predicate::FOCUS_VISIBLE, 0, 0, 1);
+            pad_variants(t, 1);
+            pad_controls(t, 0);
+        }
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), -1, "nothing showing claimed it");
+
+        // The route appears. Focus must not follow it in.
+        {
+            let t = engine.tables_mut();
+            t.set_u8(NODES, nodes::HIDDEN, 1, 0);
+        }
+        engine.tick().expect("tick");
+        assert_eq!(
+            engine.focused(),
+            -1,
+            "the chance was spent on the first frame"
+        );
+    }
+
+    /// Anything that already has focus beats `autofocus`, which is what makes it a default.
+    ///
+    /// `--focus` is the reachable case and the reason this was found: set the override,
+    /// tick, and without the guard `apply_autofocus` overwrites it — every `--focus`
+    /// screenshot of a page that happened to contain an `autofocus` would be of the wrong
+    /// node and would look entirely plausible. Verified by removing the guard and watching
+    /// this fail, because a passing test proves nothing about a branch it never took.
+    ///
+    /// The screenshot harness happens to tick before it applies flags, so the ordering
+    /// protects it today. That is the harness's business and could change; this is the
+    /// engine's rule, and it covers a press arriving in the same tick as well.
+    #[test]
+    fn an_explicit_focus_override_is_not_overwritten() {
+        let mut engine = ringed(1);
+        engine.set_input_state(-1, -1, 0);
+        engine.tick().expect("tick");
+
+        assert_eq!(engine.focused(), 0, "the override stood");
+    }
+
+    /// A tick with nothing uploaded must not spend the one chance.
+    ///
+    /// The empty-table guard, and it is not hypothetical: the host creates the engine and
+    /// ticks it, and whether the first tick sees a populated table depends on the order
+    /// two threads happen to run in. Latching on an empty table would make autofocus work
+    /// or not according to that race, which is the worst shape a bug can have.
+    #[test]
+    fn a_tick_before_anything_is_uploaded_does_not_spend_the_chance() {
+        let mut engine = Engine::new(&config(2, 2)).expect("engine");
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), -1, "nothing to focus yet");
+
+        {
+            let t = engine.tables_mut();
+            init_style(t, 0);
+            init_style(t, 1);
+            t.set_u32(STYLES, styles::BG, 0, BLACK);
+            t.set_u32(STYLES, styles::BG, 1, WHITE);
+            node(t, 0, 0, -1);
+            node(t, 1, 0, 0);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+            variant(t, 0, 0, predicate::FOCUS_VISIBLE, 0, 0, 1);
+            pad_variants(t, 1);
+            pad_controls(t, 0);
+            t.set_u8(
+                NODES,
+                nodes::FLAGS,
+                0,
+                protocol::flags::INTERACTIVE | protocol::flags::AUTOFOCUS,
+            );
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(engine.focused(), 0, "the upload still got its turn");
+    }
+}

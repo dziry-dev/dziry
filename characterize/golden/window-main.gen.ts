@@ -147,6 +147,9 @@ export const overlays = new Int32Array([335,347,357]);
 /** Nodes Tab can reach, sorted. The set; the order is a live walk of the tree. */
 export const tabStops = new Int32Array([9,10,11,12,13,14,15,16,17,18,19,20,63,64,65,72,73,74,75,82,83,84,85,92,93,94,95,136,137,263,268,273,291,296,301,311,314,317,330,342,352,375,433,434,457,458,461,465,543,544,610,611,631,632,633,731,732,800,801,945,946,947,948]);
 
+/** Nodes claiming `autofocus`, sorted. The engine focuses the first one showing. */
+export const autofocus = new Int32Array([]);
+
 /** Component-local state. Declared here because it has no name to import. */
 const local_0 = signal("drag across the quick-brown fox");   // typed
 const local_1 = signal("");   // also
