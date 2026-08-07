@@ -561,11 +561,25 @@ per-keystroke and `change` waits for blur. dziri's fields are `bind:value` signa
 per-keystroke half already exists, and the blur half is now expressible for the first time. That
 is the shape to build, not a duplicate event kind.
 
-Also missing: `autofocus`, implicit form submission, `onChange` inside a list row (the click path
-has `dispatchItem`; the change path does not), and a way for a control to *become* disabled at run
-time. Also unimplemented and now named: a keyboard activation has no press/release
-pairing, so holding Space and tabbing away activates whatever is focused at release — a browser
-cancels.
+Also missing, and each with the thing that has to happen first:
+
+- **`autofocus`** — **probe before building it.** One question is unmeasured and decides the
+  design: does focus arriving from `autofocus` match `:focus-visible`? If it does, every page
+  with an autofocused field opens wearing a ring, which is either right or a bug depending on an
+  answer nobody has. `probes/focus-visible.html` is the file to extend; the modality flag is one
+  assignment either way, so the cost is entirely in knowing which.
+- **Implicit form submission** — `<form>` *parses* (it reaches the IR as an ordinary element, so
+  selectors match it), and nothing else about it exists. Measured: Enter in a text field clicks
+  the form's submit button, a node nothing touched, so this is a lookup from field to form rather
+  than a row in the per-kind activation table.
+- **`onChange` inside a list row** — the click path has `dispatchItem`, which decomposes a node
+  into (slot, offset) so one compiled handler serves every row. The change path has no equivalent,
+  so a checkbox in a list reaches nothing.
+- **A control becoming disabled at run time** — `DISABLED` is re-read from the table on every
+  rescan because it is genuinely compile-time; a conditional class is today's answer.
+
+Also unimplemented and now named: a keyboard activation has no press/release pairing, so holding
+Space and tabbing away activates whatever is focused at release — a browser cancels.
 
 **Probe before writing Rust.** This was followed for activation and it paid for itself immediately —
 `probes/control-activation.html` found four things that would have been implemented backwards, the
