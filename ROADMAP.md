@@ -915,6 +915,43 @@ Still open, and none of it blocks a second overlay user:
 - **Nothing but a picker uses the layer yet.** A tooltip or a popover would be the test of
   whether the flag generalises; the design says it should, and that is untested.
 - `<optgroup>` labels do not render, and there is no type-to-select.
+- **`<select multiple>` compiles to a dropdown, which is the wrong shape rather than a missing
+  feature.** `multiple` reaches the IR as an attribute a selector can test and nothing else, so
+  the compiler still injects a closed button and a `::picker(select)` overlay.
+
+  Measured before designing it (`probes/select-multiple.html`, 2026-08-07), and the structure is
+  the good news: **an option inside a multiple is an ordinary in-flow block** with a box, a
+  computed style and an `offsetParent` — unlike a single select's options, which are browser
+  chrome. So a multiple needs no overlay, no `NodeFlags.OVERLAY` and no picker: it is a
+  scrolling box of block children, which dziri already lays out and paints. `:checked` tracks
+  the selection, so the existing option styling works unchanged.
+
+  What the measurement says has to be built:
+
+  - **The compiler stops injecting the picker** when `multiple` is present, and gives the select
+    `overflow-y: scroll` plus a height. The height is `size` **rows, defaulting to 4** — not
+    "all of them" and not "as many as fit". That default is the one awkward part: a height in
+    rows is a font metric, and dziri resolves lengths at build time with no `lh` unit, so this
+    needs a decision rather than a line of CSS.
+  - **Selection becomes a set.** Today `choose_option` clears the group, which is radio
+    semantics and exactly right for a single select. A plain click and a plain arrow still
+    replace the whole selection — measured — so the common path is unchanged; what is new is
+    `Shift+Arrow` extending, `Ctrl+A`, and `Ctrl+Space`.
+  - **A current option distinct from the selection**, because `Ctrl+Space` toggled `f` out of a
+    selection of `e,f`. That is the state `option:focus` already draws for a picker, so it costs
+    nothing new. `Ctrl+Arrow` does nothing, which usefully bounds it: the current option only
+    ever moves alongside a selection change.
+  - **`CHANGE` fires once per option whose selectedness changed**, not once per gesture — so a
+    multiple's event is a per-*option* `CHANGE` carrying a boolean, which is the checkbox shape
+    already in the protocol rather than v22's select shape. No new event kind.
+  - `Space` does nothing and `Enter` does nothing. Both are measured, and `Space` is worth
+    naming because it activates a checkbox and opens a single select.
+
+  **Still unmeasured, and it must not be guessed: ctrl+click and shift+click.** The probe's rows
+  for those are an artifact — the first ctrl+click on any option selected the option *above* the
+  one it hit, confirmed against the option's own `mousedown` listener. That is the runner, in the
+  same family as the textless-Enter bug, and `BROWSER-FACTS.md` records it as unresolved. A
+  measurement of modified clicks is the first step, not the last.
 
 ### B2 · Positioning
 Adapter for `@floating-ui/core`, which is platform-agnostic by design (built that way for React

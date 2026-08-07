@@ -1,0 +1,192 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>select-multiple</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  #stage { display: flex; gap: 24px; align-items: flex-start }
+</style>
+<h3>what is a &lt;select multiple&gt;, structurally and behaviourally?</h3>
+<div id="stage">
+  <select id="ms" multiple>
+    <option value="a">alpha</option>
+    <option value="b">bravo</option>
+    <option value="c">charlie</option>
+    <option value="d">delta</option>
+    <option value="e">echo</option>
+    <option value="f">foxtrot</option>
+  </select>
+  <select id="sized" multiple size="2">
+    <option>one</option>
+    <option>two</option>
+    <option>three</option>
+  </select>
+  <!--
+    A second copy with `size="6"`, and it exists because the first run of this probe
+    measured nothing for three steps. `#ms` shows only four of its six options —
+    `scrollHeight/clientHeight` is 102/68 — so the rects taken at load for options 5 and 6
+    are *below* the visible box, and clicking there hit the body. The rows read
+    "ctrl+click did nothing", which is exactly what a real finding would look like.
+  -->
+  <select id="gest" multiple size="6">
+    <option value="a">alpha</option>
+    <option value="b">bravo</option>
+    <option value="c">charlie</option>
+    <option value="d">delta</option>
+    <option value="e">echo</option>
+    <option value="f">foxtrot</option>
+  </select>
+  <select id="single">
+    <option>x</option>
+    <option>y</option>
+  </select>
+</div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * dziri has a `<select>` that opens a picker, and `multiple` is only an attribute a
+   * selector can test — so `<select multiple>` currently compiles to a dropdown, which is
+   * not merely incomplete but the wrong *shape*. Before any of it is written down:
+   *
+   * 1. **Is there a picker at all?** A single select's options are browser chrome, which
+   *    is why `select-picker.html` had to opt into `appearance: base-select` to see them.
+   *    If a multiple's options are ordinary in-flow boxes, they have computed styles and
+   *    dziri needs no overlay for them — a completely different implementation.
+   * 2. **How tall is it with no `size`?** The box has to come from somewhere and "four
+   *    rows" is folklore.
+   * 3. **What does a plain click do** — add to the selection, or replace it? Ctrl+click,
+   *    Shift+click. Everyone has a different memory of this and the platforms differ.
+   * 4. **What do the arrows do?** In a single select they move *and* commit. Here they
+   *    might move a focus ring without selecting, which would be a third piece of state
+   *    dziri does not have.
+   * 5. **Space**, which activates a checkbox and opens a single select.
+   * 6. **What fires** — one `change` per toggle, or one per gesture?
+   */
+
+  const ms = document.getElementById("ms");
+  const sized = document.getElementById("sized");
+  const gest = document.getElementById("gest");
+  const single = document.getElementById("single");
+
+  const sel = (node) => [...node.selectedOptions].map((o) => o.value || o.text).join(",") || "-";
+  const events = [];
+
+  /**
+   * Which option the pointer actually landed on, reported by the option itself.
+   *
+   * Inferring it from the selection is what produced a wrong reading: `ctrl+click`
+   * on `rects[5]` came back as a selection of `d,e`, one row above the option it
+   * named, and the row was indistinguishable from a real finding about ctrl+click.
+   * A rect taken at load and a selection read afterwards are two inferences with a
+   * gap between them; a listener on the element is an observation.
+   */
+  let hit = "";
+  for (const o of gest.options) {
+    o.addEventListener("mousedown", () => { hit = o.value || o.text; });
+  }
+  for (const n of [ms, sized, gest]) {
+    for (const kind of ["change", "input", "click"]) {
+      n.addEventListener(kind, () => events.push(kind));
+    }
+  }
+
+  const box = (node) => {
+    const r = node.getBoundingClientRect();
+    return `${Math.round(r.width)}x${Math.round(r.height)}`;
+  };
+
+  // --- structure, before any input ---------------------------------------------------
+  log("=== structure ===");
+  log(`select[multiple]        box ${box(ms)}   6 options, no size`);
+  log(`select[multiple size=2] box ${box(sized)}   3 options`);
+  log(`select (single)         box ${box(single)}   2 options`);
+
+  const opt = ms.options[0];
+  const cs = getComputedStyle(opt);
+  // The load-bearing question. If an option in a multiple has a real computed style and a
+  // real box, it is an ordinary element and dziri needs no picker overlay for it.
+  log("");
+  log(`option[0] box           ${box(opt)}`);
+  log(`option[0] display       ${cs.display}`);
+  log(`option[0] padding       ${cs.paddingTop} ${cs.paddingRight} ${cs.paddingBottom} ${cs.paddingLeft}`);
+  log(`option[0] offsetParent  ${opt.offsetParent ? opt.offsetParent.tagName.toLowerCase() : "null"}`);
+  log(`overflow-y on select    ${getComputedStyle(ms).overflowY}`);
+  log(`scrollHeight/clientH    ${ms.scrollHeight}/${ms.clientHeight}`);
+  log(`#gest box ${box(gest)} scroll ${gest.scrollHeight}/${gest.clientHeight}  option h ${Math.round(gest.options[0].getBoundingClientRect().height)}`);
+  log("");
+
+  const rects = [...gest.options].map((o) => {
+    const r = o.getBoundingClientRect();
+    return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+  });
+
+  // Each step reports the selection *and* which events it produced, because "one change
+  // per gesture" and "one per option toggled" are different implementations.
+  const plan = [
+    // Isolated first, because the ctrl+click rows below came back internally inconsistent:
+    // `hit` said foxtrot and the selection said echo. A middle option, from a clean state,
+    // with nothing before it — if this row is also off by one the cause is the dispatch and
+    // not the gesture.
+    ["plain click alpha", { ...rects[0], down: 1, up: 1 }],
+    ["ctrl+click charlie", { ...rects[2], down: 1, up: 1, modifiers: 2 }],
+    ["ctrl+click charlie again", { ...rects[2], down: 1, up: 1, modifiers: 2 }],
+
+    ["click bravo", { ...rects[1], down: 1, up: 1 }],
+    ["click delta (plain)", { ...rects[3], down: 1, up: 1 }],
+    ["ctrl+click foxtrot", { ...rects[5], down: 1, up: 1, modifiers: 2 }],
+    ["ctrl+click foxtrot again", { ...rects[5], down: 1, up: 1, modifiers: 2 }],
+    ["shift+click alpha", { ...rects[0], down: 1, up: 1, modifiers: 8 }],
+    ["plain click charlie", { ...rects[2], down: 1, up: 1 }],
+
+    // Keyboard. A single select's arrows move the highlight *and* commit; if a multiple's
+    // arrows do the same then a range cannot be built with the keyboard at all, and if
+    // they do not then there is a focus-within-the-list that is not the selection — which
+    // is a third piece of state dziri would have to hold.
+    ["ArrowDown", { key: "ArrowDown" }],
+    ["ArrowDown", { key: "ArrowDown" }],
+    ["Space", { key: " " }],
+    ["Shift+ArrowDown", { key: "ArrowDown", modifiers: 8 }],
+    ["Shift+ArrowDown", { key: "ArrowDown", modifiers: 8 }],
+    ["Ctrl+ArrowDown", { key: "ArrowDown", modifiers: 2 }],
+    ["Ctrl+Space", { key: " ", modifiers: 2 }],
+    ["Ctrl+a", { key: "a", modifiers: 2 }],
+    ["Home", { key: "Home" }],
+    ["End", { key: "End" }],
+    // Does Enter do anything at all here? There is nothing to commit.
+    ["Enter", { key: "Enter" }],
+  ];
+
+  window.__probeMouse = plan.map(([, s]) => s);
+  const labels = plan.map(([l]) => l);
+
+  // Every gesture below runs on `#gest`, whose six options are all visible — so a rect
+  // taken at load still points at the option it names.
+  log("=== gestures (select[multiple size=6], nothing clipped) ===");
+  window.__probeStep = (i) => {
+    const active = document.activeElement;
+    const name = active === gest ? "select" : active?.tagName?.toLowerCase() ?? "?";
+    log(
+      (labels[i] ?? `step ${i}`).padEnd(26) +
+        " hit=" + (hit || "-").padEnd(4) +
+        " selected=" + sel(gest).padEnd(14) +
+        " active=" + name.padEnd(8) +
+        " events=[" + (events.join(",") || "none") + "]",
+    );
+    events.length = 0;
+    hit = "";
+  };
+
+  window.__probeMouseDone = () => {
+    log("");
+    // `:checked` is how dziri draws a committed option, so whether it tracks a
+    // multiple's selection decides whether the same styling path works here.
+    log("does :checked follow the selection?");
+    for (const o of gest.options) {
+      log(`  ${(o.value || o.text).padEnd(8)} selected=${String(o.selected).padEnd(5)} :checked=${o.matches(":checked")}`);
+    }
+    report();
+  };
+
+  document.title = "ready";
+</script>

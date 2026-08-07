@@ -1793,3 +1793,85 @@ button is disabled and whether the focused node is a text area.
 
 `type="submit"` and `type="button"` have no meaning in dziri today, so the default-button rule
 needs the attribute read before any of this can be faithful.
+
+---
+
+## `<select multiple>` is a different element wearing the same tag
+
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/select-multiple.html`.
+Two runs, identical. One section is deliberately left unresolved — see the end.**
+
+Asked because dziri's `<select>` is a closed button plus a `::picker(select)` overlay, and
+`multiple` is currently only an attribute a selector can test — so `<select multiple>`
+compiles to a dropdown today, which is not incomplete but the wrong *shape*.
+
+### Structure — and this is the finding that decides the implementation
+
+| | |
+|---|---|
+| `select[multiple]`, 6 options, no `size` | box **60×70**, `clientHeight` 68 |
+| `select[multiple size=2]`, 3 options | box **51×36** |
+| `select` (single), 2 options | box 29×19 |
+| `option` inside a multiple | box **43×17**, `display: block`, padding `0 2px 1px 2px` |
+| `option.offsetParent` | **`body`** — it is in flow |
+| `select` `overflow-y` | **`scroll`** |
+| `scrollHeight/clientHeight` | 102 / 68 |
+
+1. **An option in a multiple is an ordinary in-flow element.** It has a box, a `display`,
+   a computed style and an `offsetParent`. A *single* select's options are browser chrome —
+   `select-picker.html` had to opt into `appearance: base-select` to see them at all. So a
+   multiple needs **no overlay, no picker, and no `NodeFlags.OVERLAY`**: it is a scrolling
+   box of block children, which dziri can already lay out and paint.
+2. **The default height is four rows.** 68px of client height at 17px per option, with six
+   options present. Not "as many as fit" and not all of them — a constant.
+   `size="2"` gives two. So `size` is a height in rows, defaulting to 4.
+3. **It scrolls rather than growing**, which is `overflow-y: scroll` plus that fixed height.
+
+### Keyboard — every row of this is trustworthy, since it needs no coordinates
+
+| key | result |
+|---|---|
+| `ArrowDown` / `ArrowUp` | moves the selection by one and **replaces** it |
+| `Home` / `End` | selects the first / last, replacing |
+| `Shift+ArrowDown` | **extends** the selection; clamps at the end, firing nothing |
+| `Ctrl+ArrowDown` | **nothing at all** |
+| `Space` | **nothing** |
+| `Ctrl+Space` | toggles the current option — `e,f` became `e` |
+| `Ctrl+A` | selects every option |
+| `Enter` | nothing — there is nothing to commit |
+
+4. **A plain arrow replaces the selection**, exactly as in a single select. So the common
+   case needs no new state.
+5. **But `Ctrl+Space` toggles "the current option"**, and it deselected `f` while the
+   selection was `e,f` — so there *is* a current option distinct from the selection, and
+   dziri would need it. It is the same thing `option:focus` already draws for a picker.
+6. **`Ctrl+Arrow` does nothing**, so the current option cannot be moved without changing
+   the selection. That bounds how much state is reachable: current-option moves only ever
+   accompany a selection change or a `Ctrl+Space`.
+7. `Space` doing nothing is worth knowing because it activates a checkbox and opens a
+   single select. Three meanings for one key, all measured.
+8. **`:checked` follows the selection**, so dziri's existing option styling path works
+   unchanged.
+
+### Events
+
+`input` then `change`, and **one pair per option whose selectedness changed** — not one per
+gesture. A plain click that replaced a selection fired two pairs (one deselect, one select);
+a click that only added fired one. Clamping at the end of the list fired none.
+
+### Unresolved: ctrl+click and shift+click
+
+**Not recorded as behaviour, because the instrument is wrong and the rows look plausible.**
+The *first* ctrl+click on any option consistently selected the option **above** the one that
+was hit, with two `input`/`change` pairs; a *second* ctrl+click on the same coordinates then
+selected the right one, with one pair. Reproducible, and confirmed against the option's own
+`mousedown` listener — `hit=c` while the selection became `a,b`.
+
+Ctrl+clicking an option to select its neighbour is not behaviour any browser ships, so this
+is the runner or CDP's modifier handling, in the same family as the textless-Enter bug that
+made a probe report "Enter does not activate a button". **dziri must not implement
+ctrl/shift-click from this table**; it needs a separate measurement first, probably driving
+the modifier as an explicit `Input.dispatchMouseEvent` sequence rather than a step flag.
+
+What *is* safe from the pointer rows: a plain click replaces the selection with the one
+option hit, and `hit=` matched the intended option on every plain click.
