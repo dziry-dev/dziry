@@ -24,6 +24,16 @@ export type Element = {
    */
   onClick: unknown;
   /**
+   * The change handler as authored — a function in JSX, a name string from an
+   * `onchange` attribute. Same reverse-mapping to an export name as [`onClick`].
+   *
+   * A *separate* field rather than a kind on one handler, because an element can
+   * legitimately have both: a checkbox inside a clickable row has an `onClick` that
+   * belongs to the row and an `onChange` that belongs to the box, and one slot would
+   * make the author choose.
+   */
+  onChange: unknown;
+  /**
    * Classes applied while a boolean signal is true: `{ light: isLight }`.
    *
    * The compiler compiles each of these into a *style-table patch* — it resolves
@@ -144,6 +154,7 @@ export function parseHtml(src: string): Element {
     classes: [],
     children: [],
     onClick: null,
+    onChange: null,
     classWhen: null,
     bindValue: null,
     style: null,
@@ -223,6 +234,7 @@ export function parseHtml(src: string): Element {
         classes: [],
         children: [{ type: "text", value: src.slice(i, close) }],
         onClick: null,
+        onChange: null,
         classWhen: null,
         bindValue: null,
         style: null,
@@ -241,6 +253,7 @@ export function parseHtml(src: string): Element {
       classes: (attrs.get("class") ?? "").split(/\s+/).filter(Boolean),
       children: [],
       onClick: attrs.get("onclick") ?? null,
+      onChange: attrs.get("onchange") ?? null,
       classWhen: null,
       bindValue: null,
       style: attrs.get("style") ?? null,

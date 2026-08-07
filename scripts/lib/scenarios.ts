@@ -23,6 +23,20 @@
  * the first select's button — which is what the scenario actually means. Edit the demo and
  * they follow. `transform-hover` and `hover-nav` still carry literals because a hovered
  * button has no role to look up; their comments carry the warning instead.
+ *
+ * # What a golden cannot cover
+ *
+ * **The app's reaction to an input.** The screenshot path in `host/main.ts` runs its
+ * gestures, ticks once and writes the PNG; the loop that drains events to the worker never
+ * runs, so nothing is posted, no handler fires, and no signal a handler writes is on
+ * screen. A golden proves the *engine's* answer — the box ticks, the picker opens, the
+ * caret lands — and stops there.
+ *
+ * Worth knowing before reading one as a failure. The demo grew an `onChange` that reports
+ * what it received; `controls-checked` ticks the box and the readout beside it still says
+ * "nothing yet". That reads exactly like a broken handler and is a boundary of this
+ * harness — the handler is covered end to end in `upload.test.ts`, which drives the engine
+ * and drains the queue itself.
  */
 import * as main from "../../windows/main/ui.gen.ts";
 import { ControlKind } from "../../src/ir.ts";

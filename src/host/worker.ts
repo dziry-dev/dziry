@@ -31,7 +31,13 @@ import { Uploader, type TableHost } from "../engine/upload.ts";
 import { EventKind } from "../protocol/generated.ts";
 import { acquire, publish, release } from "./channel.ts";
 import type { ToMain, ToWorker } from "./messages.ts";
-import { applyTextBindings, subscribeBindings, dispatch, typeInto } from "../runtime/bindings.ts";
+import {
+  applyTextBindings,
+  subscribeBindings,
+  dispatch,
+  dispatchChange,
+  typeInto,
+} from "../runtime/bindings.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
 import type { Signal } from "../runtime/signal.ts";
 import { updateLists, subscribeLists, dispatchItem } from "../runtime/list-runtime.ts";
@@ -343,6 +349,14 @@ function start(
               // offset); a plain handler is looked up by node. Both batch, so one
               // click costs one repaint however many signals it writes.
               if (!dispatchItem(ui, listBindings, e.node)) dispatch(ui, e.node);
+              break;
+
+            case EventKind.CHANGE:
+              // The queue the engine has been filling since v13 and nobody drained. A
+              // checkbox has been flipping its own bit and telling the app nothing, which
+              // is why `onChange` could not exist: the event was there, the subscriber
+              // was not.
+              dispatchChange(ui, e.node, e.a);
               break;
 
             case EventKind.TEXT_INPUT:

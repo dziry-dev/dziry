@@ -488,7 +488,15 @@ export type TextBinding = {
 
 export type HandlerBinding = {
   node: number;
-  fn: () => void;
+  /**
+   * Which event runs it — the same column `BuiltHandler` carries.
+   *
+   * The argument differs with it, which is why the two dispatch paths are separate
+   * functions rather than one with a branch: a click handler is called with the list
+   * item and index (or nothing), a change handler with the control's new value.
+   */
+  kind: "click" | "change";
+  fn: (value?: unknown) => void;
 };
 
 export type CompiledUi = {

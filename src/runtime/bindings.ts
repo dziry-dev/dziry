@@ -8,6 +8,7 @@
  * signal.
  */
 import type { CompiledUi } from "../ir.ts";
+import { ControlKind } from "../protocol/generated.ts";
 import { batch, type Signal } from "./signal.ts";
 
 /**
@@ -174,10 +175,14 @@ export function typeInto(
   return true;
 }
 
-/** The handler bound to a node, or null. */
-export function handlerFor(ui: CompiledUi, node: number): (() => void) | null {
+/** The handler of a kind bound to a node, or null. */
+export function handlerFor(
+  ui: CompiledUi,
+  node: number,
+  kind: "click" | "change" = "click",
+): ((value?: unknown) => void) | null {
   for (const h of ui.handlers) {
-    if (h.node === node) return h.fn;
+    if (h.node === node && h.kind === kind) return h.fn;
   }
   return null;
 }
@@ -194,5 +199,43 @@ export function dispatch(ui: CompiledUi, node: number): boolean {
   const fn = handlerFor(ui, node);
   if (!fn) return false;
   batch(fn);
+  return true;
+}
+
+/**
+ * Runs a node's `onChange`, with the control's new value.
+ *
+ * Separate from [`dispatch`] rather than a flag on it, because the *argument* is what
+ * differs and it differs in kind: a click handler takes the list item and index, a change
+ * handler takes a value. One function taking both would have to decide which to pass by
+ * inspecting the handler it is about to call.
+ *
+ * The value arrives from the engine as one integer whose meaning is the control's kind —
+ * see `EventKind.CHANGE`. Converting it here rather than in the app is deliberate: the
+ * integer encoding is a protocol detail, and an author writing
+ * `onChange={(on) => setOn(on)}` on a checkbox should get a boolean, not a 1. The lookup
+ * is the same `controls` table the engine reads, so the two cannot disagree about which
+ * kind a node is.
+ */
+export function dispatchChange(ui: CompiledUi, node: number, raw: number): boolean {
+  const fn = handlerFor(ui, node, "change");
+  if (!fn) return false;
+
+  let kind: number = ControlKind.NONE;
+  for (let r = 0; r < ui.controls.count; r++) {
+    if (ui.controls.node[r] === node) {
+      kind = ui.controls.kind[r]!;
+      break;
+    }
+  }
+
+  // A checkbox and a radio carry checkedness; a select carries the chosen index, which is
+  // already the number an author wants. Anything else passes the integer through rather
+  // than guessing — an unknown kind is a kind this function has not been taught, and
+  // inventing a conversion for it would be inventing behaviour.
+  const value =
+    kind === ControlKind.CHECKBOX || kind === ControlKind.RADIO ? raw === 1 : raw;
+
+  batch(() => fn(value));
   return true;
 }

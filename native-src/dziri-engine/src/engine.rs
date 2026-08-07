@@ -2423,6 +2423,15 @@ impl Engine {
         };
         let select = self.painter.open_select();
 
+        // Which option this is, read *before* the close — `open_options` walks the picker of
+        // the select that is open, and closing clears that. It rides on the `CHANGE` below
+        // because a host needs to know *what* was chosen, and the option's node id is not
+        // that: node ids are an implementation detail an author never sees, while the index
+        // is the position in the list they wrote.
+        let mut options = Vec::new();
+        self.painter.open_options(&self.tables, nodes, &mut options);
+        let chosen = options.iter().position(|&o| o == act.node);
+
         // Before the close, which clears `open_select`.
         let relabelled = self
             .painter
@@ -2447,10 +2456,19 @@ impl Engine {
             ..Default::default()
         });
         if act.changed {
+            // **`CHANGE` is on the select, not on the option**, and `a` is the chosen
+            // index. Measured: `probes/select-picker.html` listens on the `<select>` and
+            // that is where `input` and `change` arrive; the option is not the element a
+            // browser reports the change of.
+            //
+            // It fired on the option here until an `onChange` handler existed to receive
+            // it, which is how a queue nobody drains stays wrong quietly. The `CLICK` above
+            // stays on the option deliberately — dziri has no bubbling, so the node a click
+            // names is the node that was clicked, and for a picker that really is the row.
             self.events.push(Event {
                 kind: event_kind::CHANGE,
-                node: act.node,
-                a: 1,
+                node: select,
+                a: chosen.map_or(-1, |i| i as i32),
                 x,
                 y,
                 ..Default::default()

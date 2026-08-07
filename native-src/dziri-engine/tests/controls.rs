@@ -774,6 +774,49 @@ mod keyboard {
         );
     }
 
+    /// **A commit reports the select, not the option, and says which one.**
+    ///
+    /// Measured: `probes/select-picker.html` listens on the `<select>` and that is where
+    /// `input` and `change` arrive. The engine named the option and carried a constant 1
+    /// until an `onChange` handler existed to receive it — a queue nobody drains can be
+    /// wrong indefinitely without anything failing, which is why this assertion is worth
+    /// more than it looks.
+    ///
+    /// The index rather than the node id, because an id is an implementation detail an
+    /// author never sees and the index is the position in the list they wrote.
+    #[test]
+    fn committing_reports_the_select_and_the_chosen_index() {
+        let mut engine = two_option_select();
+        focus_by_clicking(&mut engine);
+        engine.key_down(keys::RETURN, 0);
+        engine.tick().expect("tick");
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+
+        let mut out = [dziri_engine::engine::Event::default(); 16];
+        let n = engine.drain_events(&mut out);
+        let _ = n;
+
+        engine.key_down(keys::RETURN, 0);
+        engine.tick().expect("tick");
+        let n = engine.drain_events(&mut out);
+        let change = out[..n]
+            .iter()
+            .find(|e| e.kind == protocol::event_kind::CHANGE)
+            .expect("a commit fires CHANGE");
+
+        assert_eq!(change.node, 2, "the select, not the option");
+        assert_eq!(change.a, 1, "the second option, by index");
+
+        // And the CLICK still names the row, because dziri has no bubbling — the two
+        // events answer different questions and only one of them was retargeted.
+        let click = out[..n]
+            .iter()
+            .find(|e| e.kind == protocol::event_kind::CLICK)
+            .expect("a commit fires CLICK too");
+        assert_eq!(click.node, 5, "the option that was chosen");
+    }
+
     /// Home and End jump to the ends of the list. Measured 2026-08-06 in the run that
     /// settled the clamp, and absent until then — a list that answers arrows but not Home is
     /// one a keyboard user notices immediately.

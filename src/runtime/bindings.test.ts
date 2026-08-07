@@ -9,8 +9,15 @@
  */
 import { expect, test } from "bun:test";
 
-import { MAX_SLOT_CHARS, typeInto, type EditableRef } from "./bindings.ts";
+import {
+  MAX_SLOT_CHARS,
+  dispatchChange,
+  handlerFor,
+  typeInto,
+  type EditableRef,
+} from "./bindings.ts";
 import { signal } from "./signal.ts";
+import { ControlKind, type CompiledUi } from "../ir.ts";
 
 function editable(initial: string) {
   const value = signal(initial);
@@ -211,4 +218,92 @@ test("the caret counts characters, not UTF-16 units", () => {
   const two = editable("😀a");
   expect(typeInto(two.refs, 7, { text: null, erase: "backward", caret: 1 })).toBe(true);
   expect(two.value.value).toBe("a");
+});
+
+/**
+ * `onChange` — the handler the engine has been able to fire since v13 and could not
+ * reach, because nothing drained the `CHANGE` queue.
+ *
+ * These test the conversion rather than the plumbing, because the conversion is where
+ * the decision is: the engine hands over one integer whose meaning is the control's
+ * kind, and an author writing `onChange={(on) => setOn(on)}` on a checkbox should get a
+ * boolean rather than a 1.
+ */
+function uiWith(
+  handlers: Array<{ node: number; kind: "click" | "change"; fn: (v?: unknown) => void }>,
+  controls: Array<{ node: number; kind: number }>,
+) {
+  return {
+    handlers,
+    controls: {
+      count: controls.length,
+      node: Int32Array.from(controls.map((c) => c.node)),
+      kind: Uint8Array.from(controls.map((c) => c.kind)),
+    },
+  } as unknown as CompiledUi;
+}
+
+test("a checkbox's onChange receives a boolean, not the wire integer", () => {
+  const seen: unknown[] = [];
+  const ui = uiWith(
+    [{ node: 4, kind: "change", fn: (v) => seen.push(v) }],
+    [{ node: 4, kind: ControlKind.CHECKBOX }],
+  );
+
+  expect(dispatchChange(ui, 4, 1)).toBe(true);
+  expect(dispatchChange(ui, 4, 0)).toBe(true);
+  expect(seen).toEqual([true, false]);
+});
+
+test("a select's onChange receives the chosen index", () => {
+  // Not a boolean and not a node id. The index is the position in the list the author
+  // wrote, which is the only one of the three they can act on without reading the IR.
+  const seen: unknown[] = [];
+  const ui = uiWith(
+    [{ node: 9, kind: "change", fn: (v) => seen.push(v) }],
+    [{ node: 9, kind: ControlKind.SELECT }],
+  );
+
+  expect(dispatchChange(ui, 9, 2)).toBe(true);
+  expect(seen).toEqual([2]);
+});
+
+test("click and change handlers on one node do not answer for each other", () => {
+  // The reason `handlers` grew a `kind` column rather than being looked up by node
+  // alone: a checkbox inside a clickable row has an `onClick` that belongs to the row
+  // and an `onChange` that belongs to the box, and dispatching by node would fire
+  // whichever was emitted first.
+  const fired: string[] = [];
+  const ui = uiWith(
+    [
+      { node: 4, kind: "click", fn: () => fired.push("click") },
+      { node: 4, kind: "change", fn: () => fired.push("change") },
+    ],
+    [{ node: 4, kind: ControlKind.CHECKBOX }],
+  );
+
+  expect(dispatchChange(ui, 4, 1)).toBe(true);
+  expect(fired).toEqual(["change"]);
+  expect(handlerFor(ui, 4, "click")).not.toBeNull();
+});
+
+test("a node with no change handler is not a change dispatch", () => {
+  const ui = uiWith(
+    [{ node: 4, kind: "click", fn: () => {} }],
+    [{ node: 4, kind: ControlKind.CHECKBOX }],
+  );
+  expect(dispatchChange(ui, 4, 1)).toBe(false);
+});
+
+test("an unknown kind passes the integer through rather than guessing", () => {
+  // A kind this function has not been taught is a kind whose value it cannot interpret.
+  // Inventing a conversion would be inventing behaviour; passing the wire value through
+  // at least keeps the information.
+  const seen: unknown[] = [];
+  const ui = uiWith(
+    [{ node: 4, kind: "change", fn: (v) => seen.push(v) }],
+    [{ node: 4, kind: ControlKind.BUTTON }],
+  );
+  expect(dispatchChange(ui, 4, 7)).toBe(true);
+  expect(seen).toEqual([7]);
 });

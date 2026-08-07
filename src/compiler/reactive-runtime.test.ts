@@ -106,11 +106,21 @@ test("a component-local signal round-trips through the artifact", async () => {
   // Found by shape rather than by node id, which moves whenever the page does. An
   // inline handler is a function the artifact *contains*, so its own source names the
   // local it writes — nothing else in the module looks like that.
+  //
+  // **Not an exact count.** This asserted `toHaveLength(2)` and was really asserting
+  // that the counter is the only component-local state in the whole demo, which stopped
+  // being true the moment the controls page wired an `onChange` to a local. That is a
+  // census of an unrelated page, not a fact about the round trip — so it now asks the
+  // question it means: the counter's pair is present, and they are two different
+  // handlers rather than one found twice.
   const inline = ui.handlers.filter((h) => /\blocal_\d+\b/.test(h.fn.toString()));
-  expect(inline).toHaveLength(2);
+  expect(inline.length).toBeGreaterThanOrEqual(2);
 
   const plus = inline.find((h) => h.fn.toString().includes("+"))!;
   const minus = inline.find((h) => h.fn.toString().includes("-"))!;
+  expect(plus).toBeDefined();
+  expect(minus).toBeDefined();
+  expect(plus).not.toBe(minus);
 
   /** Every signal any binding holds, so a change can be located rather than assumed. */
   const cells = ui.textBindings

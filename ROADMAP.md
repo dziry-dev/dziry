@@ -513,11 +513,27 @@ rule would give all 986 demo nodes a variant run instead of 62. Scoped it still 
 slots, which is the standing price of precomputing states and is recorded in `ua-sheet.ts` rather
 than absorbed quietly.
 
-Still missing: `onChange`/`onInput` reaching a handler (the engine queues a `CHANGE` event and no host consumes it yet), a focus/blur event kind
-at all (`EventKind::FOCUS` is the *window*'s), `autofocus`, `tabindex` in any form, implicit form
-submission, and a way for a control to *become* disabled at run time. Also unimplemented and now
-named: a keyboard activation has no press/release pairing, so holding Space and tabbing away
-activates whatever is focused at release — a browser cancels.
+**`onChange` reaches a handler** (protocol v22). The `CHANGE` queue had been filled since v13 and
+drained by nobody, so a checkbox could flip its own bit and tell the app nothing — the event
+existed and the subscriber did not, which is the quietest kind of missing feature. `handlers`
+gained a `kind` column rather than a second table, because everything except the *argument* is
+shared; the argument is what forced two dispatch functions.
+
+Two things fell out of finally reading the queue. A select's `CHANGE` **named the option and
+carried a constant 1**, where a browser reports the change of the *select* — measured, and wrong
+here since v18 without anything failing, because a wrong event in a queue nobody reads is
+indistinguishable from a right one. It now names the select and carries the chosen **index**,
+which is the position in the list the author wrote rather than a node id they never see. And the
+integer is converted per kind at the boundary, so `onChange` on a checkbox hands over a boolean:
+the wire encoding is a protocol detail and should not reach app code.
+
+Still missing: `onInput` (only `CHANGE` is emitted — the measured `input`-then-`change` pair is
+half implemented), a focus/blur event kind at all (`EventKind::FOCUS` is the *window*'s),
+`autofocus`, `tabindex` in any form, implicit form submission, `onChange` inside a list row (the
+click path has `dispatchItem`; the change path does not), and a way for a control to *become*
+disabled at run time. Also unimplemented and now named: a keyboard activation has no press/release
+pairing, so holding Space and tabbing away activates whatever is focused at release — a browser
+cancels.
 
 **Probe before writing Rust.** This was followed for activation and it paid for itself immediately —
 `probes/control-activation.html` found four things that would have been implemented backwards, the

@@ -36,6 +36,7 @@ import {
   ControlFlags,
   ControlKind,
   Display,
+  EventKind,
   FlexWrap,
   NodeKind,
   Position,
@@ -43,7 +44,7 @@ import {
 import { INITIAL_STYLE, type CompiledUi, type StyleField } from "../ir.ts";
 import { Engine } from "./host.ts";
 import { NUMBER_FIELDS, Uploader, capacitiesFor } from "./upload.ts";
-import { applyTextBindings, typeInto } from "../runtime/bindings.ts";
+import { applyTextBindings, dispatchChange, typeInto } from "../runtime/bindings.ts";
 import { updateLists, type ListBindingRef } from "../runtime/list-runtime.ts";
 import { applyStylePatches, type StylePatchRef } from "../runtime/patches.ts";
 import { buildUi, requireRoute, showRoute } from "../host/window-state.ts";
@@ -957,4 +958,93 @@ test("a short viewport overflows rather than squeezing the rows", () => {
 
   expect(roomy).toBeGreaterThan(0);
   expect(cramped).toBeCloseTo(roomy, 0);
+});
+
+/**
+ * A press reaches the app's `onChange` — the whole round trip, through the real engine.
+ *
+ * The unit tests either side of this seam pass with the seam broken: `controls.rs`
+ * proves the engine *emits* a `CHANGE`, and `bindings.test.ts` proves `dispatchChange`
+ * converts and routes one. Neither notices if the event never leaves the queue, which is
+ * precisely the state this feature was in for four protocol versions.
+ *
+ * **A golden cannot cover this**, which is why it is here. The screenshot path in
+ * `host/main.ts` runs its gestures, ticks once and writes the PNG; the loop that drains
+ * events to the worker never runs. So a golden shows the engine's own state change — the
+ * box ticks — and can never show what the app did about it.
+ */
+test("a click on a checkbox reaches its onChange with a boolean", () => {
+  const { ui, engine } = load("controls", 1400);
+
+  const box = [...ui.controls.node].find(
+    (node, row) => ui.controls.kind[row] === ControlKind.CHECKBOX && engine.bounds(node)[2] > 0,
+  );
+  expect(box, "the controls route shows a checkbox").toBeDefined();
+
+  // The handler the demo wired, found the same way the round-trip test finds inline
+  // handlers: by what its source names, not by a node id that moves.
+  const handler = ui.handlers.find((h) => h.node === box && h.kind === "change");
+  expect(handler, "the first checkbox carries an onChange").toBeDefined();
+
+  const seen: unknown[] = [];
+  const spy = { ...handler!, fn: (v?: unknown) => seen.push(v) };
+  const spied = { ...ui, handlers: [spy] } as CompiledUi;
+
+  engine.clickNode(box!);
+  for (const e of engine.drainEvents()) {
+    if (e.kind === EventKind.CHANGE) dispatchChange(spied, e.node, e.a);
+  }
+
+  expect(seen).toEqual([true]);
+
+  // And unticking reports the other way, which is the half a "did it fire" assertion
+  // would miss: a handler wired to the click rather than to the change would report
+  // `true` both times.
+  seen.length = 0;
+  engine.clickNode(box!);
+  for (const e of engine.drainEvents()) {
+    if (e.kind === EventKind.CHANGE) dispatchChange(spied, e.node, e.a);
+  }
+  expect(seen).toEqual([false]);
+
+  engine.close();
+});
+
+test("committing an option reaches the select's onChange with the chosen index", () => {
+  const { ui, engine } = load("controls", 1400);
+  const select = shownSelects(engine, ui)[0]!;
+
+  const handler = ui.handlers.find((h) => h.node === select.node && h.kind === "change");
+  expect(handler, "the first select carries an onChange").toBeDefined();
+
+  const seen: unknown[] = [];
+  const spied = {
+    ...ui,
+    handlers: [{ ...handler!, fn: (v?: unknown) => seen.push(v) }],
+  } as CompiledUi;
+
+  // Open on the press, then release over the *third* option — a value the select did not
+  // already hold, so the commit is a real change. Its own text run, deliberately: that is
+  // what a pointer lands on, and `option_at` resolving through `activates` is what makes
+  // it work.
+  const third = select.options[2]!;
+  const [bx, by, bw, bh] = engine.bounds(select.button);
+  engine.mouseDown(bx + bw / 2, by + bh / 2);
+  engine.tick();
+  // `overlayCentre`, not the option's own rect: a picker is laid out where Taffy put it and
+  // *drawn* at an anchor offset from its select, so aiming at `bounds` lands on whatever
+  // sits at those coordinates in the tree underneath. It hit the first option, which looks
+  // exactly like a working commit of the wrong row.
+  engine.mouseUp(...overlayCentre(engine, select.node, select.picker, third.node));
+  engine.tick();
+
+  for (const e of engine.drainEvents()) {
+    if (e.kind === EventKind.CHANGE) dispatchChange(spied, e.node, e.a);
+  }
+
+  // The index, not the node id and not a boolean — the position in the list the author
+  // wrote. Two of the three would be truthy and only one is usable.
+  expect(seen).toEqual([2]);
+
+  engine.close();
 });

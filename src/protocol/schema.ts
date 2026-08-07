@@ -943,13 +943,28 @@ export const ENUMS: EnumDef[] = [
       TEXT_INPUT: 8,
       FOCUS: 9,
       /**
-       * A control's own state changed — `a` is 1 for checked, 0 for unchecked.
+       * A control's own state changed. `node` is the control; `a` is its new
+       * value, whose meaning is the control's kind:
+       *
+       * - **checkbox, radio** — 1 for checked, 0 for unchecked.
+       * - **select** — the index of the chosen option within that select, or -1
+       *   if it could not be resolved. Not the option's node id: an id is an
+       *   implementation detail an author never sees, and the index is the
+       *   position in the list they wrote.
+       *
+       * **The select's `CHANGE` names the select, not the option.** Measured —
+       * `probes/select-picker.html` listens on the `<select>` and that is where
+       * `input` and `change` arrive. It named the option until an `onChange`
+       * handler existed to receive it, which is how a queue nobody drains stays
+       * wrong quietly.
        *
        * Distinct from `CLICK` because the two are not the same event and the
        * difference is measured: clicking an already-checked radio fires `click`
        * and no `change`, and clicking a *label* fires `click` on the label as
        * well as on the control. A host wanting "the value changed" cannot get it
-       * by counting clicks.
+       * by counting clicks. The converse holds too — a `CLICK` on a picker's row
+       * still names the row, because dziri has no bubbling and the node a click
+       * names is the node that was clicked.
        */
       CHANGE: 10,
     },
@@ -1193,8 +1208,19 @@ export const ENUMS: EnumDef[] = [
  * which for the UA sheet's ring means no focus indicator at all. Silent, and the one
  * failure mode here that is an accessibility failure rather than a cosmetic one: a
  * keyboard user with no way to tell where they are.
+ *
+ * v22 **retunes what an existing field means**, which is the category this header says is
+ * invisible to the hash and needs a hand bump: a `CHANGE` event for a `<select>` now names
+ * the *select* and carries the chosen option's **index** in `a`, where it named the option
+ * and carried a constant 1.
+ *
+ * No column moved and no enum value was added, so nothing would have caught it — and until
+ * this version nothing would have *noticed* either, because the engine had queued `CHANGE`
+ * since v13 and no host had ever drained it. A wrong event in a queue nobody reads is
+ * indistinguishable from a right one, which is the argument for bumping on a meaning
+ * change rather than only on a layout change.
  */
-export const PROTOCOL_VERSION = 21;
+export const PROTOCOL_VERSION = 22;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

@@ -108,6 +108,22 @@ export type Props = {
   // from a linter this repo has never configured.
   onClick?: ((item: any, index: number) => void) | (() => void) | string;
   /**
+   * Called when a control's own value changes — not when it is clicked.
+   *
+   * The two are genuinely different and the difference is measured: clicking an
+   * already-checked radio fires a click and no change, and clicking a label fires a
+   * click on the label as well as on the control. Counting clicks cannot recover
+   * "the value changed".
+   *
+   * The argument is that new value, and what it is depends on the control:
+   *
+   * - checkbox, radio — `boolean`, the new checkedness.
+   * - select — `number`, the index of the chosen option within that select.
+   *
+   * Anything without a value of its own — a `<button>`, a `<div>` — never fires it.
+   */
+  onChange?: ((value: any) => void) | string;
+  /**
    * Form attributes, kept rather than ignored: a selector can test them.
    *
    * `type` is the important one — twenty-two `input` types are one tag, so
@@ -505,7 +521,7 @@ export function jsx(
   if (typeof type === "function") {
     const result = (type as Component)(props);
     if (result === null) {
-      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, classWhen: null, bindValue: null, style: null, attrs: EMPTY_ATTRS };
+      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, onChange: null, classWhen: null, bindValue: null, style: null, attrs: EMPTY_ATTRS };
     }
     if (Array.isArray(result)) {
       return {
@@ -514,7 +530,7 @@ export function jsx(
         id: null,
         classes: [],
         children: normalize(result),
-        onClick: null,
+        onClick: null, onChange: null,
         classWhen: null,
         bindValue: null,
         style: null,
@@ -567,6 +583,7 @@ export function jsx(
     classes: names.classes,
     children: normalize(children),
     onClick: props.onClick ?? null,
+    onChange: props.onChange ?? null,
     classWhen: names.classWhen,
     bindValue: bound ?? null,
     style: styleAttr(props.style, type),
@@ -619,7 +636,7 @@ export function toDocument(exported: Node | Node[]): Element {
     id: null,
     classes: [],
     children: normalize(children),
-    onClick: null,
+    onClick: null, onChange: null,
     classWhen: null,
     bindValue: null,
     style: null,

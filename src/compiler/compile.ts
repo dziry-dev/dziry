@@ -210,6 +210,16 @@ export type BuiltHandler = {
   ref: unknown;
   /** Filled in by the resolve pass. */
   name: string;
+  /**
+   * Which event runs it.
+   *
+   * One table with a column rather than two tables, because everything else about a
+   * handler — reverse-mapping the function to its export name, emitting the import,
+   * finding it by node — is identical and would otherwise be written twice. What is
+   * *not* shared is the argument: a click handler takes the list item, a change handler
+   * takes the new value, and that split lives at the dispatch site.
+   */
+  kind: "click" | "change";
 };
 
 /** A bound text run inside a list item, addressed relative to the item root. */
@@ -1255,7 +1265,8 @@ export function compileTree(
     opts.nodeOf?.set(el, self);
     nodeOfEl.set(el, self);
 
-    if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "" });
+    if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "", kind: "click" });
+    if (el.onChange) handlers.push({ node: self, ref: el.onChange, name: "", kind: "change" });
     if (el.bindValue) {
       editables.push({ node: self, ref: el.bindValue, name: "" });
       // Read back when this element's children are walked, a few lines below — the
@@ -2344,7 +2355,7 @@ export function emit(
   const handlerSource = result.handlers
     .map(
       (h) =>
-        `  { node: ${h.node}, fn: ${resolved(h.name, `the handler on node ${h.node}`)} },`,
+        `  { node: ${h.node}, kind: "${h.kind}", fn: ${resolved(h.name, `the ${h.kind} handler on node ${h.node}`)} },`,
     )
     .join("\n");
 
@@ -2484,7 +2495,7 @@ export const textBindings = [
 ${textBindingSource}
 ] satisfies TextBinding[];
 
-/** Click handlers, as direct references to the app's exported functions. */
+/** Click and change handlers, as direct references to the app's exported functions. */
 export const handlers = [
 ${handlerSource}
 ] satisfies HandlerBinding[];

@@ -146,7 +146,7 @@ export const textBindings = [
 
 ] satisfies TextBinding[];
 
-/** Click handlers, as direct references to the app's exported functions. */
+/** Click and change handlers, as direct references to the app's exported functions. */
 export const handlers = [
 
 ] satisfies HandlerBinding[];

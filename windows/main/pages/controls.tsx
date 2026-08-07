@@ -93,6 +93,14 @@ export default function Controls() {
   const typed = signal("drag across the quick-brown fox");
   const also = signal("");
 
+  // What `onChange` reports, written out so the page proves the wiring rather than
+  // asserting it. Until protocol v22 the engine queued a `CHANGE` for every one of these
+  // and nothing drained it, so a checkbox could flip its own bit and tell the app nothing.
+  //
+  // The value's *type* differs with the control, which is the part worth showing: a
+  // checkbox hands over a boolean and a select hands over the chosen index.
+  const lastChange = signal("nothing yet");
+
   return (
     <div className="flex flex-col gap-5">
       <div className={CARD}>
@@ -102,9 +110,17 @@ export default function Controls() {
           its ::before · hover one: the border and the tick both respond, and the tick responds
           because a generated box reads its originating element's state
         </div>
+        <div className={SUB}>
+          the first box carries an `onChange`, which is new in protocol v22 · the engine has
+          queued a CHANGE for every tick since v13 and no host drained it, so a control could
+          change its own state and tell the app nothing · `onChange` is not `onClick`: clicking
+          an already-checked radio fires a click and no change, and clicking a label fires a
+          click on the label as well as on the control, so counting clicks cannot recover
+          &ldquo;the value changed&rdquo;
+        </div>
         <div className="flex flex-row gap-6">
           <label className={ROW}>
-            <input type="checkbox" />
+            <input type="checkbox" onChange={(on) => lastChange.set(`checkbox → ${on}`)} />
             <span className={LABEL}>unchecked</span>
           </label>
           <label className={ROW}>
@@ -115,6 +131,10 @@ export default function Controls() {
             <input type="checkbox" checked disabled />
             <span className={LABEL}>checked + disabled</span>
           </label>
+        </div>
+        <div className={ROW}>
+          <span className={LABEL}>last onChange:</span>
+          <span className="text-xs font-semibold text-sky-300">{lastChange}</span>
         </div>
       </div>
 
@@ -231,7 +251,7 @@ export default function Controls() {
           because &ldquo;accessible&rdquo; would be the wrong word for what is here
         </div>
         <div className="flex flex-row gap-4">
-          <select>
+          <select onChange={(i) => lastChange.set(`select → index ${i}`)}>
             <option>Free</option>
             <option selected>Pro — $20/mo</option>
             <option>Enterprise</option>
