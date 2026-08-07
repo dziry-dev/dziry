@@ -76,6 +76,27 @@ function selectButton(nth = 0): string {
 }
 
 /**
+ * The nth tab stop that is reachable **only because an author wrote `tabindex`**.
+ *
+ * A role rather than a tag: what the scenario means is "the custom-widget case", and what
+ * makes it that case is having nothing else that says it has focus.
+ *
+ * Both exclusions are load-bearing and the second was found by looking at the picture.
+ * "Not a control" alone resolved to the first *text field* — a plain `<input type="text">`
+ * has no control row either, since a press on one does nothing a control table describes —
+ * so the scenario rang a field that already had an author's ring and proved nothing about
+ * the rule it was added for.
+ */
+function focusableNonControl(nth = 0): string {
+  const controls = new Set([...main.controls.node]);
+  const fields = new Set(main.editables.map((e) => e.node));
+  const found = [...main.tabStops].filter((n) => !controls.has(n) && !fields.has(n));
+  const node = found[nth];
+  if (node === undefined) throw new Error(`no tabindex-only tab stop at index ${nth}`);
+  return String(node);
+}
+
+/**
  * The **words** beside a control — the text run that forwards a press to it.
  *
  * What a pointer actually hits most of the time, and the node the label-forwarding
@@ -286,6 +307,23 @@ export const SCENARIOS: Scenario[] = [
   {
     name: "controls-focus-ring",
     args: ["--route", "controls", "--size", "1040x1400", "--focus", control(ControlKind.SELECT, 0)],
+  },
+  /**
+   * The same ring on the case that has nothing else: a `div[tabindex="0"]`.
+   *
+   * Distinct from the scenario above rather than redundant with it. A select with no
+   * author ring still looks like a control — it has a border and an arrow — so a missing
+   * ring there is a degradation. On a plain box the ring is the *only* thing that says
+   * where the keyboard is, which is why the UA sheet lists `[tabindex]` beside the tags
+   * and why that one line needs a picture rather than a unit test: the predicate can be
+   * live and the ring fields correct and the ring still not drawn.
+   */
+  {
+    name: "controls-focus-ring-tabindex",
+    // 1800 rather than the 1400 every other controls scenario uses: the tabindex card is
+    // the last on the page and sits at y≈1569, so at 1400 this shot was of a correctly
+    // drawn ring that happened to be below the fold — a passing golden of nothing.
+    args: ["--route", "controls", "--size", "1040x1800", "--focus", focusableNonControl(0)],
   },
   /**
    * A caret, which needs a **click** rather than `--focus`.

@@ -457,13 +457,44 @@ const TAB_STOP_TAGS = new Set(["input", "textarea", "select"]);
  * `display:none` and `visibility:hidden` (layout facts the engine's walk already skips),
  * and which member of a radio group carries the group's single stop (the checked one).
  *
- * `tabindex` is unsupported, so nothing can add itself to the set or remove itself from
- * it. That is the gap to close first if a custom widget ever needs the keyboard.
+ * **`tabindex` overrides all of it**, in both directions, which is the whole of its
+ * support here — see [`tabIndexOf`]. It needed no new bit and no protocol change, which
+ * was worth checking rather than assuming: `NodeFlags.TAB_STOP`'s own comment anticipated
+ * a second bit for "focusable but not tabbable", and that second set turns out to be
+ * empty in dziri today. A pointer press focuses whatever it hits regardless of any flag,
+ * so `tabindex="-1"` is exactly "not a tab stop" and one bit says it.
  */
 function isTabStop(el: Element, path: Element[]): boolean {
+  const explicit = tabIndexOf(el);
+  if (explicit !== null) return explicit >= 0;
   if (el.tag === "a") return el.attrs.has("href");
   if (el.tag === "button") return path[path.length - 2]?.tag !== "select";
   return TAB_STOP_TAGS.has(el.tag);
+}
+
+/**
+ * The `tabindex` attribute as a number, or null when absent or unparseable.
+ *
+ * Only the sign is read, and that is deliberate rather than lazy. Measured,
+ * `probes/tab-order.html`: a **positive** `tabindex` does not sit where it is written —
+ * the whole positive group sorts ahead of everything else, and `div[tabindex="3"]` was
+ * reached *after* the document wrapped, as the first stop of the next cycle.
+ *
+ * dziri refuses that, and the refusal is structural rather than a missing feature.
+ * ROADMAP A3's design is that the order **is** a walk of the live tree; honouring a
+ * positive `tabindex` would make it a sort with a walk as its tiebreak, which is a
+ * different algorithm and one that cannot be a walk at all. The element still becomes a
+ * tab stop — dropping it would be an accessibility regression to punish a stylistic
+ * choice — it simply takes its place in document order, and the build says so.
+ *
+ * An unparseable value is `null`, which falls back to the tag rule. HTML says an invalid
+ * `tabindex` is ignored, and ignoring it is what falling through does.
+ */
+function tabIndexOf(el: Element): number | null {
+  const raw = el.attrs.get("tabindex");
+  if (raw === undefined) return null;
+  const n = Number(raw.trim());
+  return Number.isInteger(n) ? n : null;
 }
 
 export type CompileResult = {
@@ -1264,6 +1295,22 @@ export function compileTree(
     });
     opts.nodeOf?.set(el, self);
     nodeOfEl.set(el, self);
+
+    // A positive `tabindex` still becomes a tab stop, in document order, and the build
+    // says why rather than silently doing something else. Measured: a browser sorts the
+    // whole positive group ahead of everything, reached after the document wraps — which
+    // makes the order a sort rather than the live-tree walk A3 is built on.
+    const explicitTabIndex = tabIndexOf(el);
+    if (explicitTabIndex !== null && explicitTabIndex > 0) {
+      warnings.push(
+        `tabindex="${explicitTabIndex}" on <${el.tag}> is treated as tabindex="0".\n` +
+          `    A positive tabindex does not sit where it is written: browsers sort the whole\n` +
+          `    positive group ahead of every other stop (measured, probes/tab-order.html), which\n` +
+          `    makes tab order a sort rather than a walk of the tree. dziri walks.\n` +
+          `    The element is still reachable by Tab, in document order.\n` +
+          `    ${where}`,
+      );
+    }
 
     if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "", kind: "click" });
     if (el.onChange) handlers.push({ node: self, ref: el.onChange, name: "", kind: "change" });

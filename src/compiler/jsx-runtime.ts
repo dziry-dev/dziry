@@ -152,6 +152,18 @@ export type Props = {
   placeholder?: string;
   checked?: boolean;
   disabled?: boolean;
+  /**
+   * Edits the tab-stop set: `0` puts an element in it, `-1` takes one out.
+   *
+   * Lower case, matching the HTML attribute rather than the DOM property, because that
+   * is the spelling every other attribute here uses and the one a selector reads.
+   *
+   * A **positive** value is refused with a build warning and treated as `0`. Browsers
+   * sort the whole positive group ahead of every other stop — measured — which makes tab
+   * order a sort rather than the walk of the live tree dziri is built on. The element
+   * still gets a stop, in document order; see `tabIndexOf` in the compiler.
+   */
+  tabindex?: number | string;
   readOnly?: boolean;
   required?: boolean;
   multiple?: boolean;

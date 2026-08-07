@@ -527,11 +527,26 @@ which is the position in the list the author wrote rather than a node id they ne
 integer is converted per kind at the boundary, so `onChange` on a checkbox hands over a boolean:
 the wire encoding is a protocol detail and should not reach app code.
 
+**`tabindex` works**, in both directions, and it needed no protocol change — which was worth
+checking rather than assuming. `NodeFlags.TAB_STOP`'s own comment anticipated a second bit for
+"focusable but not tabbable"; that set is empty in dziri, because a pointer press focuses whatever
+it hits regardless of any flag, so `tabindex="-1"` is exactly "not a tab stop" and one bit says it.
+
+A **positive** `tabindex` is refused with a build warning and treated as `0`. Measured: browsers
+sort the whole positive group ahead of every other stop, reached after the document wraps — which
+would make tab order a sort with a walk as its tiebreak, a different algorithm from the one A3 is
+built on. The element still gets a stop, in document order, because dropping it would be an
+accessibility regression to punish a stylistic choice.
+
+The UA ring lists `[tabindex]` beside the tags for the case the attribute exists for: a custom
+widget has nothing else that says it has focus, so it is the one element that cannot do without
+the default.
+
 Still missing: `onInput` (only `CHANGE` is emitted — the measured `input`-then-`change` pair is
 half implemented), a focus/blur event kind at all (`EventKind::FOCUS` is the *window*'s),
-`autofocus`, `tabindex` in any form, implicit form submission, `onChange` inside a list row (the
-click path has `dispatchItem`; the change path does not), and a way for a control to *become*
-disabled at run time. Also unimplemented and now named: a keyboard activation has no press/release
+`autofocus`, implicit form submission, `onChange` inside a list row (the click path has
+`dispatchItem`; the change path does not), and a way for a control to *become* disabled at run
+time. Also unimplemented and now named: a keyboard activation has no press/release
 pairing, so holding Space and tabbing away activates whatever is focused at release — a browser
 cancels.
 

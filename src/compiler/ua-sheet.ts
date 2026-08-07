@@ -188,12 +188,22 @@ input::placeholder, textarea::placeholder {
 
    The list is the tab-stop set from compile.ts, minus nothing. If the two ever
    disagree, this is the copy that is wrong — a focusable element with no ring is the
-   failure, and an unfocusable one with a rule that cannot match is only waste. */
+   failure, and an unfocusable one with a rule that cannot match is only waste.
+
+   [tabindex] is on the list for exactly that reason. It is the one entry that is not a
+   tag, and it covers the case the whole attribute exists for: an element made focusable
+   because the author said so. Leaving it out would have given a ring to every control
+   that already looks like one and none to the custom widget that has nothing else to
+   say it has focus — the failure this rule is here to prevent, aimed at the only element
+   that cannot fall back on looking like a button. It matches on the attribute's
+   presence, so tabindex="-1" carries it too; that element is not tabbable but a pointer
+   or a script can still focus it, and focus you cannot see is the thing being fixed. */
 a:focus-visible,
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
-select:focus-visible {
+select:focus-visible,
+[tabindex]:focus-visible {
   box-shadow: 0 0 0 2px #3390ff;
 }
 

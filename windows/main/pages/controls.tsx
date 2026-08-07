@@ -279,6 +279,38 @@ export default function Controls() {
       </div>
 
       <div className={CARD}>
+        <div className={H}>tabindex — the keyboard, on anything</div>
+        <div className={SUB}>
+          the set of tab stops is compile-time, and `tabindex` is how an author edits it ·
+          `tabindex="0"` puts an ordinary box in the order, `tabindex="-1"` takes a control out
+          of it, and that is the whole of the attribute here — it needed no new flag, because a
+          pointer press focuses whatever it hits regardless
+        </div>
+        <div className={SUB}>
+          a positive tabindex is refused and the build says so: browsers sort the whole
+          positive group ahead of every other stop, which makes tab order a sort rather than a
+          walk of the tree · dziri walks, so the element still gets a stop, in document order
+        </div>
+        <div className={SUB}>
+          tab to the box below · the ring is the UA sheet on `[tabindex]:focus-visible`, which is
+          the only element on this page with nothing else to say it has focus · neither Enter nor
+          Space does anything to it, and that is measured rather than missing — a browser does not
+          activate a focusable div either, which is why `role="button"` has to be scripted
+        </div>
+        <div className="flex flex-row gap-4">
+          <div tabindex="0" className="rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-200">
+            div[tabindex=0] — reachable
+          </div>
+          <button
+            tabindex="-1"
+            className="rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-200"
+          >
+            button[tabindex=-1] — skipped
+          </button>
+        </div>
+      </div>
+
+      <div className={CARD}>
         <div className={H}>attribute selectors, on their own</div>
         <div className={SUB}>
           the whole operator set · each box below is styled only by an attribute test, no class

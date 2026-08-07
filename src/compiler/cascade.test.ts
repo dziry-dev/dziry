@@ -504,6 +504,43 @@ test("the tab-stop set is the measured one, not the interactive one", () => {
   expect(stops).toEqual([...stops].sort((a, b) => a - b));
 });
 
+test("tabindex overrides the tag rule in both directions", () => {
+  // The whole of `tabindex` support, and the reason it needed no protocol change: a
+  // pointer press focuses whatever it hits regardless of any flag, so "focusable but not
+  // tabbable" — the second set `NodeFlags.TAB_STOP` anticipated — is empty here, and
+  // `tabindex="-1"` is exactly "not a tab stop".
+  const result = compile(
+    `<body>` +
+      `<div tabindex="0">reachable</div>` +
+      `<button tabindex="-1">unreachable</button>` +
+      `<span tabindex="3">positive</span>` +
+      `<div tabindex="nonsense">ignored</div>` +
+      `</body>`,
+    "",
+  );
+  const ui = toCompiledUi(result);
+
+  const kids: number[] = [];
+  for (let n = ui.nodes.firstChild[0]!; n !== -1; n = ui.nodes.nextSibling[n]!) kids.push(n);
+  const [div, button, span, bogus] = kids as [number, number, number, number];
+  const stops = [...ui.tabStops];
+
+  expect(stops).toContain(div);
+  // A `<button>` is a tab stop by its tag, and this is the case that proves the attribute
+  // wins rather than merely adding: the only way to observe an override is to remove one.
+  expect(stops).not.toContain(button);
+
+  // A positive tabindex still reaches the keyboard, in document order, because dropping
+  // it would be an accessibility regression to punish a stylistic choice. The build says
+  // what it did instead of doing it quietly.
+  expect(stops).toContain(span);
+  expect(result.warnings.join("\n")).toMatch(/tabindex="3".*is treated as tabindex="0"/s);
+
+  // HTML ignores an invalid value, and ignoring it means falling back to the tag — which
+  // for a `<div>` is "not a stop".
+  expect(stops).not.toContain(bogus);
+});
+
 test("an authored select button is left alone", () => {
   // The spec's opt-in form for customizing the internals. Overwriting it would
   // make `appearance: base-select` pointless.
