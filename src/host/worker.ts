@@ -351,6 +351,17 @@ function start(
               if (!dispatchItem(ui, listBindings, e.node)) dispatch(ui, e.node);
               break;
 
+            case EventKind.FOCUS_IN:
+              dispatch(ui, e.node, "focus");
+              break;
+
+            // Emitted before the FOCUS_IN of whatever took the focus, measured, so a pair
+            // of handlers that hand something between them sees them in that order here
+            // too — the queue preserves it and this loop drains in order.
+            case EventKind.FOCUS_OUT:
+              dispatch(ui, e.node, "blur");
+              break;
+
             case EventKind.CHANGE:
               // The queue the engine has been filling since v13 and nobody drained. A
               // checkbox has been flipping its own bit and telling the app nothing, which

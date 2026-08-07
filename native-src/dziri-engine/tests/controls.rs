@@ -1033,6 +1033,86 @@ mod tab_order {
         seen
     }
 
+    /// Every event a focus move produces, in order, with what each one names.
+    ///
+    /// Measured, `probes/focus-event-order.html`, and all three parts are load-bearing:
+    /// the leaving element is told first, each event names the *other* node, and nothing
+    /// fires when focus does not move. The middle one is the finding — during a real blur
+    /// the browser reports nothing as focused, so neither event could name its counterpart
+    /// by asking the focus state, and the field is the only way to answer it.
+    #[test]
+    fn a_focus_move_reports_both_ends_in_order() {
+        let mut engine = four_stops();
+        let mut out = [dziri_engine::engine::Event::default(); 16];
+
+        // First arrival: nothing to leave, so there is no FOCUS_OUT to pair with.
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        let n = engine.drain_events(&mut out);
+        let focus: Vec<(u32, i32, i32)> = out[..n]
+            .iter()
+            .filter(|e| {
+                e.kind == protocol::event_kind::FOCUS_IN
+                    || e.kind == protocol::event_kind::FOCUS_OUT
+            })
+            .map(|e| (e.kind, e.node, e.a))
+            .collect();
+        assert_eq!(focus, vec![(protocol::event_kind::FOCUS_IN, 1, -1)]);
+
+        // A move: out then in, each naming the other.
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        let n = engine.drain_events(&mut out);
+        let focus: Vec<(u32, i32, i32)> = out[..n]
+            .iter()
+            .filter(|e| {
+                e.kind == protocol::event_kind::FOCUS_IN
+                    || e.kind == protocol::event_kind::FOCUS_OUT
+            })
+            .map(|e| (e.kind, e.node, e.a))
+            .collect();
+        assert_eq!(
+            focus,
+            vec![
+                (protocol::event_kind::FOCUS_OUT, 1, 2),
+                (protocol::event_kind::FOCUS_IN, 2, 1),
+            ],
+            "the leaving element is told first, and each names the other"
+        );
+    }
+
+    /// Focus that does not move reports nothing — the rule that keeps validate-on-blur from
+    /// firing on every press of the field it is already in.
+    #[test]
+    fn re_focusing_the_focused_node_is_silent() {
+        let mut engine = four_stops();
+        engine.mouse_down(50.0, 10.0);
+        engine.mouse_up(50.0, 10.0);
+        engine.tick().expect("tick");
+        let focused = engine.focused();
+        assert!(focused >= 0, "the press focused something");
+
+        let mut out = [dziri_engine::engine::Event::default(); 16];
+        engine.drain_events(&mut out);
+
+        engine.mouse_down(50.0, 10.0);
+        engine.mouse_up(50.0, 10.0);
+        engine.tick().expect("tick");
+        let n = engine.drain_events(&mut out);
+        assert_eq!(
+            engine.focused(),
+            focused,
+            "and the second press did not move it"
+        );
+        assert!(
+            !out[..n].iter().any(|e| {
+                e.kind == protocol::event_kind::FOCUS_IN
+                    || e.kind == protocol::event_kind::FOCUS_OUT
+            }),
+            "so neither focus event fired"
+        );
+    }
+
     #[test]
     fn tab_walks_document_order_and_wraps() {
         let mut engine = four_stops();

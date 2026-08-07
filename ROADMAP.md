@@ -542,10 +542,27 @@ The UA ring lists `[tabindex]` beside the tags for the case the attribute exists
 widget has nothing else that says it has focus, so it is the one element that cannot do without
 the default.
 
-Still missing: `onInput` (only `CHANGE` is emitted — the measured `input`-then-`change` pair is
-half implemented), a focus/blur event kind at all (`EventKind::FOCUS` is the *window*'s),
-`autofocus`, implicit form submission, `onChange` inside a list row (the click path has
-`dispatchItem`; the change path does not), and a way for a control to *become* disabled at run
+**`onFocus` and `onBlur` reach handlers** (protocol v23), which was the one item on this
+section's own probe-first list that had been skipped. Three measured facts shaped the events rather
+than being discovered afterwards: the leaving element is told **before** the arriving one, each
+event **names the other node** — during a real blur a browser reports nothing as focused, so
+neither could find its counterpart by asking — and **nothing fires when focus does not move**,
+which is what stops validate-on-blur running on every click of the field it is already in.
+
+It also collapsed the seven places that wrote `state.focused` into one `Engine::set_focus`. An
+event emitted at six of seven is a focus model that lies at the seventh, and centralising is what
+makes "the event and the state cannot disagree" a property of the code rather than a thing to
+remember.
+
+Still missing: `onInput` — and it is worth saying why it is *not* next. For a checkbox, radio or
+select the measured `input` fires with `change` every time, so an `onInput` there would be a
+second name for the same moment; the pair only diverges on a text field, where `input` is
+per-keystroke and `change` waits for blur. dziri's fields are `bind:value` signals, so the
+per-keystroke half already exists, and the blur half is now expressible for the first time. That
+is the shape to build, not a duplicate event kind.
+
+Also missing: `autofocus`, implicit form submission, `onChange` inside a list row (the click path
+has `dispatchItem`; the change path does not), and a way for a control to *become* disabled at run
 time. Also unimplemented and now named: a keyboard activation has no press/release
 pairing, so holding Space and tabbing away activates whatever is focused at release — a browser
 cancels.

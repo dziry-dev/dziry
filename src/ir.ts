@@ -495,7 +495,7 @@ export type HandlerBinding = {
    * functions rather than one with a branch: a click handler is called with the list
    * item and index (or nothing), a change handler with the control's new value.
    */
-  kind: "click" | "change";
+  kind: "click" | "change" | "focus" | "blur";
   fn: (value?: unknown) => void;
 };
 

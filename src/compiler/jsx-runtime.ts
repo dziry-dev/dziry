@@ -124,6 +124,20 @@ export type Props = {
    */
   onChange?: ((value: any) => void) | string;
   /**
+   * Runs when this element takes focus, from a pointer or from Tab alike.
+   *
+   * **`onBlur` fires before the `onFocus` of whatever took the focus**, always — measured,
+   * every event of the leaving element precedes every event of the arriving one. So a pair
+   * of handlers that hand something between them can rely on the order.
+   *
+   * Neither runs when focus does not move: pressing the element that already has focus
+   * produces nothing, which is what keeps a validate-on-blur from firing on every click of
+   * the field it is already in.
+   */
+  onFocus?: (() => void) | string;
+  /** Runs when this element loses focus. See [`onFocus`] for the ordering. */
+  onBlur?: (() => void) | string;
+  /**
    * Form attributes, kept rather than ignored: a selector can test them.
    *
    * `type` is the important one — twenty-two `input` types are one tag, so
@@ -533,7 +547,7 @@ export function jsx(
   if (typeof type === "function") {
     const result = (type as Component)(props);
     if (result === null) {
-      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, onChange: null, classWhen: null, bindValue: null, style: null, attrs: EMPTY_ATTRS };
+      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, onChange: null, onFocus: null, onBlur: null, classWhen: null, bindValue: null, style: null, attrs: EMPTY_ATTRS };
     }
     if (Array.isArray(result)) {
       return {
@@ -542,7 +556,7 @@ export function jsx(
         id: null,
         classes: [],
         children: normalize(result),
-        onClick: null, onChange: null,
+        onClick: null, onChange: null, onFocus: null, onBlur: null,
         classWhen: null,
         bindValue: null,
         style: null,
@@ -596,6 +610,8 @@ export function jsx(
     children: normalize(children),
     onClick: props.onClick ?? null,
     onChange: props.onChange ?? null,
+    onFocus: props.onFocus ?? null,
+    onBlur: props.onBlur ?? null,
     classWhen: names.classWhen,
     bindValue: bound ?? null,
     style: styleAttr(props.style, type),
@@ -648,7 +664,7 @@ export function toDocument(exported: Node | Node[]): Element {
     id: null,
     classes: [],
     children: normalize(children),
-    onClick: null, onChange: null,
+    onClick: null, onChange: null, onFocus: null, onBlur: null,
     classWhen: null,
     bindValue: null,
     style: null,

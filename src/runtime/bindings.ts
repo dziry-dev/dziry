@@ -179,7 +179,7 @@ export function typeInto(
 export function handlerFor(
   ui: CompiledUi,
   node: number,
-  kind: "click" | "change" = "click",
+  kind: "click" | "change" | "focus" | "blur" = "click",
 ): ((value?: unknown) => void) | null {
   for (const h of ui.handlers) {
     if (h.node === node && h.kind === kind) return h.fn;
@@ -195,8 +195,12 @@ export function handlerFor(
  * handler touching two signals asks for three repaints (the second write plus the
  * computed's invalidation).
  */
-export function dispatch(ui: CompiledUi, node: number): boolean {
-  const fn = handlerFor(ui, node);
+export function dispatch(
+  ui: CompiledUi,
+  node: number,
+  kind: "click" | "focus" | "blur" = "click",
+): boolean {
+  const fn = handlerFor(ui, node, kind);
   if (!fn) return false;
   batch(fn);
   return true;

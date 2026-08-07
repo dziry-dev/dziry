@@ -11,6 +11,7 @@ import { expect, test } from "bun:test";
 
 import {
   MAX_SLOT_CHARS,
+  dispatch,
   dispatchChange,
   handlerFor,
   typeInto,
@@ -230,7 +231,11 @@ test("the caret counts characters, not UTF-16 units", () => {
  * boolean rather than a 1.
  */
 function uiWith(
-  handlers: Array<{ node: number; kind: "click" | "change"; fn: (v?: unknown) => void }>,
+  handlers: Array<{
+    node: number;
+    kind: "click" | "change" | "focus" | "blur";
+    fn: (v?: unknown) => void;
+  }>,
   controls: Array<{ node: number; kind: number }>,
 ) {
   return {
@@ -306,4 +311,30 @@ test("an unknown kind passes the integer through rather than guessing", () => {
   );
   expect(dispatchChange(ui, 4, 7)).toBe(true);
   expect(seen).toEqual([7]);
+});
+
+test("focus and blur route to their own handlers on the same node", () => {
+  // One node can carry all four kinds, and the engine emits them at different moments —
+  // so dispatching by node alone would fire whichever the compiler emitted first. The
+  // kind column is what keeps a blur handler from running on a click.
+  const fired: string[] = [];
+  const ui = uiWith(
+    [
+      { node: 5, kind: "click", fn: () => fired.push("click") },
+      { node: 5, kind: "focus", fn: () => fired.push("focus") },
+      { node: 5, kind: "blur", fn: () => fired.push("blur") },
+    ],
+    [],
+  );
+
+  expect(dispatch(ui, 5, "focus")).toBe(true);
+  expect(dispatch(ui, 5, "blur")).toBe(true);
+  expect(dispatch(ui, 5)).toBe(true);
+  expect(fired).toEqual(["focus", "blur", "click"]);
+});
+
+test("a node with only a blur handler is not focusable by dispatch", () => {
+  const ui = uiWith([{ node: 5, kind: "blur", fn: () => {} }], []);
+  expect(dispatch(ui, 5, "focus")).toBe(false);
+  expect(dispatch(ui, 5, "blur")).toBe(true);
 });

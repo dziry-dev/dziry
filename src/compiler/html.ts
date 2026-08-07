@@ -33,6 +33,10 @@ export type Element = {
    * make the author choose.
    */
   onChange: unknown;
+  /** Runs when this element takes focus. See [`onClick`] for how a reference is resolved. */
+  onFocus: unknown;
+  /** Runs when this element loses it. Fires *before* the arriving element's `onFocus`. */
+  onBlur: unknown;
   /**
    * Classes applied while a boolean signal is true: `{ light: isLight }`.
    *
@@ -155,6 +159,8 @@ export function parseHtml(src: string): Element {
     children: [],
     onClick: null,
     onChange: null,
+    onFocus: null,
+    onBlur: null,
     classWhen: null,
     bindValue: null,
     style: null,
@@ -235,6 +241,8 @@ export function parseHtml(src: string): Element {
         children: [{ type: "text", value: src.slice(i, close) }],
         onClick: null,
         onChange: null,
+        onFocus: null,
+        onBlur: null,
         classWhen: null,
         bindValue: null,
         style: null,
@@ -254,6 +262,8 @@ export function parseHtml(src: string): Element {
       children: [],
       onClick: attrs.get("onclick") ?? null,
       onChange: attrs.get("onchange") ?? null,
+      onFocus: attrs.get("onfocus") ?? null,
+      onBlur: attrs.get("onblur") ?? null,
       classWhen: null,
       bindValue: null,
       style: attrs.get("style") ?? null,

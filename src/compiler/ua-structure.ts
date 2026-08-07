@@ -46,7 +46,7 @@ function plain(tag: string, children: Node[], classes: string[] = []): Element {
     id: null,
     classes,
     children,
-    onClick: null, onChange: null,
+    onClick: null, onChange: null, onFocus: null, onBlur: null,
     classWhen: null,
     bindValue: null,
     style: null,

@@ -101,6 +101,11 @@ export default function Controls() {
   // checkbox hands over a boolean and a select hands over the chosen index.
   const lastChange = signal("nothing yet");
 
+  // Focus and blur, on the one element that has nothing else to say it has focus. The pair
+  // is ordered: the leaving element hears first, always, measured — so tabbing from this
+  // box to anything else writes "left" before the next element could write anything.
+  const focusState = signal("not focused");
+
   return (
     <div className="flex flex-col gap-5">
       <div className={CARD}>
@@ -298,7 +303,12 @@ export default function Controls() {
           activate a focusable div either, which is why `role="button"` has to be scripted
         </div>
         <div className="flex flex-row gap-4">
-          <div tabindex="0" className="rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-200">
+          <div
+            tabindex="0"
+            className="rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-200"
+            onFocus={() => focusState.set("focused")}
+            onBlur={() => focusState.set("left")}
+          >
             div[tabindex=0] — reachable
           </div>
           <button
@@ -307,6 +317,8 @@ export default function Controls() {
           >
             button[tabindex=-1] — skipped
           </button>
+          <span className={LABEL}>onFocus/onBlur:</span>
+          <span className="text-xs font-semibold text-sky-300">{focusState}</span>
         </div>
       </div>
 

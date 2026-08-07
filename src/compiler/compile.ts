@@ -219,7 +219,7 @@ export type BuiltHandler = {
    * *not* shared is the argument: a click handler takes the list item, a change handler
    * takes the new value, and that split lives at the dispatch site.
    */
-  kind: "click" | "change";
+  kind: "click" | "change" | "focus" | "blur";
 };
 
 /** A bound text run inside a list item, addressed relative to the item root. */
@@ -1314,6 +1314,8 @@ export function compileTree(
 
     if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "", kind: "click" });
     if (el.onChange) handlers.push({ node: self, ref: el.onChange, name: "", kind: "change" });
+    if (el.onFocus) handlers.push({ node: self, ref: el.onFocus, name: "", kind: "focus" });
+    if (el.onBlur) handlers.push({ node: self, ref: el.onBlur, name: "", kind: "blur" });
     if (el.bindValue) {
       editables.push({ node: self, ref: el.bindValue, name: "" });
       // Read back when this element's children are walked, a few lines below — the

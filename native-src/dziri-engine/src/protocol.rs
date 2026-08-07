@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 22;
+pub const PROTOCOL_VERSION: u32 = 23;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: u32 = 22;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x0082f7c1;
+pub const SCHEMA_HASH: u32 = 0xd21f66e0;
 
 pub const TABLE_COUNT: usize = 11;
 
@@ -667,6 +667,8 @@ pub mod event_kind {
     pub const TEXT_INPUT: u32 = 8;
     pub const FOCUS: u32 = 9;
     pub const CHANGE: u32 = 10;
+    pub const FOCUS_IN: u32 = 11;
+    pub const FOCUS_OUT: u32 = 12;
 }
 
 /// `controls.kind`. What a press does to this node, which is the only thing the engine needs to know about a control — appearance is the stylesheet's job and is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets itself and clears its group, and cannot be unchecked by pointer (measured). `SELECT` opens its picker on the press rather than the release, and `OPTION` commits — which is the same set-self-clear-group `RADIO` does, plus closing.

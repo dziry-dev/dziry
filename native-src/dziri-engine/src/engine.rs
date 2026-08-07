@@ -1310,8 +1310,7 @@ impl Engine {
                 options.first().copied().unwrap_or(select)
             }
         };
-        self.state.focused = landing;
-        self.needs_paint = true;
+        self.set_focus(landing);
         true
     }
 
@@ -1332,8 +1331,7 @@ impl Engine {
         }
         self.painter.close_picker();
         self.state.open = -1;
-        self.state.focused = select;
-        self.needs_paint = true;
+        self.set_focus(select);
         select
     }
 
@@ -1624,9 +1622,8 @@ impl Engine {
         if next < 0 || next == self.state.focused {
             return;
         }
-        self.state.focused = next;
+        self.set_focus(next);
         self.painter.clear_caret();
-        self.needs_paint = true;
     }
 
     /// The keyboard half of a `<select>`. Returns whether the key was consumed.
@@ -1757,9 +1754,8 @@ impl Engine {
                 controls::arrow_nav(control_kind::OPTION).is_some_and(|nav| nav.wrap),
             ),
         };
-        if landing >= 0 && landing != self.state.focused {
-            self.state.focused = landing;
-            self.needs_paint = true;
+        if landing >= 0 {
+            self.set_focus(landing);
         }
         true
     }
@@ -1830,8 +1826,7 @@ impl Engine {
             return true;
         }
 
-        self.state.focused = landing;
-        self.needs_paint = true;
+        self.set_focus(landing);
 
         if nav.selects {
             // The same three events a click produces, because a browser really does
@@ -1865,6 +1860,55 @@ impl Engine {
         };
         if self.painter.move_caret(node, motion, chars, shift) {
             self.needs_paint = true;
+        }
+        true
+    }
+
+    /// Moves focus to `node` and tells the host, or does nothing if it is already there.
+    ///
+    /// **The one place `state.focused` is written.** There were seven before this existed —
+    /// the pointer, the tab walk, a group arrow, opening a picker, closing one, arrowing
+    /// inside one — and an event emitted at six of them is a focus model that lies at the
+    /// seventh. Centralising is what makes "the event and the state cannot disagree" a
+    /// property of the code rather than a thing to remember.
+    ///
+    /// The order and the payload are both measured, `probes/focus-event-order.html`:
+    ///
+    /// - **`FOCUS_OUT` before `FOCUS_IN`**, always. Every event of the leaving element
+    ///   precedes every event of the arriving one, so one ordered queue tells a host a
+    ///   coherent story.
+    /// - **Each names the other node**, because neither could find it otherwise. During a
+    ///   real `blur` the browser reports `document.activeElement` as `BODY` — focus has
+    ///   left and not yet arrived — so "who took my focus" is answerable only by being
+    ///   told. That measurement is why these events carry a field at all.
+    /// - **Nothing fires when focus does not move.** Re-pressing the focused element
+    ///   produces neither, which is what stops "validate on blur" running on every click
+    ///   of the field it is already in.
+    ///
+    /// Returns whether focus actually moved.
+    fn set_focus(&mut self, node: i32) -> bool {
+        let previous = self.state.focused;
+        if previous == node {
+            return false;
+        }
+        self.state.focused = node;
+        self.needs_paint = true;
+
+        if previous >= 0 {
+            self.events.push(Event {
+                kind: event_kind::FOCUS_OUT,
+                node: previous,
+                a: node,
+                ..Default::default()
+            });
+        }
+        if node >= 0 {
+            self.events.push(Event {
+                kind: event_kind::FOCUS_IN,
+                node,
+                a: previous,
+                ..Default::default()
+            });
         }
         true
     }
@@ -2101,7 +2145,7 @@ impl Engine {
                 };
                 if target >= 0 {
                     self.state.pressed = target;
-                    self.state.focused = target;
+                    self.set_focus(target);
                 }
                 self.needs_paint = true;
                 self.events.push(Event {
@@ -2150,10 +2194,10 @@ impl Engine {
         // reaches the button from its run on its own, and a press is genuinely on the thing
         // under the cursor.
         self.state.pressed = hit;
-        self.state.focused = match self.activates_of(hit) {
+        self.set_focus(match self.activates_of(hit) {
             control if control >= 0 => control,
             _ => hit,
-        };
+        });
         self.needs_paint = true;
 
         // A `<select>` opens on the **press**, and this is the one control that does.

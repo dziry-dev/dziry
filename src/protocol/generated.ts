@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 22;
+export const PROTOCOL_VERSION = 23;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 22;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x0082f7c1;
+export const SCHEMA_HASH = 0xd21f66e0;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -646,6 +646,8 @@ export const EventKind = {
   TEXT_INPUT: 8,
   FOCUS: 9,
   CHANGE: 10,
+  FOCUS_IN: 11,
+  FOCUS_OUT: 12,
 } as const;
 export type EventKind = (typeof EventKind)[keyof typeof EventKind];
 

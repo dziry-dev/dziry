@@ -1560,3 +1560,56 @@ where they think they are.
 **Bearing on dziri.** One more keycode in `picker_key`'s Escape branch, and the ordering inside
 `Engine::key_down` becomes load-bearing rather than incidental: the picker is offered the key
 before the tab walk sees it, so an open picker claims Tab and a closed one does not.
+
+---
+
+## When focus moves: what fires, in what order, and what is focused during each
+
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/focus-event-order.html`. Two
+identical consecutive runs.** The one item on ROADMAP A3's "probe before writing Rust" list that
+had been skipped — Tab order, `:focus-visible` and activation were all measured and this was not.
+
+`A` and `B` are buttons, `field` a text input, `dead` a plain `<div>`. `active` is
+`document.activeElement` sampled **inside** each handler; `rel` is `event.relatedTarget`.
+
+| step | events, in order |
+|---|---|
+| click A, from nothing | `A focus(active=A, rel=BODY)`, `A focusin(…)` |
+| click B | `A blur(active=BODY, rel=B)`, `A focusout(…)`, `B focus(active=B, rel=A)`, `B focusin(…)` |
+| Tab to the field | `B blur(active=BODY, rel=field)`, `B focusout`, `field focus(active=field, rel=B)`, `field focusin` |
+| Shift+Tab back to B | `field blur(active=BODY, rel=B)`, `field focusout`, `B focus(active=B, rel=field)`, `B focusin` |
+| click a non-focusable `<div>` | `B blur(active=BODY, rel=BODY)`, `B focusout` — **and nothing arrives** |
+| click B (from nothing) | `B focus`, `B focusin` |
+| **click B again** | **nothing at all** |
+
+### Four findings, each of which shapes the event
+
+1. **Leaving fires entirely before arriving.** All of the old element's events precede all of the
+   new one's. So a single ordered queue is enough, and a host replaying it in order sees a
+   coherent story. Had they interleaved, an event kind would have needed a sequence number.
+
+2. **During `blur`, `activeElement` is `BODY`.** Focus has already left the old element and has
+   *not yet* arrived at the new one — there is a window in which nothing is focused, and both
+   events fall inside it. So **neither event can name the other element from the focus state**;
+   `relatedTarget` is the only way, and dziri needs a field for it or the question "who took my
+   focus" is unanswerable.
+
+3. **`focus` fires before `focusin`, and `blur` before `focusout`.** The non-bubbling pair is the
+   primitive and the bubbling pair is derived. dziri has no bubbling, so it copies the primitive
+   and the distinction does not arise — but it is worth knowing which one is being copied.
+
+4. **Re-focusing what is already focused fires nothing.** No blur, no focus. This is the rule that
+   keeps "validate on blur" from validating on every click of the field it is already in.
+
+### Bearing on dziri
+
+Two event kinds in the existing queue, in that order, each carrying the *other* node — which is
+finding 2 turned into a field rather than a comment. `EventKind::FOCUS` is already the **window**'s
+focus, so the element pair needs its own names.
+
+**One measured divergence, and it is dziri's, not a gap.** A press on a non-focusable `<div>`
+clears focus to nothing in Chromium. dziri focuses whatever `hit_test` returns, and `hit_test`
+returns only `INTERACTIVE` nodes — so a plain div is not hit and focus clears the same way, but a
+div with an `onClick` *is* interactive and would take focus where a browser would not. Named
+rather than fixed: making it match means gating focus on the tab-stop set, which would also stop a
+click focusing a `tabindex="-1"` element, and that is a behaviour worth keeping.

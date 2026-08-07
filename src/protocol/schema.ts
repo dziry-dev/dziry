@@ -967,6 +967,36 @@ export const ENUMS: EnumDef[] = [
        * names is the node that was clicked.
        */
       CHANGE: 10,
+      /**
+       * An element **took** focus. `node` is it; `a` is the node that lost focus,
+       * or -1.
+       *
+       * Named `FOCUS_IN` only because `FOCUS` above is already the *window*'s. It
+       * is the non-bubbling `focus`, not the bubbling `focusin` — measured, the
+       * two fire in that order, so `focus` is the primitive and the one dziri
+       * copies. dziri has no bubbling for the distinction to matter to.
+       */
+      FOCUS_IN: 11,
+      /**
+       * An element **lost** focus. `node` is it; `a` is the node that took focus,
+       * or -1 when focus went nowhere.
+       *
+       * Always emitted **before** the matching `FOCUS_IN`, which is measured
+       * rather than chosen: every event of the leaving element precedes every
+       * event of the arriving one, so one ordered queue tells a coherent story.
+       *
+       * **`a` is why this carries a field at all.** During a real `blur`,
+       * `document.activeElement` is `BODY` — focus has left the old element and
+       * not yet reached the new one, and both events fall inside that window. So
+       * neither event can name the other element by asking what is focused, and a
+       * host that wants "who took my focus" can only be told. Measured, and it is
+       * the finding that turned a comment into a column.
+       *
+       * Neither fires when focus does not actually move: re-pressing the focused
+       * element produces nothing, which is what stops "validate on blur" running
+       * on every click of the field it is already in.
+       */
+      FOCUS_OUT: 12,
     },
   },
   {
@@ -1219,8 +1249,20 @@ export const ENUMS: EnumDef[] = [
  * since v13 and no host had ever drained it. A wrong event in a queue nobody reads is
  * indistinguishable from a right one, which is the argument for bumping on a meaning
  * change rather than only on a layout change.
+ *
+ * v23 adds **`EventKind.FOCUS_IN` and `FOCUS_OUT`**, the element focus pair. Two enum
+ * values, invisible to the hash, hand-bumped.
+ *
+ * Until now dziri emitted no element focus event of any kind — `FOCUS` is the window's —
+ * so an app could not validate a field on blur, save a draft when focus left, or show a
+ * hint while a control had it. The focus *model* has been complete since v19 and none of
+ * it was observable from outside the engine.
+ *
+ * An old engine emits neither and `onFocus`/`onBlur` never run: the same silent shape as
+ * every other missing event, and the reason the pair arrives together with its handlers
+ * rather than ahead of them.
  */
-export const PROTOCOL_VERSION = 22;
+export const PROTOCOL_VERSION = 23;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
