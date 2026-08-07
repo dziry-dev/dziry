@@ -1729,3 +1729,67 @@ browser has no equivalent situation.
 > timing. Nothing built on this changed — dziri applies autofocus inside the frame either way —
 > but "measured twice, identical" clearly did not mean "not racy", which is worth remembering
 > the next time two runs agree.
+
+---
+
+## Implicit submission: the conditions, not just the headline
+
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/implicit-submission.html`.
+Two byte-identical consecutive runs.** The headline was measured on 2026-08-05 — Enter in a
+text field inside a `<form>` clicks the submit button, then `submit` fires. That is the easy
+half. These are the conditions, and each one changes how much dziri has to build. Every form
+here cancels its own `submit`, or the first success would navigate the page away.
+
+| form | Enter in its first field |
+|---|---|
+| submit button + 1 field | `click:submit, submit` |
+| submit button + 2 fields | `click:submit, submit` |
+| **no button, 1 field** | **`submit`** — and *no* click |
+| **no button, 2 fields** | **nothing** |
+| bare `<button>`, 2 fields | `click:submit, submit` |
+| `type="button"` only, 2 fields | nothing |
+| disabled submit, 2 fields | nothing |
+| **disabled submit, 1 field** | **nothing** |
+| no button, 1 text + a checkbox | `submit` |
+| no button, 1 text + a `<select>` | `submit` |
+| no button, 1 text + a `<textarea>` | `submit` |
+| `<input type=submit>`, 2 fields | `click:submit, submit` |
+| two submit buttons | `click:first, submit` |
+| textarea (+ button, 2 fields) | nothing — `textarea.value === "\n"` |
+| **checkbox focused** (+ button) | **`click:submit, submit`** |
+
+### The whole algorithm, as measured
+
+On Enter, with focus inside a `<form>`:
+
+1. A `<textarea>` takes the key and types a newline. Nothing else happens.
+2. Otherwise find the **default button** — the first `<button type=submit>` or
+   `<input type=submit>` in tree order; `type` defaults to `submit` on a `<button>`, so a
+   bare one counts, and `type="button"` does not.
+   - It exists and is enabled → **click it**, and `submit` follows from the click.
+   - It exists and is **disabled** → **nothing at all.** It is not skipped in favour of the
+     next rule; a disabled default button blocks submission outright. The one-field case is
+     what proves this — the fall-through rule would have submitted and it did not.
+   - There is none → submit directly, with no click, **iff exactly one field blocks implicit
+     submission.** Two text inputs block; a checkbox, a `<select>` **and a `<textarea>`**
+     do not count, so "one text input plus a checkbox" still submits. The textarea is the
+     surprising member of that list — it is a text field by every intuition, and the
+     blocking set is written in terms of `input` *types*, which it is not one of.
+
+Two more that are easy to get backwards. The submitting field does **not** have to be a text
+field: a focused checkbox submits, even though Enter on a checkbox outside a form does nothing
+(measured 2026-08-05) — so the earlier row said "Enter does nothing to a checkbox" when what it
+had actually established was "there was no form to submit". And with two submit buttons it is the
+**first in tree order**, not the last and not the nearest.
+
+### Bearing on dziri
+
+It confirms what ROADMAP A3 predicted from the headline and adds the part that costs: this is a
+lookup from the focused field to its form, and then a second lookup from the form to a node
+nothing touched. Neither is a row in the per-kind activation table, and both are pure
+compile-time facts — which form each field is in, and which button each form would click, are
+decided by the markup and cannot change at run time. The only runtime questions are whether the
+button is disabled and whether the focused node is a text area.
+
+`type="submit"` and `type="button"` have no meaning in dziri today, so the default-button rule
+needs the attribute read before any of this can be faithful.

@@ -138,6 +138,22 @@ export type Props = {
   /** Runs when this element loses focus. See [`onFocus`] for the ordering. */
   onBlur?: (() => void) | string;
   /**
+   * Runs when this `<form>` is submitted: Enter in one of its fields, or a click on its
+   * submit button.
+   *
+   * There is no event object and nothing to `preventDefault` — dziri never navigates, so
+   * a submission is only ever a call into app code, and the values are in the signals the
+   * fields are bound to.
+   *
+   * **Enter does not always submit**, and the conditions are measured rather than
+   * intuited (`probes/implicit-submission.html`). A form with no submit button submits
+   * only if exactly one `<input>` blocks implicit submission; a *disabled* submit button
+   * blocks it outright; and Enter in a `<textarea>` never submits. The compiler resolves
+   * all of it, so what an author has to know is just this: give the form a submit button
+   * and Enter will work.
+   */
+  onSubmit?: (() => void) | string;
+  /**
    * Form attributes, kept rather than ignored: a selector can test them.
    *
    * `type` is the important one — twenty-two `input` types are one tag, so
@@ -560,7 +576,7 @@ export function jsx(
   if (typeof type === "function") {
     const result = (type as Component)(props);
     if (result === null) {
-      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, onChange: null, onFocus: null, onBlur: null, classWhen: null, bindValue: null, style: null, attrs: EMPTY_ATTRS };
+      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, onChange: null, onFocus: null, onBlur: null, onSubmit: null, classWhen: null, bindValue: null, style: null, attrs: EMPTY_ATTRS };
     }
     if (Array.isArray(result)) {
       return {
@@ -569,7 +585,7 @@ export function jsx(
         id: null,
         classes: [],
         children: normalize(result),
-        onClick: null, onChange: null, onFocus: null, onBlur: null,
+        onClick: null, onChange: null, onFocus: null, onBlur: null, onSubmit: null,
         classWhen: null,
         bindValue: null,
         style: null,
@@ -625,6 +641,7 @@ export function jsx(
     onChange: props.onChange ?? null,
     onFocus: props.onFocus ?? null,
     onBlur: props.onBlur ?? null,
+    onSubmit: props.onSubmit ?? null,
     classWhen: names.classWhen,
     bindValue: bound ?? null,
     style: styleAttr(props.style, type),
@@ -677,7 +694,7 @@ export function toDocument(exported: Node | Node[]): Element {
     id: null,
     classes: [],
     children: normalize(children),
-    onClick: null, onChange: null, onFocus: null, onBlur: null,
+    onClick: null, onChange: null, onFocus: null, onBlur: null, onSubmit: null,
     classWhen: null,
     bindValue: null,
     style: null,

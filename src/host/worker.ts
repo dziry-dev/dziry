@@ -36,6 +36,9 @@ import {
   subscribeBindings,
   dispatch,
   dispatchChange,
+  formSubmittedByPress,
+  submitForm,
+  submitFrom,
   typeInto,
 } from "../runtime/bindings.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
@@ -55,6 +58,16 @@ import { buildUi, indexOfRoute, requireRoute, showRoute } from "./window-state.t
  * `sdl3::keyboard::Keycode` rather than against a recollection.
  */
 const KEY_BACKSPACE = 8;
+/**
+ * Enter, and it is `13` here for the same reason the three around it are unmasked: it is
+ * an ASCII control character, so SDL sends the character code rather than a scancode.
+ *
+ * The engine sees this key first and activates the focused control with it — a button, a
+ * link — and forwards it regardless, which is what lets implicit submission live here.
+ * That forwarding is measured behaviour rather than a convenience: a browser fires
+ * `keydown` *and* the synthesised click, and does not swallow one for the other.
+ */
+const KEY_RETURN = 13;
 const KEY_ESCAPE = 27;
 const KEY_DELETE = 127;
 
@@ -348,7 +361,15 @@ function start(
               // A row's handler is found by decomposing the node into (slot,
               // offset); a plain handler is looked up by node. Both batch, so one
               // click costs one repaint however many signals it writes.
-              if (!dispatchItem(ui, listBindings, e.node)) dispatch(ui, e.node);
+              if (!dispatchItem(ui, listBindings, e.node)) {
+                // A press on a submit button submits its form — the ordinary way a form is
+                // submitted, and more common than Enter. `submitForm` runs the button's own
+                // click handler as part of it, so this must not also `dispatch`, or a
+                // button with an `onClick` would fire it twice.
+                const form = formSubmittedByPress(ui, e.node);
+                if (form >= 0) submitForm(ui, form, e.node);
+                else dispatch(ui, e.node);
+              }
               break;
 
             case EventKind.FOCUS_IN:
@@ -391,6 +412,16 @@ function start(
                 if (typeInto(editables, e.node, { text: null, erase, caret: e.b, anchor: e.c })) {
                   dirty = true;
                 }
+              } else if (e.a === KEY_RETURN) {
+                // Implicit submission. The engine has already activated the focused node
+                // if its kind takes Enter — a button, a link — and forwarded the key
+                // anyway, so both can happen from one press, which is what a browser does.
+                //
+                // Nothing is checked here about *whether* Enter should submit: the
+                // compiler resolved the button, the disabled test and the field count, and
+                // `submitFrom` is left with the two questions that depend on where focus
+                // is. See BROWSER-FACTS, "Implicit submission".
+                submitFrom(ui, e.node);
               } else if (e.a === KEY_ESCAPE) {
                 post({ t: "input", hovered: -1, pressed: -1, focused: -1 });
               }

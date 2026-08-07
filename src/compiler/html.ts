@@ -37,6 +37,8 @@ export type Element = {
   onFocus: unknown;
   /** Runs when this element loses it. Fires *before* the arriving element's `onFocus`. */
   onBlur: unknown;
+  /** `<form>` only. Runs on Enter in a field, and on a click of the submit button. */
+  onSubmit: unknown;
   /**
    * Classes applied while a boolean signal is true: `{ light: isLight }`.
    *
@@ -161,6 +163,7 @@ export function parseHtml(src: string): Element {
     onChange: null,
     onFocus: null,
     onBlur: null,
+    onSubmit: null,
     classWhen: null,
     bindValue: null,
     style: null,
@@ -243,6 +246,7 @@ export function parseHtml(src: string): Element {
         onChange: null,
         onFocus: null,
         onBlur: null,
+    onSubmit: null,
         classWhen: null,
         bindValue: null,
         style: null,
@@ -264,6 +268,7 @@ export function parseHtml(src: string): Element {
       onChange: attrs.get("onchange") ?? null,
       onFocus: attrs.get("onfocus") ?? null,
       onBlur: attrs.get("onblur") ?? null,
+      onSubmit: attrs.get("onsubmit") ?? null,
       classWhen: null,
       bindValue: null,
       style: attrs.get("style") ?? null,

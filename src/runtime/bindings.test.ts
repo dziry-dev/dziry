@@ -13,7 +13,10 @@ import {
   MAX_SLOT_CHARS,
   dispatch,
   dispatchChange,
+  formSubmittedByPress,
   handlerFor,
+  submitForm,
+  submitFrom,
   typeInto,
   type EditableRef,
 } from "./bindings.ts";
@@ -337,4 +340,127 @@ test("a node with only a blur handler is not focusable by dispatch", () => {
   const ui = uiWith([{ node: 5, kind: "blur", fn: () => {} }], []);
   expect(dispatch(ui, 5, "focus")).toBe(false);
   expect(dispatch(ui, 5, "blur")).toBe(true);
+});
+
+/**
+ * Implicit submission, on the runtime side of the split.
+ *
+ * The compiler decided the outcome; these test the two questions it could not — where
+ * focus is, and whether the node is a textarea — plus the ordering the browser produces.
+ *
+ * A hand-built `CompiledUi` rather than a compiled fixture, because `toCompiledUi`
+ * returns `handlers: []` by design: handler refs are resolved only on the generated-module
+ * path, and a compiled form here would have nothing to dispatch to.
+ */
+function formUi(opts: {
+  /** `[node, parent]`, so a walk up the chain has something to walk. */
+  parents: number[];
+  forms: Array<{ node: number; button: number; direct: boolean }>;
+  textAreas?: number[];
+  handlers?: Array<{ node: number; kind: "click" | "submit"; fn: () => void }>;
+}) {
+  return {
+    handlers: opts.handlers ?? [],
+    forms: opts.forms,
+    textAreas: Int32Array.from(opts.textAreas ?? []),
+    nodes: { parent: Int32Array.from(opts.parents) },
+  } as unknown as CompiledUi;
+}
+
+test("Enter in a field submits the form it is inside", () => {
+  const seen: string[] = [];
+  // 0 root, 1 form, 2 field, 3 button.
+  const ui = formUi({
+    parents: [-1, 0, 1, 1],
+    forms: [{ node: 1, button: 3, direct: false }],
+    handlers: [
+      { node: 1, kind: "submit", fn: () => seen.push("submit") },
+      { node: 3, kind: "click", fn: () => seen.push("click") },
+    ],
+  });
+
+  expect(submitFrom(ui, 2)).toBe(true);
+  // The button's own click first, then the submit. In a browser the submission *is* a
+  // consequence of a synthesised click on that button, so a form whose button also
+  // validates on click must behave the same under Enter as under a real press.
+  expect(seen).toEqual(["click", "submit"]);
+});
+
+test("Enter outside any form submits nothing", () => {
+  const ui = formUi({
+    parents: [-1, 0, 0],
+    forms: [{ node: 1, button: -1, direct: true }],
+    handlers: [{ node: 1, kind: "submit", fn: () => {} }],
+  });
+  // Node 2 is a sibling of the form, not a descendant. Walking up from it reaches the
+  // root without passing through node 1.
+  expect(submitFrom(ui, 2)).toBe(false);
+});
+
+test("Enter in a textarea types instead of submitting", () => {
+  const seen: string[] = [];
+  const ui = formUi({
+    parents: [-1, 0, 1],
+    forms: [{ node: 1, button: -1, direct: true }],
+    textAreas: [2],
+    handlers: [{ node: 1, kind: "submit", fn: () => seen.push("submit") }],
+  });
+
+  // Measured. And note the form *would* submit from any other field — `direct` is true —
+  // so this is the exclusion doing the work rather than the form being unsubmittable.
+  expect(submitFrom(ui, 2)).toBe(false);
+  expect(seen).toEqual([]);
+});
+
+test("a form the compiler marked unsubmittable does nothing on Enter", () => {
+  const seen: string[] = [];
+  // What a disabled submit button, or two fields and no button, compiles to.
+  const ui = formUi({
+    parents: [-1, 0, 1],
+    forms: [{ node: 1, button: -1, direct: false }],
+    handlers: [{ node: 1, kind: "submit", fn: () => seen.push("submit") }],
+  });
+
+  expect(submitFrom(ui, 2)).toBe(false);
+  expect(seen).toEqual([]);
+});
+
+test("the innermost form wins", () => {
+  const seen: string[] = [];
+  // 0 root, 1 outer form, 2 inner form, 3 field inside the inner one.
+  const ui = formUi({
+    parents: [-1, 0, 1, 2],
+    forms: [
+      { node: 1, button: -1, direct: true },
+      { node: 2, button: -1, direct: true },
+    ],
+    handlers: [
+      { node: 1, kind: "submit", fn: () => seen.push("outer") },
+      { node: 2, kind: "submit", fn: () => seen.push("inner") },
+    ],
+  });
+
+  expect(submitFrom(ui, 3)).toBe(true);
+  expect(seen).toEqual(["inner"]);
+});
+
+test("a press on the submit button submits, and fires its click exactly once", () => {
+  const seen: string[] = [];
+  const ui = formUi({
+    parents: [-1, 0, 1, 1],
+    forms: [{ node: 1, button: 3, direct: false }],
+    handlers: [
+      { node: 1, kind: "submit", fn: () => seen.push("submit") },
+      { node: 3, kind: "click", fn: () => seen.push("click") },
+    ],
+  });
+
+  // The worker asks this before falling back to `dispatch`, which is what stops the
+  // button's `onClick` running twice — once from the ordinary click path and once from
+  // inside the submission.
+  expect(formSubmittedByPress(ui, 3)).toBe(1);
+  expect(formSubmittedByPress(ui, 2)).toBe(-1);
+
+  expect(submitForm(ui, 1, 3)).toBe(true);
+  expect(seen).toEqual(["click", "submit"]);
 });

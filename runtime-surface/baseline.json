@@ -1,6 +1,6 @@
 {
-  "symbols": 25,
-  "bytes": 8049,
+  "symbols": 28,
+  "bytes": 8624,
   "bun": "1.3.14",
   "recorded": "2026-08-07",
   "inventory": [
@@ -9,7 +9,10 @@
     "bindings.ts:applyTextBindings",
     "bindings.ts:dispatch",
     "bindings.ts:dispatchChange",
+    "bindings.ts:formSubmittedByPress",
     "bindings.ts:handlerFor",
+    "bindings.ts:submitForm",
+    "bindings.ts:submitFrom",
     "bindings.ts:subscribeBindings",
     "bindings.ts:typeInto",
     "list-runtime.ts:dispatchItem",

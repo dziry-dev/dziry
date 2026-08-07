@@ -179,7 +179,7 @@ export function typeInto(
 export function handlerFor(
   ui: CompiledUi,
   node: number,
-  kind: "click" | "change" | "focus" | "blur" = "click",
+  kind: "click" | "change" | "focus" | "blur" | "submit" = "click",
 ): ((value?: unknown) => void) | null {
   for (const h of ui.handlers) {
     if (h.node === node && h.kind === kind) return h.fn;
@@ -242,4 +242,94 @@ export function dispatchChange(ui: CompiledUi, node: number, raw: number): boole
 
   batch(() => fn(value));
   return true;
+}
+
+/**
+ * The innermost `<form>` containing `node`, or -1.
+ *
+ * A walk up `nodes.parent` rather than a compiled field-to-form table, and the reason is
+ * that a table would have to have one row per focusable node while this needs no storage
+ * at all. The chain is a handful of steps and this runs once per Enter keypress.
+ *
+ * Innermost, because `forms` is scanned as the walk climbs: the first match encountered
+ * going up is the nearest ancestor. Nested forms are invalid HTML that parses anyway, and
+ * this resolves them the way the DOM would.
+ */
+function formOf(ui: CompiledUi, node: number): number {
+  for (let n = node; n >= 0; n = ui.nodes.parent[n] ?? -1) {
+    for (const form of ui.forms) if (form.node === n) return n;
+  }
+  return -1;
+}
+
+/**
+ * Runs implicit submission for an Enter pressed with `node` focused. Returns whether it
+ * submitted.
+ *
+ * The measured algorithm, with three of its four questions already answered by the
+ * compiler — see `BROWSER-FACTS.md`, "Implicit submission: the conditions, not just the
+ * headline". What is left here is the pair that depends on where focus happens to be.
+ *
+ * **The button's own `onClick` runs too, before the submit**, because in a browser the
+ * submission is a *consequence* of a synthesised click on that button rather than a
+ * separate mechanism. A form whose button both validates on click and submits would
+ * otherwise behave differently under Enter than under a real press, which is the kind of
+ * divergence that is only ever found by an author debugging their own form.
+ */
+export function submitFrom(ui: CompiledUi, node: number): boolean {
+  // A textarea takes Enter for itself. Measured, and it is the reason `textAreas` exists
+  // as a set: by the time the IR is built, a textarea and a text input are the same kind
+  // of editable box.
+  //
+  // `includes` rather than `ir.ts`'s `findRow`, even though the array is sorted for it.
+  // Importing that one function is a *value* import from `ir.ts`, which drags `STYLE_FIELDS`
+  // and its 80 rows into the runtime bundle — 8049 bytes to 13186, caught by the
+  // `runtime-surface` ratchet, and the second time this exact import has done it. A page
+  // has a handful of textareas and this runs once per Enter.
+  if (ui.textAreas.includes(node)) return false;
+
+  const form = formOf(ui, node);
+  if (form < 0) return false;
+  const binding = ui.forms.find((f) => f.node === form);
+  if (!binding) return false;
+
+  // Neither a usable button nor the one-field rule. A disabled submit button lands here,
+  // and lands here rather than falling through to `direct` — measured, it blocks outright.
+  if (binding.button < 0 && !binding.direct) return false;
+
+  return submitForm(ui, binding.node, binding.button);
+}
+
+/**
+ * Runs a form's submission: the button's click handler, then the form's `onSubmit`.
+ *
+ * Shared by Enter and by a real press on the submit button, so that the two paths cannot
+ * drift — a click on the button has to submit as surely as Enter does, and that is one
+ * call rather than a second copy of the ordering.
+ */
+export function submitForm(ui: CompiledUi, form: number, button: number): boolean {
+  const submit = handlerFor(ui, form, "submit");
+  const click = button >= 0 ? handlerFor(ui, button, "click") : null;
+  if (!submit && !click) return false;
+
+  // One batch across both, for the same reason `dispatch` batches: submitting is one user
+  // action however many signals the two handlers write between them.
+  batch(() => {
+    click?.();
+    submit?.();
+  });
+  return true;
+}
+
+/**
+ * The form a press on `node` submits, or -1.
+ *
+ * Clicking a submit button submits its form — the ordinary way a form is submitted, and
+ * the same table answers it. Kept separate from [`submitFrom`] because the question is
+ * different: that one asks "what would Enter do from here", this one asks "is this node
+ * the button", and only the second is true of a press on a node outside any form.
+ */
+export function formSubmittedByPress(ui: CompiledUi, node: number): number {
+  for (const form of ui.forms) if (form.button === node) return form.node;
+  return -1;
 }

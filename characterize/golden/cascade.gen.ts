@@ -6,7 +6,7 @@
 // 0 text bindings, 0 handlers.
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
+import type { ControlTable, FormBinding, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
 import type { EditableRef } from "dziri/runtime/bindings.ts";
 import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
 import type { StylePatchRef } from "dziri/runtime/patches.ts";
@@ -143,6 +143,14 @@ export const tabStops = new Int32Array([]);
 
 /** Nodes claiming `autofocus`, sorted. The engine focuses the first one showing. */
 export const autofocus = new Int32Array([]);
+
+/** Text areas, sorted. Enter in one types rather than submitting — measured. */
+export const textAreas = new Int32Array([]);
+
+/** Every `<form>`, with Enter's outcome resolved at build time. */
+export const forms = [
+
+] satisfies FormBinding[];
 
 /** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [

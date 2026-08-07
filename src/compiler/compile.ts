@@ -136,6 +136,15 @@ type BuiltNode = {
    * URL. See `resolveAutofocus`.
    */
   autofocus?: true;
+
+  /**
+   * A `<textarea>`, as opposed to any other text-entry box.
+   *
+   * The tag is otherwise gone by this point — a node knows its `NodeKind` and whether it
+   * is editable, and both are the same for an `<input type=text>`. Enter is where the two
+   * differ, so the distinction has to survive.
+   */
+  textArea?: true;
 };
 
 /**
@@ -229,7 +238,34 @@ export type BuiltHandler = {
    * *not* shared is the argument: a click handler takes the list item, a change handler
    * takes the new value, and that split lives at the dispatch site.
    */
-  kind: "click" | "change" | "focus" | "blur";
+  kind: "click" | "change" | "focus" | "blur" | "submit";
+};
+
+/**
+ * One `<form>`, with Enter's whole outcome already decided.
+ *
+ * Everything the measured algorithm asks — is there a default button, is it disabled, how
+ * many fields block implicit submission — is a property of the markup, so all of it is
+ * resolved here and the host is left with a lookup rather than a rule. See
+ * `BROWSER-FACTS.md`, "Implicit submission: the conditions, not just the headline".
+ *
+ * The one thing that would break this is `disabled` becoming dynamic, which is the last
+ * open item on ROADMAP A3's list. When it lands, `button` has to become "the default
+ * button" and the enabled test has to move to the host; the field is named `button` rather
+ * than `submits` so that change is a smaller lie.
+ */
+export type BuiltForm = {
+  node: number;
+  /** The button Enter clicks, or -1 when Enter must click nothing. */
+  button: number;
+  /**
+   * Enter submits with no button at all.
+   *
+   * Measured: a form with no submit button and *exactly one* field that blocks implicit
+   * submission fires `submit` directly, with no click. Two such fields and nothing
+   * happens. A checkbox and a `<select>` do not count towards the one.
+   */
+  direct: boolean;
 };
 
 /** A bound text run inside a list item, addressed relative to the item root. */
@@ -524,6 +560,8 @@ export type CompileResult = {
   keyframes: BuiltKeyframe[];
   /** Form controls, ascending by node. */
   controls: BuiltControl[];
+  /** Every `<form>`, with Enter's outcome already resolved. */
+  forms: BuiltForm[];
   /** Diagnostics worth surfacing but not worth failing over. */
   warnings: string[];
 };
@@ -1309,6 +1347,7 @@ export function compileTree(
       // height. When it *is* bound the generated run below carries the floor instead,
       // and the flag here is harmless because a node with a child is never measured.
       ...(isTextEntryTag(el) ? { editable: true as const } : {}),
+      ...(el.tag === "textarea" ? { textArea: true as const } : {}),
     });
     opts.nodeOf?.set(el, self);
     nodeOfEl.set(el, self);
@@ -1347,6 +1386,7 @@ export function compileTree(
     if (el.onChange) handlers.push({ node: self, ref: el.onChange, name: "", kind: "change" });
     if (el.onFocus) handlers.push({ node: self, ref: el.onFocus, name: "", kind: "focus" });
     if (el.onBlur) handlers.push({ node: self, ref: el.onBlur, name: "", kind: "blur" });
+    if (el.onSubmit) handlers.push({ node: self, ref: el.onSubmit, name: "", kind: "submit" });
     if (el.bindValue) {
       editables.push({ node: self, ref: el.bindValue, name: "" });
       // Read back when this element's children are walked, a few lines below — the
@@ -1663,6 +1703,7 @@ export function compileTree(
   resolveActivation(nodes, nodeOfEl, controls, labelEls, warnings);
   resolveControlLabels(nodes, nodeOfEl, controls, labelHosts);
   resolveAutofocus(nodes, autofocusCandidates, warnings);
+  const forms = resolveForms(rootEl, nodeOfEl);
 
   return {
     strings,
@@ -1688,6 +1729,7 @@ export function compileTree(
     tweens: tweens.tweens,
     keyframes: tweens.keyframes,
     controls,
+    forms,
     warnings,
   };
 }
@@ -2023,9 +2065,99 @@ function resolveAutofocus(
  * needs, though the engine does not rely on that: it re-derives the order from the tree,
  * for exactly the reason `buildTabStops` gives.
  */
+/**
+ * Whether Enter anywhere in a form would click this element.
+ *
+ * Measured, `probes/implicit-submission.html`: a bare `<button>` is a submit button
+ * because `type` defaults to `submit`; `type="button"` is not one and does not rescue a
+ * form that would otherwise not submit; and `<input type=submit>` counts too.
+ */
+function isSubmitButton(el: Element): boolean {
+  if (el.tag === "button") {
+    const type = typeOf(el);
+    return type === "" || type === "submit";
+  }
+  return el.tag === "input" && typeOf(el) === "submit";
+}
+
+/**
+ * Whether this element is one of the fields the "exactly one" rule counts.
+ *
+ * The membership is measured rather than reasoned, and the measurement is worth keeping
+ * next to the code because two of the three exclusions are counter-intuitive: a
+ * `<select>` does not count, a checkbox does not count, and **a `<textarea>` does not
+ * count either** — a form holding one text input and one textarea still submits on Enter.
+ */
+function blocksImplicitSubmission(el: Element): boolean {
+  return el.tag === "input" && TEXT_ENTRY_TYPES.has(typeOf(el));
+}
+
+/**
+ * Every `<form>`, with Enter's outcome resolved.
+ *
+ * A whole browser algorithm collapsing to one integer per form, which is the
+ * compile-time-first claim landing about as cleanly as it ever does: which button is
+ * first in tree order, whether it is disabled, and how many fields block are all
+ * properties of the markup. What is left for run time is one lookup — walk up from the
+ * focused node to a form — and one test the host can do from the tags it already has.
+ *
+ * A nested form is not descended into. That is invalid HTML which parses anyway, and
+ * giving the inner form's button to the outer one would be a quiet wrong answer where
+ * ignoring it is a quiet right one.
+ */
+function resolveForms(root: Element, nodeOf: Map<Element, number>): BuiltForm[] {
+  const out: BuiltForm[] = [];
+
+  const collect = (form: Element): { button: Element | null; blocking: number } => {
+    let button: Element | null = null;
+    let blocking = 0;
+    const scan = (el: Element): void => {
+      for (const child of el.children) {
+        if (child.type !== "element") continue;
+        if (child.tag === "form") continue;
+        if (button === null && isSubmitButton(child)) button = child;
+        if (blocksImplicitSubmission(child)) blocking += 1;
+        scan(child);
+      }
+    };
+    scan(form);
+    return { button, blocking };
+  };
+
+  const visit = (el: Element): void => {
+    if (el.tag === "form") {
+      const node = nodeOf.get(el);
+      if (node !== undefined) {
+        const { button, blocking } = collect(el);
+        // A **disabled** default button blocks submission outright rather than being
+        // skipped in favour of the no-button rule. Measured, and measured specifically:
+        // with one field the skip-then-fall-through reading predicts a submit and the
+        // block reading predicts nothing, and nothing is what happened.
+        const usable = button !== null && !(button as Element).attrs.has("disabled");
+        out.push({
+          node,
+          button: usable ? nodeOf.get(button as Element) ?? -1 : -1,
+          direct: button === null && blocking === 1,
+        });
+      }
+    }
+    for (const child of el.children) if (child.type === "element") visit(child);
+  };
+
+  visit(root);
+  return out;
+}
+
 function buildAutofocus(nodes: BuiltNode[]): Int32Array {
   const out: number[] = [];
   for (let i = 0; i < nodes.length; i++) if (nodes[i]!.autofocus) out.push(i);
+  return new Int32Array(out);
+}
+
+/** Text areas, sorted. The one text field Enter does not submit from. */
+function buildTextAreas(nodes: BuiltNode[]): Int32Array {
+  const out: number[] = [];
+  for (let i = 0; i < nodes.length; i++) if (nodes[i]!.textArea) out.push(i);
   return new Int32Array(out);
 }
 
@@ -2159,6 +2291,8 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     overlays: buildOverlays(result.nodes),
     tabStops: buildTabStops(result.nodes),
     autofocus: buildAutofocus(result.nodes),
+    textAreas: buildTextAreas(result.nodes),
+    forms: result.forms,
     // Bindings are resolved and emitted only on the generated-module path; the
     // in-memory IR is used by tests and the variant probe, which are static.
     textBindings: [],
@@ -2570,7 +2704,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { ControlTable, FormBinding, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -2627,6 +2761,14 @@ export const tabStops = ${typedArray("Int32Array", [...buildTabStops(nodes)])};
 
 /** Nodes claiming \`autofocus\`, sorted. The engine focuses the first one showing. */
 export const autofocus = ${typedArray("Int32Array", [...buildAutofocus(nodes)])};
+
+/** Text areas, sorted. Enter in one types rather than submitting — measured. */
+export const textAreas = ${typedArray("Int32Array", [...buildTextAreas(nodes)])};
+
+/** Every \`<form>\`, with Enter's outcome resolved at build time. */
+export const forms = [
+${result.forms.map((f) => `  { node: ${f.node}, button: ${f.button}, direct: ${f.direct} },`).join("\n")}
+] satisfies FormBinding[];
 
 ${localsSource}/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [

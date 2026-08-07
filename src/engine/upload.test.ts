@@ -956,6 +956,8 @@ test("a capacity request is a power of two", () => {
     overlays: generated.overlays,
     tabStops: generated.tabStops,
     autofocus: generated.autofocus,
+    textAreas: generated.textAreas,
+    forms: generated.forms,
     textBindings: [],
     handlers: [],
     lists: generated.lists,

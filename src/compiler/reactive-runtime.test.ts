@@ -116,8 +116,17 @@ test("a component-local signal round-trips through the artifact", async () => {
   const inline = ui.handlers.filter((h) => /\blocal_\d+\b/.test(h.fn.toString()));
   expect(inline.length).toBeGreaterThanOrEqual(2);
 
-  const plus = inline.find((h) => h.fn.toString().includes("+"))!;
-  const minus = inline.find((h) => h.fn.toString().includes("-"))!;
+  // Matched on the *shape* of the counter's handlers — `local_N.set(local_N.value ± 1)` —
+  // and not on the source merely containing a `+` or a `-`. That looser predicate is what
+  // this comment's first version warned about one step too late: it survived the controls
+  // page gaining an `onChange`, then broke when a form handler on the same page said "the
+  // two-field form", whose hyphen made it the `minus` handler. The test went on running,
+  // pressed something unrelated, and reported that the counter did not go back down.
+  const counter = /local_(\d+)\.set\(local_\1\.value ([-+]) 1\)/;
+  const arm = (sign: string) =>
+    inline.find((h) => counter.exec(h.fn.toString())?.[2] === sign)!;
+  const plus = arm("+");
+  const minus = arm("-");
   expect(plus).toBeDefined();
   expect(minus).toBeDefined();
   expect(plus).not.toBe(minus);

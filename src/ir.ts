@@ -495,8 +495,25 @@ export type HandlerBinding = {
    * functions rather than one with a branch: a click handler is called with the list
    * item and index (or nothing), a change handler with the control's new value.
    */
-  kind: "click" | "change" | "focus" | "blur";
+  kind: "click" | "change" | "focus" | "blur" | "submit";
   fn: (value?: unknown) => void;
+};
+
+/**
+ * One `<form>`, with Enter's outcome already decided by the compiler.
+ *
+ * The measured algorithm (`BROWSER-FACTS.md`, "Implicit submission") asks four questions
+ * and three of them are answered by the markup alone: which submit button comes first, is
+ * it disabled, how many fields block. Only "is the focused node inside this form, and is
+ * it a textarea" is left for run time, and both are lookups rather than rules.
+ */
+export type FormBinding = {
+  /** The `<form>` element's node. */
+  node: number;
+  /** The button Enter clicks, or -1 when Enter clicks nothing. */
+  button: number;
+  /** Enter submits directly, with no button. Exactly one blocking field and no button. */
+  direct: boolean;
 };
 
 export type CompiledUi = {
@@ -507,6 +524,17 @@ export type CompiledUi = {
   variants: VariantTable;
   textBindings: TextBinding[];
   handlers: HandlerBinding[];
+  /** Every `<form>`, with Enter's outcome resolved. See [`FormBinding`]. */
+  forms: FormBinding[];
+  /**
+   * Text areas, sorted. Enter in one of these must not submit its form.
+   *
+   * Measured: a `<textarea>` takes Enter and types a newline. It is also the one text
+   * field that does *not* count towards the "exactly one blocking field" rule, so it
+   * appears twice in the algorithm with opposite signs — which is why it is a set the
+   * host can test rather than a condition folded into `FormBinding`.
+   */
+  textAreas: Int32Array;
   /**
    * Sorted node ids that can receive input.
    *

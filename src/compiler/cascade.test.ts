@@ -584,6 +584,98 @@ test("autofocus takes the wider focusable set, not the tab-stop set", () => {
   expect(result.warnings.join("\n")).not.toMatch(/autofocus/);
 });
 
+/**
+ * One case per measured row of `BROWSER-FACTS.md`'s implicit-submission table.
+ *
+ * A table-driven test rather than one per case, because the *set* is the claim: the rule
+ * is a disjunction with three arms and two of them only exist to say "no", so a suite that
+ * covered the submitting cases would pass while the blocking ones quietly submitted.
+ */
+test("Enter's outcome is resolved at build time, per the measured table", () => {
+  const form = (inner: string): { button: number; direct: boolean } => {
+    const result = compile(`<body><form>${inner}</form></body>`, "");
+    const ui = toCompiledUi(result);
+    expect(ui.forms.length).toBe(1);
+    const { button, direct } = ui.forms[0]!;
+    return { button, direct };
+  };
+
+  // A usable default button: Enter clicks it, whatever else is in the form.
+  expect(form(`<input><button type=submit>go</button>`).button).toBeGreaterThan(0);
+  expect(form(`<input><input><button type=submit>go</button>`).button).toBeGreaterThan(0);
+  // `type` defaults to submit, so a bare <button> is one...
+  expect(form(`<input><input><button>go</button>`).button).toBeGreaterThan(0);
+  // ...and `<input type=submit>` is one too.
+  expect(form(`<input><input><input type=submit>`).button).toBeGreaterThan(0);
+
+  // No button, exactly one blocking field: submits with nothing to click.
+  expect(form(`<input>`)).toEqual({ button: -1, direct: true });
+  // Two blocking fields and no button: nothing happens at all.
+  expect(form(`<input><input>`)).toEqual({ button: -1, direct: false });
+
+  // A checkbox, a select and — the surprising one — a textarea do not count towards the
+  // "exactly one" rule, so each of these still submits directly.
+  expect(form(`<input><input type=checkbox>`).direct).toBe(true);
+  expect(form(`<input><select><option>x</option></select>`).direct).toBe(true);
+  expect(form(`<input><textarea></textarea>`).direct).toBe(true);
+
+  // `type=button` is not a submit button and does not rescue the two-field case.
+  expect(form(`<input><input><button type=button>x</button>`)).toEqual({
+    button: -1,
+    direct: false,
+  });
+
+  // A **disabled** submit button blocks outright. The one-field case is what proves it:
+  // if a disabled button were merely skipped, this would fall through to `direct`.
+  expect(form(`<input><button type=submit disabled>go</button>`)).toEqual({
+    button: -1,
+    direct: false,
+  });
+});
+
+test("the default button is the first in tree order", () => {
+  const ui = toCompiledUi(
+    compile(
+      `<body><form><input>` +
+        `<button type=submit id=first>1</button><button type=submit id=second>2</button>` +
+        `</form></body>`,
+      "",
+    ),
+  );
+
+  // Resolved by walking, so the assertion is that it picked the earlier node — which is
+  // also the only way to tell "first" from "last" when both are submit buttons.
+  const buttons: number[] = [];
+  for (let i = 0; i < ui.nodes.count; i++) {
+    if (ui.nodes.kind[i] === NodeKind.BUTTON) buttons.push(i);
+  }
+  expect(buttons.length).toBe(2);
+  expect(ui.forms[0]!.button).toBe(buttons[0]!);
+});
+
+test("a nested form's button does not become the outer form's", () => {
+  // Invalid HTML that parses anyway. Giving the inner button to the outer form would be a
+  // wrong answer where ignoring it is a right one.
+  const ui = toCompiledUi(
+    compile(`<body><form><input><form><button type=submit>go</button></form></form></body>`, ""),
+  );
+
+  const outer = ui.forms.find((f) => f.node === Math.min(...ui.forms.map((g) => g.node)))!;
+  expect(outer.button).toBe(-1);
+  // One blocking field and no button of its own, so the outer form still submits directly.
+  expect(outer.direct).toBe(true);
+});
+
+test("a textarea is a text area, and Enter there is not a submission", () => {
+  const ui = toCompiledUi(compile(`<body><input><textarea></textarea></body>`, ""));
+
+  // The tag is gone by this point — both are editable boxes of the same node kind — so the
+  // distinction has to survive as its own set or Enter cannot tell them apart.
+  expect(ui.textAreas.length).toBe(1);
+  expect([...ui.editableBoxes]).toContain(ui.textAreas[0]!);
+  expect([...ui.editableBoxes].length).toBeGreaterThan(1);
+});
+
 test("no autofocus is an empty table, not a sentinel", () => {
   const ui = toCompiledUi(compile(`<body><button>plain</button></body>`, ""));
   expect([...ui.autofocus]).toEqual([]);

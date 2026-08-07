@@ -105,6 +105,10 @@ export default function Controls() {
   // is ordered: the leaving element hears first, always, measured — so tabbing from this
   // box to anything else writes "left" before the next element could write anything.
   const focusState = signal("not focused");
+  const submitted = signal("nothing yet");
+  const formName = signal("");
+  const formTwo = signal("");
+  const formFields = signal("");
 
   return (
     <div className="flex flex-col gap-5">
@@ -319,6 +323,75 @@ export default function Controls() {
           </button>
           <span className={LABEL}>onFocus/onBlur:</span>
           <span className="text-xs font-semibold text-sky-300">{focusState}</span>
+        </div>
+      </div>
+
+      <div className={CARD}>
+        <div className={H}>forms — Enter submits, and when it does not</div>
+        <div className={SUB}>
+          `onSubmit` runs on Enter in a field and on a press of the submit button · there is no
+          event object and nothing to cancel, because dziri never navigates: a submission is a
+          call into app code, and the values are already in the signals the fields are bound to
+        </div>
+        <div className={SUB}>
+          the conditions are measured, not guessed · the left form has a submit button, so Enter
+          in it always submits · the right one has none and two fields, so Enter does nothing at
+          all — a form with no button submits only when exactly one field blocks implicit
+          submission, and a disabled submit button blocks it outright
+        </div>
+        <div className={SUB}>
+          all of that is resolved at build time into one number per form: which button Enter
+          clicks, or none · what is left at run time is walking up from the focused node to find
+          the form
+        </div>
+        <div className="flex flex-row flex-wrap items-start gap-8">
+          <div className="flex flex-col gap-1">
+            <span className={LABEL}>one field and a submit button — Enter submits</span>
+            <form
+              className="flex flex-row items-center gap-2"
+              onSubmit={() => submitted.set("the form with a button")}
+            >
+              <input
+                type="text"
+                bind:value={formName}
+                placeholder="name"
+                className="w-40 rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+              />
+              <button
+                type="submit"
+                className="rounded-lg bg-sky-700 px-3 py-1 text-xs font-semibold text-zinc-50"
+              >
+                submit
+              </button>
+            </form>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className={LABEL}>two fields and no button — Enter does nothing</span>
+            {/* The readout below stays as it was if Enter is pressed in either of these, which
+                is the whole demonstration. A handler is attached precisely so that "nothing
+                happened" is a measured absence rather than a missing wire. */}
+            <form
+              className="flex flex-row items-center gap-2"
+              onSubmit={() => submitted.set("the two-field form — this should be unreachable")}
+            >
+              <input
+                type="text"
+                bind:value={formTwo}
+                className="w-24 rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+                placeholder="two"
+              />
+              <input
+                type="text"
+                bind:value={formFields}
+                className="w-24 rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100"
+                placeholder="fields"
+              />
+            </form>
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className={LABEL}>onSubmit:</span>
+            <span className="text-xs font-semibold text-sky-300">{submitted}</span>
+          </div>
         </div>
       </div>
 
