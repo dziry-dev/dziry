@@ -1317,3 +1317,197 @@ mod activation {
             .any(|&(k, _)| k == protocol::event_kind::CLICK),);
     }
 }
+
+/// Arrows inside a radio group — the half of roving tabindex that makes the other half
+/// safe.
+///
+/// A group is one tab stop on its checked member. On its own that is a trap: Space on an
+/// already-checked radio fires nothing at all (measured), so a keyboard user could reach
+/// the group and never change the answer. These tests are the escape from it.
+mod group_arrows {
+    use super::*;
+    use dziri_engine::engine::keys;
+
+    /// Root with three radios in one group (1, 2, 3) and a plain button (4) after them.
+    /// The middle radio starts checked, so the group's tab stop is node 2.
+    fn radio_group() -> Engine {
+        let mut engine = Engine::new(&config(5, 2)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            init_style(t, 0);
+            init_style(t, 1);
+            t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+
+            node(t, 0, 0, -1);
+            for i in 1..5 {
+                node(t, i, 1, 0);
+                t.set_u8(
+                    NODES,
+                    nodes::FLAGS,
+                    i,
+                    protocol::flags::INTERACTIVE | protocol::flags::TAB_STOP,
+                );
+            }
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+            for i in 1..4 {
+                t.set_i32(NODES, nodes::NEXT_SIBLING, i, (i + 1) as i32);
+            }
+
+            control(t, 0, 1, control_kind::RADIO, 7, 0);
+            control(t, 1, 2, control_kind::RADIO, 7, control_flags::CHECKED);
+            control(t, 2, 3, control_kind::RADIO, 7, 0);
+            control(t, 3, 4, control_kind::BUTTON, -1, 0);
+            pad_variants(t, 0);
+        }
+        engine.tick().expect("tick");
+        engine
+    }
+
+    fn checked(engine: &Engine) -> Vec<i32> {
+        (1..4)
+            .filter(|&n| engine.is_checked(n))
+            .collect::<Vec<i32>>()
+    }
+
+    fn tab_in(engine: &mut Engine) {
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+    }
+
+    /// The trap, closed. Tab lands on the checked member and every other member is
+    /// reachable from there — which before this was not true of any of them.
+    #[test]
+    fn arrows_reach_the_members_tab_cannot() {
+        let mut engine = radio_group();
+        tab_in(&mut engine);
+        assert_eq!(engine.focused(), 2, "the tab stop is the checked member");
+
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 3);
+
+        engine.key_down(keys::UP, 0);
+        engine.key_down(keys::UP, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 1, "and back past where Tab put us");
+    }
+
+    /// **Landing selects**, which no other key in this engine does. Measured: one arrow
+    /// press fires `click`, `input` and `change` on the newly focused radio.
+    #[test]
+    fn an_arrow_moves_the_selection_with_the_focus() {
+        let mut engine = radio_group();
+        tab_in(&mut engine);
+        assert_eq!(checked(&engine), vec![2]);
+
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(checked(&engine), vec![3], "arrowing changed the value");
+
+        engine.key_down(keys::UP, 0);
+        engine.tick().expect("tick");
+        assert_eq!(checked(&engine), vec![2], "and back");
+    }
+
+    /// All four arrows work and the group has no orientation — Right is Down and Left is
+    /// Up. A browser does not ask how the group was laid out, and neither can dziri:
+    /// `flex-direction` is a style, and the keys are the same either way.
+    #[test]
+    fn right_is_down_and_left_is_up() {
+        let mut engine = radio_group();
+        tab_in(&mut engine);
+
+        engine.key_down(keys::RIGHT, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 3);
+
+        engine.key_down(keys::LEFT, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 2);
+    }
+
+    /// **A group wraps where a picker clamps.** Both measured, and the only difference
+    /// between the two walks — which is why it is a flag on `arrow_nav` rather than a
+    /// policy inside `step_within`.
+    #[test]
+    fn a_group_wraps_at_both_ends() {
+        let mut engine = radio_group();
+        tab_in(&mut engine);
+
+        engine.key_down(keys::DOWN, 0);
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 1, "off the end and round to the first");
+
+        engine.key_down(keys::UP, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 3, "and backwards off the start");
+    }
+
+    /// The tab stop follows the arrow, because the stop *is* the checked member and the
+    /// arrow moves the check. Falls out rather than being arranged, and it is what makes
+    /// tabbing away and back return to the user's choice rather than to where they started.
+    #[test]
+    fn the_groups_tab_stop_follows_the_selection() {
+        let mut engine = radio_group();
+        tab_in(&mut engine);
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 3);
+
+        // Out of the group to the button, then round the cycle back in.
+        tab_in(&mut engine);
+        assert_eq!(engine.focused(), 4, "the button after the group");
+        tab_in(&mut engine);
+        assert_eq!(
+            engine.focused(),
+            3,
+            "back into the group at what the arrow chose, not at the first member"
+        );
+    }
+
+    /// A disabled member is not focusable, so an arrow must step over it — the arrow list
+    /// and the tab order come from the same walk precisely so they cannot disagree about
+    /// which nodes exist.
+    #[test]
+    fn an_arrow_steps_over_a_disabled_member() {
+        let mut engine = radio_group();
+        {
+            let t = engine.tables_mut();
+            t.set_u8(CONTROLS, controls::FLAGS, 2, control_flags::DISABLED);
+        }
+        engine.tick().expect("tick");
+
+        tab_in(&mut engine);
+        assert_eq!(engine.focused(), 2);
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        assert_eq!(
+            engine.focused(),
+            1,
+            "node 3 is disabled, so Down wraps to 1"
+        );
+    }
+
+    /// An arrow with a button focused is not the group's, and must reach the host — the
+    /// engine claims only what it handles.
+    #[test]
+    fn an_arrow_outside_a_group_is_not_claimed() {
+        let mut engine = radio_group();
+        tab_in(&mut engine);
+        tab_in(&mut engine);
+        assert_eq!(engine.focused(), 4, "the button");
+
+        let mut out = [dziri_engine::engine::Event::default(); 16];
+        engine.key_down(keys::DOWN, 0);
+        engine.tick().expect("tick");
+        let n = engine.drain_events(&mut out);
+        assert!(
+            out[..n]
+                .iter()
+                .any(|e| e.kind == protocol::event_kind::KEY_DOWN),
+            "an arrow the engine does not handle still reaches the host"
+        );
+        assert_eq!(checked(&engine), vec![2], "and nothing was selected");
+    }
+}

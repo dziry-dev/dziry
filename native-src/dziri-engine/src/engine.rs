@@ -1424,6 +1424,16 @@ impl Engine {
             return;
         }
 
+        // Arrows inside the focused control's group. After the picker, which owns its own
+        // arrows while it is open, and **before the caret**, which is the ordering that
+        // matters: a radio is not a text field, so there is no caret competing for the key
+        // — but a caret left over from a field the user clicked earlier still exists, and
+        // `move_caret` would happily walk it while the user believes they are choosing a
+        // radio.
+        if self.group_key(keycode) {
+            return;
+        }
+
         if select_all {
             self.select_all();
             return;
@@ -1525,6 +1535,21 @@ impl Engine {
             _ => false,
         };
         if !wanted {
+            return false;
+        }
+        self.activate_focused_now()
+    }
+
+    /// Activates the focused control, having already decided that the key means to.
+    ///
+    /// Split from [`Engine::activate_focused`] because an **arrow inside a radio group is
+    /// also an activation** — measured, it dispatches `click`, `input` and `change` — and
+    /// it is neither Enter nor Space. Routing it through the key-to-kind table would have
+    /// meant passing a key that was not pressed, which is a lie the next reader has to
+    /// unpick.
+    fn activate_focused_now(&mut self) -> bool {
+        let node = self.state.focused;
+        if node < 0 {
             return false;
         }
 
@@ -1717,30 +1742,101 @@ impl Engine {
             return true;
         }
 
-        let at = options.iter().position(|&o| o == self.state.focused);
-        let next = match (home, end) {
-            (true, _) => 0,
-            (_, true) => options.len() - 1,
-            _ => match (at, keycode == keys::DOWN) {
-                // Clamped at both ends rather than wrapping — measured 2026-08-06, four
-                // presses down a three-option list, and it stops. Worth having measured
-                // rather than reasoned about, because **a radio group wraps** under the
-                // same arrow keys. The two are not one navigation rule, which is a
-                // constraint on A3's "one tab stop, arrows inside it": that generalisation
-                // carries a per-kind wrap flag.
-                //
-                // An unfocused picker starts at the first option going down and the last
-                // going up, which is what an arrow into a fresh list means.
-                (Some(i), true) => (i + 1).min(options.len() - 1),
-                (Some(i), false) => i.saturating_sub(1),
-                (None, true) => 0,
-                (None, false) => options.len() - 1,
-            },
+        // The shared walk, with the picker's own answer to the one question that differs
+        // between lists: it **clamps**. A radio group under the same keys wraps, both
+        // measured, which is why `arrow_nav` carries the flag instead of `step_within`
+        // choosing. This used to be a hand-rolled `min`/`saturating_sub` here — the
+        // "fourth hand-rolled clamp" ROADMAP A3 asks not to reach for again.
+        let landing = match (home, end) {
+            (true, _) => options[0],
+            (_, true) => options[options.len() - 1],
+            _ => focus::step_within(
+                &options,
+                self.state.focused,
+                keycode == keys::DOWN,
+                controls::arrow_nav(control_kind::OPTION).is_some_and(|nav| nav.wrap),
+            ),
         };
-        let landing = options[next];
-        if landing != self.state.focused {
+        if landing >= 0 && landing != self.state.focused {
             self.state.focused = landing;
             self.needs_paint = true;
+        }
+        true
+    }
+
+    /// An arrow inside the group the focused control belongs to. Returns whether consumed.
+    ///
+    /// The other half of "one tab stop, arrows inside it", and the half that makes the
+    /// first half correct rather than a trap. A radio group is one tab stop **on its
+    /// checked member** — so without this, Tab reaches a group and every other member of it
+    /// is unreachable: Space on an already-checked radio fires nothing at all (measured), so
+    /// a keyboard user could see the group and never change the answer.
+    ///
+    /// Measured, `probes/keyboard-activation.html`, and three things about it are not
+    /// guessable:
+    ///
+    /// - **ArrowRight and ArrowDown both go forward**, Left and Up back. A radio group has
+    ///   no orientation to respect; all four keys work in a browser regardless of how the
+    ///   group is laid out.
+    /// - **It wraps**, where the picker clamps.
+    /// - **Landing selects.** One press fires `click`, `input` and `change` on the newly
+    ///   focused radio, on keydown — so arrowing through a group changes the value as it
+    ///   goes, which no other key in this engine does.
+    ///
+    /// Because landing selects, and because the group's tab stop *is* the checked member,
+    /// the tab stop moves with the arrow. That falls out rather than being arranged, and it
+    /// is the behaviour that makes tabbing away and back return to what the user chose.
+    fn group_key(&mut self, keycode: i32) -> bool {
+        let forward = match keycode {
+            k if k == keys::DOWN || k == keys::RIGHT => true,
+            k if k == keys::UP || k == keys::LEFT => false,
+            _ => return false,
+        };
+
+        let focused = self.state.focused;
+        let kind = self.painter.control_kind(&self.tables, focused);
+        let Some(nav) = controls::arrow_nav(kind) else {
+            return false;
+        };
+        // Options are the picker's, and `picker_key` has already had this key — it runs
+        // first and consumes what it uses. Reaching here with an option focused would mean
+        // an open picker whose keys this function does not own.
+        if kind != control_kind::RADIO {
+            return false;
+        }
+
+        let group = self.painter.control_group(&self.tables, focused);
+        if group < 0 {
+            // An unnamed radio is in no group, so there is nothing to arrow through. It
+            // stays a tab stop of its own, which is what `collapse_radio_groups` decided.
+            return false;
+        }
+
+        let mut members = Vec::new();
+        focus::group_members(
+            &self.painter,
+            &self.tables,
+            self.geometry(),
+            &self.state,
+            self.root,
+            group,
+            &mut members,
+        );
+
+        let landing = focus::step_within(&members, focused, forward, nav.wrap);
+        if landing < 0 || landing == focused {
+            // Consumed even when nothing moved — a one-member group still owns its arrows,
+            // and forwarding them would let a host act on a key aimed at the group.
+            return true;
+        }
+
+        self.state.focused = landing;
+        self.needs_paint = true;
+
+        if nav.selects {
+            // The same three events a click produces, because a browser really does
+            // dispatch a `click` here — the arrow is an activation, not just a move.
+            self.activate_focused_now();
         }
         true
     }
@@ -1771,6 +1867,17 @@ impl Engine {
             self.needs_paint = true;
         }
         true
+    }
+
+    /// Whether `node` is a checked control.
+    ///
+    /// The live bit, not the authored one — the engine has owned checkedness since v13 and
+    /// the table only seeds it. Exposed because the alternative for a test is asserting on
+    /// pixels, which is the right check for *paint* and a poor one for a state machine: a
+    /// radio that fails to clear its group and a stylesheet that lost its `:checked` rule
+    /// produce the same wrong colour.
+    pub fn is_checked(&self, node: i32) -> bool {
+        self.painter.control_state(node) & protocol::control_flags::CHECKED != 0
     }
 
     /// The focused node, or `-1`.

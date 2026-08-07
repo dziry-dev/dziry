@@ -376,6 +376,47 @@ pub fn space_activates(kind: u8) -> bool {
     )
 }
 
+/// What an arrow key does inside a group of this kind.
+///
+/// The per-kind half of ROADMAP A3's "one tab stop, arrows inside it". The walk itself is
+/// shared — `focus::step_within` — and this is everything about it that is a fact about
+/// the *control* rather than about the list.
+///
+/// Two fields, and both had to be measured because both differ between the two kinds that
+/// exist today:
+///
+/// | kind | wraps | arrival selects | measured in |
+/// |---|---|---|---|
+/// | radio | **yes** | **yes** — `click`, `input`, `change`, on keydown | `keyboard-activation.html` |
+/// | option (open picker) | **no, clamps** | no — Enter commits, separately | `select-picker.html` |
+///
+/// "Arrival selects" is the one that would be guessed wrong in either direction. A radio
+/// group changes its value as you arrow through it, which is unlike every other key in
+/// this file; a picker deliberately does not, which is what makes Escape able to throw the
+/// highlight away.
+///
+/// A third control gets keyboard navigation by adding an arm here and a source of members
+/// at the call site. That is the property worth preserving, and the reason this is a table
+/// rather than a branch inside the engine's key handler.
+pub struct ArrowNav {
+    pub wrap: bool,
+    pub selects: bool,
+}
+
+pub fn arrow_nav(kind: u8) -> Option<ArrowNav> {
+    match kind {
+        control_kind::RADIO => Some(ArrowNav {
+            wrap: true,
+            selects: true,
+        }),
+        control_kind::OPTION => Some(ArrowNav {
+            wrap: false,
+            selects: false,
+        }),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

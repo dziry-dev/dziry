@@ -62,6 +62,46 @@ pub fn tab_stops(
     root: usize,
     out: &mut Vec<i32>,
 ) {
+    focusable_nodes(painter, tables, geometry, state, root, out);
+    collapse_radio_groups(painter, tables, out);
+}
+
+/// The members of one radio group, in document order.
+///
+/// The list arrows walk inside a group, and it is deliberately built from the same source
+/// as the tab order rather than from the controls table directly: a member that is
+/// disabled, `display:none` or inside a hidden route is not focusable, so an arrow must
+/// not land on it either. Reading the table would find those members and reading the walk
+/// cannot, which is the kind of divergence that produces focus on an invisible node.
+///
+/// This is the *pre-collapse* list — every member, not the one that carries the tab stop.
+/// Collapsing is what makes the group one stop; arrows are what move within it, and they
+/// need the whole thing.
+pub fn group_members(
+    painter: &Painter,
+    tables: &Tables,
+    geometry: Geometry,
+    state: &InputState,
+    root: usize,
+    group: i32,
+    out: &mut Vec<i32>,
+) {
+    focusable_nodes(painter, tables, geometry, state, root, out);
+    out.retain(|&node| {
+        painter.control_kind(tables, node) == control_kind::RADIO
+            && painter.control_group(tables, node) == group
+    });
+}
+
+/// Every focusable node in document order, before a group is collapsed to one stop.
+fn focusable_nodes(
+    painter: &Painter,
+    tables: &Tables,
+    geometry: Geometry,
+    state: &InputState,
+    root: usize,
+    out: &mut Vec<i32>,
+) {
     out.clear();
     let count = geometry.bounds.len();
     let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
@@ -116,8 +156,6 @@ pub fn tab_stops(
             stack.push(kid);
         }
     }
-
-    collapse_radio_groups(painter, tables, out);
 }
 
 /// Reduces every radio group in `stops` to the single stop it is.
@@ -190,17 +228,44 @@ fn collapse_radio_groups(painter: &Painter, tables: &Tables, stops: &mut Vec<i32
 /// pointer press focused — where "the next one after it" is not defined by this list, so
 /// the walk starts from the end it is coming from.
 pub fn step(stops: &[i32], from: i32, backward: bool) -> i32 {
-    if stops.is_empty() {
+    step_within(stops, from, !backward, true)
+}
+
+/// Moves one place through an ordered list of nodes. The whole of "arrows inside".
+///
+/// ROADMAP A3's "one tab stop, arrows inside it" reduced to the part that is genuinely
+/// shared. A tab order, a radio group and a `<select>` picker are three lists a key walks,
+/// and having measured all three the *only* thing that differs between the walks is
+/// whether they wrap:
+///
+/// | list | wrap | measured in |
+/// |---|---|---|
+/// | tab order | yes (dziri; a browser leaves for its chrome) | `tab-order.html` |
+/// | radio group | **yes** | `keyboard-activation.html` |
+/// | picker options | **no — clamps** | `select-picker.html` |
+///
+/// That a group wraps and a picker clamps under the same arrow keys is exactly why the
+/// flag is a parameter rather than a policy baked in here. Everything else that varies —
+/// which nodes are in the list, whether landing on one activates it, which keys count as
+/// forward — belongs to the caller, because those are facts about the control and this is
+/// a walk over a slice.
+///
+/// **Not being in the list is not an error.** Nothing is focused when a window opens, and
+/// focus can sit on a node no list contains. Entering from the end you are coming from is
+/// what makes the first Tab land on the first stop and a first ArrowUp into a fresh picker
+/// land on its last option.
+pub fn step_within(members: &[i32], from: i32, forward: bool, wrap: bool) -> i32 {
+    if members.is_empty() {
         return -1;
     }
-    let last = stops.len() - 1;
-    match stops.iter().position(|&n| n == from) {
-        Some(0) if backward => stops[last],
-        Some(i) if backward => stops[i - 1],
-        Some(i) if i == last => stops[0],
-        Some(i) => stops[i + 1],
-        None if backward => stops[last],
-        None => stops[0],
+    let last = members.len() - 1;
+    match members.iter().position(|&n| n == from) {
+        Some(0) if !forward => members[if wrap { last } else { 0 }],
+        Some(i) if !forward => members[i - 1],
+        Some(i) if i == last => members[if wrap { 0 } else { last }],
+        Some(i) => members[i + 1],
+        None if forward => members[0],
+        None => members[last],
     }
 }
 

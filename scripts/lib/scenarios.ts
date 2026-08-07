@@ -9,8 +9,73 @@
  *
  * `args` are `windows/entry.gen.ts` flags, so a scenario is a state the shipped
  * entry can be driven into rather than a harness-only mode.
+ *
+ * # Node ids are looked up, not written down
+ *
+ * A scenario that says `--click 282` is a scenario that points at whatever node inherits
+ * 282 the next time anyone edits the demo, and it will still take a screenshot and still
+ * look plausible. That is not hypothetical: on 2026-08-07 three lines of copy were added
+ * to a page and `--open` silently pressed a plain box, producing a picture of a *closed*
+ * picker for the scenario named `controls-picker`. It would have been blessed by
+ * `--accept` without complaint.
+ *
+ * So the ids below are resolved from the compiled artifact by *role* — the third radio,
+ * the first select's button — which is what the scenario actually means. Edit the demo and
+ * they follow. `transform-hover` and `hover-nav` still carry literals because a hovered
+ * button has no role to look up; their comments carry the warning instead.
  */
+import * as main from "../../windows/main/ui.gen.ts";
+import { ControlKind } from "../../src/ir.ts";
+
 export type Scenario = { name: string; args: string[] };
+
+/** The nth control of a kind, in document order. Throws rather than screenshotting a lie. */
+function control(kind: number, nth = 0): string {
+  const found: number[] = [];
+  for (let r = 0; r < main.controls.count; r++) {
+    if (main.controls.kind[r] === kind) found.push(main.controls.node[r]!);
+  }
+  const node = found.sort((a, b) => a - b)[nth];
+  if (node === undefined) {
+    throw new Error(`no control of kind ${kind} at index ${nth} — the demo changed shape`);
+  }
+  return String(node);
+}
+
+/** The nth `bind:value` field, in document order. */
+function editable(nth = 0): string {
+  const node = main.editables.map((e) => e.node).sort((a, b) => a - b)[nth];
+  if (node === undefined) throw new Error(`no editable at index ${nth}`);
+  return String(node);
+}
+
+/**
+ * The `<button>` a `<select>` shows when closed — the node a press has to land on.
+ *
+ * Its first child, and worth resolving rather than assuming: the select is what the
+ * *control* row names, and pressing the select's own box is not the same gesture. The
+ * arithmetic version of this ("the select's id plus one") is what produced the closed
+ * picker described above.
+ */
+function selectButton(nth = 0): string {
+  return String(main.nodes.firstChild[Number(control(ControlKind.SELECT, nth))]!);
+}
+
+/**
+ * The **words** beside a control — the text run that forwards a press to it.
+ *
+ * What a pointer actually hits most of the time, and the node the label-forwarding
+ * scenarios exist to press. Found by asking which text run `activates` the control, which
+ * is the same column the engine follows, so the scenario and the behaviour it tests read
+ * the same table.
+ */
+function labelTextOf(controlNode: string): string {
+  const target = Number(controlNode);
+  for (let n = 0; n < main.nodes.count; n++) {
+    if (main.nodes.activates[n] === target && main.nodes.text[n]! >= 0) return String(n);
+  }
+  throw new Error(`no label text forwards to node ${target}`);
+}
 
 /**
  * `--patch light,compact` flips conditional classes on by name: `light` is
@@ -149,12 +214,12 @@ export const SCENARIOS: Scenario[] = [
    *
    *   - `controls` is the resting page: `:checked` and `:disabled` live from the
    *     authored attributes, which is the *seed* rather than a fixed style.
-   *   - `controls-checked` presses node 264 — the **text** "unchecked", not the 18px
+   *   - `controls-checked` presses the **text** "unchecked", not the 18px
    *     box. It is the label-forwarding case, and it is the one the pointer actually
    *     hits most of the time. It fails if `activates` stops propagating to a label's
    *     descendants, or if `buildInteractive` stops marking a node that operates a
    *     control, which would leave `hit_test` walking straight past the span.
-   *   - `controls-radio` presses node 282 ("free"), which must check it *and clear*
+   *   - `controls-radio` presses the first radio ("free"), which must check it *and clear*
    *     "pro". Without the group clear both would be filled and the picture would look
    *     like two checkboxes — a wrong frame that a per-control test cannot produce.
    *
@@ -166,11 +231,11 @@ export const SCENARIOS: Scenario[] = [
   { name: "controls", args: ["--route", "controls", "--size", "1040x1400"] },
   {
     name: "controls-checked",
-    args: ["--route", "controls", "--size", "1040x1400", "--click", "264"],
+    args: ["--route", "controls", "--size", "1040x1400", "--click", labelTextOf(control(ControlKind.CHECKBOX, 0))],
   },
   {
     name: "controls-radio",
-    args: ["--route", "controls", "--size", "1040x1400", "--click", "282"],
+    args: ["--route", "controls", "--size", "1040x1400", "--click", control(ControlKind.RADIO, 0)],
   },
   /**
    * A focused text field, which is the only way to see focus at all until there is a
@@ -188,7 +253,7 @@ export const SCENARIOS: Scenario[] = [
    */
   {
     name: "controls-focus",
-    args: ["--route", "controls", "--size", "1040x1400", "--focus", "302"],
+    args: ["--route", "controls", "--size", "1040x1400", "--focus", editable(0)],
   },
   /**
    * The UA sheet's `:focus-visible` ring, on a control that has no ring of its own.
@@ -206,7 +271,7 @@ export const SCENARIOS: Scenario[] = [
    */
   {
     name: "controls-focus-ring",
-    args: ["--route", "controls", "--size", "1040x1400", "--focus", "321"],
+    args: ["--route", "controls", "--size", "1040x1400", "--focus", control(ControlKind.SELECT, 0)],
   },
   /**
    * A caret, which needs a **click** rather than `--focus`.
@@ -236,7 +301,7 @@ export const SCENARIOS: Scenario[] = [
    */
   {
     name: "controls-caret",
-    args: ["--route", "controls", "--size", "1040x1400", "--click", "302"],
+    args: ["--route", "controls", "--size", "1040x1400", "--click", editable(0)],
   },
 
   /**
@@ -267,7 +332,7 @@ export const SCENARIOS: Scenario[] = [
       "--drag",
       "302:0.05:0.45",
       "--focus",
-      "302",
+      editable(0),
     ],
   },
 
@@ -282,7 +347,7 @@ export const SCENARIOS: Scenario[] = [
    */
   {
     name: "controls-word",
-    args: ["--route", "controls", "--size", "1040x1400", "--double", "302", "--focus", "302"],
+    args: ["--route", "controls", "--size", "1040x1400", "--double", editable(0), "--focus", editable(0)],
   },
 
   /**
@@ -313,7 +378,7 @@ export const SCENARIOS: Scenario[] = [
    */
   {
     name: "controls-picker",
-    args: ["--route", "controls", "--size", "1040x1400", "--open", "322"],
+    args: ["--route", "controls", "--size", "1040x1400", "--open", selectButton(0)],
   },
 
   /**
@@ -343,7 +408,7 @@ export const SCENARIOS: Scenario[] = [
       "--scroll",
       "560",
       "--open",
-      "322",
+      selectButton(0),
     ],
   },
 

@@ -125,6 +125,13 @@ export default function Controls() {
           them apart — twenty-two input types share one tag, which is why attribute selectors had
           to exist before a UA stylesheet could describe any of them
         </div>
+        <div className={SUB}>
+          the group is one tab stop, on whichever radio is checked, and the arrows move inside
+          it — all four of them, since a group has no orientation to respect · an arrow both moves
+          focus and changes the value, which no other key here does, and it wraps at both ends
+          where a select&apos;s picker clamps · both measured · the tab stop follows the choice, so
+          tabbing away and back returns to it
+        </div>
         <div className="flex flex-row gap-6">
           <label className={ROW}>
             <input type="radio" name="plan" />

@@ -455,15 +455,20 @@ winit-versus-SDL3 choice reversible.
   broken.
 - Skip hidden subtrees; autofocus.
 - Tab order over spatial navigation: it is the desktop convention and what Radix implements.
-- **One tab stop, arrows inside it** — ARIA's roving-tabindex pattern, and the generalisation
-  worth building rather than reaching a fourth time. A radio group, a tab strip, a menu, a
-  listbox and a `<select>` picker are all the same mechanism: the group is one stop in the tab
-  order, and arrows navigate within it. The picker built its own version in B1
-  (`Engine::picker_key` plus `open_options` and a hand-rolled clamp), which is the copy to fold
-  in once this exists. What varies per control is only *what an arrow means*, and that is a
-  dispatch on `ControlKind` — already a `u8` in the tables, and already how
-  `Controls::activate` dispatches. So a new keyboard-operable control is one arm plus a row,
-  which is the property to preserve.
+- ~~**One tab stop, arrows inside it**~~ — **built**, for the two controls that exist. The walk
+  is `focus::step_within`, one function over a slice; what varies per control is
+  `controls::arrow_nav`, a two-field row keyed on `ControlKind`. The picker's hand-rolled clamp
+  is gone, folded into the shared walk, which was the point of building this rather than
+  reaching for a fourth copy.
+
+  Having measured both, the *only* thing that differs between the two walks is **wrap**: a radio
+  group wraps and a picker clamps under the same arrow keys. The second field is whether landing
+  selects — a radio group changes its value as you arrow through it, a picker does not, which is
+  what lets Escape throw a picker's highlight away and why the two cannot share one answer.
+
+  A tab strip or a menu is now an arm plus a source of members. Still owed: the members for a
+  radio group come from the focus walk and for a picker from `open_options`, which is a match at
+  the call site rather than part of the table — fine for two, worth a column at four.
 - Activation is **already kind-dispatched and simply unreachable from the keyboard**:
   `Controls::activate` handles checkbox, radio and option, and a focused checkbox does nothing
   on Space only because nothing calls it. Enter/Space is wiring, not new behaviour.
