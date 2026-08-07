@@ -631,12 +631,16 @@ export function jsx(
     children.push({ type: "dyntext", parts: [{ source: bound }] });
   }
 
+  const droppedSignals: string[] = [];
+  const attrs = attrsOf(props, names.classes, droppedSignals);
+
   return {
     type: "element",
     tag: type.toLowerCase(),
     id: props.id ?? null,
     classes: names.classes,
     children: normalize(children),
+    ...(droppedSignals.length ? { droppedSignals } : {}),
     onClick: props.onClick ?? null,
     onChange: props.onChange ?? null,
     onFocus: props.onFocus ?? null,
@@ -645,7 +649,7 @@ export function jsx(
     classWhen: names.classWhen,
     bindValue: bound ?? null,
     style: styleAttr(props.style, type),
-    attrs: attrsOf(props, names.classes),
+    attrs,
   };
 }
 
@@ -668,13 +672,23 @@ export function jsx(
  * it holds, and `kebab("bind:value")` is not an attribute name anyone wants in
  * the map if a future binding ever carries a literal.
  */
-function attrsOf(props: Props, classes: string[]): ReadonlyMap<string, string> {
+function attrsOf(
+  props: Props,
+  classes: string[],
+  /** Filled with the names of props that held a signal and were therefore dropped. */
+  droppedSignals?: string[],
+): ReadonlyMap<string, string> {
   const out = new Map<string, string>();
   for (const [key, value] of Object.entries(props)) {
     if (key === "children" || key === "className" || key === "class" || key === "style") continue;
     if (key.startsWith("bind:")) continue;
     if (typeof value === "string") out.set(kebab(key).toLowerCase(), value);
     else if (value === true) out.set(kebab(key).toLowerCase(), "");
+    // A signal here is dropped, as the doc above says it must be — but dropping it in
+    // silence is the problem. `disabled={isBusy}` reads like it works, compiles without a
+    // word, and produces a control that is simply never disabled. Recorded so the build
+    // can say so once; see `warnDroppedSignals` in `compile.ts`.
+    else if (isSignal(value)) droppedSignals?.push(key);
   }
   if (classes.length) out.set("class", classes.join(" "));
   if (typeof props.id === "string") out.set("id", props.id);

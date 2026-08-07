@@ -40,6 +40,15 @@ export type Element = {
   /** `<form>` only. Runs on Enter in a field, and on a click of the submit button. */
   onSubmit: unknown;
   /**
+   * Props that held a signal and were dropped, by name.
+   *
+   * Only the JSX front end can produce these — HTML attributes are always strings — and
+   * only so the build can say something. An attribute map holds text, because a selector
+   * compares against text, so `disabled={isBusy}` has nowhere to go. Silence there reads
+   * as support; see `warnDroppedSignals`.
+   */
+  droppedSignals?: string[];
+  /**
    * Classes applied while a boolean signal is true: `{ light: isLight }`.
    *
    * The compiler compiles each of these into a *style-table patch* — it resolves

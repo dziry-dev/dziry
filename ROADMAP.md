@@ -561,22 +561,48 @@ per-keystroke and `change` waits for blur. dziri's fields are `bind:value` signa
 per-keystroke half already exists, and the blur half is now expressible for the first time. That
 is the shape to build, not a duplicate event kind.
 
-Also missing, and each with the thing that has to happen first:
+Three of the four that were listed here are **done** (2026-08-07), and each turned out to be a
+different shape from the one this list predicted — which is the argument for the prediction being
+written down in the first place:
 
-- **`autofocus`** — **probe before building it.** One question is unmeasured and decides the
-  design: does focus arriving from `autofocus` match `:focus-visible`? If it does, every page
-  with an autofocused field opens wearing a ring, which is either right or a bug depending on an
-  answer nobody has. `probes/focus-visible.html` is the file to extend; the modality flag is one
-  assignment either way, so the cost is entirely in knowing which.
-- **Implicit form submission** — `<form>` *parses* (it reaches the IR as an ordinary element, so
-  selectors match it), and nothing else about it exists. Measured: Enter in a text field clicks
-  the form's submit button, a node nothing touched, so this is a lookup from field to form rather
-  than a row in the per-kind activation table.
-- **`onChange` inside a list row** — the click path has `dispatchItem`, which decomposes a node
-  into (slot, offset) so one compiled handler serves every row. The change path has no equivalent,
-  so a checkbox in a list reaches nothing.
-- **A control becoming disabled at run time** — `DISABLED` is re-read from the table on every
-  rescan because it is genuinely compile-time; a conditional class is today's answer.
+- **`autofocus`** — done, protocol v24. The question this was held for turned out to be the wrong
+  shape. Script `focus()` gives a ring after Tab and none after a click — the *identical* call — so
+  a focus change carries the modality bit rather than deciding it, and before any interaction the
+  bit is already set. `autofocus` opening with a ring is that rule, not a rule of its own, and the
+  code was `focus_visible: false` → `true`. A second probe then changed the design: an unfocusable
+  claim is walked past, and with thirteen of fourteen routes hidden on the first frame, several
+  claims are dziri's normal case — so the compiler marks every claim and the engine walks for the
+  first one showing.
+- **Implicit form submission** — done. `onSubmit` on `<form>`, no protocol change. The four
+  conditions were each measured and none were guessable: no button submits anyway but only with
+  exactly one blocking field; a checkbox, a `<select>` and a `<textarea>` do not count towards that
+  one; a *disabled* submit button blocks outright rather than being skipped; and the submitting
+  field need not be a text field. All of it is markup, so it resolves to `{ node, button, direct }`
+  per form and the host is left with "walk up to the form, is this a textarea".
+- **`onChange` inside a list row** — done, and the cause was a layer below the symptom. A list
+  arena is `capacity` copies of one template, and the copy was *structural only*: anything in a
+  side table keyed by node id stayed behind, so a control in a row had exactly one control row —
+  for row 0. Rows 1..7 were painted boxes: not controls, not tab stops, `activates` at -1. It hid
+  because it needs two items to show, and every test and the demo's list used one. It was live: the
+  demo's todo rows 2-8 took no Enter or Space on their buttons.
+
+Still open, with what is now known about it:
+
+- **A control becoming disabled at run time.** The engine side is already done — `DISABLED` is
+  re-read from the controls table on every rescan, so writing `ui.controls.flags` and re-uploading
+  is sufficient and no protocol or engine change is needed. What is missing is the authoring
+  surface and the wiring: `disabled` takes a `boolean`, and a signal there was **silently dropped**
+  until 2026-08-07. It now warns, which is the honest interim state rather than the fix.
+  - The pattern to copy is `patches.ts` — signal → table write → dirty flag — which is the same
+    shape and already has its `applied` map for skipping no-op writes.
+  - A conditional class is still today's answer for the *appearance*, and it cannot make a control
+    behave. Those are different halves and the warning says so.
+  - Whatever lands must handle list rows: a disabled control inside a template now has one control
+    row per replica, so a binding has to write `capacity` flags rather than one.
+
+Also still missing, and smaller: runtime arena *growth* past the compiled capacity appends rows
+that are not controls and not tab stops — `ui.controls` and `ui.tabStops` are not extended by
+`growArena`, and the engine's `control_capacity` would have to grow with them.
 
 Also unimplemented and now named: a keyboard activation has no press/release pairing, so holding
 Space and tabbing away activates whatever is focused at release — a browser cancels.

@@ -399,3 +399,27 @@ test("a click does not run the row's change handler", () => {
   expect(dispatchItem(ui, [ref], box, "click")).toBe(true);
   expect(seen).toEqual(["click"]);
 });
+
+test("a prop given a signal is refused out loud, not dropped in silence", () => {
+  // `disabled={isBusy}` compiles cleanly and produces a control that is never disabled:
+  // the attribute map holds text, because a selector compares against text, so a signal
+  // has nowhere to go. Everything about that is correct except the silence.
+  const busy = signal(true);
+  setCompiling(true);
+  let doc;
+  try {
+    doc = toDocument(
+      <div>
+        <input type="checkbox" disabled={busy as never} />
+      </div>,
+    );
+  } finally {
+    setCompiling(false);
+  }
+  const result = compileTree(doc, "");
+  const ui = toCompiledUi(result);
+
+  expect(result.warnings.join("\n")).toMatch(/disabled=\{…\} was given a signal, which is ignored/);
+  // And the behaviour it warns about is real: the control is not disabled.
+  expect(ui.controls.flags[0]).toBe(0);
+});

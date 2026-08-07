@@ -1392,6 +1392,22 @@ export function compileTree(
       });
     }
 
+    // A prop given a signal that the attribute map cannot hold. Said once, here, rather
+    // than left to be discovered by an author whose `disabled={isBusy}` compiles cleanly
+    // and produces a control that is never disabled. See `Element.droppedSignals`.
+    for (const prop of el.droppedSignals ?? []) {
+      warnings.push(
+        `${prop}={…} was given a signal, which is ignored.\n` +
+          `    Attributes hold text — a selector compares against text — so a signal here has\n` +
+          `    nowhere to go, and <${el.tag}> compiled as though the prop were absent.\n` +
+          `    Signals reach an element three ways today: bind:value for a field's text,\n` +
+          `    cn("x", { on: sig }) for a conditional class, and {sig} for a text run.\n` +
+          `    A control that becomes disabled at run time is not one of them yet — see\n` +
+          `    ROADMAP A3. A conditional class can style it; nothing yet makes it behave.\n` +
+          `    ${where}`,
+      );
+    }
+
     if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "", kind: "click" });
     if (el.onChange) handlers.push({ node: self, ref: el.onChange, name: "", kind: "change" });
     if (el.onFocus) handlers.push({ node: self, ref: el.onFocus, name: "", kind: "focus" });

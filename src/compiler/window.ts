@@ -128,7 +128,18 @@ export function Window(props: WindowProps): Element {
     minHeight: props.minHeight,
   });
 
-  if (props.route) routeSignals.set(root, props.route);
+  if (props.route) {
+    routeSignals.set(root, props.route);
+    // `jsx` above sees `route` as a prop holding a signal that no attribute can carry, and
+    // records it as dropped so the build can warn — which is right for `disabled={sig}` and
+    // wrong here, because it was not dropped: this line is where it goes. Cleared rather
+    // than exempted inside `attrsOf`, which has no idea it is building a window.
+    //
+    // The false positive is the reason this is written down: the warning found it on its
+    // first run against the demo, which is a warning working, and the fix belongs at the
+    // consumer rather than in a list of special names.
+    root.droppedSignals = root.droppedSignals?.filter((p) => p !== "route");
+  }
 
   return root;
 }
