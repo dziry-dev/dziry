@@ -17,6 +17,7 @@
 import { findRow } from "../find-row.ts";
 import type { CompiledUi } from "../ir.ts";
 import type { ItemPath } from "../compiler/item-path.ts";
+import { ControlKind } from "../protocol/generated.ts";
 import { Dirty } from "./bindings.ts";
 import { batch, type ReadonlySignal } from "./signal.ts";
 
@@ -53,7 +54,13 @@ export type ItemBindingRef = {
 
 export type ItemHandlerRef = {
   offset: number;
-  fn: (item: never, index: number) => void;
+  /**
+   * Which event runs it. Without this an `onChange` and an `onClick` on one element are
+   * indistinguishable here — both are the same offset — and a click runs whichever was
+   * emitted first, with the wrong arguments.
+   */
+  kind: "click" | "change" | "focus" | "blur" | "submit";
+  fn: (item: never, index: number, value?: unknown) => void;
 };
 
 export type ListBindingRef = {
@@ -176,10 +183,16 @@ function growArena(ui: CompiledUi, ref: ListBindingRef, needed: number): void {
       // row — so copying it unshifted would make every replica operate item 0's
       // control. `-1` stays `-1`.
       //
-      // The *controls table* is deliberately not extended to match: a list row
-      // containing a real control would need one row per replica, and nothing emits
-      // that yet. So a control inside a list is a gap rather than a silent
-      // half-feature, and this line is what makes filling it a table append.
+      // **The controls table is still not extended here, and that is now a real gap
+      // rather than a deferred one.** This comment used to say a control in a list row
+      // was unemitted; the compiler emits one control row per replica now
+      // (`replicateListControls`), so a control inside a list works — up to the
+      // *compiled* capacity. Past it, growth appends rows that are not controls, are not
+      // tab stops, and emit no `CHANGE`.
+      //
+      // Filling it is a table append plus a re-sort of `ui.controls` and the same for
+      // `ui.tabStops`, and it also needs the engine's `control_capacity` to grow, which
+      // is why it is not a two-line change here. Named in ROADMAP A3.
       nodes.activates[dst] = nodes.activates[src]! === -1 ? -1 : nodes.activates[src]! + shift;
     }
 
@@ -377,13 +390,18 @@ export function subscribeLists(refs: ListBindingRef[], onChange: () => void): ()
 }
 
 /**
- * Runs a per-row handler if `node` is inside a list arena.
+ * Which row a node belongs to, and what that row's data is. Null if it is not in a list.
  *
- * The clicked node is decomposed into (slot, offset): the offset identifies which
- * handler in the template was hit, and the slot says which item is currently
- * rendered there. That indirection is why one compiled handler serves every row.
+ * The decomposition every per-row dispatch needs: the node is split into (slot, offset),
+ * where the offset identifies which element of the *template* it is and the slot says
+ * which item is currently rendered there. That indirection is why one compiled handler
+ * serves every row.
  */
-export function dispatchItem(ui: CompiledUi, refs: ListBindingRef[], node: number): boolean {
+function rowOf(
+  ui: CompiledUi,
+  refs: ListBindingRef[],
+  node: number,
+): { ref: ListBindingRef; offset: number; item: unknown; index: number } | null {
   for (const ref of refs) {
     const start = ui.lists.arenaStart[ref.list]!;
     const stride = ui.lists.stride[ref.list]!;
@@ -394,17 +412,82 @@ export function dispatchItem(ui: CompiledUi, refs: ListBindingRef[], node: numbe
     const slot = Math.floor((node - start) / stride);
     const offset = node - start - slot * stride;
 
-    const handler = ref.itemHandlers.find((h) => h.offset === offset);
-    if (!handler) return false;
-
+    // A slot off the chain renders nothing, so there is no item to hand a handler. This
+    // is reachable: growth is append-and-abandon, so an arena keeps slots that used to
+    // hold rows and no longer do.
     const index = ref.slotData?.[slot] ?? -1;
-    if (index < 0) return false;
+    if (index < 0) return null;
 
-    const items = ref.signal.value ?? [];
-    batch(() => handler.fn(items[index] as never, index));
-    return true;
+    return { ref, offset, item: (ref.signal.value ?? [])[index], index };
   }
-  return false;
+  return null;
+}
+
+/**
+ * Runs a per-row handler if `node` is inside a list arena.
+ *
+ * `kind` is not optional in spirit even though it has a default: handlers are found by
+ * offset, so a row element carrying both an `onClick` and an `onChange` produces two
+ * entries with the same offset, and a lookup that ignored the kind would run whichever
+ * was emitted first — a click firing the change handler, with a click's arguments.
+ */
+export function dispatchItem(
+  ui: CompiledUi,
+  refs: ListBindingRef[],
+  node: number,
+  kind: ItemHandlerRef["kind"] = "click",
+): boolean {
+  const row = rowOf(ui, refs, node);
+  if (!row) return false;
+
+  const handler = row.ref.itemHandlers.find((h) => h.offset === row.offset && h.kind === kind);
+  if (!handler) return false;
+
+  batch(() => handler.fn(row.item as never, row.index));
+  return true;
+}
+
+/**
+ * Runs a row's `onChange`, with the control's new value as a third argument.
+ *
+ * The change path had no per-row equivalent at all, and the gap was not a missing feature
+ * so much as a trap: a handler inside a template is *lifted* out of `ui.handlers` into the
+ * list's own table, so `dispatchChange` looked for it where it no longer was and a
+ * checkbox in a row reached nothing. Silently, and only in a list.
+ *
+ * The signature is `(item, index, value)` rather than `(value)`, because a row handler
+ * already takes its item and index and a change handler in a row needs all three — which
+ * row was ticked is exactly the question a list of checkboxes asks.
+ *
+ * `raw` is converted the same way [`dispatchChange`] converts it, and for the same
+ * reason: the integer's meaning is the control's kind, and that is a protocol detail an
+ * author writing `onChange={(t, i, on) => …}` should never see. The lookup is by the
+ * *replica's* node, which only resolves because the compiler now gives every row its own
+ * control row — see `replicateListControls`.
+ */
+export function dispatchItemChange(
+  ui: CompiledUi,
+  refs: ListBindingRef[],
+  node: number,
+  raw: number,
+): boolean {
+  const row = rowOf(ui, refs, node);
+  if (!row) return false;
+
+  const handler = row.ref.itemHandlers.find((h) => h.offset === row.offset && h.kind === "change");
+  if (!handler) return false;
+
+  let kind: number = ControlKind.NONE;
+  for (let r = 0; r < ui.controls.count; r++) {
+    if (ui.controls.node[r] === node) {
+      kind = ui.controls.kind[r]!;
+      break;
+    }
+  }
+  const value = kind === ControlKind.CHECKBOX || kind === ControlKind.RADIO ? raw === 1 : raw;
+
+  batch(() => handler.fn(row.item as never, row.index, value));
+  return true;
 }
 
 void findRow;

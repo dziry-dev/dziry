@@ -19,7 +19,12 @@ import { expect, test } from "bun:test";
 import { compileTree, toCompiledUi } from "./compile.ts";
 import { toDocument } from "./jsx-runtime.ts";
 import { signal, setCompiling } from "../runtime/signal.ts";
-import { updateList, type ListBindingRef } from "../runtime/list-runtime.ts";
+import {
+  dispatchItem,
+  dispatchItemChange,
+  updateList,
+  type ListBindingRef,
+} from "../runtime/list-runtime.ts";
 import { Display, type CompiledUi } from "../ir.ts";
 
 type Item = { id: number; title: string };
@@ -229,4 +234,168 @@ test("a structural pseudo-class beside a dynamic list resolves to not-matching",
 
   // The container is not a child of `.sp` and must not have been given one.
   expect(marginOf(ui.root)).toBe(0);
+});
+
+/**
+ * Controls inside a row, which were structurally replicated and semantically not.
+ *
+ * A list arena is `capacity` copies of one template. The copy took nodes, styles and text
+ * slots; anything held in a *side table* keyed by node id stayed behind. So a checkbox in
+ * a row compiled to exactly one control row — for row 0 — and rows 1..7 were painted
+ * boxes that swallowed presses, were skipped by Tab, and emitted no `CHANGE`.
+ *
+ * It needed two items to show. Every existing test and the demo's one list used a single
+ * item, which only ever renders row 0.
+ */
+function buildControls() {
+  const data = signal([
+    { id: 1, title: "a" },
+    { id: 2, title: "b" },
+  ]);
+  setCompiling(true);
+  let doc;
+  try {
+    doc = toDocument(
+      <div>
+        {data.value.map(
+          (t: Item) => (
+            <label className="row">
+              <input type="checkbox" onChange={() => {}} />
+              <span>{t.title}</span>
+            </label>
+          ),
+          { key: (t: Item) => t.id },
+        )}
+      </div>,
+    );
+  } finally {
+    setCompiling(false);
+  }
+  return { data, result: compileTree(doc, CSS) };
+}
+
+test("every row of a list gets its template's control rows", () => {
+  const { result } = buildControls();
+  const ui = toCompiledUi(result);
+  const list = result.lists[0]!;
+
+  // One per row, not one in total.
+  expect(ui.controls.count).toBe(list.capacity);
+
+  // At the same offset within each row, which is what makes them the same control.
+  const offsets = new Set<number>();
+  for (let r = 0; r < ui.controls.count; r++) {
+    const node = ui.controls.node[r]!;
+    offsets.add((node - list.arenaStart) % list.stride);
+  }
+  expect(offsets.size).toBe(1);
+
+  // Ascending, because the engine binary-searches this column and the replicas are
+  // appended after every node the walk produced. Unsorted, every lookup past the first
+  // arena silently misses — and misses by returning *some other control*.
+  const nodes = [...ui.controls.node].slice(0, ui.controls.count);
+  expect(nodes).toEqual([...nodes].sort((a, b) => a - b));
+});
+
+test("every row is a tab stop, not just the first", () => {
+  const { result } = buildControls();
+  const ui = toCompiledUi(result);
+  const list = result.lists[0]!;
+
+  // `tabStop` is a per-node boolean the replication loop was not copying, so Tab walked
+  // into row 0's checkbox and then straight past the other seven.
+  expect([...ui.tabStops].length).toBe(list.capacity);
+});
+
+test("a row's label activates that row's control, not row zero's", () => {
+  const { result } = buildControls();
+  const list = result.lists[0]!;
+
+  // The template is a `<label>` wrapping the box, so the label's press is redirected to
+  // the control — `activates`, a node id, which has to be shifted per row. Unshifted,
+  // clicking any row's text would tick the *first* row's box.
+  for (let item = 0; item < list.capacity; item++) {
+    const row = list.arenaStart + item * list.stride;
+    const activates = result.nodes[row]!.activates;
+    expect(activates).toBeGreaterThanOrEqual(row);
+    expect(activates).toBeLessThan(row + list.stride);
+  }
+});
+
+test("a row's onChange runs, with its item, its index and a converted value", () => {
+  const { data, result } = buildControls();
+  const ui = toCompiledUi(result);
+  const list = result.lists[0]!;
+
+  const seen: Array<[string, number, unknown]> = [];
+  const ref = {
+    list: 0,
+    signal: data,
+    keyPath: ["id"],
+    slotStart: list.slotStart,
+    slotsPerItem: list.bindings.length,
+    bindings: list.bindings.map((b) => ({
+      offset: b.offset,
+      slotOffset: b.slotOffset,
+      parts: [{ path: ["title"] }],
+    })),
+    itemHandlers: [
+      {
+        offset: list.itemHandlers[0]!.offset,
+        kind: "change" as const,
+        fn: (t: Item, i: number, v?: unknown) => seen.push([t.title, i, v]),
+      },
+    ],
+  } as unknown as ListBindingRef;
+
+  // `slotData` is what maps a node back to an item, and only `updateList` fills it.
+  updateList(ui, ref);
+
+  const box = (row: number) => list.arenaStart + row * list.stride + list.itemHandlers[0]!.offset;
+
+  expect(dispatchItemChange(ui, [ref], box(1), 1)).toBe(true);
+  // The **second** row's item, not the first. This is the whole indirection: one compiled
+  // handler, and the slot says which item it is running for.
+  expect(seen).toEqual([["b", 1, true]]);
+
+  // A checkbox hands over a boolean rather than the wire integer, exactly as
+  // `dispatchChange` does off a list — and that lookup only resolves because the replica
+  // now has a control row of its own.
+  seen.length = 0;
+  expect(dispatchItemChange(ui, [ref], box(0), 0)).toBe(true);
+  expect(seen).toEqual([["a", 0, false]]);
+});
+
+test("a click does not run the row's change handler", () => {
+  const { data, result } = buildControls();
+  const ui = toCompiledUi(result);
+  const list = result.lists[0]!;
+
+  const seen: string[] = [];
+  const offset = list.itemHandlers[0]!.offset;
+  const ref = {
+    list: 0,
+    signal: data,
+    keyPath: ["id"],
+    slotStart: list.slotStart,
+    slotsPerItem: list.bindings.length,
+    bindings: list.bindings.map((b) => ({
+      offset: b.offset,
+      slotOffset: b.slotOffset,
+      parts: [{ path: ["title"] }],
+    })),
+    // Two handlers at the *same offset*, which is the case a kind-less lookup cannot tell
+    // apart: it finds by offset, so it would return whichever was emitted first and run a
+    // change handler on a click, with a click's arguments.
+    itemHandlers: [
+      { offset, kind: "change" as const, fn: () => seen.push("change") },
+      { offset, kind: "click" as const, fn: () => seen.push("click") },
+    ],
+  } as unknown as ListBindingRef;
+
+  updateList(ui, ref);
+  const box = list.arenaStart + offset;
+
+  expect(dispatchItem(ui, [ref], box, "click")).toBe(true);
+  expect(seen).toEqual(["click"]);
 });

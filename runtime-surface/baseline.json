@@ -1,6 +1,6 @@
 {
-  "symbols": 28,
-  "bytes": 8624,
+  "symbols": 29,
+  "bytes": 9102,
   "bun": "1.3.14",
   "recorded": "2026-08-07",
   "inventory": [
@@ -16,6 +16,7 @@
     "bindings.ts:subscribeBindings",
     "bindings.ts:typeInto",
     "list-runtime.ts:dispatchItem",
+    "list-runtime.ts:dispatchItemChange",
     "list-runtime.ts:readPath",
     "list-runtime.ts:subscribeLists",
     "list-runtime.ts:updateList",

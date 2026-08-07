@@ -288,6 +288,16 @@ export type BuiltItemHandler = {
   offset: number;
   ref: unknown;
   name: string;
+  /**
+   * Which event runs it — the same column {@link BuiltHandler} carries, and needed here
+   * for a sharper reason than there.
+   *
+   * A row handler is found by *offset*, so without a kind an `onChange` and an `onClick`
+   * on the same element are two rows with the same key and `find` returns whichever was
+   * emitted first. A click would then run the change handler, with a click handler's
+   * arguments. That is not a lookup miss, it is a wrong call that succeeds.
+   */
+  kind: "click" | "change" | "focus" | "blur" | "submit";
 };
 
 export type BuiltList = {
@@ -1546,7 +1556,12 @@ export function compileTree(
     for (let h = handlers.length - 1; h >= 0; h--) {
       const handler = handlers[h]!;
       if (handler.node < arenaStart || handler.node >= arenaStart + stride) continue;
-      itemHandlers.unshift({ offset: handler.node - arenaStart, ref: handler.ref, name: "" });
+      itemHandlers.unshift({
+        offset: handler.node - arenaStart,
+        ref: handler.ref,
+        name: "",
+        kind: handler.kind,
+      });
       handlers.splice(h, 1);
     }
 
@@ -1601,6 +1616,22 @@ export function compileTree(
           parent: k === 0 ? parent : src.parent + shift,
           children: src.children.map((c) => c + shift),
           ...(src.generated ? { generated: true as const } : {}),
+          // Everything that makes a node reachable, and it was all missing.
+          //
+          // Without these a control in a row worked in the *first* row and was inert in
+          // every other: no tab stop, no press target, no control row (see
+          // `replicateListControls`). One item hid it completely, because a
+          // single-item list only ever uses row 0 — so the bug needed a second item to
+          // appear at all, and then looked like a styling problem rather than a
+          // structural one.
+          ...(src.ownsPress ? { ownsPress: true as const } : {}),
+          ...(src.tabStop ? { tabStop: true as const } : {}),
+          ...(src.editable ? { editable: true as const } : {}),
+          ...(src.textArea ? { textArea: true as const } : {}),
+          // `autofocus` is deliberately **not** replicated. One claim per row is eight
+          // claims for a capacity-8 arena, all of them the same element repeated, and
+          // "which row gets the caret" is a question the markup has not answered. The
+          // template's own claim survives, which is row 0 — the one a reader would mean.
         });
       }
       // Each replica's bound slots live in its own block.
@@ -1703,6 +1734,9 @@ export function compileTree(
   resolveActivation(nodes, nodeOfEl, controls, labelEls, warnings);
   resolveControlLabels(nodes, nodeOfEl, controls, labelHosts);
   resolveAutofocus(nodes, autofocusCandidates, warnings);
+  // After both resolve passes, because `activates` and a control's `label` are node ids
+  // those passes fill in — replicating before them would copy two -1s.
+  replicateListControls(nodes, controls, lists);
   const forms = resolveForms(rootEl, nodeOfEl);
 
   return {
@@ -2152,6 +2186,69 @@ function buildAutofocus(nodes: BuiltNode[]): Int32Array {
   const out: number[] = [];
   for (let i = 0; i < nodes.length; i++) if (nodes[i]!.autofocus) out.push(i);
   return new Int32Array(out);
+}
+
+/**
+ * Gives every row of a list arena the control rows its template has.
+ *
+ * A list arena is `capacity` copies of one template subtree, and the copy was structural
+ * only — nodes, styles and text slots. Anything held in a *side table* keyed by node id
+ * was left behind, and the controls table is the big one: a `<input type=checkbox>` in a
+ * row compiled to exactly one control row, for row 0, so the first checkbox toggled and
+ * the other seven were painted boxes that swallowed presses.
+ *
+ * It hid well. A list with one item never uses a row past 0, so every test and every demo
+ * with a single-item list behaved perfectly; it needed a second item to appear, and then
+ * looked like a paint bug rather than a missing table row.
+ *
+ * **A radio group is shared across rows**, because `group` is copied unchanged. That is a
+ * decision rather than an oversight: rows carrying the same `name` are the markup's way of
+ * saying "pick one of these", and one group across the list is what that means. A
+ * per-row group would need a per-row `name`, which a template cannot express.
+ *
+ * `activates` is shifted with the rest, and shifted **only when it points inside the
+ * arena** — a label outside the row aiming at a control inside it would otherwise be
+ * relocated to a node that has nothing to do with it.
+ */
+function replicateListControls(
+  nodes: BuiltNode[],
+  controls: BuiltControl[],
+  lists: BuiltList[],
+): void {
+  let added = false;
+
+  for (const list of lists) {
+    const { arenaStart, stride, capacity } = list;
+    const end = arenaStart + stride;
+    const template = controls.filter((c) => c.node >= arenaStart && c.node < end);
+
+    for (let item = 1; item < capacity; item++) {
+      const shift = item * stride;
+
+      for (let k = 0; k < stride; k++) {
+        const src = nodes[arenaStart + k]!;
+        if (src.activates === undefined) continue;
+        const inside = src.activates >= arenaStart && src.activates < end;
+        nodes[arenaStart + shift + k]!.activates = inside ? src.activates + shift : src.activates;
+      }
+
+      for (const c of template) {
+        controls.push({
+          node: c.node + shift,
+          kind: c.kind,
+          group: c.group,
+          flags: c.flags,
+          label: c.label >= 0 ? c.label + shift : -1,
+        });
+        added = true;
+      }
+    }
+  }
+
+  // The engine binary-searches this column, and the rows above were appended after every
+  // node the walk had produced — so without this the table is unsorted the moment a list
+  // holds a control, and every lookup past the first arena silently misses.
+  if (added) controls.sort((a, b) => a.node - b.node);
 }
 
 /** Text areas, sorted. The one text field Enter does not submit from. */
@@ -2638,7 +2735,7 @@ export function emit(
         )
         .join("\n");
       const rowHandlers = l.itemHandlers
-        .map((h) => `      { offset: ${h.offset}, fn: ${h.name} },`)
+        .map((h) => `      { offset: ${h.offset}, kind: "${h.kind}", fn: ${h.name} },`)
         .join("\n");
 
       return (

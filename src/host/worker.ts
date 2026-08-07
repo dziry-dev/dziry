@@ -43,7 +43,12 @@ import {
 } from "../runtime/bindings.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
 import type { Signal } from "../runtime/signal.ts";
-import { updateLists, subscribeLists, dispatchItem } from "../runtime/list-runtime.ts";
+import {
+  updateLists,
+  subscribeLists,
+  dispatchItem,
+  dispatchItemChange,
+} from "../runtime/list-runtime.ts";
 import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
 import { buildUi, indexOfRoute, requireRoute, showRoute } from "./window-state.ts";
@@ -373,14 +378,17 @@ function start(
               break;
 
             case EventKind.FOCUS_IN:
-              dispatch(ui, e.node, "focus");
+              // Rows first, for the same reason a click checks them first: a handler
+              // inside a template is lifted out of `ui.handlers` into the list, so the
+              // plain lookup cannot find it.
+              if (!dispatchItem(ui, listBindings, e.node, "focus")) dispatch(ui, e.node, "focus");
               break;
 
             // Emitted before the FOCUS_IN of whatever took the focus, measured, so a pair
             // of handlers that hand something between them sees them in that order here
             // too — the queue preserves it and this loop drains in order.
             case EventKind.FOCUS_OUT:
-              dispatch(ui, e.node, "blur");
+              if (!dispatchItem(ui, listBindings, e.node, "blur")) dispatch(ui, e.node, "blur");
               break;
 
             case EventKind.CHANGE:
@@ -388,7 +396,11 @@ function start(
               // checkbox has been flipping its own bit and telling the app nothing, which
               // is why `onChange` could not exist: the event was there, the subscriber
               // was not.
-              dispatchChange(ui, e.node, e.a);
+              // A row checkbox reached nothing at all before this line: its handler is
+              // lifted into the list table, so `dispatchChange` looked where it was not.
+              if (!dispatchItemChange(ui, listBindings, e.node, e.a)) {
+                dispatchChange(ui, e.node, e.a);
+              }
               break;
 
             case EventKind.TEXT_INPUT:

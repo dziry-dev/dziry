@@ -7,6 +7,7 @@
  * no dependency discovery — the compiler already decided which node reads which
  * signal.
  */
+import { findRow } from "../find-row.ts";
 import type { CompiledUi } from "../ir.ts";
 import { ControlKind } from "../protocol/generated.ts";
 import { batch, type Signal } from "./signal.ts";
@@ -281,12 +282,11 @@ export function submitFrom(ui: CompiledUi, node: number): boolean {
   // as a set: by the time the IR is built, a textarea and a text input are the same kind
   // of editable box.
   //
-  // `includes` rather than `ir.ts`'s `findRow`, even though the array is sorted for it.
-  // Importing that one function is a *value* import from `ir.ts`, which drags `STYLE_FIELDS`
-  // and its 80 rows into the runtime bundle — 8049 bytes to 13186, caught by the
-  // `runtime-surface` ratchet, and the second time this exact import has done it. A page
-  // has a handful of textareas and this runs once per Enter.
-  if (ui.textAreas.includes(node)) return false;
+  // From `find-row.ts` and **not** from `ir.ts`, which re-exports it. `ir.ts` is a value
+  // import that drags `STYLE_FIELDS` and its 80 rows into the runtime bundle — 8049 bytes
+  // to 13186, caught by the `runtime-surface` ratchet. That split module exists for
+  // exactly this, as its own comment in `list-runtime.ts` says.
+  if (findRow(ui.textAreas, node) >= 0) return false;
 
   const form = formOf(ui, node);
   if (form < 0) return false;
