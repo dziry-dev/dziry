@@ -25,7 +25,7 @@ import {
   updateList,
   type ListBindingRef,
 } from "../runtime/list-runtime.ts";
-import { Display, type CompiledUi } from "../ir.ts";
+import { Display, NodeKind, type CompiledUi } from "../ir.ts";
 
 type Item = { id: number; title: string };
 
@@ -401,16 +401,21 @@ test("a click does not run the row's change handler", () => {
 });
 
 test("a prop given a signal is refused out loud, not dropped in silence", () => {
-  // `disabled={isBusy}` compiles cleanly and produces a control that is never disabled:
-  // the attribute map holds text, because a selector compares against text, so a signal
-  // has nowhere to go. Everything about that is correct except the silence.
+  // `checked={sig}` compiles cleanly and produces a box whose checkedness the signal never
+  // touches: the attribute map holds text, because a selector compares against text, so a
+  // signal has nowhere to go. Everything about that is correct except the silence.
+  //
+  // This test used to use `disabled`, which is the prop the warning was written for. That
+  // stopped being an example when `disabled` learned to take a signal — so the test now
+  // names one that is still dropped, and the failure that caught the staleness was the
+  // feature landing.
   const busy = signal(true);
   setCompiling(true);
   let doc;
   try {
     doc = toDocument(
       <div>
-        <input type="checkbox" disabled={busy as never} />
+        <input type="checkbox" checked={busy as never} />
       </div>,
     );
   } finally {
@@ -419,7 +424,98 @@ test("a prop given a signal is refused out loud, not dropped in silence", () => 
   const result = compileTree(doc, "");
   const ui = toCompiledUi(result);
 
-  expect(result.warnings.join("\n")).toMatch(/disabled=\{…\} was given a signal, which is ignored/);
-  // And the behaviour it warns about is real: the control is not disabled.
+  expect(result.warnings.join("\n")).toMatch(/checked=\{…\} was given a signal, which is ignored/);
+  // And the behaviour it warns about is real: the box is not checked.
   expect(ui.controls.flags[0]).toBe(0);
+});
+
+/**
+ * `disabled={signal}`, which until 2026-08-08 was dropped in silence.
+ *
+ * These are here rather than in `cascade.test.ts` because a signal needs the JSX front end;
+ * the HTML parser can only produce string attributes.
+ */
+test("disabled={signal} resolves to the control rows it writes", () => {
+  const busy = signal(true);
+  setCompiling(true);
+  let doc;
+  try {
+    doc = toDocument(
+      <div>
+        <button disabled={busy}>Save</button>
+      </div>,
+    );
+  } finally {
+    setCompiling(false);
+  }
+  const result = compileTree(doc, "");
+
+  expect(result.disabled.length).toBe(1);
+  // A *control row* index, not a node id — that is what the runtime writes into, and
+  // resolving it here is free because the table is final and sorted by now.
+  const row = result.disabled[0]!.rows[0]!;
+  expect(result.nodes[result.controls[row]!.node]!.kind).toBe(NodeKind.BUTTON);
+  expect(result.disabled[0]!.ref).toBe(busy);
+
+  // The attribute is *not* set, and that is the documented split rather than an oversight:
+  // `[disabled]` matches text the compiler wrote down, and a signal never becomes text.
+  // `:disabled` reads the live flag and matches either way.
+  expect(result.controls[row]!.flags).toBe(0);
+});
+
+test("a disabled signal on a list row writes every replica's flag", () => {
+  const data = signal([
+    { id: 1, title: "a" },
+    { id: 2, title: "b" },
+  ]);
+  const busy = signal(true);
+  setCompiling(true);
+  let doc;
+  try {
+    doc = toDocument(
+      <div>
+        {data.value.map(
+          (t: Item) => (
+            <div className="row">
+              <button disabled={busy}>{t.title}</button>
+            </div>
+          ),
+          { key: (t: Item) => t.id },
+        )}
+      </div>,
+    );
+  } finally {
+    setCompiling(false);
+  }
+  const result = compileTree(doc, CSS);
+  const list = result.lists[0]!;
+
+  // One authored prop, `capacity` rows. Emitting a single row would disable row 0 and
+  // leave the other seven live — the same bug as the arena's missing control rows, reached
+  // from the other direction.
+  expect(result.disabled.length).toBe(1);
+  expect(result.disabled[0]!.rows.length).toBe(list.capacity);
+
+  // And they are the button in each row, not eight copies of row 0's.
+  const nodes = [...result.disabled[0]!.rows].map((r) => result.controls[r]!.node);
+  expect(new Set(nodes).size).toBe(list.capacity);
+  for (const [item, node] of nodes.entries()) {
+    expect(node).toBeGreaterThanOrEqual(list.arenaStart + item * list.stride);
+    expect(node).toBeLessThan(list.arenaStart + (item + 1) * list.stride);
+  }
+});
+
+test("disabled={signal} on something that cannot be disabled says so", () => {
+  const busy = signal(true);
+  setCompiling(true);
+  let doc;
+  try {
+    doc = toDocument(<div disabled={busy}>not a control</div>);
+  } finally {
+    setCompiling(false);
+  }
+  const result = compileTree(doc, "");
+
+  expect(result.disabled.length).toBe(0);
+  expect(result.warnings.join("\n")).toMatch(/disabled=\{…\} on <div> does nothing/);
 });

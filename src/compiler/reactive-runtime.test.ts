@@ -116,19 +116,33 @@ test("a component-local signal round-trips through the artifact", async () => {
   const inline = ui.handlers.filter((h) => /\blocal_\d+\b/.test(h.fn.toString()));
   expect(inline.length).toBeGreaterThanOrEqual(2);
 
-  // Matched on the *shape* of the counter's handlers — `local_N.set(local_N.value ± 1)` —
-  // and not on the source merely containing a `+` or a `-`. That looser predicate is what
-  // this comment's first version warned about one step too late: it survived the controls
-  // page gaining an `onChange`, then broke when a form handler on the same page said "the
-  // two-field form", whose hyphen made it the `minus` handler. The test went on running,
-  // pressed something unrelated, and reported that the counter did not go back down.
+  // A pair that writes **the same local**, which is the invariant this test is actually
+  // about: one handler undoes the other. Anything weaker keeps drifting as the demo grows,
+  // and it has now drifted three times — each fix one step behind the next page:
+  //
+  //   `toHaveLength(2)`      — a census of every component-local in the demo.
+  //   source contains "+"/"-" — a form handler saying "the two-field form" became `minus`.
+  //   the shape, independently — the demo gained a *second* counter, so `plus` came from one
+  //                             signal and `minus` from the other, and the test reported
+  //                             that the counter did not go back down.
+  //
+  // Each time the test kept passing while measuring something else, then failed for a
+  // reason that had nothing to do with the round trip. Grouping by the local is the first
+  // version that cannot: it asks for two handlers on one signal, which is the thing.
   const counter = /local_(\d+)\.set\(local_\1\.value ([-+]) 1\)/;
-  const arm = (sign: string) =>
-    inline.find((h) => counter.exec(h.fn.toString())?.[2] === sign)!;
-  const plus = arm("+");
-  const minus = arm("-");
-  expect(plus).toBeDefined();
-  expect(minus).toBeDefined();
+  const pairs = new Map<string, Record<string, (typeof inline)[number]>>();
+  for (const handler of inline) {
+    const match = counter.exec(handler.fn.toString());
+    if (!match) continue;
+    const arms = pairs.get(match[1]!) ?? {};
+    arms[match[2]!] = handler;
+    pairs.set(match[1]!, arms);
+  }
+
+  const pair = [...pairs.values()].find((arms) => arms["+"] && arms["-"]);
+  expect(pair).toBeDefined();
+  const plus = pair!["+"]!;
+  const minus = pair!["-"]!;
   expect(plus).not.toBe(minus);
 
   /** Every signal any binding holds, so a change can be located rather than assumed. */

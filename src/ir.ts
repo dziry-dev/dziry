@@ -507,6 +507,24 @@ export type HandlerBinding = {
  * it disabled, how many fields block. Only "is the focused node inside this form, and is
  * it a textarea" is left for run time, and both are lookups rather than rules.
  */
+/**
+ * A boolean signal driving one control's `DISABLED` flag.
+ *
+ * `rows` are indices into the **controls table**, not node ids, and they are plural for one
+ * reason: a control inside a list template has one control row per replica, so a single
+ * authored `disabled={sig}` has to write `capacity` flags. Resolving them at build time is
+ * what keeps the runtime a loop over a small array rather than a search.
+ *
+ * Nothing else about the control moves. The engine re-reads `DISABLED` from this table on
+ * every rescan — see `Controls::rescan`, which clears everything but `CHECKED` — so the
+ * whole runtime cost of this feature is writing a byte and letting the ordinary commit
+ * carry it across.
+ */
+export type DisabledBinding = {
+  rows: Int32Array;
+  signal: ReadonlySignal<boolean>;
+};
+
 export type FormBinding = {
   /** The `<form>` element's node. */
   node: number;
@@ -526,6 +544,8 @@ export type CompiledUi = {
   handlers: HandlerBinding[];
   /** Every `<form>`, with Enter's outcome resolved. See [`FormBinding`]. */
   forms: FormBinding[];
+  /** Signals driving a control's `DISABLED` flag. See [`DisabledBinding`]. */
+  disabledBindings: DisabledBinding[];
   /**
    * Text areas, sorted. Enter in one of these must not submit its form.
    *

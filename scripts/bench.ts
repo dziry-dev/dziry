@@ -134,6 +134,7 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     autofocus: m.autofocus,
     textAreas: m.textAreas,
     forms: m.forms,
+    disabledBindings: m.disabledBindings,
     textBindings: m.textBindings,
     handlers: m.handlers,
     lists: m.lists,

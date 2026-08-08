@@ -33,6 +33,7 @@ import { acquire, publish, release } from "./channel.ts";
 import type { ToMain, ToWorker } from "./messages.ts";
 import {
   applyTextBindings,
+  Dirty,
   subscribeBindings,
   dispatch,
   dispatchChange,
@@ -42,6 +43,7 @@ import {
   typeInto,
 } from "../runtime/bindings.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
+import { applyDisabled, subscribeDisabled } from "../runtime/controls.ts";
 import type { Signal } from "../runtime/signal.ts";
 import {
   updateLists,
@@ -174,7 +176,7 @@ function start(
   const generated = pickWindow(registry, argv);
   const ui = buildUi(generated);
 
-  const { stylePatches, listBindings, editables } = generated;
+  const { stylePatches, listBindings, editables, disabledBindings } = generated;
   const { routeNodes, initialRoute, windowConfig, windowId } = generated;
 
   /** `--route routing`, for starting somewhere other than the initial route. */
@@ -219,6 +221,9 @@ function start(
   applyTextBindings(ui, changedNodes);
   updateLists(ui, listBindings);
   applyStylePatches(ui, stylePatches);
+  // Before the first upload, so a control authored `disabled={sig}` with the signal
+  // already true is disabled in the first frame rather than one frame later.
+  applyDisabled(ui, disabledBindings);
   showRoute(ui, routeNodes, active);
 
   post({
@@ -243,6 +248,15 @@ function start(
   let uploader: Uploader | null = null;
   let flags: Int32Array | null = null;
   let dirty = true;
+  /**
+   * A control's flags changed, so the *controls* table has to go up with the next batch.
+   *
+   * Tracked separately because `flush` deliberately does not upload every table: styles,
+   * variants, lists, nodes and strings are the ones a signal could move, and controls were
+   * not among them until `disabled` could follow a signal. Uploading it unconditionally
+   * would put a table write on the path of every keystroke to buy nothing.
+   */
+  let controlsDirty = false;
   /** Set while the engine thread is growing the tables; nothing may be written. */
   let growing = false;
 
@@ -260,6 +274,13 @@ function start(
 
   subscribeStylePatches(stylePatches, () => {
     applyStylePatches(ui, stylePatches);
+    dirty = true;
+    schedule();
+  });
+
+  subscribeDisabled(disabledBindings, () => {
+    if (applyDisabled(ui, disabledBindings) === Dirty.NONE) return;
+    controlsDirty = true;
     dirty = true;
     schedule();
   });
@@ -311,6 +332,12 @@ function start(
       uploader.uploadLists();
       uploader.uploadNodes();
       uploader.uploadStrings();
+      // Only when a `disabled` signal actually moved. The engine re-reads DISABLED from
+      // this table on every rescan, so one upload is the whole delivery mechanism.
+      if (controlsDirty) {
+        uploader.uploadControls();
+        controlsDirty = false;
+      }
       changedNodes.length = 0;
       publish(flags);
     } finally {

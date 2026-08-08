@@ -165,12 +165,25 @@ input[type="radio"]:hover { border-color: #38bdf8; }
 input[type="checkbox"]:hover::before { color: #52525b; }
 input[type="checkbox"]:checked:hover::before { color: #ffffff; }
 
-/* Disabled. A live predicate now, though nothing can currently *become* disabled:
-   it is seeded from the attribute and the user cannot change it, which is exactly
-   what a browser does with `disabled` too. */
+/* Disabled — a live predicate, and one a control can now *become*.
+
+   This comment used to say nothing could become disabled, "which is exactly what a
+   browser does with `disabled` too". The second half was never true — `el.disabled =
+   true` has always worked — and the first stopped being true when `disabled` learned to
+   take a signal. The flag is re-read from the controls table on every rescan, so an
+   author flipping it lands here on the next frame.
+
+   Which is why `button:disabled` is worth having: the Controls page's Save button is
+   switched off by a signal, and without a rule the only evidence would be that presses
+   stop landing. */
 input:disabled {
     background: #27272a;
     border-color: #3f3f46;
+}
+
+button:disabled {
+    background: #3f3f46;
+    color: #71717a;
 }
 
 input[type="checkbox"]:disabled::before { color: #52525b; }

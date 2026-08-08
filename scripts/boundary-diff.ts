@@ -167,6 +167,7 @@ if (LIVE) {
       autofocus: ui.autofocus,
       textAreas: ui.textAreas,
       forms: ui.forms,
+      disabledBindings: ui.disabledBindings,
       textBindings: ui.textBindings,
       handlers: ui.handlers,
       lists: ui.lists,

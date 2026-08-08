@@ -561,7 +561,7 @@ per-keystroke and `change` waits for blur. dziri's fields are `bind:value` signa
 per-keystroke half already exists, and the blur half is now expressible for the first time. That
 is the shape to build, not a duplicate event kind.
 
-Three of the four that were listed here are **done** (2026-08-07), and each turned out to be a
+**All four that were listed here are done** (2026-08-07 and -08), and each turned out to be a
 different shape from the one this list predicted — which is the argument for the prediction being
 written down in the first place:
 
@@ -586,23 +586,33 @@ written down in the first place:
   because it needs two items to show, and every test and the demo's list used one. It was live: the
   demo's todo rows 2-8 took no Enter or Space on their buttons.
 
-Still open, with what is now known about it:
+- **A control becoming disabled at run time** — done (2026-08-08), and it cost no protocol
+  version and no engine change at all. `disabled` takes a signal; the compiler resolves it to the
+  **control rows** it writes, and the runtime writes one byte per row.
 
-- **A control becoming disabled at run time.** The engine side is already done — `DISABLED` is
-  re-read from the controls table on every rescan, so writing `ui.controls.flags` and re-uploading
-  is sufficient and no protocol or engine change is needed. What is missing is the authoring
-  surface and the wiring: `disabled` takes a `boolean`, and a signal there was **silently dropped**
-  until 2026-08-07. It now warns, which is the honest interim state rather than the fix.
-  - The pattern to copy is `patches.ts` — signal → table write → dirty flag — which is the same
-    shape and already has its `applied` map for skipping no-op writes.
-  - A conditional class is still today's answer for the *appearance*, and it cannot make a control
-    behave. Those are different halves and the warning says so.
-  - Whatever lands must handle list rows: a disabled control inside a template now has one control
-    row per replica, so a binding has to write `capacity` flags rather than one.
+  It was already possible and nothing could express it. `Controls::rescan` clears every live flag
+  except `CHECKED` and re-reads `DISABLED` from the table each time — on the grounds that
+  checkedness is the user's and disabledness is the author's — so the author changing their mind
+  is precisely the case that path was built for, years of commits before anything could say it.
 
-Also still missing, and smaller: runtime arena *growth* past the compiled capacity appends rows
-that are not controls and not tab stops — `ui.controls` and `ui.tabStops` are not extended by
-`growArena`, and the engine's `control_capacity` would have to grow with them.
+  Three things worth keeping:
+
+  - **Rows, plural.** A control in a list template has one control row per replica, so one
+    authored `disabled={sig}` writes `capacity` flags. A single row would have disabled row 0 and
+    left the rest live — the same bug as the arena's missing control rows, from the other side.
+  - **`flush` does not upload the controls table.** Styles, variants, lists, nodes and strings are
+    what a signal could move, and controls were not among them until now. `applyDisabled` returns
+    whether it wrote anything and the worker uploads that table only then, so this costs nothing
+    on the path of a keystroke.
+  - **`:disabled` and `[disabled]` part company**, deliberately. The pseudo-class reads the live
+    flag and matches either spelling; the attribute selector matches only the literal, because an
+    attribute is text the compiler wrote down and a signal never becomes text.
+
+Still missing, and smaller: runtime arena *growth* past the compiled capacity appends rows that
+are not controls and not tab stops — `ui.controls` and `ui.tabStops` are not extended by
+`growArena`, and the engine's `control_capacity` would have to grow with them. A `disabled`
+binding on a list row inherits that ceiling: it writes every *compiled* replica and knows nothing
+about rows added later.
 
 Also unimplemented and now named: a keyboard activation has no press/release pairing, so holding
 Space and tabbing away activates whatever is focused at release — a browser cancels.

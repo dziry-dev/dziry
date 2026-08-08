@@ -106,6 +106,9 @@ export default function Controls() {
   // box to anything else writes "left" before the next element could write anything.
   const focusState = signal("not focused");
   const submitted = signal("nothing yet");
+  // Drives a real `disabled`, not a class: the button stops taking presses.
+  const busy = signal(false);
+  const saves = signal(0);
   const formName = signal("");
   const formTwo = signal("");
   const formFields = signal("");
@@ -323,6 +326,43 @@ export default function Controls() {
           </button>
           <span className={LABEL}>onFocus/onBlur:</span>
           <span className="text-xs font-semibold text-sky-300">{focusState}</span>
+        </div>
+      </div>
+
+      <div className={CARD}>
+        <div className={H}>disabled, following a signal</div>
+        <div className={SUB}>
+          `disabled` takes a signal, not just a literal · flip the switch and the button
+          below stops responding for real: no press, no Enter, no Space, and Tab walks past
+          it · this is the state every "saving…" button needs and it used to be dropped in
+          silence, compiling to a button that was never disabled
+        </div>
+        <div className={SUB}>
+          it costs no protocol change and no engine work. `Controls::rescan` already cleared
+          every live flag except `:checked` and re-read DISABLED from the table each time —
+          on the grounds that checkedness is the user's and disabledness is the author's — so
+          the author changing their mind is the case that path was built for, before anything
+          could express it
+        </div>
+        <div className={SUB}>
+          `:disabled` matches either way, because it reads the live flag · `[disabled]` — the
+          attribute selector — matches only the literal spelling, since an attribute is text
+          the compiler wrote down and a signal never becomes text
+        </div>
+        <div className="flex flex-row flex-wrap items-center gap-4">
+          <label className={ROW}>
+            <input type="checkbox" onChange={(on) => busy.set(on === true)} />
+            <span className={LABEL}>pretend we are saving</span>
+          </label>
+          <button
+            disabled={busy}
+            className="rounded-lg bg-sky-700 px-3 py-1 text-xs font-semibold text-zinc-50"
+            onClick={() => saves.set(saves + 1)}
+          >
+            Save
+          </button>
+          <span className={LABEL}>presses that landed:</span>
+          <span className="text-xs font-semibold text-sky-300">{saves}</span>
         </div>
       </div>
 

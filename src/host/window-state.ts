@@ -71,6 +71,7 @@ export function buildUi(artifact: WindowArtifact): CompiledUi {
     autofocus: artifact.autofocus,
     textAreas: artifact.textAreas,
     forms: artifact.forms,
+    disabledBindings: artifact.disabledBindings,
     textBindings: artifact.textBindings,
     handlers: artifact.handlers,
     lists: artifact.lists,

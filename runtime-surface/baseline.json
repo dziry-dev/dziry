@@ -1,8 +1,8 @@
 {
-  "symbols": 29,
-  "bytes": 9102,
+  "symbols": 31,
+  "bytes": 9582,
   "bun": "1.3.14",
-  "recorded": "2026-08-07",
+  "recorded": "2026-08-08",
   "inventory": [
     "bindings.ts:Dirty",
     "bindings.ts:MAX_SLOT_CHARS",
@@ -15,6 +15,8 @@
     "bindings.ts:submitFrom",
     "bindings.ts:subscribeBindings",
     "bindings.ts:typeInto",
+    "controls.ts:applyDisabled",
+    "controls.ts:subscribeDisabled",
     "list-runtime.ts:dispatchItem",
     "list-runtime.ts:dispatchItemChange",
     "list-runtime.ts:readPath",

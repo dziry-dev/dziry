@@ -254,6 +254,14 @@ export type BuiltHandler = {
  * button" and the enabled test has to move to the host; the field is named `button` rather
  * than `submits` so that change is a smaller lie.
  */
+/** A `disabled={signal}`, resolved to the control rows it writes. */
+export type BuiltDisabled = {
+  rows: Int32Array;
+  /** The signal as authored; the resolve pass replaces it with an export name. */
+  ref: unknown;
+  name: string;
+};
+
 export type BuiltForm = {
   node: number;
   /** The button Enter clicks, or -1 when Enter must click nothing. */
@@ -572,6 +580,8 @@ export type CompileResult = {
   controls: BuiltControl[];
   /** Every `<form>`, with Enter's outcome already resolved. */
   forms: BuiltForm[];
+  /** Signals driving a control's DISABLED flag, resolved to control rows. */
+  disabled: BuiltDisabled[];
   /** Diagnostics worth surfacing but not worth failing over. */
   warnings: string[];
 };
@@ -689,6 +699,8 @@ export function compileTree(
   const textBindings: BuiltTextBinding[] = [];
   const handlers: BuiltHandler[] = [];
   const lists: BuiltList[] = [];
+  /** `disabled={signal}`, per element, resolved to control rows after the walk. */
+  const disabledCandidates: { node: number; tag: string; ref: unknown; where: string }[] = [];
   /** Everything carrying `autofocus`, in document order. At most one survives. */
   const autofocusCandidates: {
     node: number;
@@ -1378,6 +1390,22 @@ export function compileTree(
       );
     }
 
+    // Collected rather than resolved, because a control's *row* index is not final until
+    // the walk ends: `replicateListControls` appends replica rows and re-sorts the table.
+    if (el.disabledWhen !== undefined) {
+      if (!DISABLEABLE.has(el.tag)) {
+        warnings.push(
+          `disabled={…} on <${el.tag}> does nothing: only a form control can be disabled.\n` +
+            `    \`disabled\` is meaningful on input, select, textarea and button — those are the\n` +
+            `    elements with a control row for the flag to live on. Anywhere else there is\n` +
+            `    nothing to switch off, and no press to swallow.\n` +
+            `    ${where}`,
+        );
+      } else {
+        disabledCandidates.push({ node: self, tag: el.tag, ref: el.disabledWhen, where });
+      }
+    }
+
     // Collected rather than resolved. Which claim wins depends on which is showing, and
     // that is not known until the engine has a layout — see `resolveAutofocus`.
     if (el.attrs.has("autofocus")) {
@@ -1400,10 +1428,9 @@ export function compileTree(
         `${prop}={…} was given a signal, which is ignored.\n` +
           `    Attributes hold text — a selector compares against text — so a signal here has\n` +
           `    nowhere to go, and <${el.tag}> compiled as though the prop were absent.\n` +
-          `    Signals reach an element three ways today: bind:value for a field's text,\n` +
-          `    cn("x", { on: sig }) for a conditional class, and {sig} for a text run.\n` +
-          `    A control that becomes disabled at run time is not one of them yet — see\n` +
-          `    ROADMAP A3. A conditional class can style it; nothing yet makes it behave.\n` +
+          `    Signals reach an element four ways: bind:value for a field's text,\n` +
+          `    cn("x", { on: sig }) for a conditional class, {sig} for a text run, and\n` +
+          `    disabled={sig} to switch a control off.\n` +
           `    ${where}`,
       );
     }
@@ -1754,6 +1781,9 @@ export function compileTree(
   // those passes fill in — replicating before them would copy two -1s.
   replicateListControls(nodes, controls, lists);
   const forms = resolveForms(rootEl, nodeOfEl);
+  // After `replicateListControls`, which appends replica rows and re-sorts: a row index
+  // taken before that points at a different control.
+  const disabled = resolveDisabled(disabledCandidates, controls, lists);
 
   return {
     strings,
@@ -1780,6 +1810,7 @@ export function compileTree(
     keyframes: tweens.keyframes,
     controls,
     forms,
+    disabled,
     warnings,
   };
 }
@@ -2267,6 +2298,51 @@ function replicateListControls(
   if (added) controls.sort((a, b) => a.node - b.node);
 }
 
+/**
+ * Turns each `disabled={signal}` into the set of control rows it writes.
+ *
+ * Rows rather than a node id, because that is what the runtime needs and resolving it here
+ * is free: the controls table is final and sorted by the time this runs.
+ *
+ * **Plural rows, and the list case is why.** A control inside a list template has one row
+ * per replica — `replicateListControls` — so one authored `disabled={sig}` on a row's
+ * button has to switch off all `capacity` copies of it. Emitting a single row would
+ * disable row 0 and leave the rest live, which is the same shape of bug this session
+ * already found in the arena replication, arrived at from the other direction.
+ *
+ * A candidate with no control row at all is dropped silently, and only one thing produces
+ * that: an element in `DISABLEABLE` that got no row because it is a `<select>`'s own
+ * UA-supplied `<button>`. The author cannot write that element, so there is nobody to warn.
+ */
+function resolveDisabled(
+  candidates: { node: number; tag: string; ref: unknown; where: string }[],
+  controls: BuiltControl[],
+  lists: BuiltList[],
+): BuiltDisabled[] {
+  const out: BuiltDisabled[] = [];
+
+  for (const c of candidates) {
+    const nodes: number[] = [c.node];
+
+    // Inside a list template? Then every replica of this offset needs the same flag.
+    for (const list of lists) {
+      const end = list.arenaStart + list.stride;
+      if (c.node < list.arenaStart || c.node >= end) continue;
+      for (let item = 1; item < list.capacity; item++) nodes.push(c.node + item * list.stride);
+      break;
+    }
+
+    const rows: number[] = [];
+    for (const node of nodes) {
+      const row = controls.findIndex((r) => r.node === node);
+      if (row >= 0) rows.push(row);
+    }
+    if (rows.length > 0) out.push({ rows: new Int32Array(rows), ref: c.ref, name: "" });
+  }
+
+  return out;
+}
+
 /** Text areas, sorted. The one text field Enter does not submit from. */
 function buildTextAreas(nodes: BuiltNode[]): Int32Array {
   const out: number[] = [];
@@ -2406,6 +2482,9 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     autofocus: buildAutofocus(result.nodes),
     textAreas: buildTextAreas(result.nodes),
     forms: result.forms,
+    // Empty on the in-memory path for the same reason `handlers` is: a binding needs its
+    // signal resolved to an export, which only the generated-module path does.
+    disabledBindings: [],
     // Bindings are resolved and emitted only on the generated-module path; the
     // in-memory IR is used by tests and the variant probe, which are static.
     textBindings: [],
@@ -2817,7 +2896,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, FormBinding, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -2892,6 +2971,26 @@ ${textBindingSource}
 export const handlers = [
 ${handlerSource}
 ] satisfies HandlerBinding[];
+
+/**
+ * Signals driving a control's DISABLED flag. Rows index \`controls\`, not \`nodes\`.
+ *
+ * Plural rows because a control in a list row has one per replica.
+ *
+ * **After \`localsSource\`, and that is required rather than tidy.** A component-local signal
+ * is declared by this module rather than imported, so a binding that names one has to come
+ * after the declaration — \`const\` is not hoisted, and emitting this block above the locals
+ * threw "Cannot access 'local_5' before initialization" at import time, which is a broken
+ * artifact rather than a failing test.
+ */
+export const disabledBindings = [
+${result.disabled
+  .map(
+    (d) =>
+      `  { rows: ${typedArray("Int32Array", [...d.rows])}, signal: ${resolved(d.name, `the disabled signal on control row ${d.rows[0] ?? -1}`)} },`,
+  )
+  .join("\n")}
+] satisfies DisabledBinding[];
 
 /** Nodes that route keystrokes into a string signal while focused. */
 export const editables = [

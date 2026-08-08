@@ -6,7 +6,7 @@
 // 0 text bindings, 0 handlers.
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, FormBinding, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
+import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
 import type { EditableRef } from "dziri/runtime/bindings.ts";
 import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
 import type { StylePatchRef } from "dziri/runtime/patches.ts";
@@ -161,6 +161,21 @@ export const textBindings = [
 export const handlers = [
 
 ] satisfies HandlerBinding[];
+
+/**
+ * Signals driving a control's DISABLED flag. Rows index `controls`, not `nodes`.
+ *
+ * Plural rows because a control in a list row has one per replica.
+ *
+ * **After `localsSource`, and that is required rather than tidy.** A component-local signal
+ * is declared by this module rather than imported, so a binding that names one has to come
+ * after the declaration — `const` is not hoisted, and emitting this block above the locals
+ * threw "Cannot access 'local_5' before initialization" at import time, which is a broken
+ * artifact rather than a failing test.
+ */
+export const disabledBindings = [
+
+] satisfies DisabledBinding[];
 
 /** Nodes that route keystrokes into a string signal while focused. */
 export const editables = [

@@ -49,6 +49,15 @@ export type Element = {
    */
   droppedSignals?: string[];
   /**
+   * A boolean signal driving `disabled`, or absent.
+   *
+   * Separate from the `disabled` *attribute* in [`attrs`] on purpose, and the two are not
+   * interchangeable: the attribute is text a selector can test, this is a value that
+   * changes. `:disabled` reads the live control flag and matches either way; `[disabled]`
+   * reads the attribute and matches only the literal spelling.
+   */
+  disabledWhen?: unknown;
+  /**
    * Classes applied while a boolean signal is true: `{ light: isLight }`.
    *
    * The compiler compiles each of these into a *style-table patch* — it resolves

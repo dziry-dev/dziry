@@ -48,6 +48,8 @@ import { NUMBER_FIELDS, Uploader, capacitiesFor } from "./upload.ts";
 import { applyTextBindings, dispatchChange, typeInto } from "../runtime/bindings.ts";
 import { updateLists, type ListBindingRef } from "../runtime/list-runtime.ts";
 import { applyStylePatches, type StylePatchRef } from "../runtime/patches.ts";
+import { applyDisabled } from "../runtime/controls.ts";
+import { Dirty } from "../runtime/bindings.ts";
 import { buildUi, requireRoute, showRoute } from "../host/window-state.ts";
 import * as generated from "../../windows/main/ui.gen.ts";
 
@@ -958,6 +960,7 @@ test("a capacity request is a power of two", () => {
     autofocus: generated.autofocus,
     textAreas: generated.textAreas,
     forms: generated.forms,
+    disabledBindings: generated.disabledBindings,
     textBindings: [],
     handlers: [],
     lists: generated.lists,
@@ -1097,5 +1100,71 @@ test("committing an option reaches the select's onChange with the chosen index",
   // wrote. Two of the three would be truthy and only one is usable.
   expect(seen).toEqual([2]);
 
+  engine.close();
+});
+
+/**
+ * `disabled={signal}`, end to end: a signal flip really does stop the press landing.
+ *
+ * This is the assertion the feature is for, and nothing smaller reaches it. The compiler
+ * tests stop at "the binding names the right control row"; a runtime test would stop at
+ * "the byte in `ui.controls.flags` changed". Between them are three steps all capable of
+ * failing silently — `uploadControls` has to run at all (`flush` deliberately does not
+ * upload that table), the engine's `rescan` has to re-read `DISABLED` rather than
+ * preserving it the way it preserves `CHECKED`, and the press has to be refused.
+ *
+ * A press at a coordinate rather than a state setter, for the reason `controls.rs`'s header
+ * gives: nothing can declare a click, so a control that only refuses declared presses would
+ * pass every test that skipped the press.
+ */
+test("a control disabled by a signal stops taking presses", () => {
+  const { ui, engine, uploader } = load("controls", 2400);
+
+  const binding = ui.disabledBindings[0];
+  expect(binding).toBeDefined();
+  const flag = binding!.signal as unknown as { value: boolean };
+  const node = ui.controls.node[binding!.rows[0]!]!;
+
+  const press = (): number[] => {
+    const [x, y, w, h] = engine.bounds(node);
+    expect(w).toBeGreaterThan(0);
+    engine.mouseDown(x + w / 2, y + h / 2);
+    engine.mouseUp(x + w / 2, y + h / 2);
+    engine.tick();
+    return engine.drainEvents().map((e) => e.kind);
+  };
+
+  const republish = (): void => {
+    expect(applyDisabled(ui, ui.disabledBindings)).not.toBe(Dirty.NONE);
+    uploader.uploadControls();
+    engine.tick();
+    engine.drainEvents();
+  };
+
+  // Enabled: the press reaches the node and is reported.
+  expect(flag.value).toBe(false);
+  expect(press()).toContain(EventKind.CLICK);
+
+  // Flip the signal the way the app would, then do exactly what the worker does.
+  flag.value = true;
+  republish();
+  expect(press()).not.toContain(EventKind.CLICK);
+
+  // And back. The bit is *cleared*, not merely stopped from being set — an `|=` with no
+  // matching `&= ~` would satisfy every assertion above and never re-enable anything.
+  flag.value = false;
+  republish();
+  expect(press()).toContain(EventKind.CLICK);
+
+  engine.close();
+});
+
+test("applying an unchanged disabled signal writes nothing", () => {
+  const { ui, engine } = load("controls", 2400);
+
+  // Not an optimisation to trust silently: `worker.ts` uploads the controls table only when
+  // this reports a change, so a version that always reported one would put a table write on
+  // the path of every keystroke, and one that never did would never deliver the flag.
+  expect(applyDisabled(ui, ui.disabledBindings)).toBe(Dirty.NONE);
   engine.close();
 });

@@ -317,6 +317,15 @@ export function resolveRefs(
     editable.name = lookup(editable.ref, `the bind:value on node ${editable.node}`).name;
   }
 
+  for (const entry of result.disabled) {
+    // Named by control row rather than by node, because that is what the binding holds and
+    // a message naming a node the author cannot find in the artifact helps nobody.
+    entry.name = lookup(
+      entry.ref,
+      `the signal driving disabled on control row ${entry.rows[0] ?? -1}`,
+    ).name;
+  }
+
   for (const list of result.lists) {
     list.exportName = lookup(list.source, `the array behind a map() in node ${list.container}`).name;
     for (const handler of list.itemHandlers) {

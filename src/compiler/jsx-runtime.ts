@@ -161,9 +161,12 @@ export type Props = {
    * checkbox from a text field. These no longer merely "typecheck"; they reach
    * the IR and the cascade reads them.
    *
-   * They still do not make a control *behave*. `checked` and `disabled` here are
-   * the static, authored attributes, which is what a selector matches; the live
-   * `:checked` state is a predicate bit that nothing sets yet (A3).
+   * They used to not make a control *behave*, and that stopped being true in protocol
+   * v13: `:checked` and `:disabled` are live bits the engine owns, so a click ticks a box
+   * and a disabled control swallows the press. What these props still are is the
+   * **authored** state — where the control starts, and what `[checked]` and `[disabled]`
+   * match. `disabled` also accepts a signal now; see its own comment for why the
+   * attribute selector and the pseudo-class part company there.
    */
   type?: string;
   name?: string;
@@ -181,7 +184,25 @@ export type Props = {
    */
   placeholder?: string;
   checked?: boolean;
-  disabled?: boolean;
+  /**
+   * Switches the control off: no press, no keyboard activation, skipped by Tab.
+   *
+   * A boolean or **a signal**, and the signal is the interesting half —
+   * `disabled={isSaving}` is the ordinary thing an author wants and it used to be dropped
+   * in silence, producing a control that was never disabled.
+   *
+   * The two spellings differ in one visible way, and it is not a bug:
+   *
+   * - `:disabled` matches either way. It is a live predicate bit the engine owns, so a
+   *   stylesheet rule fires the moment the signal flips.
+   * - `[disabled]` — the *attribute* selector — matches only the literal spelling. An
+   *   attribute is text the compiler wrote down; a signal never becomes text. Style the
+   *   dynamic case with `:disabled`, which is what it is for.
+   *
+   * Only on the elements `disabled` means something on — `input`, `select`, `textarea`,
+   * `button`. Anywhere else the build says so rather than compiling a flag nothing reads.
+   */
+  disabled?: boolean | ReadonlySignal<boolean>;
   /**
    * Edits the tab-stop set: `0` puts an element in it, `-1` takes one out.
    *
@@ -634,13 +655,20 @@ export function jsx(
   const droppedSignals: string[] = [];
   const attrs = attrsOf(props, names.classes, droppedSignals);
 
+  // `disabled={sig}` is consumed rather than dropped, so it must not be warned about.
+  // Pulled out here beside `bind:value` — both are props whose value is a signal the
+  // element keeps rather than an attribute the cascade reads.
+  const disabledWhen = isSignal(props.disabled) ? props.disabled : null;
+  const dropped = disabledWhen ? droppedSignals.filter((p) => p !== "disabled") : droppedSignals;
+
   return {
     type: "element",
     tag: type.toLowerCase(),
     id: props.id ?? null,
     classes: names.classes,
     children: normalize(children),
-    ...(droppedSignals.length ? { droppedSignals } : {}),
+    ...(dropped.length ? { droppedSignals: dropped } : {}),
+    ...(disabledWhen ? { disabledWhen } : {}),
     onClick: props.onClick ?? null,
     onChange: props.onChange ?? null,
     onFocus: props.onFocus ?? null,
