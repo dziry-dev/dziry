@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 24;
+pub const PROTOCOL_VERSION: u32 = 25;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: u32 = 24;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0xe772a183;
+pub const SCHEMA_HASH: u32 = 0x96d27e1f;
 
 pub const TABLE_COUNT: usize = 11;
 
@@ -486,10 +486,12 @@ pub mod controls {
     pub const GROUP: usize = 2;
     pub const FLAGS: usize = 3;
     pub const LABEL: usize = 4;
+    pub const ROWS: usize = 5;
 
-    pub const FIELD_COUNT: usize = 5;
-    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 1, 4, 1, 4];
-    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["node", "kind", "group", "flags", "label"];
+    pub const FIELD_COUNT: usize = 6;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 1, 4, 1, 4, 4];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] =
+        ["node", "kind", "group", "flags", "label", "rows"];
 }
 
 /// Final bounds per node, written by the engine.
@@ -530,6 +532,7 @@ pub mod flags {
 pub mod control_flags {
     pub const CHECKED: u8 = 1 << 0;
     pub const DISABLED: u8 = 1 << 1;
+    pub const MULTIPLE: u8 = 1 << 2;
 }
 
 /// What a node is. `nodes.kind`.
@@ -681,6 +684,7 @@ pub mod control_kind {
     pub const OPTION: u8 = 4;
     pub const BUTTON: u8 = 5;
     pub const LINK: u8 = 6;
+    pub const LISTBOX: u8 = 7;
 }
 
 /// Return code of every FFI entry point. Negative is failure, and the detail is in `dziri_last_error`.

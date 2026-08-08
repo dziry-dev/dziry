@@ -404,6 +404,7 @@ export class Uploader {
     t.group.set(controls.group.subarray(0, n));
     t.flags.set(controls.flags.subarray(0, n));
     t.label.set(controls.label.subarray(0, n));
+    t.rows.set(controls.rows.subarray(0, n));
 
     t.node.fill(NO_CONTROL_NODE, n);
     t.kind.fill(0, n);
@@ -414,6 +415,9 @@ export class Uploader {
     // A spare row that named node 0 as its label would let a commit repoint a real
     // node's string, so this is a `-1` fill for the reason `activates` is.
     t.label.fill(-1, n);
+    // 0 is "not a list box", which is what every non-LISTBOX row carries anyway — so
+    // unlike the two above, this fill needs no sentinel of its own.
+    t.rows.fill(0, n);
   }
 
   uploadLists(): void {

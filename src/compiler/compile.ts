@@ -31,7 +31,7 @@ import { parseCss, Origin, type Pseudo, type PseudoElement } from "./css.ts";
 import { EMPTY_VARS, extendVarEnv, substituteVars, type VarEnv } from "./values.ts";
 import { parseContent, parseInlineStyle } from "./properties.ts";
 import { UA_SHEET } from "./ua-sheet.ts";
-import { optionsOf, uaParts, type UaParts } from "./ua-structure.ts";
+import { listboxOf, optionsOf, uaParts, type UaParts } from "./ua-structure.ts";
 import {
   collectDecls,
   hasPseudoElementRule,
@@ -352,6 +352,14 @@ export type BuiltControl = {
    * {@link resolveSelectLabels} — the run does not exist yet when the row is pushed.
    */
   label: number;
+  /**
+   * A `LISTBOX`'s height in rows — its `size`, defaulting to 4 — and 0 elsewhere.
+   *
+   * A count rather than a height because the height is not knowable here: it is `rows`
+   * times an option's laid-out row, and that comes from the font's metrics in the
+   * engine. See `controls.rows` in the schema.
+   */
+  rows: number;
 };
 
 /**
@@ -381,7 +389,9 @@ export type BuiltControl = {
  * helper that would hide two unrelated arguments behind one name.
  */
 function controlKindOf(el: Element, path: Element[] = []): number {
-  if (el.tag === "select") return ControlKind.SELECT;
+  if (el.tag === "select") {
+    return listboxOf(el) !== null ? ControlKind.LISTBOX : ControlKind.SELECT;
+  }
   if (el.tag === "option") return ControlKind.OPTION;
   if (el.tag === "button") {
     return path[path.length - 2]?.tag === "select" ? ControlKind.NONE : ControlKind.BUTTON;
@@ -756,7 +766,27 @@ export function compileTree(
    * down, and "the select two ancestors up" is a rule that quietly breaks the moment a
    * group is introduced.
    */
-  const optionRows = new Map<Element, { group: number; chosen: boolean }>();
+  const optionRows = new Map<Element, { group: number; selected: boolean }>();
+
+  /**
+   * Marks a `<select>`'s options with their group and their initial selectedness.
+   *
+   * Called before any of them is walked, so each finds its row waiting when it pushes
+   * its controls entry. Shared by the dropdown and the list box because the two differ
+   * only in *where* the options end up — the picker box or in flow — and not at all in
+   * what a `controls` row for one says.
+   *
+   * `parts.selected` rather than `parts.chosen`, and that is the whole reason this is a
+   * function: a list box may have several selected options and may have none, so "is it
+   * the chosen one" cannot be the test any more.
+   */
+  const markOptions = (select: Element, options: Element[], parts: UaParts): void => {
+    const group = optionGroup(select);
+    for (const option of options) {
+      optionRows.set(option, { group, selected: parts.selected.has(option) });
+      labelHosts.set(option, option);
+    }
+  };
 
   /**
    * The group id shared by one `<select>`'s options.
@@ -1243,13 +1273,7 @@ export function compileTree(
   ): number {
     if (parts.picker === null) return -1;
 
-    // Options are marked before any of them is walked, so each one finds its row
-    // waiting when it pushes its controls entry.
-    const group = optionGroup(el);
-    for (const option of optionsOf(parts.picker)) {
-      optionRows.set(option, { group, chosen: option === parts.chosen });
-      labelHosts.set(option, option);
-    }
+    markOptions(el, optionsOf(parts.picker), parts);
     if (parts.selectedContent !== null) labelHosts.set(el, parts.selectedContent);
 
     const inherited = inheritFrom(ownStyle);
@@ -1464,6 +1488,7 @@ export function compileTree(
       // option that belongs to a select. An `<option>` written outside one has no row
       // and is in no group, which is what a browser does with it: nothing.
       const option = optionRows.get(el);
+      const listbox = listboxOf(el);
       controls.push({
         node: self,
         kind: controlKind,
@@ -1471,16 +1496,26 @@ export function compileTree(
           controlKind === ControlKind.RADIO
             ? radioGroup(el, path)
             : (option?.group ?? -1),
+        // Only a list box has one, and only the engine can use it: the height is
+        // `rows` times an option's row height, and that row height is Skia's ascent +
+        // descent + line gap at the resolved font size. Measured as a *ratio* across a
+        // 4x font-size range (`probes/select-listbox.html`), which is what rules out
+        // compiling a pixel height here — the 17px it looks like at the default font is
+        // an instance, not a constant.
+        rows: listbox?.rows ?? 0,
         // Presence, not value: `<input checked>` and `checked=""` both mean checked,
         // which is what `parseAttributes` already normalises to.
         //
-        // An option is `CHECKED` when it is the one the closed control shows, which is
-        // `selected` or — when nothing is — the first. Deriving it from `uaParts.chosen`
-        // rather than from the attribute is what keeps the baked label and the engine's
-        // initial selection from disagreeing: they are the same decision, made once.
+        // An option is `CHECKED` when it is selected at rest, which is a rule with two
+        // branches and neither is "has the attribute". A dropdown falls back to its first
+        // option when none says `selected`; a list box selects nothing at all, and a
+        // `multiple` can select several. Deriving it from `uaParts.selected` rather than
+        // from the attribute is what keeps the baked label and the engine's initial
+        // selection from disagreeing: they are the same decision, made once.
         flags:
-          (el.attrs.has("checked") || option?.chosen === true ? ControlFlags.CHECKED : 0) |
-          (el.attrs.has("disabled") ? ControlFlags.DISABLED : 0),
+          (el.attrs.has("checked") || option?.selected === true ? ControlFlags.CHECKED : 0) |
+          (el.attrs.has("disabled") ? ControlFlags.DISABLED : 0) |
+          (listbox?.multiple === true ? ControlFlags.MULTIPLE : 0),
         // Not knowable yet — the run is a child and children have not been walked.
         label: -1,
       });
@@ -1506,6 +1541,12 @@ export function compileTree(
     // second layout path.
     const parts = uaParts(el);
     const kids = parts.children;
+
+    // A list box's options are in `kids` and are walked by the ordinary loop below, so
+    // they are marked here — the dropdown's equivalent lives in `walkPicker`, which a
+    // list box never reaches. Before the walk, not after: an option pushes its own
+    // controls row while being walked and reads this map to fill it.
+    if (parts.listbox !== null) markOptions(el, optionsOf(parts.children), parts);
     const onlyText =
       kids.length === 1 && kids[0]!.type === "text" ? (kids[0] as { value: string }).value : null;
 
@@ -2286,6 +2327,7 @@ function replicateListControls(
           group: c.group,
           flags: c.flags,
           label: c.label >= 0 ? c.label + shift : -1,
+          rows: c.rows,
         });
         added = true;
       }
@@ -2515,6 +2557,7 @@ function controlTable(controls: BuiltControl[]): CompiledUi["controls"] {
     group: Int32Array.from(controls, (c) => c.group),
     flags: Uint8Array.from(controls, (c) => c.flags),
     label: Int32Array.from(controls, (c) => c.label),
+    rows: Int32Array.from(controls, (c) => c.rows),
   };
 }
 
@@ -3100,6 +3143,7 @@ export const controls = {
   group: ${typedArray("Int32Array", controlRows.map((c) => c.group))},
   flags: ${typedArray("Uint8Array", controlRows.map((c) => c.flags))},
   label: ${typedArray("Int32Array", controlRows.map((c) => c.label))},
+  rows: ${typedArray("Int32Array", controlRows.map((c) => c.rows))},
 } satisfies ControlTable;
 
 export const root: number = ${root};

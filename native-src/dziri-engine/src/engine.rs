@@ -1085,13 +1085,10 @@ impl Engine {
                 } => self.wheel(x, y, dx, dy, shift),
 
                 RawInput::MouseMotion { x, y } => self.mouse_move(x, y),
-                RawInput::MouseDown {
-                    x,
-                    y,
-                    clicks,
-                    shift,
-                } => self.mouse_down_with(x, y, clicks, shift),
-                RawInput::MouseUp { x, y } => self.mouse_up(x, y),
+                RawInput::MouseDown { x, y, clicks, mods } => {
+                    self.mouse_down_with(x, y, clicks, mods & mod_bits::SHIFT != 0)
+                }
+                RawInput::MouseUp { x, y, mods } => self.mouse_up_with(x, y, mods),
 
                 RawInput::KeyDown { keycode, mods } => self.key_down(keycode, mods),
 
@@ -1443,6 +1440,14 @@ impl Engine {
             return;
         }
 
+        // A list box owns its arrows, Home, End, Space and Ctrl+A. Before `group_key` (whose
+        // options belong to a picker, not to a list) and — the ordering that matters —
+        // before `select_all`, or Ctrl+A over a list would run the *text field's* select-all
+        // against whatever caret was left lying around.
+        if self.listbox_key(keycode, shift, ctrl) {
+            return;
+        }
+
         // Arrows inside the focused control's group. After the picker, which owns its own
         // arrows while it is open, and **before the caret**, which is the ordering that
         // matters: a radio is not a text field, so there is no caret competing for the key
@@ -1639,7 +1644,18 @@ impl Engine {
             &mut stops,
         );
 
-        let next = focus::step(&stops, self.state.focused, backward);
+        // Tab leaves from the **list box**, not from the option inside it that an arrow left
+        // focus on. Options are not tab stops, and `step` reads a `from` that is not in the
+        // list as "entering from the end you came from" — correct when nothing is focused,
+        // and wrong here: it would send Tab to the first stop in the document rather than to
+        // the one after the list. Only the list box is in `stops`, so this is what makes the
+        // walk find the right neighbour.
+        let from = match self.listbox_focus() {
+            Some((listbox, option)) if option >= 0 => listbox,
+            _ => self.state.focused,
+        };
+
+        let next = focus::step(&stops, from, backward);
         if next < 0 || next == self.state.focused {
             return;
         }
@@ -2374,6 +2390,17 @@ impl Engine {
 
     /// A release at `(x, y)`.
     pub fn mouse_up(&mut self, x: f32, y: f32) {
+        self.mouse_up_with(x, y, 0)
+    }
+
+    /// A release, with SDL's modifier mask.
+    ///
+    /// The mask matters here and nowhere else on the pointer path, because a list box is
+    /// the one control whose selection changes on the **release** — measured,
+    /// `probes/select-multiple.html`, where every gesture showed the old selection at
+    /// `mousedown` and the new one at `mouseup`. A single `<select>` is the opposite and
+    /// opens on the press, which is why the two cannot share a trigger point.
+    pub fn mouse_up_with(&mut self, x: f32, y: f32, mods: u16) {
         if self.drag.take().is_some() {
             // The bar keeps its hover if the pointer ended up back on it, and loses it
             // if the drag finished somewhere else.
@@ -2426,6 +2453,24 @@ impl Engine {
         // dragging off a button cancel it. Measured too: pressing a checkbox and
         // releasing away from it focused the box without ticking it.
         if self.state.pressed != -1 && hit == self.state.pressed {
+            // A list box option is intercepted before `activate_control`, which would send
+            // it down the `OPTION` arm — and that arm is radio semantics: it refuses to
+            // unselect, so ctrl+clicking a selected row would do nothing at all. What a
+            // list box needs instead is the modifier, and the modifier only exists here.
+            if self.listbox_release(hit, mods, x, y) {
+                self.state.pressed = -1;
+                self.state.hovered = hit;
+                self.needs_paint = true;
+                self.events.push(Event {
+                    kind: event_kind::MOUSE_UP,
+                    node: hit,
+                    x,
+                    y,
+                    ..Default::default()
+                });
+                return;
+            }
+
             // The activation behaviour runs *before* the click event, not after. That
             // ordering is measured rather than chosen: a `mouseup` handler still sees
             // the old checkedness while a `click` handler sees the new one, which is
@@ -2496,6 +2541,254 @@ impl Engine {
             .get(node as usize)
             .copied()
             .unwrap_or(-1)
+    }
+
+    /// The list box a key applies to, and the option focus is on inside it.
+    ///
+    /// Two ways in, because a list box is **one tab stop** and its options are not stops at
+    /// all — the same rule a picker's options follow. So Tab lands on the list box, and only
+    /// once an arrow has moved does focus sit on an option.
+    fn listbox_focus(&self) -> Option<(i32, i32)> {
+        let focused = self.state.focused;
+        match self.painter.control_kind(&self.tables, focused) {
+            control_kind::LISTBOX => Some((focused, -1)),
+            control_kind::OPTION => {
+                let nodes = self.tree.bounds().len();
+                match self.painter.listbox_of(&self.tables, focused, nodes) {
+                    listbox if listbox >= 0 => Some((listbox, focused)),
+                    // An option inside an open *picker*, which is `picker_key`'s and has
+                    // already had this keystroke.
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// The keys a list box owns. Returns whether it consumed one.
+    ///
+    /// Every row is measured, `probes/select-multiple.html`, and three of them would be
+    /// guessed wrong:
+    ///
+    /// | key | result |
+    /// |---|---|
+    /// | Arrow, Home, End | moves the current option and **replaces** the selection |
+    /// | Shift+Arrow | extends from the anchor; clamps at the ends |
+    /// | **Ctrl+Arrow** | **nothing at all** — so the current option cannot be moved alone |
+    /// | **Space** | **nothing**, though it ticks a checkbox and opens a `<select>` |
+    /// | Ctrl+Space | toggles the current option |
+    /// | Ctrl+A | selects every option |
+    /// | Enter | nothing — deliberately *not* consumed here, see below |
+    ///
+    /// Ctrl+Arrow and plain Space are consumed while doing nothing, which is the point of
+    /// naming them: they are the list box's keys, and forwarding them would let a host act
+    /// on a keystroke the user aimed at the list.
+    ///
+    /// **Enter is not consumed**, and that is the one asymmetry. It was measured to do
+    /// nothing *to the list*, which is not the same as doing nothing — a list box inside a
+    /// form leaves Enter to mean what Enter means there, and swallowing it here would break
+    /// implicit submission for a form that happens to contain one.
+    fn listbox_key(&mut self, keycode: i32, shift: bool, ctrl: bool) -> bool {
+        let Some((listbox, current)) = self.listbox_focus() else {
+            return false;
+        };
+        let nodes = self.tree.bounds().len();
+        let mut options = Vec::new();
+        self.painter
+            .listbox_options(&self.tables, listbox, nodes, &mut options);
+        if options.is_empty() {
+            // A `<select multiple>` with no options owns no keys — there is nothing for an
+            // arrow to move to, so forwarding is more useful than swallowing.
+            return false;
+        }
+
+        // Where the current option is. Focus when an arrow has already moved it; otherwise
+        // the first selected one, so arrowing into a list that was authored with a
+        // selection continues from there rather than from the top. With neither, -1 — which
+        // `step_within` reads as "entering from the end you came from".
+        let from = if current >= 0 {
+            current
+        } else {
+            options
+                .iter()
+                .copied()
+                .find(|&o| self.painter.control_checked(o))
+                .unwrap_or(-1)
+        };
+
+        let target = match keycode {
+            keys::DOWN | keys::UP => {
+                // Measured to do nothing at all, and consumed rather than forwarded.
+                if ctrl {
+                    return true;
+                }
+                // Clamps rather than wraps, as a picker's arrows do — `arrow_nav(OPTION)`
+                // is the same measured answer, from `select-picker.html`.
+                focus::step_within(&options, from, keycode == keys::DOWN, false)
+            }
+            keys::HOME | keys::END => {
+                if ctrl {
+                    return true;
+                }
+                let last = options.len() - 1;
+                options[if keycode == keys::HOME { 0 } else { last }]
+            }
+            keys::SPACE => {
+                // Plain Space does nothing — measured, and worth the arm rather than the
+                // fallthrough, because Space ticks a checkbox and opens a `<select>`. Three
+                // meanings for one key, and this is the one that is "none".
+                if ctrl && from >= 0 {
+                    self.listbox_gesture_key(listbox, from, select::Gesture::Toggle);
+                }
+                return true;
+            }
+            keys::A if ctrl => {
+                if self
+                    .painter
+                    .listbox_select_all(&self.tables, listbox, nodes)
+                {
+                    self.needs_paint = true;
+                    self.queue_listbox_change(listbox, from, 0.0, 0.0);
+                }
+                return true;
+            }
+            _ => return false,
+        };
+
+        if target < 0 {
+            return true;
+        }
+        // Shift extends from the anchor, a bare arrow replaces. Shift+Home/End takes the
+        // extending branch too, which the probe did not cover — it is the reading that
+        // makes Home and End behave as the arrows do, rather than a second rule.
+        let gesture = if shift {
+            select::Gesture::Extend
+        } else {
+            select::Gesture::Replace
+        };
+        self.listbox_gesture_key(listbox, target, gesture);
+        true
+    }
+
+    /// Applies a keyboard gesture to a list box: move the current option, then select.
+    ///
+    /// Focus first and unconditionally, because moving the current option is not the same
+    /// as changing the selection — Shift+Arrow into an already-selected row moves where you
+    /// are while the set stays put, and `changed` being false must not leave the highlight
+    /// behind.
+    fn listbox_gesture_key(&mut self, listbox: i32, option: i32, gesture: select::Gesture) {
+        let nodes = self.tree.bounds().len();
+        let changed = self
+            .painter
+            .listbox_gesture(&self.tables, listbox, option, gesture, nodes);
+        self.set_focus(option);
+        self.needs_paint = true;
+        if changed {
+            // Coordinates are zero, as they are for a keyboard commit in `choose_option`.
+            self.queue_listbox_change(listbox, option, 0.0, 0.0);
+        }
+    }
+
+    /// Handles a release on a list box option. False when `hit` is not one.
+    ///
+    /// Returning a bool rather than an `Option<Activation>` because this deliberately does
+    /// *not* join the activation path: an `Activation` says "this control is now checked",
+    /// and a gesture here may have changed five rows or unchecked the one that was hit.
+    /// What the caller needs is only whether the release was consumed.
+    ///
+    /// The events it queues are the measured pair. `CLICK` on the **option**, because dziri
+    /// has no bubbling and the node a click names is the node clicked — the same rule the
+    /// picker follows. `CHANGE` on the **list box**, because that is the element a browser
+    /// reports the change of, and exactly **one** per gesture however many rows moved: a
+    /// Shift+click that selected five fired one pair, measured.
+    fn listbox_release(&mut self, hit: i32, mods: u16, x: f32, y: f32) -> bool {
+        // Through `activates`, so releasing on an option's *text* operates the option. The
+        // same resolution `option_at` does for the picker, and the same bug it exists for:
+        // most of an option's area is its label.
+        let option = self.activates_of(hit);
+        if option < 0 || self.painter.control_kind(&self.tables, option) != control_kind::OPTION {
+            return false;
+        }
+        let nodes = self.tree.bounds().len();
+        let listbox = self.painter.listbox_of(&self.tables, option, nodes);
+        if listbox < 0 {
+            return false;
+        }
+
+        let gesture = select::Gesture::of(mods & mod_bits::SHIFT != 0, mods & mod_bits::CTRL != 0);
+        let changed = self
+            .painter
+            .listbox_gesture(&self.tables, listbox, option, gesture, nodes);
+
+        // The current option follows the gesture, and it is focus — the same state
+        // `option:focus` draws for an open picker. Measured that a list box has one
+        // distinct from the selection: `Ctrl+Space` toggled `f` out of a selection of
+        // `e,f`, which is only expressible if something remembers where you are.
+        self.set_focus(option);
+        self.needs_paint = true;
+
+        self.events.push(Event {
+            kind: event_kind::CLICK,
+            node: option,
+            x,
+            y,
+            ..Default::default()
+        });
+        if changed {
+            self.queue_listbox_change(listbox, option, x, y);
+        }
+        true
+    }
+
+    /// The single `CHANGE` a list box gesture fires, on the list box itself.
+    ///
+    /// `a` is the index of the option the gesture acted on and `b` is how many are selected
+    /// now. Neither is the *set*, and that is the honest shape rather than a compromise: one
+    /// `i32` cannot carry a set of unbounded size, and the encodings that nearly fit — a
+    /// bitmask over 31 options — are wrong silently on the 32nd. The host reads the set
+    /// beside the event, from `dziri_engine_listbox_selection`, which is the same answer
+    /// `dziri_engine_selection` gives for a text range: engine state with no signal to hold
+    /// it.
+    fn queue_listbox_change(&mut self, listbox: i32, option: i32, x: f32, y: f32) {
+        let nodes = self.tree.bounds().len();
+        let mut options = Vec::new();
+        self.painter
+            .listbox_options(&self.tables, listbox, nodes, &mut options);
+
+        let index = options.iter().position(|&o| o == option);
+        let count = options
+            .iter()
+            .filter(|&&o| self.painter.control_checked(o))
+            .count();
+
+        self.events.push(Event {
+            kind: event_kind::CHANGE,
+            node: listbox,
+            a: index.map_or(-1, |i| i as i32),
+            b: count as i32,
+            x,
+            y,
+            ..Default::default()
+        });
+    }
+
+    /// Every selected option of `listbox`, as indices into its option list.
+    ///
+    /// The accessor behind `dziri_engine_listbox_selection`. Indices rather than node ids
+    /// because a node id is an implementation detail an author never sees, while the index
+    /// is the position in the list they wrote — the same choice the single select's
+    /// `CHANGE` payload makes.
+    pub fn listbox_selection(&self, listbox: i32) -> Vec<i32> {
+        let nodes = self.tree.bounds().len();
+        let mut options = Vec::new();
+        self.painter
+            .listbox_options(&self.tables, listbox, nodes, &mut options);
+        options
+            .iter()
+            .enumerate()
+            .filter(|&(_, &o)| self.painter.control_checked(o))
+            .map(|(i, _)| i as i32)
+            .collect()
     }
 
     /// The `<option>` a hit inside a picker refers to, or -1.

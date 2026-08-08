@@ -222,7 +222,12 @@ export function dispatch(
  * is the same `controls` table the engine reads, so the two cannot disagree about which
  * kind a node is.
  */
-export function dispatchChange(ui: CompiledUi, node: number, raw: number): boolean {
+export function dispatchChange(
+  ui: CompiledUi,
+  node: number,
+  raw: number,
+  selected: readonly number[] = [],
+): boolean {
   const fn = handlerFor(ui, node, "change");
   if (!fn) return false;
 
@@ -238,8 +243,18 @@ export function dispatchChange(ui: CompiledUi, node: number, raw: number): boole
   // already the number an author wants. Anything else passes the integer through rather
   // than guessing — an unknown kind is a kind this function has not been taught, and
   // inventing a conversion for it would be inventing behaviour.
+  //
+  // A **list box** is the one whose answer is not in `raw` at all. Its selection is a set,
+  // measured to fire one `change` per gesture however many rows moved, so `raw` is only
+  // the row the gesture landed on and the set arrives beside the event — see
+  // `EngineEvent.selected`. A fresh array per dispatch, because the drained one is shared
+  // and a handler that keeps it would be holding a buffer the next event overwrites.
   const value =
-    kind === ControlKind.CHECKBOX || kind === ControlKind.RADIO ? raw === 1 : raw;
+    kind === ControlKind.CHECKBOX || kind === ControlKind.RADIO
+      ? raw === 1
+      : kind === ControlKind.LISTBOX
+        ? [...selected]
+        : raw;
 
   batch(() => fn(value));
   return true;

@@ -983,6 +983,61 @@ impl Painter {
         self.selects.labels()
     }
 
+    /// The `LISTBOX` that owns `option`, or -1. See `select::listbox_of`.
+    pub fn listbox_of(&self, tables: &Tables, option: i32, node_count: usize) -> i32 {
+        select::listbox_of(tables, &self.controls, option, node_count)
+    }
+
+    /// Every `<option>` of `listbox`, in document order.
+    ///
+    /// The same walk `open_options` makes, from the list box itself rather than from a
+    /// picker box — which is the whole structural difference between the two shapes, and
+    /// the reason one function serves both.
+    pub fn listbox_options(
+        &self,
+        tables: &Tables,
+        listbox: i32,
+        node_count: usize,
+        out: &mut Vec<i32>,
+    ) {
+        select::options_of(tables, &self.controls, listbox, node_count, out);
+    }
+
+    /// Applies a gesture to a list box's selection. Returns whether it moved.
+    pub fn listbox_gesture(
+        &mut self,
+        tables: &Tables,
+        listbox: i32,
+        option: i32,
+        gesture: select::Gesture,
+        node_count: usize,
+    ) -> bool {
+        select::apply_gesture(
+            &mut self.selects,
+            &mut self.controls,
+            tables,
+            listbox,
+            option,
+            gesture,
+            node_count,
+        )
+    }
+
+    /// Ctrl+A on a list box. Returns whether anything moved.
+    pub fn listbox_select_all(&mut self, tables: &Tables, listbox: i32, node_count: usize) -> bool {
+        select::select_all(&mut self.controls, tables, listbox, node_count)
+    }
+
+    /// A `LISTBOX`'s height in rows — `controls.rows`, or 0 for anything else.
+    pub fn control_rows(&self, tables: &Tables, node: i32) -> i32 {
+        self.controls.rows_of(tables, node)
+    }
+
+    /// Whether `node` is checked right now.
+    pub fn control_checked(&self, node: i32) -> bool {
+        self.controls.is_checked(node)
+    }
+
     /// Every `<option>` in the open picker, in document order.
     ///
     /// Collected on demand rather than cached, because the only caller is a keypress on an

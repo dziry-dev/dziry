@@ -683,6 +683,48 @@ pub unsafe extern "C" fn dziri_engine_scroll(
     })
 }
 
+/// Writes the selected option **indices** of a list box to `out`, and the count to `written`.
+///
+/// Exposed for the reason `dziri_engine_selection` is, and it is the same reason twice: this
+/// is engine state with no signal to hold it. The difference is that a text range is two
+/// numbers and this is a *set* — so it cannot ride in the `CHANGE` event the way a single
+/// select's chosen index does. One `i32` does not hold a set of unbounded size, and every
+/// encoding that nearly fits (a bitmask over 31 options) is silently wrong on the 32nd.
+///
+/// Indices into the list box's options, in document order, ascending. Node ids would be the
+/// other candidate and are the wrong currency: an author never sees one, while the index is
+/// the position in the list they wrote — the same choice the single select's `CHANGE` makes.
+///
+/// A node that is not a list box writes nothing and reports 0, which is indistinguishable
+/// from a list box with an empty selection. That is deliberate: both mean "no selected
+/// indices here", and the caller already knows which kind of control it asked about, because
+/// it read that from the same `controls` table the compiler filled.
+///
+/// # Safety
+/// `out` must be writable for `capacity` `i32`, and `written` for one `u32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_listbox_selection(
+    handle: Handle,
+    listbox: i32,
+    out: *mut i32,
+    capacity: u32,
+    written: *mut u32,
+) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() || written.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        let selected = engine.listbox_selection(listbox);
+        let n = selected.len().min(capacity as usize);
+        // SAFETY: the caller promises room for `capacity` i32, and `n` is clamped to it.
+        unsafe {
+            std::ptr::copy_nonoverlapping(selected.as_ptr(), out, n);
+            *written = n as u32;
+        }
+        status::OK
+    })
+}
+
 /// Writes the open `<select>` and the option it currently shows to `out`, as two `i32`.
 ///
 /// `(-1, -1)` when no picker is open; `(select, -1)` for an open picker whose select has no

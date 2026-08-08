@@ -113,6 +113,38 @@ select::picker(select) { position: absolute; left: 0; right: 0 }
    doubled edge they never asked for. */
 select button { border-width: 0 }
 
+/* A list box: a select with multiple, or with a size above one.
+
+   Not a dropdown with a flag on it. Measured (probes/select-listbox.html and
+   select-multiple.html): its options are ordinary in-flow boxes with a box, a computed
+   style and an offsetParent, where a dropdown's are browser chrome with no box at all.
+   So none of the picker rules above apply to it — and they do not have to be undone
+   either, because it has no picker box and no button for them to match.
+
+   display:block is what makes the options stack. dziri's default display is flex, whose
+   default direction is row, so without this the rows come out side by side — which is
+   what the first render of this showed, six options in a line spilling out of the box.
+   Block is also the measured display of the options themselves, so the two agree.
+
+   overflow-y:scroll is the other half of "size rows": the box is a fixed number of rows
+   tall whether or not the options fit, so the rest has to be reachable. Measured, a
+   list box of six options with no size has a client height of four rows and a scroll
+   height of six.
+
+   The height itself is deliberately absent, and it is the one thing here that cannot be
+   written down: it is the size attribute times a *row*, and a row is ascent + descent +
+   line gap at the resolved size. Measured as a ratio across a 4x font-size range, so the
+   17px it looks like at the default font is an instance rather than a constant. The row
+   count travels in controls.rows and layout.rs multiplies — see size_listboxes.
+
+   The attribute is written by the compiler, not by the author. A selector cannot express
+   "multiple or size above one": select[size] matches size="1", which is a dropdown, and
+   CSS has no numeric comparison. So compile.ts resolves the condition and records it as
+   something this sheet can match. It sits at UA origin like everything else here, which
+   is the point of doing it this way rather than in the engine — an author's own
+   overflow or display beats it. */
+select[data-dziri-listbox] { display: block; overflow-y: scroll }
+
 /* A placeholder overlays the text rather than occupying room beside it.
 
    No backticks anywhere in this comment, and that is not a style choice: the whole sheet

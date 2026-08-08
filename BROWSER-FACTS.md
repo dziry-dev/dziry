@@ -1892,3 +1892,105 @@ The correction matters beyond tidiness: the earlier count was used, in the same 
 recorded it, to argue that a multiple's `CHANGE` should be a per-option boolean like a
 checkbox's. That argument is now unsupported. See ROADMAP B1, where the open question is
 what a single per-gesture event can carry when the answer is a *set*.
+
+## A listbox is made by `size`, not by `multiple` — and it starts with nothing selected
+
+**Measured 2026-08-08 · Chromium 151 (via Edge 151) · `probes/select-listbox.html`.
+Three runs, identical.**
+
+Asked because `select-multiple.html` measured how a listbox *behaves* and never asked what
+makes one, and dziri was about to fork its whole `<select>` structure on the `multiple`
+attribute. Two of the three answers below contradict what the fork assumed.
+
+### What makes a listbox
+
+| shape | box | client | option height | selected at rest |
+|---|---|---|---|---|
+| `<select>` | 62×19 | 17 | **0** | `alpha` |
+| `<select size=1>` | 62×19 | 17 | **0** | `alpha` |
+| `<select size=2>` | 60×36 | 34 | 17 | — |
+| `<select size=4>` | 60×70 | 68 | 17 | — |
+| `<select multiple>` | 60×70 | 68 | 17 | — |
+| `<select multiple size=2>` | 60×36 | 34 | 17 | — |
+| `<select size=9>` (6 options) | 60×155 | 153 | 17 | — |
+
+1. **`size > 1` alone makes a listbox**, with no `multiple` anywhere. `<select size="4">`
+   is a six-option list box, not a dropdown — same box, same in-flow options and same
+   empty initial selection as `<select multiple>`. So the structural fork is
+   **`multiple || size > 1`**, and keying it on `multiple` would have compiled a common
+   authored shape to a dropdown.
+2. **`size` is a height in rows even past the option count.** `size="9"` with six options
+   gives nine rows of client height and empty space below, rather than shrinking to fit.
+3. A listbox's options are in flow (`offsetParent` is `body`, `display: block`); a
+   dropdown's are chrome with a zero box. That is the same split `select-multiple.html`
+   found, now with `size` on the other side of it too.
+
+### What is selected at rest — the rule differs by shape
+
+| shape | selected | `selectedIndex` |
+|---|---|---|
+| single, no `selected` | `alpha` | 0 |
+| single, third `selected` | `charlie` | 2 |
+| single, 2nd **and** 4th `selected` | **`delta`** | 3 |
+| **listbox** (`multiple`), no `selected` | **nothing** | **-1** |
+| listbox, third `selected` | `charlie` | 2 |
+| listbox, 2nd **and** 4th `selected` | `bravo,delta` | 1 |
+| `size=4` (no `multiple`), no `selected` | **nothing** | -1 |
+| `size=4`, 2nd **and** 4th `selected` | **`delta`** | 3 |
+| `multiple`, no options | nothing | -1 |
+
+4. **A listbox selects nothing when no option says `selected`.** A dropdown falls back to
+   the first; a listbox does not. dziri's `uaParts.chosen` implements the dropdown rule —
+   `selected`, else the first — so a listbox inheriting it would come up with a row
+   highlighted that the user never chose.
+5. **`selectedIndex` on a multiple is the *first* selected**, not the last or the only.
+6. **Two `selected` attributes: a multiple keeps both, anything single-selection keeps
+   the last.** So `selected` is a per-option flag whose *resolution* depends on
+   `multiple`, and `size=4` without `multiple` is a listbox with dropdown selection
+   semantics — a real shape, and one neither half of the fork would have handled.
+
+   **This found a live bug in dziri's dropdown**, which is why the single row was added:
+   `uaParts` takes the **first** option marked `selected` (`options.find(…)`), and
+   Chromium takes the **last**. Nothing had measured it because every earlier case marked
+   at most one option, so the two rules could not disagree. Fixed alongside the listbox
+   work rather than filed, since the same line computes both.
+
+### The height is a ratio, not a constant
+
+| font-size | option height | client | client / option |
+|---|---|---|---|
+| 8px | 10.59 | 42 | 3.97 |
+| 12px | 15.39 | 62 | 4.03 |
+| 16px | 20.19 | 81 | 4.01 |
+| 24px | 29.80 | 119 | 3.99 |
+| 32px | 39.39 | 158 | 4.01 |
+
+7. **A listbox's content height is `size` × the option's own row height**, holding across a
+   4× font-size range — the residual is `clientHeight` being an integer. So the earlier
+   "68px at 17px per option" is an instance of a rule, not a number to bake. **dziri cannot
+   compile this height**: its rows come from Skia's ascent + descent + line gap at layout
+   time (`Measurer::line_height`), so the row count has to reach the engine and be
+   multiplied there.
+
+### One shape is incoherent, and dziri will diverge from it
+
+| | scrollHeight/client | option height | `offsetParent` | option `display` |
+|---|---|---|---|---|
+| `<select>` | 17/17 | 0 | null | `block` |
+| `<select multiple size=1>` | **17/17** | **0** | **null** | `flex` |
+| `<select multiple size=2>` | 102/34 | 17 | `body` | `block` |
+
+8. **`<select multiple size=1>` is neither.** It takes the listbox's selection rule
+   (nothing selected at rest) but the dropdown's structure — chrome options, no box, and
+   `scrollHeight == clientHeight`, so its five remaining options are unreachable: there is
+   no overflow to scroll. A third `display` value (`flex`) says Chromium treats it as its
+   own case rather than falling back to either.
+
+   Recorded because it was about to be built on: the row read "listbox" in the selection
+   column and "dropdown" in the box column, and either alone would have been believed.
+   **dziri deliberately diverges** and makes it a one-row scrolling listbox — the coherent
+   reading of `multiple || size > 1` with `size` rows — since Chromium's version shows six
+   options' worth of content in a 17px box with no way to reach five of them.
+
+9. `select[multiple]` matches as a selector, and `option:checked` counts exactly the
+   selected ones — so dziri's existing `:checked` styling path needs nothing new.

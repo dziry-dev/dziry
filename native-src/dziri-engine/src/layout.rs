@@ -21,7 +21,9 @@ use taffy::style::{
 use taffy::{Point, Rect, Size, TaffyTree};
 
 use crate::error::EngineError;
-use crate::protocol::{self, align, display as display_enum, flex_direction, flex_wrap, justify};
+use crate::protocol::{
+    self, align, control_kind, display as display_enum, flex_direction, flex_wrap, justify,
+};
 use crate::tables::Tables;
 use crate::text::Measurer;
 
@@ -321,6 +323,180 @@ impl LayoutTree {
             .map_err(taffy_at("taffy set_children", node))
     }
 
+    /// Gives every `LISTBOX` a height of `controls.rows` rows.
+    ///
+    /// The *only* part of a list box's box that is here. Stacking and clipping —
+    /// `display: block` and `overflow-y: scroll` — are ordinary UA declarations in
+    /// `ua-sheet.ts`, matched through the `data-dziri-listbox` attribute the compiler
+    /// stamps. They belong there because they are what a list box looks like, so an
+    /// author's own rule should beat them; this one cannot go there at all.
+    ///
+    /// # Why this is here and not in the style table
+    ///
+    /// It is the one box dziri cannot compile. Measured across a 4x font-size range
+    /// (`probes/select-listbox.html`), a list box's content height is `size` times the
+    /// option's own row height — a *ratio*, so the 17px it looks like at the default font
+    /// is an instance and not a constant. And a row height is [`Measurer::line_height`]:
+    /// ascent + descent + line gap, from Skia, at the resolved size. The compiler has no
+    /// access to that and CSS has no `lh` unit here, so the row *count* crosses the
+    /// boundary in `controls.rows` and the multiplication happens where both numbers exist,
+    /// which is this function and nowhere else.
+    ///
+    /// # Why inside `compute` rather than in `style_of`
+    ///
+    /// `apply_style` rewrites a node's whole style from the tables whenever a patch touches
+    /// it, so an override applied there would be silently dropped by the next conditional
+    /// class. Running it at the top of every layout instead means the last word is always
+    /// this, whatever else has been written since.
+    ///
+    /// The `set_style` calls are guarded on the value actually differing, and that guard is
+    /// load-bearing rather than an optimisation: `set_style` marks a node dirty, so an
+    /// unguarded version would relayout the list box — and thus its ancestors — every
+    /// single frame. This is the case the warning on [`Self::apply_style`] exempts, because
+    /// unlike a style patch, everything this writes is recomputed here from its inputs.
+    ///
+    /// The font is read from the **list box's** own style rather than an option's, since
+    /// options inherit it. An author who sets `font-size` on one option gets a box sized
+    /// for the others, which is the same approximation a browser makes.
+    fn size_listboxes(
+        &mut self,
+        tables: &Tables,
+        measurer: &mut Measurer,
+    ) -> Result<(), EngineError> {
+        const CONTROLS: usize = protocol::Table::Controls as usize;
+
+        let ids = tables.i32s(CONTROLS, protocol::controls::NODE);
+        let kinds = tables.u8s(CONTROLS, protocol::controls::KIND);
+        let rows_col = tables.i32s(CONTROLS, protocol::controls::ROWS);
+        let style_of_node = tables.u16s(NODES, protocol::nodes::STYLE);
+        let font_size = tables.f32s(STYLES, protocol::styles::FONT_SIZE);
+        let font_weight = tables.u16s(STYLES, protocol::styles::FONT_WEIGHT);
+
+        for (row, &node) in ids.iter().enumerate() {
+            // A spare row is `i32::MAX` and this is untrusted host memory, so out of range
+            // is a skip rather than a panic on the render thread.
+            if node < 0 || node as usize >= self.ids.len() {
+                continue;
+            }
+            if kinds.get(row).copied().unwrap_or(0) != control_kind::LISTBOX {
+                continue;
+            }
+            let rows = rows_col.get(row).copied().unwrap_or(0);
+            if rows <= 0 {
+                continue;
+            }
+
+            let node = node as usize;
+            // A row is one **option's** box, not one line of the list box's own font. The
+            // demo found the difference immediately: its options carry `padding: 6px 8px`
+            // and `font-size: 13px`, so four rows of the select's 16px line height held
+            // two and a half options and clipped the third mid-word. A browser's row is
+            // the option's content plus its padding — measured, `optH` 17 for a 16px line
+            // with `padding: 0 2px 1px 2px` — so that is what this adds up.
+            //
+            // Taken from the *first* option, so a list whose options are styled unevenly
+            // is sized for the first one. Same approximation a browser makes, and the same
+            // one the font choice below already commits to.
+            let sample = Self::first_option(tables, node, self.ids.len()).unwrap_or(node);
+            let slot = style_of_node.get(sample).copied().unwrap_or(0) as usize;
+            let size = font_size.get(slot).copied().unwrap_or(16.0);
+            let weight = font_weight.get(slot).copied().unwrap_or(400);
+            let pad = |field: usize| -> f32 {
+                tables
+                    .f32s(STYLES, field)
+                    .get(slot)
+                    .copied()
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(0.0)
+            };
+            // An authored `height` on the option wins over the font. Not measured — the
+            // probe never styled an option — but it is the same correctness condition the
+            // padding above is: a box sized for rows that are not the rows on screen shows
+            // a different number of them than it says, and the author's height is the more
+            // specific statement about how tall a row is.
+            let content = match tables.f32s(STYLES, protocol::styles::HEIGHT).get(slot) {
+                Some(&h) if h.is_finite() => h,
+                _ => measurer.line_height(size, weight),
+            };
+            // Padding and border are added either way, because an option is a
+            // `content-box` like every non-root node here — so `height` names the content
+            // and the box is taller than it by both. Adding them only on the measured
+            // branch is the bug this spells out: it would size the list for content boxes
+            // while the rows on screen are border boxes.
+            let row = content
+                + pad(protocol::styles::PAD_TOP)
+                + pad(protocol::styles::PAD_BOTTOM)
+                + 2.0 * pad(protocol::styles::BORDER_WIDTH);
+            let want = Dimension::length(row * rows as f32);
+
+            let id = self.ids[node];
+            let current = self.tree.style(id).map_err(taffy_at("taffy style", node))?;
+            if current.size.height == want {
+                continue;
+            }
+
+            let mut style = current.clone();
+            style.size.height = want;
+            self.tree
+                .set_style(id, style)
+                .map_err(taffy_at("taffy set_style on a list box", node))?;
+        }
+        Ok(())
+    }
+
+    /// The first `<option>` under `node`, in document order, or `None`.
+    ///
+    /// A subtree walk rather than a child scan, because an option inside an `<optgroup>` is two
+    /// levels down and is still the list's first row — the same reason `select::options_of` walks
+    /// rather than scans, and the same failure if it did not: a grouped list would be sized from
+    /// the group box instead of from an option.
+    ///
+    /// Here rather than borrowed from `select.rs` because that one needs `Controls`, which layout
+    /// does not have and should not: this reads the same `controls` table directly, and the only
+    /// thing it wants from a row is its kind.
+    fn first_option(tables: &Tables, node: usize, node_count: usize) -> Option<usize> {
+        const CONTROLS: usize = protocol::Table::Controls as usize;
+        let ids = tables.i32s(CONTROLS, protocol::controls::NODE);
+        let kinds = tables.u8s(CONTROLS, protocol::controls::KIND);
+        let first = tables.i32s(NODES, protocol::nodes::FIRST_CHILD);
+        let next = tables.i32s(NODES, protocol::nodes::NEXT_SIBLING);
+
+        // Explicit stack with children pushed reversed, so they pop in document order — the
+        // shape every walk over host memory here uses, and budgeted for the same reason: a
+        // cycle in the chains must cost a frame rather than the render thread.
+        let mut stack = vec![node as i32];
+        let mut kids: Vec<i32> = Vec::new();
+        let mut budget = node_count.saturating_mul(2) + 16;
+
+        while let Some(at) = stack.pop() {
+            if budget == 0 {
+                return None;
+            }
+            budget -= 1;
+            if at < 0 || at as usize >= node_count {
+                continue;
+            }
+            if at as usize != node
+                && ids
+                    .binary_search(&at)
+                    .is_ok_and(|row| kinds.get(row).copied() == Some(control_kind::OPTION))
+            {
+                return Some(at as usize);
+            }
+
+            kids.clear();
+            let mut child = first.get(at as usize).copied().unwrap_or(-1);
+            while child >= 0 && (child as usize) < node_count && kids.len() <= node_count {
+                kids.push(child);
+                child = next.get(child as usize).copied().unwrap_or(-1);
+            }
+            while let Some(child) = kids.pop() {
+                stack.push(child);
+            }
+        }
+        None
+    }
+
     /// Pushes a node's resolved style into Taffy.
     ///
     /// **Do not guard this with `Style: PartialEq`.** It is the obvious saving
@@ -448,6 +624,8 @@ impl LayoutTree {
                 .set_style(root, style)
                 .map_err(taffy("taffy set_style on root"))?;
         }
+
+        self.size_listboxes(tables, measurer)?;
 
         let space = Size {
             width: AvailableSpace::Definite(width),

@@ -231,6 +231,17 @@ export type Props = {
   readOnly?: boolean;
   required?: boolean;
   multiple?: boolean;
+  /**
+   * `<select size=…>` — its height in rows, and the other half of what makes a list box.
+   *
+   * A `<select size="4">` with no `multiple` is a list box, not a dropdown: measured,
+   * `probes/select-listbox.html`, same box and same in-flow options as a `multiple`. So
+   * this is not a cosmetic hint — it decides which of two elements the tag compiles to.
+   *
+   * Also `<input size=…>`, which dziri does not implement. Typed as a string or a number
+   * because both spellings are ordinary in JSX and the compiler parses it either way.
+   */
+  size?: number | string;
   selected?: boolean;
   /**
    * `<optgroup label=…>`, and nothing renders it yet.

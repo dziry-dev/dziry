@@ -14,6 +14,7 @@ import { dlopen, FFIType, ptr, type Pointer } from "bun:ffi";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import {
+  EventKind,
   PROTOCOL_VERSION,
   SCHEMA_HASH,
   Status,
@@ -84,6 +85,7 @@ const SYMBOLS = {
   dziri_engine_bounds: { args: [u32, u32, PTR], returns: i32 },
   dziri_engine_selection: { args: [u32, i32, PTR], returns: i32 },
   dziri_engine_open_select: { args: [u32, PTR], returns: i32 },
+  dziri_engine_listbox_selection: { args: [u32, i32, PTR, u32, PTR], returns: i32 },
   dziri_engine_scroll: { args: [u32, f32, f32, f32, f32, PTR], returns: i32 },
   dziri_engine_surface_info: { args: [u32, PTR], returns: i32 },
   dziri_engine_read_pixels: { args: [u32, PTR, u32], returns: i32 },
@@ -198,6 +200,15 @@ const errorBuf = new Uint8Array(1024);
 const decoder = new TextDecoder();
 
 /**
+ * The `selected` of every event that is not a list box's `CHANGE`.
+ *
+ * One shared frozen array rather than a fresh `[]` per event, because this is on the drain
+ * path and a mouse move produces one of these every frame. Frozen so a consumer that
+ * mutated it could not reach the next event's.
+ */
+const EMPTY: readonly number[] = Object.freeze([]) as readonly number[];
+
+/**
  * The detail behind a failure status.
  *
  * The engine returns how many bytes it *wrote*, which is the longest whole-
@@ -250,6 +261,20 @@ export type EngineEvent = {
   x: number;
   y: number;
   text: string;
+  /**
+   * A list box's selected option indices, on a `CHANGE` and nowhere else.
+   *
+   * Attached at drain time rather than packed into the record, because the record is a
+   * fixed `#[repr(C)]` struct and this is a set of unbounded size. It travels *in the
+   * event* because the worker — which dispatches handlers — never holds the engine handle,
+   * so it could not ask for it later even though the accessor exists.
+   *
+   * Empty for every other event and for a list box with nothing selected. Those two are
+   * not distinguished here on purpose: the runtime already knows which it is from
+   * `ui.controls.kind`, and inventing a null to carry the same fact twice is how the two
+   * get to disagree.
+   */
+  selected: readonly number[];
 };
 
 export class Engine {
@@ -472,15 +497,25 @@ export class Engine {
       /* `a` is the byte length for TEXT_INPUT and a key code otherwise. */
       const a = view.getInt32(at + 8, true);
       const textLen = Math.max(0, Math.min(a, 32));
+      const kind = view.getUint32(at, true);
+      const node = view.getInt32(at + 4, true);
+      const b = view.getInt32(at + 12, true);
       out.push({
-        kind: view.getUint32(at, true),
-        node: view.getInt32(at + 4, true),
+        kind,
+        node,
         a,
-        b: view.getInt32(at + 12, true),
+        b,
         c: view.getInt32(at + 16, true),
         x: view.getFloat32(at + 20, true),
         y: view.getFloat32(at + 24, true),
         text: decoder.decode(bytes.subarray(at + 28, at + 28 + textLen)),
+        // A list box's `CHANGE` carries how many options are selected in `b`, and every
+        // other `CHANGE` leaves it 0 — so `b` doubles as both the gate and the exact
+        // buffer size, and the read cannot truncate. The set itself is fetched here,
+        // where the engine handle is, because the worker that will dispatch the handler
+        // does not have one.
+        selected:
+          kind === EventKind.CHANGE && b > 0 ? this.listboxSelection(node, b) : EMPTY,
       });
     }
     return out;
@@ -600,6 +635,34 @@ export class Engine {
     );
     const [select, option] = [scratch32[0]!, scratch32[1]!];
     return select < 0 ? null : { select, option };
+  }
+
+  /**
+   * Which options of a `<select multiple>` are selected, as indices in document order.
+   *
+   * The only way to ask, for the reason {@link Engine.selectionOf} is — a list box's
+   * selection is engine state with no signal behind it. Unlike a single select's, it is a
+   * *set*, so it cannot ride in the `CHANGE` event: one `i32` does not hold one, and a
+   * bitmask would be silently wrong past 31 options.
+   *
+   * `cap` is the option count, so it cannot truncate: a list box has as many selectable
+   * options as it has options, and the buffer is sized from the same table the engine walks.
+   */
+  listboxSelection(node: number, cap: number): number[] {
+    if (cap <= 0) return [];
+    const out = new Int32Array(cap);
+    const written = new Uint32Array(1);
+    check(
+      engine.dziri_engine_listbox_selection(
+        this.#handle,
+        node,
+        ptr(out) as Pointer,
+        cap,
+        ptr(written) as Pointer,
+      ),
+      "dziri_engine_listbox_selection",
+    );
+    return Array.from(out.subarray(0, written[0]!));
   }
 
   /**

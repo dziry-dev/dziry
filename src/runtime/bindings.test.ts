@@ -276,6 +276,41 @@ test("a select's onChange receives the chosen index", () => {
   expect(seen).toEqual([2]);
 });
 
+test("a list box's onChange receives the selected indices, not the row that moved", () => {
+  // The one control whose answer is not in the wire integer at all. Measured, a list box
+  // fires **one** `change` per gesture however many rows moved — so `raw` can only name
+  // the row the gesture landed on, and the set arrives beside the event, read on the
+  // engine thread where the handle is. See `EngineEvent.selected`.
+  const seen: unknown[] = [];
+  const ui = uiWith(
+    [{ node: 9, kind: "change", fn: (v) => seen.push(v) }],
+    [{ node: 9, kind: ControlKind.LISTBOX }],
+  );
+
+  expect(dispatchChange(ui, 9, 3, [0, 2, 3])).toBe(true);
+  // Empty is a real answer — a list box can have nothing selected, which is also how it
+  // starts unless an option says `selected`.
+  expect(dispatchChange(ui, 9, 1, [])).toBe(true);
+  expect(seen).toEqual([[0, 2, 3], []]);
+});
+
+test("a list box's handler gets a copy, not the drained event's array", () => {
+  // The drained array is shared — `host.ts` hands out one frozen empty for every event
+  // that is not a list box's `CHANGE`, and the filled ones come straight off an FFI read.
+  // A handler that keeps what it was given must not be holding a buffer that the next
+  // event rewrites.
+  const kept: unknown[] = [];
+  const ui = uiWith(
+    [{ node: 9, kind: "change", fn: (v) => kept.push(v) }],
+    [{ node: 9, kind: ControlKind.LISTBOX }],
+  );
+
+  const wire = [1, 2];
+  dispatchChange(ui, 9, 2, wire);
+  wire.length = 0;
+  expect(kept).toEqual([[1, 2]]);
+});
+
 test("click and change handlers on one node do not answer for each other", () => {
   // The reason `handlers` grew a `kind` column rather than being looked up by node
   // alone: a checkbox inside a clickable row has an `onClick` that belongs to the row

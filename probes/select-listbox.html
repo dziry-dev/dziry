@@ -1,0 +1,155 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>select-listbox</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  #stage select { vertical-align: top }
+</style>
+<h3>what makes a &lt;select&gt; a listbox, and what is selected before anyone touches it?</h3>
+<div id="stage"></div>
+<script type="module">
+  import { log, mount, report } from "./_harness.js";
+
+  /**
+   * `select-multiple.html` measured how a listbox *behaves*. Two questions it never asked
+   * decide how dziri compiles one, and both were about to be answered from memory:
+   *
+   * 1. **Is `multiple` what makes it a listbox?** HTML says `size` does too — a
+   *    `<select size="4">` with no `multiple` is a list, not a dropdown. If that is true
+   *    then keying dziri's whole structural fork on the `multiple` attribute is wrong for
+   *    a shape authors really write, and the fork has to be on the pair.
+   * 2. **What is selected at rest?** dziri's single select checks `selected`, else the
+   *    first option — `uaParts.chosen`, and the closed button's baked label depends on it.
+   *    A listbox that inherited that rule would come up with a row highlighted that the
+   *    user never chose, and would submit a value nobody picked. The suspicion is that a
+   *    listbox selects *nothing*, but "the first one" is exactly as memorable.
+   *
+   * Both are structure, so both are read from the box and from `selectedOptions` before
+   * any input happens. No gestures here at all — that is the other probe's job, and it is
+   * what makes every row below trustworthy without coordinates.
+   */
+
+  const sel = (n) => [...n.selectedOptions].map((o) => o.value || o.text).join(",") || "-";
+  const box = (n) => {
+    const r = n.getBoundingClientRect();
+    return `${Math.round(r.width)}x${Math.round(r.height)}`;
+  };
+
+  const OPTS = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot"];
+  const opts = (mark = () => "") =>
+    OPTS.map((o, i) => `<option ${mark(i)}>${o}</option>`).join("");
+
+  /**
+   * One row per shape. `size` is reported as the *attribute*, and the height beside it is
+   * what decides whether the attribute did anything — a dropdown and a listbox are told
+   * apart by their box far more reliably than by any property.
+   */
+  const shapes = [
+    ["<select>", `<select>${opts()}</select>`],
+    ["<select size=1>", `<select size="1">${opts()}</select>`],
+    ["<select size=2>", `<select size="2">${opts()}</select>`],
+    ["<select size=4>", `<select size="4">${opts()}</select>`],
+    ["<select multiple>", `<select multiple>${opts()}</select>`],
+    ["<select multiple size=1>", `<select multiple size="1">${opts()}</select>`],
+    ["<select multiple size=2>", `<select multiple size="2">${opts()}</select>`],
+    ["<select size=9> (>opts)", `<select size="9">${opts()}</select>`],
+  ];
+
+  log("=== structure at rest: does `size` alone make a listbox? ===");
+  log("shape".padEnd(26) + " box".padEnd(11) + " client".padEnd(8) + " optH".padEnd(6) + " selected");
+  for (const [name, html] of shapes) {
+    const host = mount(`<div>${html}</div>`);
+    const s = host.querySelector("select");
+    const oh = Math.round(s.options[0].getBoundingClientRect().height);
+    log(
+      name.padEnd(26) +
+        " " + box(s).padEnd(10) +
+        " " + String(s.clientHeight).padEnd(7) +
+        " " + String(oh).padEnd(5) +
+        " " + sel(s),
+    );
+  }
+
+  log("");
+  log("=== what is selected at rest ===");
+  const initial = [
+    ["single, no `selected`", `<select>${opts()}</select>`],
+    ["single, third `selected`", `<select>${opts((i) => (i === 2 ? "selected" : ""))}</select>`],
+    // dziri's dropdown takes the *first* option marked `selected`. Nothing measured that
+    // — the shape has one marked option in every earlier row — and the `size=4` row below
+    // says a single-selection list box takes the last. If a dropdown does too, the
+    // existing code is wrong for markup that is legal and not rare.
+    ["single, 2nd+4th `selected`", `<select>${opts((i) => (i === 1 || i === 3 ? "selected" : ""))}</select>`],
+    ["multiple, no `selected`", `<select multiple>${opts()}</select>`],
+    ["multiple, third `selected`", `<select multiple>${opts((i) => (i === 2 ? "selected" : ""))}</select>`],
+    // The case a single select cannot have, and the one that says whether `selected` is a
+    // per-option flag here or still a document-wide singleton that the last one wins.
+    ["multiple, 2nd+4th `selected`", `<select multiple>${opts((i) => (i === 1 || i === 3 ? "selected" : ""))}</select>`],
+    ["size=4, no `selected`", `<select size="4">${opts()}</select>`],
+    ["size=4, 2nd+4th `selected`", `<select size="4">${opts((i) => (i === 1 || i === 3 ? "selected" : ""))}</select>`],
+    ["multiple, no options", `<select multiple></select>`],
+  ];
+  for (const [name, html] of initial) {
+    const host = mount(`<div>${html}</div>`);
+    const s = host.querySelector("select");
+    log(name.padEnd(30) + " selected=" + sel(s).padEnd(12) + " selectedIndex=" + s.selectedIndex);
+  }
+
+  log("");
+  log("=== does the row height follow font-size? ===");
+  // dziri cannot bake Chrome's 17px: it lays out with its own font and its own metrics, so
+  // what it needs from this is the *rule* — whether a listbox's height is `size` times a
+  // row, with the row coming from the font. A constant here and a ratio there are different
+  // implementations, and only the second survives an author setting font-size.
+  for (const fs of ["8px", "12px", "16px", "24px", "32px"]) {
+    const host = mount(`<div><select size="4" style="font-size:${fs}">${opts()}</select></div>`);
+    const s = host.querySelector("select");
+    const oh = s.options[0].getBoundingClientRect().height;
+    log(
+      `font-size ${fs}`.padEnd(20) +
+        " optH=" + oh.toFixed(2).padStart(6) +
+        " client=" + String(s.clientHeight).padStart(4) +
+        " client/optH=" + (s.clientHeight / oh).toFixed(3),
+    );
+  }
+
+  log("");
+  // `<select multiple size=1>` came back the odd one out: nothing selected at rest, which
+  // is the listbox rule, but `option[0]` reporting a zero-height box, which is the
+  // *dropdown* rule — a dropdown's options are browser chrome with no box at all. One row
+  // reading half like each is exactly the sort of thing that gets built on and then found
+  // to have meant something else, so it is discriminated here rather than left standing.
+  //
+  // `scrollHeight` is the discriminator: a one-row listbox holding six options has five
+  // rows of overflow, and a dropdown has none.
+  log("=== the odd row: is `multiple size=1` a one-row listbox or a dropdown? ===");
+  for (const [name, html] of [
+    ["<select>", `<select>${opts()}</select>`],
+    ["<select multiple size=1>", `<select multiple size="1">${opts()}</select>`],
+    ["<select multiple size=2>", `<select multiple size="2">${opts()}</select>`],
+  ]) {
+    const host = mount(`<div>${html}</div>`);
+    const s = host.querySelector("select");
+    const o = s.options[0];
+    log(
+      name.padEnd(26) +
+        " scroll=" + String(s.scrollHeight).padStart(4) + "/" + String(s.clientHeight).padEnd(4) +
+        " optH=" + o.getBoundingClientRect().height.toFixed(2).padStart(6) +
+        " offsetParent=" + (o.offsetParent ? o.offsetParent.tagName.toLowerCase() : "null") +
+        " optDisplay=" + getComputedStyle(o).display,
+    );
+  }
+
+  log("");
+  log("=== is `multiple` reachable as a selector, and does :checked follow? ===");
+  {
+    const host = mount(`<div><select multiple>${opts((i) => (i === 1 ? "selected" : ""))}</select></div>`);
+    const s = host.querySelector("select");
+    log(`select[multiple] matches   ${s.matches("select[multiple]")}`);
+    log(`option:checked count       ${host.querySelectorAll("option:checked").length}`);
+    log(`:checked is the 2nd         ${host.querySelector("option:checked")?.textContent}`);
+  }
+
+  report();
+</script>

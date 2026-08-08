@@ -915,69 +915,71 @@ the ones already there. The argument is in `select.rs`'s header; NOTES.md holds 
 uncommitted work. This is now the second such debt — A5's caret and selection entry is still
 owed too.
 
+**`<select multiple>` is done — protocol v25, 2026-08-08.** It compiled to a dropdown
+before this, which was the wrong *shape* rather than a missing feature: a closed button and a
+`::picker(select)` overlay, for an element whose options are ordinary in-flow boxes.
+
+Two probes, and the second moved two things the first had left to assumption.
+`probes/select-multiple.html` measured how one behaves; `probes/select-listbox.html`
+asked what *makes* one, and answered:
+
+- **The fork is `multiple || size > 1`, not `multiple`.** A `<select size="4">` with no
+  `multiple` is a list box — same box, same in-flow options, same empty initial selection.
+  Keying on the attribute would have compiled a shape authors really write into a dropdown.
+- **A list box starts with nothing selected.** A dropdown falls back to its first option; a
+  list box does not. dziri had the dropdown’s rule in both places.
+- **The height is a ratio.** Content height is `size` times the option’s own row, holding
+  across a 4x font-size range — so the 17px it looks like at the default font is an instance,
+  not a constant.
+
+What shipped, and where each half lives:
+
+- **`ControlKind.LISTBOX`, `ControlFlags.MULTIPLE` and a `controls.rows` column.** Two
+  questions with different answers, so two fields: which of the two elements it is, and
+  whether its selection is a set.
+- **Structure is the compiler’s.** No picker, no button, no `<selectedcontent>`, options in
+  flow. Stacking and clipping are ordinary UA declarations reached through a *computed*
+  attribute — CSS cannot say “multiple or size above one”, so `matcher.ts` answers
+  `[data-dziri-listbox]` from `listboxOf` rather than anything being stamped on the element.
+- **The height is the engine’s**, and it is the only part that had to be: a row is Skia’s
+  ascent + descent + line gap plus the option’s padding, known first at layout. The row
+  *count* crosses the boundary and `layout.rs::size_listboxes` multiplies.
+- **Selection is a set**, with an anchor per list box in `Selects` and the current option
+  carried by focus — `option:focus`, the same state a picker already draws, so it cost no
+  new field. Pointer and keyboard share one `apply_gesture`, because Shift+click and
+  Shift+Arrow *are* the same rule.
+- **A release now carries modifiers.** `RawInput::MouseUp` had none, because a list box is the
+  first control whose selection changes on the release rather than the press.
+
+**The open design question is answered, and the answer changed shape.** One `CHANGE` per
+gesture, on the list box, with `a` = the row the gesture landed on and `b` = how many are
+selected. The *set* travels beside the event, read through `dziri_engine_listbox_selection`
+at drain time — which resolves the objection that killed the accessor route, since the drain
+happens on the engine thread and only the worker lacks a handle. A bitmask was rejected
+outright: it is silently wrong on the 32nd option.
+
+It also found and fixed a live bug in the *dropdown*: `uaParts` took the **first** option
+marked `selected` where Chromium takes the last. Nothing had caught it because every case
+measured before marked at most one option, so the two rules could not disagree.
+
 Still open, and none of it blocks a second overlay user:
 
-- **Collision handling.** A picker near the window's bottom edge hangs off it rather than
-  flipping above its select, and a wide one runs off the right. That is B2's, deliberately: a
+- **Collision handling.** A picker near the window’s bottom edge hangs off it rather than
+  flipping above its select, and a wide one runs off the right. That is B2’s, deliberately: a
   half-version here would be a second placement engine to delete. The anchor offset is computed
-  from the two rects layout produced, because the spec's `top: anchor(bottom)` has no dziri
+  from the two rects layout produced, because the spec’s `top: anchor(bottom)` has no dziri
   spelling — `top: 100%` would be it, and `css.ts` refuses percentage lengths.
 - **Nothing but a picker uses the layer yet.** A tooltip or a popover would be the test of
   whether the flag generalises; the design says it should, and that is untested.
-- `<optgroup>` labels do not render, and there is no type-to-select.
-- **`<select multiple>` compiles to a dropdown, which is the wrong shape rather than a missing
-  feature.** `multiple` reaches the IR as an attribute a selector can test and nothing else, so
-  the compiler still injects a closed button and a `::picker(select)` overlay.
-
-  Measured before designing it (`probes/select-multiple.html`, 2026-08-07), and the structure is
-  the good news: **an option inside a multiple is an ordinary in-flow block** with a box, a
-  computed style and an `offsetParent` — unlike a single select's options, which are browser
-  chrome. So a multiple needs no overlay, no `NodeFlags.OVERLAY` and no picker: it is a
-  scrolling box of block children, which dziri already lays out and paints. `:checked` tracks
-  the selection, so the existing option styling works unchanged.
-
-  What the measurement says has to be built:
-
-  - **The compiler stops injecting the picker** when `multiple` is present, and gives the select
-    `overflow-y: scroll` plus a height. The height is `size` **rows, defaulting to 4** — not
-    "all of them" and not "as many as fit". That default is the one awkward part: a height in
-    rows is a font metric, and dziri resolves lengths at build time with no `lh` unit, so this
-    needs a decision rather than a line of CSS.
-  - **Selection becomes a set.** Today `choose_option` clears the group, which is radio
-    semantics and exactly right for a single select. A plain click and a plain arrow still
-    replace the whole selection — measured — so the common path is unchanged; what is new is
-    `Shift+Arrow` extending, `Ctrl+A`, and `Ctrl+Space`.
-  - **A current option distinct from the selection**, because `Ctrl+Space` toggled `f` out of a
-    selection of `e,f`. That is the state `option:focus` already draws for a picker, so it costs
-    nothing new. `Ctrl+Arrow` does nothing, which usefully bounds it: the current option only
-    ever moves alongside a selection change.
-  - **The pointer is measured now** (corrected 2026-08-08): plain click replaces, ctrl+click
-    toggles one and moves the anchor, shift+click extends from the anchor — and the selection
-    changes on **mouseup**, which is the opposite of a single select opening on the press. Two
-    elements, one tag, opposite rules.
-  - `Space` does nothing and `Enter` does nothing. Both are measured, and `Space` is worth
-    naming because it activates a checkbox and opens a single select.
-
-  **The one genuinely open design question: what `CHANGE` carries.** Measured, a multiple fires
-  **one** `input`/`change` per gesture however many options moved — so v22's shape (name the
-  select) is right and v22's *payload* (the chosen index) cannot be, because the answer is a set.
-  Three ways out, none of them free:
-
-  - The engine writes the selection somewhere Bun can read. It cannot today: live checkedness is
-    the engine's own `Vec`, and `ui.controls.flags` is the authored table Bun owns.
-  - An accessor, the way `dziri_engine_selection` exposes a text range for exactly this reason —
-    engine state with no signal. But the *worker* dispatches handlers and holds no engine handle,
-    so the value would have to travel in the event anyway.
-  - Emit one `CHANGE` per option changed, diverging from the browser's event count but carrying
-    the checkbox payload the protocol already has. This was the plan until the count that
-    justified it turned out to be a probe artifact; it may still be the right answer, but it now
-    needs an argument that does not cite a browser doing it.
-
-  Worth noting how that error happened, since the shape recurs: the runner dispatches a
-  `mouseMoved` before every press so `:hover` works, a `<select multiple>` drag-selects on move,
-  and so every click landed on a selection the move had already changed. One instrument defect
-  produced both a wrong "unresolved" verdict *and* a wrong event count that was then reasoned
-  from. Steps opt out with `move: false`.
+- `<optgroup>` labels do not render, and there is no type-to-select — for a list box as much as
+  for a picker.
+- **A list box’s modifiers are only measured for a `multiple`.** A single-selection list box
+  ignores Ctrl and Shift today, which is the conservative reading rather than a measured one:
+  they collapse to a plain click, and a plain click *is* measured. Pinned by a test so that
+  changing it is a decision.
+- **Nothing scrolls a list box to its current option.** Arrowing past the visible rows moves the
+  selection out of sight, since the engine’s scroll is driven by the wheel and the bar and not
+  by focus. A browser keeps the current option in view.
 
 ### B2 · Positioning
 Adapter for `@floating-ui/core`, which is platform-agnostic by design (built that way for React

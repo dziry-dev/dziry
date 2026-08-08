@@ -353,6 +353,17 @@ export type ControlTable = {
    * select's run and the chosen option's.
    */
   label: Int32Array;
+  /**
+   * A `LISTBOX`'s height in rows — its `size`, defaulting to 4 — and 0 elsewhere.
+   *
+   * The one column here the compiler cannot turn into pixels. A list box's content
+   * height is `rows` times an option's row, and that row is the font's ascent + descent
+   * + line gap at the resolved size — Skia's answer, known only once layout runs.
+   * Measured as a ratio rather than assumed: `probes/select-listbox.html` holds it
+   * across a 4x font-size range, which is what rules out baking the 17px it looks like
+   * at the default font.
+   */
+  rows: Int32Array;
 };
 
 export function emptyControlTable(): ControlTable {
@@ -363,6 +374,7 @@ export function emptyControlTable(): ControlTable {
     group: new Int32Array(0),
     flags: new Uint8Array(0),
     label: new Int32Array(0),
+    rows: new Int32Array(0),
   };
 }
 

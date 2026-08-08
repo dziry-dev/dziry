@@ -249,6 +249,104 @@ impl Controls {
         }
     }
 
+    /// Whether `node` is checked right now.
+    #[inline]
+    pub fn is_checked(&self, node: i32) -> bool {
+        self.state(node) & control_flags::CHECKED != 0
+    }
+
+    /// Whether this control's selection is a **set** — `ControlFlags::MULTIPLE`.
+    ///
+    /// Read from the table on every ask rather than mirrored into `state`, for the reason
+    /// `DISABLED` is re-read on each rescan: it comes from an attribute the user cannot
+    /// change, so there is no live value to keep and a mirror could only go stale.
+    pub fn is_multiple(&self, tables: &Tables, node: i32) -> bool {
+        match self.row_of(tables, node) {
+            Some(row) => {
+                tables
+                    .u8s(CONTROLS, protocol::controls::FLAGS)
+                    .get(row)
+                    .copied()
+                    .unwrap_or(0)
+                    & control_flags::MULTIPLE
+                    != 0
+            }
+            None => false,
+        }
+    }
+
+    /// A `LISTBOX`'s height in rows, or 0 for anything else. `controls.rows`.
+    pub fn rows_of(&self, tables: &Tables, node: i32) -> i32 {
+        match self.row_of(tables, node) {
+            Some(row) => tables
+                .i32s(CONTROLS, protocol::controls::ROWS)
+                .get(row)
+                .copied()
+                .unwrap_or(0),
+            None => 0,
+        }
+    }
+
+    /// Makes the selection of `group` exactly `keep`, and reports whether that moved.
+    ///
+    /// The radio set, reached as a function because a list box needs it for a plain click
+    /// and cannot go through [`Self::activate`] — that path refuses to *unselect*, since a
+    /// radio cannot be unchecked by pointer. A list box can: clicking one of two selected
+    /// rows leaves one selected, and the row that lost it was unchecked by this.
+    pub fn select_only(&mut self, tables: &Tables, group: i32, keep: i32) -> bool {
+        let changed = !self.is_checked(keep) || self.group_count(tables, group) != 1;
+        self.clear_group(tables, group, keep);
+        self.set(keep, true);
+        changed
+    }
+
+    /// Flips one control's checkedness, leaving its group alone. Always a change.
+    pub fn toggle(&mut self, node: i32) -> bool {
+        let now = !self.is_checked(node);
+        self.set(node, now);
+        true
+    }
+
+    /// Selects exactly `wanted` within `group`, and reports whether anything moved.
+    ///
+    /// The primitive behind Shift+click, Shift+Arrow and Ctrl+A alike: each of those
+    /// computes a set and hands it here, so "which rows end up selected" is decided once
+    /// rather than three times. `wanted` need not be sorted or unique.
+    pub fn select_set(&mut self, tables: &Tables, group: i32, wanted: &[i32]) -> bool {
+        let ids = tables.i32s(CONTROLS, protocol::controls::NODE);
+        let groups = tables.i32s(CONTROLS, protocol::controls::GROUP);
+        let mut changed = false;
+
+        for (row, &node) in ids.iter().enumerate() {
+            if node < 0 || groups.get(row).copied().unwrap_or(-1) != group {
+                continue;
+            }
+            let want = wanted.contains(&node);
+            if self.is_checked(node) != want {
+                self.set(node, want);
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// How many members of `group` are checked. -1 is nobody's group, so it counts none.
+    fn group_count(&self, tables: &Tables, group: i32) -> usize {
+        if group < 0 {
+            return 0;
+        }
+        let ids = tables.i32s(CONTROLS, protocol::controls::NODE);
+        let groups = tables.i32s(CONTROLS, protocol::controls::GROUP);
+        ids.iter()
+            .enumerate()
+            .filter(|&(row, &node)| {
+                node >= 0
+                    && groups.get(row).copied().unwrap_or(-1) == group
+                    && self.is_checked(node)
+            })
+            .count()
+    }
+
     /// The group `node` belongs to, or -1 for "none" — a checkbox, or an unnamed radio.
     ///
     /// The same column `activate` reads to clear a group, asked as a question instead of

@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 24;
+export const PROTOCOL_VERSION = 25;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 24;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xe772a183;
+export const SCHEMA_HASH = 0x96d27e1f;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -31,7 +31,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
   lists: [4, 4, 4, 4, 4, 4, 4],
   tweens: [4, 4, 4, 4, 4, 2, 1, 4, 4, 4, 4],
   keyframes: [2, 4, 1, 4, 4, 4, 4],
-  controls: [4, 1, 4, 1, 4],
+  controls: [4, 1, 4, 1, 4, 4],
   layout: [4, 4, 4, 4],
   strings: [4, 4],
 };
@@ -46,7 +46,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
   lists: ["container", "anchorPrev", "anchorNext", "arenaStart", "stride", "capacity", "active"],
   tweens: ["mask", "duration", "delay", "iterations", "firstSegment", "segmentCount", "easing", "easeA", "easeB", "easeC", "easeD"],
   keyframes: ["style", "offset", "easing", "easeA", "easeB", "easeC", "easeD"],
-  controls: ["node", "kind", "group", "flags", "label"],
+  controls: ["node", "kind", "group", "flags", "label", "rows"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
 };
@@ -274,6 +274,7 @@ export const F = {
     group: 2, // Radio group id — interned per (form, name), or per <select> for an option — or -1
     flags: 3, // ControlFlags: the authored initial state
     label: 4, // The text-run node this control's label lives on, or -1. On a SELECT it is the run inside <selectedcontent>, whose string the engine repoints at the committed option's; on an OPTION it is that option's own run. Nothing else fills it.
+    rows: 5, // A LISTBOX's height in rows — its `size`, defaulting to 4. 0 on every other kind. The engine multiplies it by the option row height, which only the engine knows.
   },
   /** Final bounds per node, written by the engine. */
   layout: {
@@ -299,7 +300,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
   lists: 7,
   tweens: 11,
   keyframes: 7,
-  controls: 5,
+  controls: 6,
   layout: 4,
   strings: 2,
 };
@@ -314,7 +315,7 @@ export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
   tweens: [Uint32Array, Float32Array, Float32Array, Float32Array, Int32Array, Uint16Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
   keyframes: [Uint16Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
-  controls: [Int32Array, Uint8Array, Int32Array, Uint8Array, Int32Array],
+  controls: [Int32Array, Uint8Array, Int32Array, Uint8Array, Int32Array, Int32Array],
   layout: [Float32Array, Float32Array, Float32Array, Float32Array],
   strings: [Uint32Array, Uint32Array],
 };
@@ -467,6 +468,7 @@ export type SharedTables = {
     group: Int32Array;
     flags: Uint8Array;
     label: Int32Array;
+    rows: Int32Array;
   };
   layout: {
     x: Float32Array;
@@ -494,6 +496,7 @@ export const NodeFlags = {
 export const ControlFlags = {
   CHECKED: 1 << 0,
   DISABLED: 1 << 1,
+  MULTIPLE: 1 << 2,
 } as const;
 
 /** What a node is. `nodes.kind`. */
@@ -661,6 +664,7 @@ export const ControlKind = {
   OPTION: 4,
   BUTTON: 5,
   LINK: 6,
+  LISTBOX: 7,
 } as const;
 export type ControlKind = (typeof ControlKind)[keyof typeof ControlKind];
 

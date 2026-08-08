@@ -291,6 +291,56 @@ export default function Controls() {
       </div>
 
       <div className={CARD}>
+        <div className={H}>select multiple — the same tag, the opposite element</div>
+        <div className={SUB}>
+          a `&lt;select&gt;` with `multiple`, or with a `size` above one, is not a dropdown with
+          a flag on it · its options are ordinary in-flow boxes rather than browser chrome, so
+          there is no picker, no overlay and nothing to open — measured, and it is the finding
+          that decided the implementation · everything else follows: it acts on the release
+          where a dropdown opens on the press, its selection is a set rather than one value, and
+          re-choosing the row you are on is a change here because it deselects
+        </div>
+        <div className={SUB}>
+          click a row to replace the selection, ctrl+click to add or remove one, shift+click to
+          take a range · ctrl+click also *moves the anchor* the next shift+click measures from,
+          which is measured and is the one rule with a visible consequence · tab to it and the
+          arrows walk it, shift+arrow extends, Ctrl+Space toggles where you are, Ctrl+A takes
+          everything — and Ctrl+Arrow and plain Space are measured to do nothing at all, which
+          is why they are consumed rather than forwarded
+        </div>
+        <div className={SUB}>
+          it starts with **nothing** selected unless an option says `selected`, where a dropdown
+          falls back to its first — the rule differs by shape and dziri had the dropdown&apos;s
+          in both places until it was measured · the height is `size` rows, and it is the one box
+          the compiler cannot resolve: a row is the font&apos;s ascent + descent + line gap, so
+          the row *count* crosses the boundary and the engine multiplies
+        </div>
+        <div className="flex flex-row gap-4">
+          <select
+            multiple
+            size="4"
+            onChange={(picked) => lastChange.set(`multiple → [${picked}]`)}
+          >
+            <option selected>espresso</option>
+            <option>cortado</option>
+            <option selected>flat white</option>
+            <option>filter</option>
+            <option>cold brew</option>
+            <option>affogato</option>
+          </select>
+          {/* No `multiple`, so this one is a list box that still selects one at a time —
+              the shape that would have compiled to a dropdown had the fork been on the
+              attribute rather than on `multiple || size > 1`. */}
+          <select size="3" onChange={(picked) => lastChange.set(`size=3 → [${picked}]`)}>
+            <option>one at a time</option>
+            <option>still a list</option>
+            <option>not a dropdown</option>
+            <option>and it scrolls</option>
+          </select>
+        </div>
+      </div>
+
+      <div className={CARD}>
         <div className={H}>tabindex — the keyboard, on anything</div>
         <div className={SUB}>
           the set of tab stops is compile-time, and `tabindex` is how an author edits it ·

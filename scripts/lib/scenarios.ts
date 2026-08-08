@@ -291,6 +291,45 @@ export const SCENARIOS: Scenario[] = [
     args: ["--route", "controls", "--size", "1040x1400", "--focus", editable(0)],
   },
   /**
+   * `<select multiple>`, which is a different element wearing the `<select>` tag.
+   *
+   * **1040x2000 and not the 1400 every other scenario on this route uses**, because the
+   * card sits below 1400 — and a golden of a card that is not in the frame is a golden of
+   * nothing. That is not hypothetical here: the first render of this feature was taken at
+   * 1400, showed the top edge of the card and nothing else, and would have been blessed.
+   *
+   * Three things only a picture can check, and each of them was wrong at some point while
+   * this was being built:
+   *
+   *   - **The rows stack.** dziri's default display is flex, whose default direction is
+   *     `row`, so the first render put six options side by side spilling out of the box.
+   *     `display: block` in the UA sheet is what fixes it, and no unit test sees it.
+   *   - **The box holds exactly `size` rows.** A row is an *option's* box — its font, its
+   *     padding — not one line of the select's own font, and the demo's options carry both.
+   *     Sized the other way, four rows held two and a half options and clipped the third
+   *     mid-word.
+   *   - **The selection is visible and is a set.** Two rows are filled in the first list
+   *     and *none* in the second, which is the measured rule a dropdown does not share: a
+   *     list box with no option marked `selected` starts with nothing selected, where a
+   *     dropdown falls back to its first.
+   */
+  { name: "controls-listbox", args: ["--route", "controls", "--size", "1040x2000"] },
+  /**
+   * A real press on a list box row, which must **replace** the authored selection.
+   *
+   * The one assertion that separates a working list box from the radio-set path the
+   * `OPTION` kind already had: clicking the third row here has to leave one row filled,
+   * not three. `--click` runs the press rather than declaring the state, so it also covers
+   * the release-not-press rule and the hit walking through the option's own text run.
+   */
+  {
+    name: "controls-listbox-click",
+    args: [
+      "--route", "controls", "--size", "1040x2000",
+      "--click", control(ControlKind.OPTION, 9),
+    ],
+  },
+  /**
    * The UA sheet's `:focus-visible` ring, on a control that has no ring of its own.
    *
    * Node 321 is the first `<select>`. It is chosen precisely because the demo styles no

@@ -425,8 +425,11 @@ function start(
               // was not.
               // A row checkbox reached nothing at all before this line: its handler is
               // lifted into the list table, so `dispatchChange` looked where it was not.
+              // `e.selected` is empty for every control but a list box, whose answer is a
+              // set and so cannot be `e.a`. It was read on the engine thread, beside the
+              // drain, because this side has no engine handle to ask with.
               if (!dispatchItemChange(ui, listBindings, e.node, e.a)) {
-                dispatchChange(ui, e.node, e.a);
+                dispatchChange(ui, e.node, e.a, e.selected);
               }
               break;
 

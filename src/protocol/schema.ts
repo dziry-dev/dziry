@@ -208,6 +208,13 @@ const CONTROLS: Table = {
         "run inside <selectedcontent>, whose string the engine repoints at the committed " +
         "option's; on an OPTION it is that option's own run. Nothing else fills it.",
     },
+    {
+      name: "rows",
+      type: "i32",
+      doc:
+        "A LISTBOX's height in rows — its `size`, defaulting to 4. 0 on every other kind. " +
+        "The engine multiplies it by the option row height, which only the engine knows.",
+    },
   ],
 };
 
@@ -1068,6 +1075,28 @@ export const ENUMS: EnumDef[] = [
        * focusable, so there is no state in which a key could reach it.
        */
       LINK: 6,
+      /**
+       * A `<select>` drawn as a **list** rather than a dropdown: `multiple`, or
+       * `size` greater than one. Its options are in flow, so it has no picker.
+       *
+       * A separate kind from `SELECT` rather than a flag on it, because almost
+       * nothing they do is shared. A `SELECT` opens an overlay on the press and
+       * commits on a release *inside that overlay*; a `LISTBOX` has no overlay at
+       * all, its options are hit by the ordinary tree walk, and — measured,
+       * `probes/select-multiple.html` — its selection changes on the **release**.
+       * Two elements wearing one tag, and the one thing they share is that
+       * `<option>` means the same in both.
+       *
+       * Which of the two an author gets is `multiple || size > 1`, measured in
+       * `probes/select-listbox.html`: `<select size="4">` with no `multiple` is a
+       * list box, and keying this on `multiple` alone compiled a shape authors
+       * really write into a dropdown.
+       *
+       * `ControlFlags.MULTIPLE` then says whether its selection is a *set*. It is
+       * a flag rather than an eighth kind because it changes only what a modifier
+       * does — the box, the hit path and the row height are identical either way.
+       */
+      LISTBOX: 7,
     },
   },
   {
@@ -1283,8 +1312,30 @@ export const ENUMS: EnumDef[] = [
  * An old engine ignores the bit and nothing is focused at startup — the pre-v24 behaviour
  * exactly, so this is the one bump here whose failure mode is not a wrong picture but an
  * older correct one.
+ *
+ * v25 adds the **list box**: a `controls.rows` column, `ControlKind.LISTBOX` and
+ * `ControlFlags.MULTIPLE`. This one the hash *does* see, because the column moves bytes —
+ * the first of these bumps in a while that would have been caught had it been forgotten.
+ *
+ * A `<select multiple>` compiled to a dropdown before this, which was the wrong *shape*
+ * rather than a missing feature: a closed button and an overlay, for an element whose
+ * options are ordinary in-flow boxes. Measured in `probes/select-multiple.html` and
+ * `probes/select-listbox.html`, and the second of those moved two things the first had
+ * left to assumption — `size > 1` makes a list box with no `multiple` anywhere, and a list
+ * box starts with **nothing** selected where a dropdown falls back to its first option.
+ *
+ * `rows` is a column rather than a compiled height because the height is not compilable.
+ * Measured across a 4× font-size range, a list box's content height is `size` times the
+ * option's own row height — a ratio, not the 17px constant it looks like at the default
+ * font — and dziri's row height comes from Skia's ascent + descent + line gap at layout
+ * time. So the row *count* crosses the boundary and the multiplication happens in
+ * `layout.rs`, which is the one place that knows both numbers.
+ *
+ * An old engine sees `LISTBOX` as a kind it has no arm for: the box lays out with no
+ * height of its own and presses on it do nothing. Not a wrong picture — an inert one —
+ * but the column bump means it never gets that far.
  */
-export const PROTOCOL_VERSION = 24;
+export const PROTOCOL_VERSION = 25;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
@@ -1468,4 +1519,23 @@ export const NodeFlags = {
 export const ControlFlags = {
   CHECKED: 1 << 0,
   DISABLED: 1 << 1,
+  /**
+   * On a `LISTBOX`: its selection is a **set**, because the author wrote
+   * `multiple`.
+   *
+   * Compile-time in the same sense `DISABLED` is — it comes from an attribute the
+   * user cannot change — so it rides in this table rather than in the engine's live
+   * state, and `Controls::rescan` re-reads it for the same reason.
+   *
+   * It is deliberately *not* what decides whether a select is drawn as a list; that
+   * is `ControlKind.LISTBOX`, and it is also true for `<select size="4">` with no
+   * `multiple`. Measured, `probes/select-listbox.html`: the two questions have
+   * different answers for a shape authors really write, and one bit answering both
+   * would have compiled that shape to a dropdown.
+   *
+   * It also changes what `CHECKED` means at rest on the options below it. A
+   * dropdown falls back to selecting its first option when none says `selected`; a
+   * listbox — with or without `multiple` — selects **nothing**. Same measurement.
+   */
+  MULTIPLE: 1 << 2,
 } as const;

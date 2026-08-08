@@ -20,6 +20,7 @@
  */
 import { Predicate } from "../ir.ts";
 import type { Element } from "./html.ts";
+import { listboxOf } from "./ua-structure.ts";
 import { warnOnce } from "./diagnostics.ts";
 import {
   compareCascade,
@@ -210,6 +211,30 @@ function positionOf(path: Element[], subject: number): SiblingPos {
 }
 
 /**
+ * The one attribute nobody writes: it is computed, and only the UA sheet asks for it.
+ *
+ * A list box is `multiple || size > 1` — measured, `probes/select-listbox.html`, where
+ * `<select size="4">` with no `multiple` turned out to be a list box too. **CSS cannot say
+ * that.** `select[size]` also matches `size="1"`, which is a dropdown, and a selector has
+ * no numeric comparison. So the compiler resolves the condition and the matcher answers as
+ * if the element carried the result.
+ *
+ * Computed rather than stamped onto `el.attrs`, and not only because that map is readonly:
+ * a stamped attribute is a second copy of a fact `listboxOf` already owns, and the two
+ * could disagree if anything ever rewrote `size`. This cannot go stale. It is also
+ * invisible to everything that walks attributes — the JSX prop checks, the diagnostics —
+ * which is right for something no author wrote.
+ *
+ * See `select[data-dziri-listbox]` in `ua-sheet.ts` for what it is for: the stacking and
+ * clipping that make a list box a list, at UA origin so an author's own rule beats them.
+ */
+const LISTBOX_ATTR = "data-dziri-listbox";
+
+function listboxMarker(el: Element): string | undefined {
+  return listboxOf(el) !== null ? "" : undefined;
+}
+
+/**
  * One `[attr op value]` test against an element's attributes.
  *
  * The operators are the spec's, and the two easy ones to get subtly wrong are
@@ -220,7 +245,7 @@ function positionOf(path: Element[], subject: number): SiblingPos {
  * everything — which is the direction that would silently over-apply a rule.
  */
 function matchAttr(el: Element, a: AttrSel): boolean {
-  const raw = el.attrs.get(a.name);
+  const raw = a.name === LISTBOX_ATTR ? listboxMarker(el) : el.attrs.get(a.name);
   if (raw === undefined) return false;
   if (a.op === "exists") return true;
 

@@ -346,6 +346,24 @@ select option:focus { background: #1d4ed8; color: #ffffff; }
    group and clearing the rest. */
 select option:checked { color: #93c5fd; }
 
+/* A list box wears its selection as a filled row rather than as a tint.
+
+   Both spellings are here because a list box is `multiple` **or** `size` above one, and
+   a selector cannot say that — `select[size]` alone would also match `size="1"`, which is
+   a dropdown, but a dropdown has no in-flow options for this to reach, so the overlap
+   costs nothing. The compiler resolves the real condition into an attribute of its own;
+   that attribute is deliberately not used here, because it is an internal and this is
+   author CSS.
+
+   The tint above is enough for a dropdown, whose committed option is also named by the
+   closed button. A list box has no such label — the selection *is* the whole readout —
+   and a colour shift on one of four rows is not one. */
+select[multiple] option:checked,
+select[size] option:checked {
+    background: #1e40af;
+    color: #ffffff;
+}
+
 /* Quotes — `::before` and `::after` around real content, so their position in
    the child chain is visible rather than asserted.
 

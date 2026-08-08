@@ -68,14 +68,24 @@ pub enum RawInput {
         /// Measured too: Chrome selects a word from the click count and not from timing, so
         /// this is the same signal a browser acts on.
         clicks: u8,
-        /// Whether shift was held, which makes the press extend the selection rather than
-        /// place a caret. From a separate `SDL_GetModState` query for the reason `Wheel`
-        /// documents: SDL's mouse events carry no modifier state.
-        shift: bool,
+        /// SDL's modifier bitmask, from a separate `SDL_GetModState` query for the reason
+        /// `Wheel` documents: SDL's mouse events carry no modifier state.
+        ///
+        /// The whole mask rather than the one `shift` bool this used to be, because a
+        /// list box reads Ctrl as well — `engine::mod_bits` is where the meanings live,
+        /// and it is already what `KeyDown` carries.
+        mods: u16,
     },
     MouseUp {
         x: f32,
         y: f32,
+        /// The modifier mask, as on [`RawInput::MouseDown`].
+        ///
+        /// A release carries them because a list box's selection changes on the **release**
+        /// and its modifiers decide what the change is — measured,
+        /// `probes/select-multiple.html`. Every other control reads its modifiers on the
+        /// press, which is why this arm had none until there was a control that could not.
+        mods: u16,
     },
     /// `mods` is SDL's modifier bitmask. Without it a host cannot tell `A` from
     /// `Ctrl-A`, which makes every shortcut unimplementable.
@@ -465,11 +475,7 @@ impl Window {
                     x,
                     y,
                     clicks,
-                    shift: self
-                        .sdl
-                        .keyboard()
-                        .mod_state()
-                        .intersects(Mod::LSHIFTMOD | Mod::RSHIFTMOD),
+                    mods: self.sdl.keyboard().mod_state().bits(),
                 }),
 
                 SdlEvent::MouseButtonUp {
@@ -477,7 +483,11 @@ impl Window {
                     x,
                     y,
                     ..
-                } => out.push(RawInput::MouseUp { x, y }),
+                } => out.push(RawInput::MouseUp {
+                    x,
+                    y,
+                    mods: self.sdl.keyboard().mod_state().bits(),
+                }),
 
                 SdlEvent::KeyDown {
                     keycode: Some(code),

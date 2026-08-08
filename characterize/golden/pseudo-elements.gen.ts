@@ -285,6 +285,7 @@ export const controls = {
   group: new Int32Array([]),
   flags: new Uint8Array([]),
   label: new Int32Array([]),
+  rows: new Int32Array([]),
 } satisfies ControlTable;
 
 export const root: number = 0;

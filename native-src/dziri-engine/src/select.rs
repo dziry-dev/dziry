@@ -52,6 +52,58 @@ pub struct Selects {
     /// Empty until something commits, which is what keeps a document with no select —
     /// and a select nobody has used — paying a single length check.
     label: Vec<i32>,
+    /// Per list box, the option a Shift-extend measures from, or -1.
+    ///
+    /// Per node rather than one for the document, which is the opposite of the choice
+    /// [`Selects::open`] makes two fields up — and the difference is real rather than
+    /// cautious. Only one picker can be *open* at a time, so openness has nothing to key
+    /// on. Two list boxes can both hold a range at once, and tabbing between them must not
+    /// make the second extend from where the first left off.
+    ///
+    /// Empty until a gesture sets one, on the same argument as `label`: a document with no
+    /// list box pays a length check.
+    anchor: Vec<i32>,
+}
+
+/// What a gesture on a list box option means for the selection.
+///
+/// Measured, `probes/select-multiple.html`, and every row of it would be guessed wrong by
+/// somebody — the platforms genuinely differ, and the three modifiers do three things:
+///
+/// | gesture | result |
+/// |---|---|
+/// | plain click | **replaces** the whole selection |
+/// | Ctrl+click | toggles that one, and **moves the anchor** to it |
+/// | Shift+click | selects the range from the anchor, replacing |
+///
+/// Ctrl moving the anchor is the part with a visible consequence: after ctrl-clicking
+/// `foxtrot`, a shift+click on `alpha` took the whole list rather than stopping at the
+/// previously selected `delta`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Gesture {
+    /// A plain click or a plain arrow.
+    Replace,
+    /// Ctrl+click, or Ctrl+Space on the current option.
+    Toggle,
+    /// Shift+click, or Shift+Arrow.
+    Extend,
+}
+
+impl Gesture {
+    /// Which gesture a modifier mask means on a list box.
+    ///
+    /// Shift wins over Ctrl when both are held. Not measured — the probe holds one
+    /// modifier at a time — and it is written here rather than left implicit so that the
+    /// assumption is visible if the combination ever turns out to matter.
+    pub fn of(shift: bool, ctrl: bool) -> Self {
+        if shift {
+            Self::Extend
+        } else if ctrl {
+            Self::Toggle
+        } else {
+            Self::Replace
+        }
+    }
 }
 
 impl Selects {
@@ -60,6 +112,7 @@ impl Selects {
             open: -1,
             picker: -1,
             label: Vec::new(),
+            anchor: Vec::new(),
         }
     }
 
@@ -75,8 +128,35 @@ impl Selects {
         if !self.label.is_empty() {
             self.label.resize(node_count, -1);
         }
+        // Kept across a republish for the reason checkedness is: the anchor is where the
+        // user last put it, and re-seeding from a table that never held it would move it
+        // because an unrelated counter incremented.
+        if !self.anchor.is_empty() {
+            self.anchor.resize(node_count, -1);
+        }
         if self.open >= node_count as i32 {
             self.close();
+        }
+    }
+
+    /// The option a Shift-extend on `listbox` measures from, or -1.
+    #[inline]
+    pub fn anchor_of(&self, listbox: i32) -> i32 {
+        match usize::try_from(listbox) {
+            Ok(n) => self.anchor.get(n).copied().unwrap_or(-1),
+            Err(_) => -1,
+        }
+    }
+
+    pub fn set_anchor(&mut self, listbox: i32, option: i32, node_count: usize) {
+        let Ok(n) = usize::try_from(listbox) else {
+            return;
+        };
+        if self.anchor.is_empty() {
+            self.anchor = vec![-1; node_count];
+        }
+        if let Some(slot) = self.anchor.get_mut(n) {
+            *slot = option;
         }
     }
 
@@ -263,6 +343,118 @@ pub fn options_of(
             stack.push(child);
         }
     }
+}
+
+/// The `LISTBOX` that owns `option`, or -1.
+///
+/// A walk up `nodes.parent` rather than a lookup, because there is no column pointing the
+/// other way and an option may be two levels down inside an `<optgroup>` — the same reason
+/// [`options_of`] is a subtree walk rather than a child scan. Stops at the first list box,
+/// so a nested one would bind to the nearest, which is what nesting means everywhere else.
+///
+/// Budgeted like every other upward walk here: `nodes.parent` is host memory and a cycle in
+/// it must cost a frame rather than the render thread.
+pub fn listbox_of(tables: &Tables, controls: &Controls, option: i32, node_count: usize) -> i32 {
+    if option < 0 || option as usize >= node_count {
+        return -1;
+    }
+    let parents = tables.i32s(NODES, protocol::nodes::PARENT);
+    let mut at = option;
+    let mut budget = node_count + 1;
+
+    while let Some(&parent) = parents.get(usize::try_from(at).unwrap_or(usize::MAX)) {
+        if parent < 0 || parent as usize >= node_count || budget == 0 {
+            return -1;
+        }
+        budget -= 1;
+        if controls.kind_of(tables, parent) == control_kind::LISTBOX {
+            return parent;
+        }
+        at = parent;
+    }
+    -1
+}
+
+/// Applies a gesture on `option` to `listbox`'s selection. Returns whether it moved.
+///
+/// The one place the measured rules live, shared by the pointer and the keyboard because
+/// they *are* the same rules: Shift+click and Shift+Arrow both extend from the anchor, and
+/// having each key path compute its own set is how two of them end up disagreeing.
+///
+/// **A single-selection list box replaces on every gesture.** `<select size="4">` with no
+/// `multiple` is a real shape (measured, `probes/select-listbox.html`) whose modifier
+/// behaviour is *not* measured — the probe only ever held modifiers over a `multiple`. So
+/// the modifiers are ignored rather than guessed, which is the conservative direction: a
+/// plain click is what they collapse to, and a plain click is measured.
+pub fn apply_gesture(
+    selects: &mut Selects,
+    controls: &mut Controls,
+    tables: &Tables,
+    listbox: i32,
+    option: i32,
+    gesture: Gesture,
+    node_count: usize,
+) -> bool {
+    if listbox < 0 || option < 0 {
+        return false;
+    }
+    let group = controls.group_of(tables, option);
+    let multiple = controls.is_multiple(tables, listbox);
+    let gesture = if multiple { gesture } else { Gesture::Replace };
+
+    match gesture {
+        Gesture::Replace => {
+            selects.set_anchor(listbox, option, node_count);
+            controls.select_only(tables, group, option)
+        }
+        Gesture::Toggle => {
+            // The anchor moves even though the selection was not replaced — measured, and
+            // the row that shows it is the shift+click *after* a ctrl+click, which took the
+            // whole list instead of stopping where the previous selection ended.
+            selects.set_anchor(listbox, option, node_count);
+            controls.toggle(option)
+        }
+        Gesture::Extend => {
+            let mut options = Vec::new();
+            options_of(tables, controls, listbox, node_count, &mut options);
+            // With no anchor yet the range has one end, so it degenerates to the option
+            // itself. That is a Shift+click as the very first gesture on a list box, which
+            // the probe never did and which has to do *something*.
+            let anchor = match selects.anchor_of(listbox) {
+                a if a >= 0 => a,
+                _ => option,
+            };
+            let (Some(from), Some(to)) = (
+                options.iter().position(|&o| o == anchor),
+                options.iter().position(|&o| o == option),
+            ) else {
+                return false;
+            };
+            let (lo, hi) = if from <= to { (from, to) } else { (to, from) };
+            // The anchor deliberately stays put, which is what lets a run of Shift+Arrows
+            // grow and shrink one range rather than ratcheting outward.
+            controls.select_set(tables, group, &options[lo..=hi])
+        }
+    }
+}
+
+/// Selects every option of `listbox` — Ctrl+A. Returns whether anything moved.
+pub fn select_all(
+    controls: &mut Controls,
+    tables: &Tables,
+    listbox: i32,
+    node_count: usize,
+) -> bool {
+    if !controls.is_multiple(tables, listbox) {
+        return false;
+    }
+    let mut options = Vec::new();
+    options_of(tables, controls, listbox, node_count, &mut options);
+    let Some(&first) = options.first() else {
+        return false;
+    };
+    let group = controls.group_of(tables, first);
+    controls.select_set(tables, group, &options)
 }
 
 /// The `controls.label` of a node, or -1 for "no row, or nothing to mirror".
