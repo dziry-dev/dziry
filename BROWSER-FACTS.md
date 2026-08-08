@@ -1853,25 +1853,42 @@ compiles to a dropdown today, which is not incomplete but the wrong *shape*.
 8. **`:checked` follows the selection**, so dziri's existing option styling path works
    unchanged.
 
-### Events
+### The pointer — **corrected 2026-08-08, same probe, and both halves were wrong**
 
-`input` then `change`, and **one pair per option whose selectedness changed** — not one per
-gesture. A plain click that replaced a selection fired two pairs (one deselect, one select);
-a click that only added fired one. Clamping at the end of the list fired none.
+The first version of this section reported the ctrl+click rows as *unresolved* and reported
+the event count as "one `input`/`change` pair per option whose selectedness changed". The
+cause of the first was found, and it turns out to have produced the second as well.
 
-### Unresolved: ctrl+click and shift+click
+**The runner's own `mouseMoved` was interacting with the listbox.** `scripts/probe.ts`
+dispatches a move before every press so that `:hover` and `:active` are reachable — and a
+`<select multiple>` treats a move across its options as a drag-selection. The probe logged
+`input=a,b,c` *before its own `mousedown`*, so every click was landing on a selection the
+move had already changed. Steps now opt out with `move: false`.
 
-**Not recorded as behaviour, because the instrument is wrong and the rows look plausible.**
-The *first* ctrl+click on any option consistently selected the option **above** the one that
-was hit, with two `input`/`change` pairs; a *second* ctrl+click on the same coordinates then
-selected the right one, with one pair. Reproducible, and confirmed against the option's own
-`mousedown` listener — `hit=c` while the selection became `a,b`.
+With the move gone, every row is coherent and the two runs are identical:
 
-Ctrl+clicking an option to select its neighbour is not behaviour any browser ships, so this
-is the runner or CDP's modifier handling, in the same family as the textless-Enter bug that
-made a probe report "Enter does not activate a button". **dziri must not implement
-ctrl/shift-click from this table**; it needs a separate measurement first, probably driving
-the modifier as an explicit `Input.dispatchMouseEvent` sequence rather than a step flag.
+| gesture | selection after | events |
+|---|---|---|
+| plain click `alpha` | `a` | one `input`/`change` |
+| **ctrl**+click `charlie` | `a,c` | one pair |
+| **ctrl**+click `charlie` again | `a` | one pair — it toggles |
+| plain click `bravo` | `b` | one pair — plain **replaces** |
+| **ctrl**+click `foxtrot` | `d,f` | one pair |
+| **shift**+click `alpha` (anchor at `f`) | `a,b,c,d,e,f` | one pair |
 
-What *is* safe from the pointer rows: a plain click replaces the selection with the one
-option hit, and `hit=` matched the intended option on every plain click.
+9. **Plain click replaces, ctrl+click toggles one, shift+click extends from the anchor** —
+   and ctrl+click *moves* the anchor, which is why shift+click `alpha` after ctrl-clicking
+   `foxtrot` took the whole list rather than stopping at the previously selected `delta`.
+10. **The selection changes on `mouseup`, not `mousedown`.** Every row shows the old
+    selection at `mousedown` and the new one at `mouseup`. That is the opposite of a
+    *single* select, which opens its picker on the press — measured 2026-08-05. Two
+    elements, one tag, opposite rules.
+11. **Exactly one `input`/`change` pair per gesture**, however many options changed.
+    Shift+click that selected five fired one pair; a plain click that deselected five and
+    selected one fired one pair. **This corrects the earlier claim outright** — the "one
+    pair per option" reading was the move's interaction being counted as a second gesture.
+
+The correction matters beyond tidiness: the earlier count was used, in the same commit that
+recorded it, to argue that a multiple's `CHANGE` should be a per-option boolean like a
+checkbox's. That argument is now unsupported. See ROADMAP B1, where the open question is
+what a single per-gesture event can carry when the answer is a *set*.

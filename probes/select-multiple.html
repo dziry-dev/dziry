@@ -85,9 +85,14 @@
   for (const o of gest.options) {
     o.addEventListener("mousedown", () => { hit = o.value || o.text; });
   }
+  // Each entry is the selection *at the moment the event fired*, not just the event's
+  // name. Counting `input`/`change` pairs was not enough to explain the ctrl+click rows —
+  // "two pairs" is consistent with several different orders, and only the states tell them
+  // apart. `mousedown` and `mouseup` are in the list so the press and the release can be
+  // told apart at all, which is the specific thing in doubt.
   for (const n of [ms, sized, gest]) {
-    for (const kind of ["change", "input", "click"]) {
-      n.addEventListener(kind, () => events.push(kind));
+    for (const kind of ["mousedown", "mouseup", "change", "input", "click"]) {
+      n.addEventListener(kind, () => events.push(kind + "=" + sel(n)));
     }
   }
 
@@ -128,16 +133,16 @@
     // `hit` said foxtrot and the selection said echo. A middle option, from a clean state,
     // with nothing before it — if this row is also off by one the cause is the dispatch and
     // not the gesture.
-    ["plain click alpha", { ...rects[0], down: 1, up: 1 }],
-    ["ctrl+click charlie", { ...rects[2], down: 1, up: 1, modifiers: 2 }],
-    ["ctrl+click charlie again", { ...rects[2], down: 1, up: 1, modifiers: 2 }],
+    ["plain click alpha", { ...rects[0], down: 1, up: 1, move: false }],
+    ["ctrl+click charlie", { ...rects[2], down: 1, up: 1, move: false, modifiers: 2 }],
+    ["ctrl+click charlie again", { ...rects[2], down: 1, up: 1, move: false, modifiers: 2 }],
 
-    ["click bravo", { ...rects[1], down: 1, up: 1 }],
-    ["click delta (plain)", { ...rects[3], down: 1, up: 1 }],
-    ["ctrl+click foxtrot", { ...rects[5], down: 1, up: 1, modifiers: 2 }],
-    ["ctrl+click foxtrot again", { ...rects[5], down: 1, up: 1, modifiers: 2 }],
-    ["shift+click alpha", { ...rects[0], down: 1, up: 1, modifiers: 8 }],
-    ["plain click charlie", { ...rects[2], down: 1, up: 1 }],
+    ["click bravo", { ...rects[1], down: 1, up: 1, move: false }],
+    ["click delta (plain)", { ...rects[3], down: 1, up: 1, move: false }],
+    ["ctrl+click foxtrot", { ...rects[5], down: 1, up: 1, move: false, modifiers: 2 }],
+    ["ctrl+click foxtrot again", { ...rects[5], down: 1, up: 1, move: false, modifiers: 2 }],
+    ["shift+click alpha", { ...rects[0], down: 1, up: 1, move: false, modifiers: 8 }],
+    ["plain click charlie", { ...rects[2], down: 1, up: 1, move: false }],
 
     // Keyboard. A single select's arrows move the highlight *and* commit; if a multiple's
     // arrows do the same then a range cannot be built with the keyboard at all, and if

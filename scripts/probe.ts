@@ -296,6 +296,14 @@ async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<vo
     modifiers?: number;
     /** 2 for a double click. Chrome derives word selection from this, not from timing. */
     clickCount?: number;
+    /**
+     * `false` skips the `mouseMoved` that normally precedes a press.
+     *
+     * Only set it where the move itself is an interaction — a `<select multiple>` drag-
+     * selects on hover-with-intent, so the move changed the selection before the click.
+     * Everything measuring `:hover` or `:active` needs the move and must leave this alone.
+     */
+    move?: boolean;
     label?: string;
   }>;
 
@@ -330,7 +338,20 @@ async function driveMouse(cdp: Cdp, sessionId: string, name: string): Promise<vo
         buttons: 0,
         ...(step.modifiers === undefined ? {} : { modifiers: step.modifiers }),
       };
-      await cdp.send("Input.dispatchMouseEvent", { ...common, type: "mouseMoved" }, sessionId);
+      // The move exists so hover chains and `:active` are reachable — a press with no
+      // preceding move leaves `:hover` unset, and several probes depend on it.
+      //
+      // **It is not free, and one element proves it.** A `<select multiple>` treats a move
+      // over its options as a drag-selection, so the move alone changed the selection
+      // *before* the press: the probe logged `input=a,b,c` ahead of its own `mousedown`,
+      // and the click then did the right thing on top of the wrong starting state. Every
+      // ctrl+click row read as a clean off-by-one finding about ctrl+click.
+      //
+      // Opt-out rather than removal, and opt-out rather than "strip the modifiers": the
+      // plain steps did it too, so the modifier is not the trigger — the move is.
+      if (step.move !== false) {
+        await cdp.send("Input.dispatchMouseEvent", { ...common, type: "mouseMoved" }, sessionId);
+      }
       if (step.down) {
         await cdp.send(
           "Input.dispatchMouseEvent",

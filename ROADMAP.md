@@ -951,17 +951,33 @@ Still open, and none of it blocks a second overlay user:
     selection of `e,f`. That is the state `option:focus` already draws for a picker, so it costs
     nothing new. `Ctrl+Arrow` does nothing, which usefully bounds it: the current option only
     ever moves alongside a selection change.
-  - **`CHANGE` fires once per option whose selectedness changed**, not once per gesture — so a
-    multiple's event is a per-*option* `CHANGE` carrying a boolean, which is the checkbox shape
-    already in the protocol rather than v22's select shape. No new event kind.
+  - **The pointer is measured now** (corrected 2026-08-08): plain click replaces, ctrl+click
+    toggles one and moves the anchor, shift+click extends from the anchor — and the selection
+    changes on **mouseup**, which is the opposite of a single select opening on the press. Two
+    elements, one tag, opposite rules.
   - `Space` does nothing and `Enter` does nothing. Both are measured, and `Space` is worth
     naming because it activates a checkbox and opens a single select.
 
-  **Still unmeasured, and it must not be guessed: ctrl+click and shift+click.** The probe's rows
-  for those are an artifact — the first ctrl+click on any option selected the option *above* the
-  one it hit, confirmed against the option's own `mousedown` listener. That is the runner, in the
-  same family as the textless-Enter bug, and `BROWSER-FACTS.md` records it as unresolved. A
-  measurement of modified clicks is the first step, not the last.
+  **The one genuinely open design question: what `CHANGE` carries.** Measured, a multiple fires
+  **one** `input`/`change` per gesture however many options moved — so v22's shape (name the
+  select) is right and v22's *payload* (the chosen index) cannot be, because the answer is a set.
+  Three ways out, none of them free:
+
+  - The engine writes the selection somewhere Bun can read. It cannot today: live checkedness is
+    the engine's own `Vec`, and `ui.controls.flags` is the authored table Bun owns.
+  - An accessor, the way `dziri_engine_selection` exposes a text range for exactly this reason —
+    engine state with no signal. But the *worker* dispatches handlers and holds no engine handle,
+    so the value would have to travel in the event anyway.
+  - Emit one `CHANGE` per option changed, diverging from the browser's event count but carrying
+    the checkbox payload the protocol already has. This was the plan until the count that
+    justified it turned out to be a probe artifact; it may still be the right answer, but it now
+    needs an argument that does not cite a browser doing it.
+
+  Worth noting how that error happened, since the shape recurs: the runner dispatches a
+  `mouseMoved` before every press so `:hover` works, a `<select multiple>` drag-selects on move,
+  and so every click landed on a selection the move had already changed. One instrument defect
+  produced both a wrong "unresolved" verdict *and* a wrong event count that was then reasoned
+  from. Steps opt out with `move: false`.
 
 ### B2 · Positioning
 Adapter for `@floating-ui/core`, which is platform-agnostic by design (built that way for React
