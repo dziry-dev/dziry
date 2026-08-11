@@ -271,6 +271,11 @@ export const INITIAL_STYLE: ComputedStyle = {
   scrollMarginRight: 0,
   scrollMarginBottom: 0,
   scrollMarginLeft: 0,
+  // `scroll-padding` initial is 0 on all sides (browser default)
+  scrollPaddingTop: 0,
+  scrollPaddingRight: 0,
+  scrollPaddingBottom: 0,
+  scrollPaddingLeft: 0,
   fontSize: 16,
   fontWeight: 400,
   // `font-style: normal` and `font-family`'s initial, which for dziri is "the

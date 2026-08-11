@@ -19,6 +19,16 @@
 @source "./Nav.tsx";
 @source "./pages/**/*.tsx";
 
+/*
+ * A field wrapper's error state, as a variant.
+ *
+ * Written in the **prefix** form on purpose. Tailwind's default spelling for a group variant
+ * emits `:is(:where(.group\/error) *)`, and the `*` inside `:is()` is not a selector dziri
+ * parses; this emits `.group\/error .error\:block`, an ordinary descendant selector, which
+ * compiles to the same style-table patches any conditional class does.
+ */
+@custom-variant error (.group\/error &);
+
 /* ---------------------------------------------------------------------------
  * Authored CSS, passed through by the Tailwind CLI.
  *
@@ -61,6 +71,32 @@ body.light .heading {
 
 body.light .muted {
     color: #52525b;
+}
+
+/* ---------------------------------------------------------------------------
+ * A form's error state, which is a class on a wrapper and nothing else.
+ *
+ * `errorClassName="group/error"` puts that class on the `field` wrapper while any issue's
+ * path starts with the wrapper's own, and everything below is an ordinary descendant
+ * selector — so the input's border and the message's colour are both CSS, and no JavaScript
+ * runs to style a bad field. The compiler resolves these two rules into style-table patches
+ * keyed on the wrapper's own error cell, which is why twenty fields can share the class
+ * string and stay independent.
+ * ------------------------------------------------------------------------- */
+
+/* `.field` rather than `input[type=text]`, because a number field is a text-entry box too
+   and the two would otherwise be drawn differently for no reason an author intended. */
+.field {
+    border-width: 1px;
+    border-color: #3f3f46;
+}
+
+.group\/error .field {
+    border-color: #f43f5e;
+}
+
+.group\/error .note {
+    color: #fb7185;
 }
 
 /* Layout-affecting: tighter rows, so applying it forces a relayout. */

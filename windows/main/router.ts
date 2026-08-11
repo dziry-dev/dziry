@@ -81,6 +81,7 @@ export const goControls = () => go("controls");
 export const goTransforms = () => go("transforms");
 export const goAnimations = () => go("animations");
 export const goFeatures = () => go("features");
+export const goForms = () => go("forms");
 export const goReactivity = () => go("reactivity");
 export const goProducts = () => go("products/new");
 export const goNewProduct = () => go("products/new");

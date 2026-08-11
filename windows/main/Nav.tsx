@@ -21,6 +21,7 @@ import {
     goColors,
     goControls,
     goFeatures,
+    goForms,
     goLayout,
     goOverview,
     goProducts,
@@ -106,6 +107,12 @@ export function Nav() {
                     onClick={goReactivity}
                 >
                     Reactivity
+                </button>
+                <button
+                    className={cn(LINK, { active: router.matches('forms') })}
+                    onClick={goForms}
+                >
+                    Forms
                 </button>
                 {/* Prefix-aware: stays lit on products/new and products/$id too. */}
                 <button

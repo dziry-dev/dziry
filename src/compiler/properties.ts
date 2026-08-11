@@ -1796,6 +1796,76 @@ export const PROPERTIES: Record<string, PropertyRule> = {
     parse: parseLength,
   },
 
+  "scroll-padding": (value, out) => {
+    const parts = splitTopLevel(value).map(parseLength);
+    const [a, b = a, c = a, d = b] = parts as [number, number?, number?, number?];
+    out.scrollPaddingTop = a!;
+    out.scrollPaddingRight = b!;
+    out.scrollPaddingBottom = c!;
+    out.scrollPaddingLeft = d!;
+  },
+
+  "scroll-padding-top": {
+    field: "scrollPaddingTop",
+    parse: parseLength,
+  },
+
+  "scroll-padding-right": {
+    field: "scrollPaddingRight",
+    parse: parseLength,
+  },
+
+  "scroll-padding-bottom": {
+    field: "scrollPaddingBottom",
+    parse: parseLength,
+  },
+
+  "scroll-padding-left": {
+    field: "scrollPaddingLeft",
+    parse: parseLength,
+  },
+
+  // Logical aliases: scroll-padding-block and scroll-padding-inline expand to top+bottom and left+right
+  "scroll-padding-block": (value, out) => {
+    const parts = value.trim().split(/\s+/).filter(p => p);
+    if (parts.length < 1 || parts.length > 2) {
+      throw new CssError(`scroll-padding-block takes 1 or 2 values, got "${value}"`);
+    }
+    const v = parts.map(parseLength);
+    out.scrollPaddingTop = v[0];
+    out.scrollPaddingBottom = v.length === 2 ? v[1] : v[0];
+  },
+
+  "scroll-padding-block-start": {
+    field: "scrollPaddingTop",
+    parse: parseLength,
+  },
+
+  "scroll-padding-block-end": {
+    field: "scrollPaddingBottom",
+    parse: parseLength,
+  },
+
+  "scroll-padding-inline": (value, out) => {
+    const parts = value.trim().split(/\s+/).filter(p => p);
+    if (parts.length < 1 || parts.length > 2) {
+      throw new CssError(`scroll-padding-inline takes 1 or 2 values, got "${value}"`);
+    }
+    const v = parts.map(parseLength);
+    out.scrollPaddingLeft = v[0];
+    out.scrollPaddingRight = v.length === 2 ? v[1] : v[0];
+  },
+
+  "scroll-padding-inline-start": {
+    field: "scrollPaddingLeft",
+    parse: parseLength,
+  },
+
+  "scroll-padding-inline-end": {
+    field: "scrollPaddingRight",
+    parse: parseLength,
+  },
+
   // Clamped rather than refused out of range: CSS says `opacity` clamps to
   // 0..1, and `opacity: 1.5` is a legal declaration meaning fully opaque.
   opacity: {

@@ -437,6 +437,13 @@ const STYLES: Table = {
     { name: "scrollMarginRight", type: "f32", affects: "paint" },
     { name: "scrollMarginBottom", type: "f32", affects: "paint" },
     { name: "scrollMarginLeft", type: "f32", affects: "paint" },
+    // `scroll-padding` — distance to scroll a viewport when scrolling a container into view.
+    // Four per-side fields (top/right/bottom/left). Paint-only (no layout effect).
+    // NaN means unset (default 0). Logical aliases (scroll-padding-inline, etc.) expand here.
+    { name: "scrollPaddingTop", type: "f32", affects: "paint" },
+    { name: "scrollPaddingRight", type: "f32", affects: "paint" },
+    { name: "scrollPaddingBottom", type: "f32", affects: "paint" },
+    { name: "scrollPaddingLeft", type: "f32", affects: "paint" },
     // text
     //
     // `layout`, and not for the obvious reason: neither appears in Taffy's
@@ -1483,7 +1490,7 @@ export const ENUMS: EnumDef[] = [
  * measure callback like `fontSize`. `fontFamily` is a generic-family enum, not
  * a name — the engine resolves one concrete face per generic at startup.
  */
-export const PROTOCOL_VERSION = 35;
+export const PROTOCOL_VERSION = 36;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
