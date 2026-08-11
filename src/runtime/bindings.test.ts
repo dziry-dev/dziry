@@ -20,7 +20,7 @@ import {
   typeInto,
   type EditableRef,
 } from "./bindings.ts";
-import { signal } from "./signal.ts";
+import { signal, type Signal } from "./signal.ts";
 import { ControlKind, type CompiledUi } from "../ir.ts";
 
 function editable(initial: string) {
@@ -390,13 +390,25 @@ test("a node with only a blur handler is not focusable by dispatch", () => {
 function formUi(opts: {
   /** `[node, parent]`, so a walk up the chain has something to walk. */
   parents: number[];
-  forms: Array<{ node: number; button: number; direct: boolean }>;
+  forms: Array<{ node: number; button: number; direct: boolean; owns?: Int32Array }>;
   textAreas?: number[];
   handlers?: Array<{ node: number; kind: "click" | "submit"; fn: () => void }>;
 }) {
   return {
     handlers: opts.handlers ?? [],
-    forms: opts.forms,
+    // No fields, so the payload every `onSubmit` here receives is `{}`. These tests are
+    // about *when* a form submits; `forms.test.ts` is about what it hands over.
+    //
+    // `owns` empty, which makes `formOf` fall through to the parent walk — the path these
+    // tests were written for, and the one that answers for markup with no `form=` attribute.
+    forms: opts.forms.map((f) => ({
+      owns: new Int32Array(),
+      fields: [],
+      keys: [],
+      arrays: [],
+      validate: null,
+      ...f,
+    })),
     textAreas: Int32Array.from(opts.textAreas ?? []),
     nodes: { parent: Int32Array.from(opts.parents) },
   } as unknown as CompiledUi;
@@ -498,4 +510,166 @@ test("a press on the submit button submits, and fires its click exactly once", (
 
   expect(submitForm(ui, 1, 3)).toBe(true);
   expect(seen).toEqual(["click", "submit"]);
+});
+
+// ---------------------------------------------------------------------------
+// What a submission hands over
+// ---------------------------------------------------------------------------
+
+/**
+ * A one-field form, wired the way the emitter wires one.
+ *
+ * `formUi` above is deliberately field-less — those tests are about *when* a form
+ * submits. These are about what reaches the handler, which is the other half.
+ */
+function payloadUi(opts: {
+  cell: Signal<string>;
+  validate?: unknown;
+  onSubmit?: (data?: unknown) => void;
+  onInvalid?: (issues?: unknown) => void;
+}) {
+  return {
+    handlers: [
+      ...(opts.onSubmit ? [{ node: 1, kind: "submit", fn: opts.onSubmit }] : []),
+      ...(opts.onInvalid ? [{ node: 1, kind: "invalid", fn: opts.onInvalid }] : []),
+    ],
+    forms: [
+      {
+        node: 1,
+        button: 3,
+        direct: false,
+        validate: opts.validate ?? null,
+        owns: Int32Array.from([2, 3]),
+        validateOn: "submit",
+        // No `field` wrapper, so no error cells: these tests are about what a submission
+        // hands over, not about what it lights up. `forms.test.ts` covers `applyIssues`.
+        groups: [],
+        arrays: [],
+        fields: [
+          {
+            node: 2,
+            kind: "text",
+            value: "",
+            initial: "",
+            options: [],
+            disabled: false,
+            row: -1,
+            signal: opts.cell,
+          },
+        ],
+        keys: [{ path: ["email"], shape: "text", fields: Int32Array.from([0]) }],
+      },
+    ],
+    textAreas: Int32Array.from([]),
+    controls: { count: 0, flags: new Uint8Array(4) },
+    nodes: { parent: Int32Array.from([-1, 0, 1, 1]) },
+  } as unknown as CompiledUi;
+}
+
+test("onSubmit receives the payload, keyed by name", () => {
+  let seen: unknown = null;
+  const cell = signal("a@b.co");
+  const ui = payloadUi({ cell, onSubmit: (data) => (seen = data) });
+
+  expect(submitForm(ui, 1, 3)).toBe(true);
+  expect(seen).toEqual({ email: "a@b.co" });
+
+  // Live, not authored: what the user typed since is what submits.
+  cell.value = "typed@later.co";
+  submitForm(ui, 1, 3);
+  expect(seen).toEqual({ email: "typed@later.co" });
+});
+
+test("a valid payload reaches onSubmit as the schema's output", () => {
+  let seen: unknown = null;
+  const ui = payloadUi({
+    cell: signal("  a@b.co  "),
+    validate: (d: { email: string }) => {
+      d.email = d.email.trim();
+      return null;
+    },
+    onSubmit: (data) => (seen = data),
+  });
+
+  expect(submitForm(ui, 1, 3)).toBe(true);
+  expect(seen).toEqual({ email: "a@b.co" });
+});
+
+test("an invalid payload runs onInvalid and not onSubmit", () => {
+  const seen: string[] = [];
+  let issues: unknown = null;
+  const ui = payloadUi({
+    cell: signal(""),
+    validate: (d: { email: string }) =>
+      d.email === "" ? [{ path: ["email"], message: "required" }] : null,
+    onSubmit: () => seen.push("submit"),
+    onInvalid: (raw) => {
+      seen.push("invalid");
+      issues = raw;
+    },
+  });
+
+  // Still `true`: the form *was* submitted, and the validator is what stopped it. A
+  // `false` here would tell the caller to go looking for another meaning for the press.
+  expect(submitForm(ui, 1, 3)).toBe(true);
+  expect(seen).toEqual(["invalid"]);
+  expect(issues).toEqual([{ path: ["email"], message: "required" }]);
+});
+
+test("a form with a validate and no onInvalid simply does not submit", () => {
+  const seen: string[] = [];
+  const ui = payloadUi({
+    cell: signal(""),
+    validate: () => [{ path: [], message: "no" }],
+    onSubmit: () => seen.push("submit"),
+  });
+
+  expect(submitForm(ui, 1, 3)).toBe(true);
+  expect(seen).toEqual([]);
+});
+
+test("an async validator submits later, and the button's click still fires now", async () => {
+  const seen: string[] = [];
+  const ui = payloadUi({
+    cell: signal("a@b.co"),
+    validate: async () => null,
+    onSubmit: () => seen.push("submit"),
+  });
+
+  expect(submitForm(ui, 1, 3)).toBe(true);
+  // The click belongs to this action and is not made to wait for a validator that may
+  // take a network round trip.
+  expect(seen).toEqual([]);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(seen).toEqual(["submit"]);
+});
+
+test("Enter in a form= field submits that form, though it is not inside it", () => {
+  const seen: string[] = [];
+  // 0 root, 1 form, 2 the form's own field, 3 its button, 4 a field written *outside* the
+  // form and associated with it by `form="…"`. Node 4's parent is the root, so no walk up
+  // the tree can reach node 1 — `owns` is the only thing that can.
+  const ui = formUi({
+    parents: [-1, 0, 1, 1, 0],
+    forms: [{ node: 1, button: 3, direct: false, owns: Int32Array.from([2, 3, 4]) }],
+    handlers: [{ node: 1, kind: "submit", fn: () => seen.push("submit") }],
+  });
+
+  expect(submitFrom(ui, 4)).toBe(true);
+  expect(seen).toEqual(["submit"]);
+});
+
+test("a node inside a form but not owned still submits, by walking up", () => {
+  const seen: string[] = [];
+  // Node 4 is a `<div tabindex=0>` inside the form: not a control, so not in `owns`. The
+  // parent walk is what answers for it, which is why both paths exist.
+  const ui = formUi({
+    parents: [-1, 0, 1, 1, 1],
+    forms: [{ node: 1, button: 3, direct: false, owns: Int32Array.from([2, 3]) }],
+    handlers: [{ node: 1, kind: "submit", fn: () => seen.push("submit") }],
+  });
+
+  expect(submitFrom(ui, 4)).toBe(true);
+  expect(seen).toEqual(["submit"]);
 });

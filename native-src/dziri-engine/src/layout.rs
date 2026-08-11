@@ -25,7 +25,7 @@ use crate::protocol::{
     self, align, control_kind, display as display_enum, flex_direction, flex_wrap, justify,
 };
 use crate::tables::Tables;
-use crate::text::Measurer;
+use crate::text::{FontSpec, Measurer};
 
 const NODES: usize = protocol::Table::Nodes as usize;
 const STYLES: usize = protocol::Table::Styles as usize;
@@ -79,6 +79,14 @@ pub struct LayoutTree {
     /// Layout needs its own copy because `style_of` resolves a node's variant run
     /// with it, and layout runs from callers that never see the painter.
     globals: u32,
+    /// The surface the current styles were resolved against, `[width, height]`.
+    ///
+    /// Viewport-relative lengths (`100vh`, `calc(100vw - 4rem)`) are summed into
+    /// the Taffy style when it is built, so a resize is a *restyle* whenever any
+    /// style uses them — see `compute`. Zeroed until the first compute, which
+    /// is itself a size change, so the first layout restyles rather than
+    /// laying out against a zero-sized window.
+    surface: [f32; 2],
 }
 
 impl Default for LayoutTree {
@@ -116,6 +124,7 @@ impl LayoutTree {
             parents: Vec::new(),
             root: 0,
             globals: 0,
+            surface: [0.0; 2],
         }
     }
 
@@ -371,6 +380,8 @@ impl LayoutTree {
         let style_of_node = tables.u16s(NODES, protocol::nodes::STYLE);
         let font_size = tables.f32s(STYLES, protocol::styles::FONT_SIZE);
         let font_weight = tables.u16s(STYLES, protocol::styles::FONT_WEIGHT);
+        let font_style = tables.u8s(STYLES, protocol::styles::FONT_STYLE);
+        let font_family = tables.u8s(STYLES, protocol::styles::FONT_FAMILY);
 
         for (row, &node) in ids.iter().enumerate() {
             // A spare row is `i32::MAX` and this is untrusted host memory, so out of range
@@ -399,8 +410,19 @@ impl LayoutTree {
             // one the font choice below already commits to.
             let sample = Self::first_option(tables, node, self.ids.len()).unwrap_or(node);
             let slot = style_of_node.get(sample).copied().unwrap_or(0) as usize;
-            let size = font_size.get(slot).copied().unwrap_or(16.0);
-            let weight = font_weight.get(slot).copied().unwrap_or(400);
+            let spec = FontSpec::new(
+                font_size.get(slot).copied().unwrap_or(16.0),
+                font_weight.get(slot).copied().unwrap_or(400),
+                font_style.get(slot).copied().unwrap_or(0),
+                font_family.get(slot).copied().unwrap_or(0),
+            )
+            .with_leading(
+                tables
+                    .f32s(STYLES, protocol::styles::LINE_HEIGHT)
+                    .get(slot)
+                    .map(|v| if v.is_finite() && *v > 0.0 { *v } else { 0.0 })
+                    .unwrap_or(0.0),
+            );
             let pad = |field: usize| -> f32 {
                 tables
                     .f32s(STYLES, field)
@@ -416,7 +438,7 @@ impl LayoutTree {
             // specific statement about how tall a row is.
             let content = match tables.f32s(STYLES, protocol::styles::HEIGHT).get(slot) {
                 Some(&h) if h.is_finite() => h,
-                _ => measurer.line_height(size, weight),
+                _ => measurer.line_height(spec),
             };
             // Padding and border are added either way, because an option is a
             // `content-box` like every non-root node here — so `height` names the content
@@ -426,7 +448,8 @@ impl LayoutTree {
             let row = content
                 + pad(protocol::styles::PAD_TOP)
                 + pad(protocol::styles::PAD_BOTTOM)
-                + 2.0 * pad(protocol::styles::BORDER_WIDTH);
+                + pad(protocol::styles::BORDER_TOP_WIDTH)
+                + pad(protocol::styles::BORDER_BOTTOM_WIDTH);
             let want = Dimension::length(row * rows as f32);
 
             let id = self.ids[node];
@@ -511,7 +534,7 @@ impl LayoutTree {
     /// The saving that *is* safe is upstream, in `classify`: a field that layout
     /// never reads produces no entry, so this is not called at all.
     pub fn apply_style(&mut self, tables: &Tables, node: usize) -> Result<(), EngineError> {
-        let style = style_of(tables, node, self.globals);
+        let style = style_of(tables, node, self.globals, self.surface);
         self.tree
             .set_style(self.ids[node], style)
             .map_err(taffy_at("taffy set_style", node))
@@ -578,6 +601,24 @@ impl LayoutTree {
         if self.ids.is_empty() {
             return Ok(());
         }
+
+        // Viewport-relative lengths (`h-screen`, `calc(100vw - 4rem)`) are summed
+        // into the Taffy style when the style is built, so a resize while any are
+        // in use is a restyle as well as a relayout. The scan is over *styles* —
+        // interned rows, six columns of a small table — and only on a frame where
+        // the size actually moved, which is every resize and nothing else.
+        //
+        // This also covers the first layout: `surface` starts zeroed, so a tree
+        // whose styles were built before the window's size was known is restyled
+        // against the real one rather than laid out at zero.
+        let surface = [width, height];
+        if surface != self.surface && has_viewport_lengths(tables) {
+            // First, so the restyle below resolves against the new size.
+            self.surface = surface;
+            self.apply_all_styles(tables)?;
+        }
+        self.surface = surface;
+
         let root = *self.ids.get(self.root).ok_or_else(|| {
             EngineError::layout(format!("root node {} is outside the table", self.root))
         })?;
@@ -587,6 +628,8 @@ impl LayoutTree {
         let style_of_node = tables.u16s(NODES, protocol::nodes::STYLE);
         let font_size = tables.f32s(STYLES, protocol::styles::FONT_SIZE);
         let font_weight = tables.u16s(STYLES, protocol::styles::FONT_WEIGHT);
+        let font_style = tables.u8s(STYLES, protocol::styles::FONT_STYLE);
+        let font_family = tables.u8s(STYLES, protocol::styles::FONT_FAMILY);
 
         // The root receives the window rect, rather than shrink-wrapping its
         // content. This is what makes `body { background: … }` fill the window
@@ -643,8 +686,19 @@ impl LayoutTree {
                 let editable = node_flags & protocol::flags::EDITABLE != 0;
 
                 let style = style_of_node.get(node).copied().unwrap_or(0) as usize;
-                let size = font_size.get(style).copied().unwrap_or(16.0);
-                let weight = font_weight.get(style).copied().unwrap_or(400);
+                let spec = FontSpec::new(
+                    font_size.get(style).copied().unwrap_or(16.0),
+                    font_weight.get(style).copied().unwrap_or(400),
+                    font_style.get(style).copied().unwrap_or(0),
+                    font_family.get(style).copied().unwrap_or(0),
+                )
+                .with_leading(
+                    tables
+                        .f32s(STYLES, protocol::styles::LINE_HEIGHT)
+                        .get(style)
+                        .map(|v| if v.is_finite() && *v > 0.0 { *v } else { 0.0 })
+                        .unwrap_or(0.0),
+                );
 
                 // A text field is one line high with nothing in it, and an empty
                 // anything else is nothing at all. Measured both ways,
@@ -663,7 +717,7 @@ impl LayoutTree {
                 // may fill — the closure borrows `measurer` mutably.
                 let mut strut = || Size {
                     width: known.width.unwrap_or(0.0),
-                    height: known.height.unwrap_or(measurer.line_height(size, weight)),
+                    height: known.height.unwrap_or(measurer.line_height(spec)),
                 };
 
                 // Leaves with no text never reach Skia at all.
@@ -683,7 +737,7 @@ impl LayoutTree {
                     AvailableSpace::MinContent => 0.0,
                 };
 
-                let (w, h) = measurer.measure(content, size, weight, avail);
+                let (w, h) = measurer.measure(content, spec, avail);
                 Size {
                     width: known.width.unwrap_or(w),
                     height: known.height.unwrap_or(h),
@@ -833,6 +887,33 @@ fn dim(v: f32) -> Dimension {
     }
 }
 
+/// A sizing dimension with its two dynamic channels.
+///
+/// A length on the wire is a *sum*: px the compiler resolved, plus `pct` — a
+/// fraction of the containing block, which Taffy resolves natively — plus `vp`,
+/// a fraction of the window on this axis, resolved here because the window's
+/// size is the one input this function has. The compiler never writes a
+/// percentage alongside a px or viewport part (Taffy takes a percent *or* a
+/// length, and has no calc to sum them), so the channels are checked rather
+/// than combined.
+fn dimc(px: f32, pct: f32, vp: f32, surface_axis: f32) -> Dimension {
+    if pct != 0.0 {
+        return Dimension::percent(pct);
+    }
+    if vp != 0.0 {
+        return Dimension::length(if px.is_finite() { px } else { 0.0 } + vp * surface_axis);
+    }
+    dim(px)
+}
+
+/// `dimc` without the viewport channel — `flex-basis` has no use for one.
+fn dimp(px: f32, pct: f32) -> Dimension {
+    if pct != 0.0 {
+        return Dimension::percent(pct);
+    }
+    dim(px)
+}
+
 fn lp(v: f32) -> LengthPercentage {
     LengthPercentage::length(if v.is_finite() { v } else { 0.0 })
 }
@@ -842,6 +923,32 @@ fn lpa(v: f32) -> LengthPercentageAuto {
         Some(px) => LengthPercentageAuto::length(px),
         None => LengthPercentageAuto::auto(),
     }
+}
+
+/// An inset with its percentage channel. The percentage is the containing
+/// block's, as CSS resolves `top: 50%` — which is what Taffy's percent does.
+fn lpap(px: f32, pct: f32) -> LengthPercentageAuto {
+    if pct != 0.0 {
+        return LengthPercentageAuto::percent(pct);
+    }
+    lpa(px)
+}
+
+/// True if any style row uses a viewport unit — the trigger for `compute`'s
+/// restyle-on-resize. Over styles, not nodes: the rows are interned, so this is
+/// six columns of a table whose count is in the hundreds, not the thousands.
+fn has_viewport_lengths(tables: &Tables) -> bool {
+    use protocol::styles as f;
+    const VP: [usize; 6] = [
+        f::WIDTH_VP,
+        f::HEIGHT_VP,
+        f::MIN_WIDTH_VP,
+        f::MIN_HEIGHT_VP,
+        f::MAX_WIDTH_VP,
+        f::MAX_HEIGHT_VP,
+    ];
+    VP.iter()
+        .any(|&field| tables.f32s(STYLES, field).iter().any(|&v| v != 0.0))
 }
 
 fn overflow_of(v: u8) -> Overflow {
@@ -982,7 +1089,7 @@ fn compact_bits(value: u32, mask: u32) -> u32 {
     out
 }
 
-fn style_of(tables: &Tables, node: usize, globals: u32) -> Style {
+fn style_of(tables: &Tables, node: usize, globals: u32, surface: [f32; 2]) -> Style {
     use protocol::styles as f;
 
     // Taffy's `Style::default()` is `BoxSizing::BorderBox`; CSS's initial value for
@@ -1076,23 +1183,53 @@ fn style_of(tables: &Tables, node: usize, globals: u32) -> Style {
     s.flex_grow = if grow.is_finite() { grow } else { 0.0 };
     let shrink = f32f(f::FLEX_SHRINK);
     s.flex_shrink = if shrink.is_finite() { shrink } else { 1.0 };
-    s.flex_basis = dim(f32f(f::FLEX_BASIS));
+    s.flex_basis = dimp(f32f(f::FLEX_BASIS), f32f(f::FLEX_BASIS_PCT));
 
     s.gap = Size {
         width: lp(f32f(f::GAP_COLUMN)),
         height: lp(f32f(f::GAP_ROW)),
     };
     s.size = Size {
-        width: dim(f32f(f::WIDTH)),
-        height: dim(f32f(f::HEIGHT)),
+        width: dimc(
+            f32f(f::WIDTH),
+            f32f(f::WIDTH_PCT),
+            f32f(f::WIDTH_VP),
+            surface[0],
+        ),
+        height: dimc(
+            f32f(f::HEIGHT),
+            f32f(f::HEIGHT_PCT),
+            f32f(f::HEIGHT_VP),
+            surface[1],
+        ),
     };
     s.min_size = Size {
-        width: dim(f32f(f::MIN_WIDTH)),
-        height: dim(f32f(f::MIN_HEIGHT)),
+        width: dimc(
+            f32f(f::MIN_WIDTH),
+            f32f(f::MIN_WIDTH_PCT),
+            f32f(f::MIN_WIDTH_VP),
+            surface[0],
+        ),
+        height: dimc(
+            f32f(f::MIN_HEIGHT),
+            f32f(f::MIN_HEIGHT_PCT),
+            f32f(f::MIN_HEIGHT_VP),
+            surface[1],
+        ),
     };
     s.max_size = Size {
-        width: dim(f32f(f::MAX_WIDTH)),
-        height: dim(f32f(f::MAX_HEIGHT)),
+        width: dimc(
+            f32f(f::MAX_WIDTH),
+            f32f(f::MAX_WIDTH_PCT),
+            f32f(f::MAX_WIDTH_VP),
+            surface[0],
+        ),
+        height: dimc(
+            f32f(f::MAX_HEIGHT),
+            f32f(f::MAX_HEIGHT_PCT),
+            f32f(f::MAX_HEIGHT_VP),
+            surface[1],
+        ),
     };
 
     s.padding = Rect {
@@ -1101,17 +1238,16 @@ fn style_of(tables: &Tables, node: usize, globals: u32) -> Style {
         bottom: lp(f32f(f::PAD_BOTTOM)),
         left: lp(f32f(f::PAD_LEFT)),
     };
-    // One width for all four sides until the schema grows per-side borders.
+    // Per side, as CSS has them — `border-t-2` reserves room on the top alone.
     // `lp` maps the non-finite sentinels to 0, which is what "no border" means
     // here — unlike `margin`, where non-finite means `auto` — and `max` rejects a
     // negative width from a hostile table, which Taffy would otherwise treat as
     // room it can hand back to the content.
-    let border = lp(f32f(f::BORDER_WIDTH).max(0.0));
     s.border = Rect {
-        top: border,
-        right: border,
-        bottom: border,
-        left: border,
+        top: lp(f32f(f::BORDER_TOP_WIDTH).max(0.0)),
+        right: lp(f32f(f::BORDER_RIGHT_WIDTH).max(0.0)),
+        bottom: lp(f32f(f::BORDER_BOTTOM_WIDTH).max(0.0)),
+        left: lp(f32f(f::BORDER_LEFT_WIDTH).max(0.0)),
     };
     s.margin = Rect {
         top: lpa(f32f(f::MARGIN_TOP)),
@@ -1134,10 +1270,10 @@ fn style_of(tables: &Tables, node: usize, globals: u32) -> Style {
         Position::Relative
     };
     s.inset = Rect {
-        top: lpa(f32f(f::INSET_TOP)),
-        right: lpa(f32f(f::INSET_RIGHT)),
-        bottom: lpa(f32f(f::INSET_BOTTOM)),
-        left: lpa(f32f(f::INSET_LEFT)),
+        top: lpap(f32f(f::INSET_TOP), f32f(f::INSET_TOP_PCT)),
+        right: lpap(f32f(f::INSET_RIGHT), f32f(f::INSET_RIGHT_PCT)),
+        bottom: lpap(f32f(f::INSET_BOTTOM), f32f(f::INSET_BOTTOM_PCT)),
+        left: lpap(f32f(f::INSET_LEFT), f32f(f::INSET_LEFT_PCT)),
     };
 
     s.aspect_ratio = opt(f32f(f::ASPECT_RATIO));

@@ -40,6 +40,7 @@ import {
   type StyleField,
 } from "../ir.ts";
 import {
+  lengthCalc,
   lengthPercent,
   parseAngle,
   parseColor,
@@ -366,6 +367,190 @@ function boxShorthand(raw: string): [number, number, number, number] {
   return [a, b, c, d];
 }
 
+/** `boxShorthand` over a per-part parser, for the shorthands whose parts are not plain px. */
+function boxShorthandWith<T>(raw: string, parse: (part: string) => T): [T, T, T, T] {
+  const parts = splitTopLevel(raw).map(parse);
+  const [a, b, c, d] = parts;
+  if (a === undefined) throw new CssError(`empty box shorthand "${raw}"`);
+  if (b === undefined) return [a, a, a, a];
+  if (c === undefined) return [a, b, a, b];
+  if (d === undefined) return [a, b, c, b];
+  return [a, b, c, d];
+}
+
+/**
+ * A sizing length — `width`, `min-height`, … — which is three channels, and a
+ * declaration writes **all three**: px the compiler resolved, a fraction of the
+ * containing block, and a fraction of the window on the property's own axis.
+ * Writing all three is what keeps the cascade honest — `width: 50%` losing to a
+ * later `width: 100px` must clear the fraction, and a patch object only carries
+ * the fields the winner wrote.
+ *
+ * Viewport units on the *other* axis are refused: `width: 50vh` would make a
+ * box's width a function of the window's height, and the channel is per-axis
+ * because nothing in the measured Tailwind corpus does it.
+ */
+const sizingLen =
+  (pxField: StyleField, pctField: StyleField, vpField: StyleField, axis: "w" | "h"): ExpandRule =>
+  (value, out, prop) => {
+    const d = lengthCalc(value);
+    const cross = axis === "w" ? d.vh : d.vw;
+    if (cross !== 0) {
+      throw new CssError(
+        `${prop}: "${value}" is relative to the viewport's ${axis === "w" ? "height" : "width"}, ` +
+          `and a ${axis} cannot be. Use ${axis === "w" ? "vw" : "vh"}.`,
+      );
+    }
+    out[pxField] = d.px;
+    out[pctField] = d.pct;
+    out[vpField] = axis === "w" ? d.vw : d.vh;
+  };
+
+/** A max-* bound, where `none` is the absence of the bound rather than zero. */
+const maxLen =
+  (pxField: StyleField, pctField: StyleField, vpField: StyleField, axis: "w" | "h"): ExpandRule =>
+  (value, out, prop) => {
+    if (value.trim().toLowerCase() === "none") {
+      out[pxField] = Infinity;
+      out[pctField] = 0;
+      out[vpField] = 0;
+      return;
+    }
+    sizingLen(pxField, pctField, vpField, axis)(value, out, prop);
+  };
+
+/** An inset length: px plus a fraction of the containing block. No viewport channel —
+ *  nothing in the measured corpus positions from the window. */
+const insetLen =
+  (pxField: StyleField, pctField: StyleField): ExpandRule =>
+  (value, out, prop) => {
+    const d = lengthCalc(value);
+    if (d.vw !== 0 || d.vh !== 0) {
+      throw new CssError(`${prop}: "${value}" — viewport units are not supported on inset`);
+    }
+    out[pxField] = d.px;
+    out[pctField] = d.pct;
+  };
+
+/** `flex-basis`: px or a fraction of the container's main axis. */
+const basisLen: ExpandRule = (value, out) => {
+  const d = lengthCalc(value);
+  if (d.vw !== 0 || d.vh !== 0) {
+    throw new CssError(`flex-basis: "${value}" — viewport units are not supported here`);
+  }
+  out.basis = d.px;
+  out.basisPct = d.pct;
+};
+
+/** The border sides, in shorthand order (top, right, bottom, left). */
+const BORDER_W = ["borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth"] as const;
+const BORDER_C = ["borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor"] as const;
+
+/** A `border-*-width` value: a length, or one of the three CSS keywords. */
+function borderWidthValue(raw: string): number {
+  const v = raw.trim().toLowerCase();
+  // Measured initial values: `medium` is 3px, and `thin`/`thick` are 1px and 5px.
+  if (v === "thin") return 1;
+  if (v === "medium") return 3;
+  if (v === "thick") return 5;
+  return parseLength(v);
+}
+
+/**
+ * `border-style` and its per-side forms. There is no style field: a side paints
+ * exactly when it has a width and a colour, so `none` (and `hidden`) *is* width
+ * 0, and the patterned styles are solid with a warning rather than a lie of
+ * omission — a dashed border drawn solid is a note, not a wrong box.
+ */
+function borderStyle(
+  value: string,
+  out: Partial<Record<StyleField, number>>,
+  widths: readonly StyleField[],
+  sides: number,
+  prop = "border-style",
+): void {
+  const parts = splitTopLevel(value);
+  if (parts.length > sides) {
+    throw new CssError(`${prop} takes at most ${sides} value(s) here, got "${value}"`);
+  }
+  // The 1-to-N expansion: all four sides, or both ends of one axis.
+  const expanded =
+    sides === 4
+      ? [parts[0]!, parts[1] ?? parts[0]!, parts[2] ?? parts[0]!, parts[3] ?? parts[1] ?? parts[0]!]
+      : [parts[0]!, parts[1] ?? parts[0]!];
+  for (let i = 0; i < widths.length; i++) {
+    const style = expanded[i]!.toLowerCase();
+    if (style === "none" || style === "hidden") {
+      out[widths[i]!] = 0;
+    } else if (style === "solid") {
+      // The default: nothing to write.
+    } else if (/^(dashed|dotted|double|groove|ridge|inset|outset)$/.test(style)) {
+      warnOnce(`${prop}: ${style} is painted solid — patterned lines are not drawn yet`);
+    } else {
+      throw new CssError(`unsupported ${prop} "${style}"`);
+    }
+  }
+}
+
+/**
+ * The `border` shorthand and its per-side forms: `<width> <style> <color>` in
+ * any order, each component optional.
+ *
+ * The one that is *absent* decides the outcome: CSS's initial `border-style` is
+ * `none`, so a shorthand that never names a style paints nothing — `border:
+ * 2px` is a 2px-wide nothing in a browser, and the compiler says so by zeroing
+ * the widths rather than painting a border nobody asked the style of.
+ */
+function borderShorthand(
+  value: string,
+  out: Partial<Record<StyleField, number>>,
+  widths: readonly StyleField[],
+  colors: readonly StyleField[],
+): void {
+  const parts = splitTopLevel(value);
+  let width: number | undefined;
+  let color: number | undefined;
+  let sawStyle = false;
+  let none = false;
+
+  for (const part of parts) {
+    const p = part.toLowerCase();
+    if (/^(none|hidden)$/.test(p)) {
+      sawStyle = true;
+      none = true;
+      continue;
+    }
+    if (p === "solid") {
+      sawStyle = true;
+      continue;
+    }
+    if (/^(dashed|dotted|double|groove|ridge|inset|outset)$/.test(p)) {
+      sawStyle = true;
+      warnOnce(`border-style: ${p} is painted solid — patterned borders are not drawn yet`);
+      continue;
+    }
+    if (/^(thin|medium|thick)$/.test(p) || /^-?[\d.]/.test(p) || /^calc\(/.test(p)) {
+      if (width !== undefined) throw new CssError(`two widths in border "${value}"`);
+      width = borderWidthValue(part);
+      continue;
+    }
+    if (color !== undefined) throw new CssError(`two colors in border "${value}"`);
+    color = parseColor(part);
+  }
+
+  // The shorthand resets what it does not name, and `border-style`'s initial is
+  // `none` — so a shorthand with no style keyword is a width 0 however wide the
+  // width part says. `border: 2px` paints nothing in a browser; here too.
+  if (none || !sawStyle) {
+    for (const f of widths) out[f] = 0;
+  } else if (width !== undefined) {
+    for (const f of widths) out[f] = width;
+  }
+  if (color !== undefined) {
+    for (const f of colors) out[f] = color;
+  }
+}
+
 const JUSTIFY_KEYWORDS: Record<string, number> = {
   "flex-start": Justify.START,
   start: Justify.START,
@@ -666,10 +851,6 @@ const colorOrAuto = (value: string): number =>
  */
 const handledByCaller: ExpandRule = () => {};
 
-/** A max-* length, where `none` is the absence of a bound rather than zero. */
-const lengthOrNone = (value: string): number =>
-  value.toLowerCase() === "none" ? Infinity : parseLength(value);
-
 /** `gap` and its `grid-gap` spelling: one value for both axes, or `<row> <column>`. */
 const gapShorthand: ExpandRule = (value, out) => {
   const parts = splitTopLevel(value);
@@ -851,6 +1032,27 @@ function parseBoxShadow(value: string, out: Partial<Record<StyleField, number>>)
   }
 }
 
+/** `text-decoration-line`'s keywords, ORed into the bit set. */
+function decorationLines(value: string): number {
+  let bits = 0;
+  for (const part of splitTopLevel(value.toLowerCase())) {
+    if (part === "none") return 0;
+    const bit = part === "underline" ? 1 : part === "overline" ? 2 : part === "line-through" ? 4 : 0;
+    if (bit === 0) throw new CssError(`unsupported text-decoration-line "${part}"`);
+    bits |= bit;
+  }
+  return bits;
+}
+
+/** `text-decoration-style`'s five keywords, in the schema's order. */
+function decorationStyleValue(value: string): number {
+  const v = value.trim().toLowerCase();
+  const map: Record<string, number> = { solid: 0, double: 1, dotted: 2, dashed: 3, wavy: 4 };
+  const style = map[v];
+  if (style === undefined) throw new CssError(`unsupported text-decoration-style "${value}"`);
+  return style;
+}
+
 /** `grid-column` / `grid-row`: a start line and a span, from {@link parsePlacement}. */
 const placement =
   (startField: StyleField, spanField: StyleField): ExpandRule =>
@@ -894,18 +1096,134 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   "border-bottom-right-radius": { field: "radBR", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
   "border-bottom-left-radius": { field: "radBL", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
 
-  "border": (value, out) => {
-    // `<width> <style> <color>`, in any order, style ignored.
-    const parts = splitTopLevel(value);
-    for (const part of parts) {
-      if (/^(none|solid|dashed|dotted)$/i.test(part)) continue;
-      if (/^-?[\d.]/.test(part)) out.borderWidth = parseLength(part);
-      else out.borderColor = parseColor(part);
-    }
-    if (/^none$/i.test(value)) out.borderWidth = 0;
+  "border": (value, out) => borderShorthand(value, out, BORDER_W, BORDER_C),
+  "border-top": (value, out) => borderShorthand(value, out, ["borderTopWidth"], ["borderTopColor"]),
+  "border-right": (value, out) =>
+    borderShorthand(value, out, ["borderRightWidth"], ["borderRightColor"]),
+  "border-bottom": (value, out) =>
+    borderShorthand(value, out, ["borderBottomWidth"], ["borderBottomColor"]),
+  "border-left": (value, out) =>
+    borderShorthand(value, out, ["borderLeftWidth"], ["borderLeftColor"]),
+  "border-inline": (value, out) =>
+    borderShorthand(value, out, ["borderLeftWidth", "borderRightWidth"], ["borderLeftColor", "borderRightColor"]),
+  "border-block": (value, out) =>
+    borderShorthand(value, out, ["borderTopWidth", "borderBottomWidth"], ["borderTopColor", "borderBottomColor"]),
+
+  "border-width": (value, out) => {
+    const parts = boxShorthandWith(value, borderWidthValue);
+    for (let i = 0; i < 4; i++) out[BORDER_W[i]!] = parts[i]!;
   },
-  "border-width": { field: "borderWidth", parse: parseLength },
-  "border-color": { field: "borderColor", parse: parseColor },
+  "border-top-width": { field: "borderTopWidth", parse: borderWidthValue },
+  "border-right-width": { field: "borderRightWidth", parse: borderWidthValue },
+  "border-bottom-width": { field: "borderBottomWidth", parse: borderWidthValue },
+  "border-left-width": { field: "borderLeftWidth", parse: borderWidthValue },
+  "border-inline-width": axis("borderLeftWidth", "borderRightWidth"),
+  "border-block-width": axis("borderTopWidth", "borderBottomWidth"),
+  "border-inline-start-width": { field: "borderLeftWidth", parse: borderWidthValue },
+  "border-inline-end-width": { field: "borderRightWidth", parse: borderWidthValue },
+  "border-block-start-width": { field: "borderTopWidth", parse: borderWidthValue },
+  "border-block-end-width": { field: "borderBottomWidth", parse: borderWidthValue },
+
+  "border-color": (value, out) => {
+    const parts = splitTopLevel(value);
+    if (parts.length > 4) throw new CssError(`border-color takes 1 to 4 values, got "${value}"`);
+    const colors = parts.map(parseColor);
+    const [a, b = a, c = a, d = b] = colors as [number, number?, number?, number?];
+    out.borderTopColor = a!;
+    out.borderRightColor = b!;
+    out.borderBottomColor = c!;
+    out.borderLeftColor = d!;
+  },
+  "border-top-color": { field: "borderTopColor", parse: parseColor },
+  "border-right-color": { field: "borderRightColor", parse: parseColor },
+  "border-bottom-color": { field: "borderBottomColor", parse: parseColor },
+  "border-left-color": { field: "borderLeftColor", parse: parseColor },
+  "border-inline-color": (value, out) => {
+    const c = parseColor(value);
+    out.borderLeftColor = c;
+    out.borderRightColor = c;
+  },
+  "border-block-color": (value, out) => {
+    const c = parseColor(value);
+    out.borderTopColor = c;
+    out.borderBottomColor = c;
+  },
+  "border-inline-start-color": { field: "borderLeftColor", parse: parseColor },
+  "border-inline-end-color": { field: "borderRightColor", parse: parseColor },
+  "border-block-start-color": { field: "borderTopColor", parse: parseColor },
+  "border-block-end-color": { field: "borderBottomColor", parse: parseColor },
+
+  // Style has no field: a side is drawn exactly when it has both a width and a
+  // colour, so `none` is width 0 and every other keyword is the absence of a
+  // change. The patterned styles paint solid with a warning — a dashed border
+  // rendered solid is a fidelity note, not a wrong box.
+  "border-style": (value, out) => borderStyle(value, out, BORDER_W, 4),
+  "border-top-style": (value, out) => borderStyle(value, out, ["borderTopWidth"], 1),
+  "border-right-style": (value, out) => borderStyle(value, out, ["borderRightWidth"], 1),
+  "border-bottom-style": (value, out) => borderStyle(value, out, ["borderBottomWidth"], 1),
+  "border-left-style": (value, out) => borderStyle(value, out, ["borderLeftWidth"], 1),
+  "border-inline-style": (value, out) =>
+    borderStyle(value, out, ["borderLeftWidth", "borderRightWidth"], 2),
+  "border-block-style": (value, out) =>
+    borderStyle(value, out, ["borderTopWidth", "borderBottomWidth"], 2),
+
+  // `outline` — the same grammar as `border`, one ring instead of four sides,
+  // and *no layout*: an outline never moves a box, so all three fields are
+  // paint-only. `outline-offset` is signed; a negative one draws inside.
+  outline: (value, out) => borderShorthand(value, out, ["outlineWidth"], ["outlineColor"]),
+  "outline-color": { field: "outlineColor", parse: parseColor },
+  "outline-width": { field: "outlineWidth", parse: borderWidthValue },
+  "outline-offset": { field: "outlineOffset", parse: parseLength },
+  "outline-style": (value, out) => borderStyle(value, out, ["outlineWidth"], 1, "outline-style"),
+
+  // `text-decoration`. The line is a bit set — `underline overline` is legal
+  // CSS and both paint — and the shorthand is the four longhands in any order.
+  "text-decoration-line": (value, out) => {
+    out.decorationLine = decorationLines(value);
+  },
+  "text-decoration-color": { field: "decorationColor", parse: parseColor },
+  "text-decoration-style": (value, out) => {
+    out.decorationStyle = decorationStyleValue(value);
+  },
+  // `auto` and `from-font` both mean "the font's own metric", which the wire
+  // spells 0. A percentage is of the font size, which the compiler knows.
+  "text-decoration-thickness": (value, out) => {
+    const v = value.trim().toLowerCase();
+    if (v === "auto" || v === "from-font") {
+      out.decorationThickness = 0;
+    } else if (v.endsWith("%")) {
+      throw new CssError(
+        `text-decoration-thickness: "${value}" — a percentage is of the font size, ` +
+          `which this expander cannot see; write the px you mean`,
+      );
+    } else {
+      out.decorationThickness = parseLength(v);
+    }
+  },
+  // `auto` is NaN, the table's "nothing was said" for lengths.
+  "text-underline-offset": (value, out) => {
+    const v = value.trim().toLowerCase();
+    out.underlineOffset = v === "auto" ? NaN : parseLength(v);
+  },
+  "text-decoration": (value, out) => {
+    const v = value.trim().toLowerCase();
+    if (v === "none") {
+      out.decorationLine = 0;
+      return;
+    }
+    for (const part of splitTopLevel(value)) {
+      const p = part.toLowerCase();
+      if (/^(underline|overline|line-through)$/.test(p)) {
+        out.decorationLine = (out.decorationLine ?? 0) | decorationLines(p);
+      } else if (/^(solid|double|dotted|dashed|wavy)$/.test(p)) {
+        out.decorationStyle = decorationStyleValue(p);
+      } else if (/^-?[\d.]/.test(p) || p.startsWith("calc(")) {
+        out.decorationThickness = parseLength(p);
+      } else {
+        out.decorationColor = parseColor(part);
+      }
+    }
+  },
 
   "box-shadow": parseBoxShadow,
 
@@ -950,13 +1268,53 @@ export const PROPERTIES: Record<string, PropertyRule> = {
    * worked. 125 classes each, and no field, no engine change and no protocol
    * bump between them.
    */
-  inset: quad("insetT", "insetR", "insetB", "insetL"),
-  "inset-inline": axis("insetL", "insetR"),
-  "inset-block": axis("insetT", "insetB"),
-  "inset-inline-start": { field: "insetL", parse: parseLength },
-  "inset-inline-end": { field: "insetR", parse: parseLength },
-  "inset-block-start": { field: "insetT", parse: parseLength },
-  "inset-block-end": { field: "insetB", parse: parseLength },
+  inset: (value, out) => {
+    const parts = boxShorthandWith(value, lengthCalc);
+    const sides = [
+      ["insetT", "insetTPct"],
+      ["insetR", "insetRPct"],
+      ["insetB", "insetBPct"],
+      ["insetL", "insetLPct"],
+    ] as const;
+    for (let i = 0; i < 4; i++) {
+      const d = parts[i]!;
+      if (d.vw !== 0 || d.vh !== 0) {
+        throw new CssError(`inset: "${value}" — viewport units are not supported on inset`);
+      }
+      out[sides[i]![0]] = d.px;
+      out[sides[i]![1]] = d.pct;
+    }
+  },
+  "inset-inline": (value, out) => {
+    const [a, b] = boxShorthandWith(value, lengthCalc);
+    for (const [d, px, pct] of [
+      [a, "insetL", "insetLPct"],
+      [b, "insetR", "insetRPct"],
+    ] as const) {
+      if (d.vw !== 0 || d.vh !== 0) {
+        throw new CssError(`inset-inline: "${value}" — viewport units are not supported on inset`);
+      }
+      out[px] = d.px;
+      out[pct] = d.pct;
+    }
+  },
+  "inset-block": (value, out) => {
+    const [a, b] = boxShorthandWith(value, lengthCalc);
+    for (const [d, px, pct] of [
+      [a, "insetT", "insetTPct"],
+      [b, "insetB", "insetBPct"],
+    ] as const) {
+      if (d.vw !== 0 || d.vh !== 0) {
+        throw new CssError(`inset-block: "${value}" — viewport units are not supported on inset`);
+      }
+      out[px] = d.px;
+      out[pct] = d.pct;
+    }
+  },
+  "inset-inline-start": insetLen("insetL", "insetLPct"),
+  "inset-inline-end": insetLen("insetR", "insetRPct"),
+  "inset-block-start": insetLen("insetT", "insetTPct"),
+  "inset-block-end": insetLen("insetB", "insetBPct"),
 
   "padding-top": { field: "padT", parse: parseLength },
   "padding-right": { field: "padR", parse: parseLength },
@@ -1005,12 +1363,14 @@ export const PROPERTIES: Record<string, PropertyRule> = {
       out.grow = 0;
       out.shrink = 0;
       out.basis = AUTO;
+      out.basisPct = 0;
       return;
     }
     if (v === "auto") {
       out.grow = 1;
       out.shrink = 1;
       out.basis = AUTO;
+      out.basisPct = 0;
       return;
     }
 
@@ -1018,15 +1378,32 @@ export const PROPERTIES: Record<string, PropertyRule> = {
     const grow = Number(parts[0]);
     if (!Number.isFinite(grow)) throw new CssError(`bad flex "${value}"`);
     out.grow = grow;
+    // The grammar is `<grow> <shrink>? <basis>?`, and the basis is a *length* —
+    // so a non-numeric second value is the basis, not the shrink: `flex: 1 100px`
+    // is grow 1, shrink 1 (the default), basis 100px. Telling them apart by
+    // value rather than position was the bug: a length equal to no number string
+    // still got skipped for *being* parts[1].
+    let shrink = 1;
+    let basisPart: string | undefined;
+    if (parts.length > 1) {
+      if (Number.isFinite(Number(parts[1]))) shrink = Number(parts[1]);
+      else basisPart = parts[1];
+    }
+    if (parts.length > 2) basisPart = parts[2];
     // `flex: 1` means `1 1 0`, not `1 1 auto` — the difference is whether
     // items size from content before growing, and it is visible.
-    out.shrink = parts.length > 1 && Number.isFinite(Number(parts[1])) ? Number(parts[1]) : 1;
-    const basis = parts.find((p) => /^-?[\d.]+(px)?$/.test(p) && p !== parts[0] && p !== parts[1]);
-    out.basis = basis ? parseLength(basis) : 0;
+    out.shrink = shrink;
+    // Both channels, always: a winning `flex` with no basis part still means
+    // `0`, and an earlier declaration's fraction has to be cleared with it.
+    if (basisPart) basisLen(basisPart, out, "flex");
+    else {
+      out.basis = 0;
+      out.basisPct = 0;
+    }
   },
   "flex-grow": { field: "grow", parse: finite("flex-grow") },
   "flex-shrink": { field: "shrink", parse: finite("flex-shrink") },
-  "flex-basis": { field: "basis", parse: (v) => (v.toLowerCase() === "auto" ? AUTO : parseLength(v)) },
+  "flex-basis": basisLen,
 
   gap: gapShorthand,
   // The pre-`gap` spelling, which Tailwind still emits for `gap-*` in some configs.
@@ -1064,17 +1441,17 @@ export const PROPERTIES: Record<string, PropertyRule> = {
     // meaning yet, and approximating them as `absolute` would be a lie.
     throw new CssError(`unsupported position "${value}"`);
   },
-  top: { field: "insetT", parse: parseLength },
-  right: { field: "insetR", parse: parseLength },
-  bottom: { field: "insetB", parse: parseLength },
-  left: { field: "insetL", parse: parseLength },
+  top: insetLen("insetT", "insetTPct"),
+  right: insetLen("insetR", "insetRPct"),
+  bottom: insetLen("insetB", "insetBPct"),
+  left: insetLen("insetL", "insetLPct"),
 
-  width: { field: "width", parse: parseLength },
-  height: { field: "height", parse: parseLength },
-  "min-width": { field: "minW", parse: parseLength },
-  "max-width": { field: "maxW", parse: lengthOrNone },
-  "min-height": { field: "minH", parse: parseLength },
-  "max-height": { field: "maxH", parse: lengthOrNone },
+  width: sizingLen("width", "widthPct", "widthVp", "w"),
+  height: sizingLen("height", "heightPct", "heightVp", "h"),
+  "min-width": sizingLen("minW", "minWPct", "minWVp", "w"),
+  "max-width": maxLen("maxW", "maxWPct", "maxWVp", "w"),
+  "min-height": sizingLen("minH", "minHPct", "minHVp", "h"),
+  "max-height": maxLen("maxH", "maxHPct", "maxHVp", "h"),
 
   /**
    * The logical sizing properties, which are aliases and not a feature.
@@ -1090,14 +1467,43 @@ export const PROPERTIES: Record<string, PropertyRule> = {
    * other way was invisible to the number. A key in this table is visible however it
    * got here.
    */
-  "inline-size": { field: "width", parse: parseLength },
-  "block-size": { field: "height", parse: parseLength },
-  "min-inline-size": { field: "minW", parse: parseLength },
-  "max-inline-size": { field: "maxW", parse: lengthOrNone },
-  "min-block-size": { field: "minH", parse: parseLength },
-  "max-block-size": { field: "maxH", parse: lengthOrNone },
+  "inline-size": sizingLen("width", "widthPct", "widthVp", "w"),
+  "block-size": sizingLen("height", "heightPct", "heightVp", "h"),
+  "min-inline-size": sizingLen("minW", "minWPct", "minWVp", "w"),
+  "max-inline-size": maxLen("maxW", "maxWPct", "maxWVp", "w"),
+  "min-block-size": sizingLen("minH", "minHPct", "minHVp", "h"),
+  "max-block-size": maxLen("maxH", "maxHPct", "maxHVp", "h"),
 
   "font-size": { field: "fontSize", parse: parseLength },
+
+  // `line-height`: a multiplier, a percentage of the font size, or an absolute
+  // length. Two channels because the px form folds against the *resolved* font
+  // size, which only the engine knows — see the schema note.
+  "line-height": (value, out) => {
+    const v = value.trim().toLowerCase();
+    if (v === "normal") {
+      out.lineHeight = 0;
+      out.lineHeightPx = NaN;
+      return;
+    }
+    if (v.endsWith("%")) {
+      const n = Number(v.slice(0, -1));
+      if (!Number.isFinite(n) || n < 0) throw new CssError(`bad line-height "${value}"`);
+      out.lineHeight = n / 100;
+      out.lineHeightPx = NaN;
+      return;
+    }
+    const n = Number(v);
+    if (Number.isFinite(n)) {
+      if (n < 0) throw new CssError(`bad line-height "${value}"`);
+      out.lineHeight = n;
+      out.lineHeightPx = NaN;
+      return;
+    }
+    out.lineHeight = 0;
+    out.lineHeightPx = parseLength(v);
+  },
+  "text-indent": { field: "textIndent", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
   "font-weight": {
     field: "fontWeight",
     parse: (value) => {
@@ -1107,6 +1513,47 @@ export const PROPERTIES: Record<string, PropertyRule> = {
       const n = Number(v);
       if (!Number.isFinite(n)) throw new CssError(`bad font-weight "${value}"`);
       return n;
+    },
+  },
+
+  // A slant flag. `oblique` maps to italic — for a face with no true italic the
+  // platform synthesizes a slant either way, and no probe has yet shown a case
+  // where the distinction survives to pixels here. `oblique <angle>` is refused:
+  // an angle needs a field, and nothing has measured wanting one.
+  "font-style": {
+    field: "fontStyle",
+    parse: (value) => {
+      switch (value.trim().toLowerCase()) {
+        case "normal":
+          return 0;
+        case "italic":
+        case "oblique":
+          return 1;
+        default:
+          throw new CssError(`unsupported font-style "${value}"`);
+      }
+    },
+  },
+
+  // A *generic* family, never a name. dziri resolves one concrete face per
+  // generic at startup (`Measurer::new`), so an author picks a category and the
+  // platform picks the font — a font file cannot ride in a style table, and
+  // naming faces is @font-face territory, a committed non-goal for now. The
+  // list form is honoured by scanning for the first generic present, which is
+  // what a browser's fallback walk degenerates to when none of the named faces
+  // exist: `font-family: "Fira Code", ui-monospace, monospace` is MONOSPACE.
+  // A list with no recognised generic keeps the default face rather than being
+  // an error, because that is exactly what a browser does when every name
+  // misses — but it is worth a warning, which expandDeclaration cannot issue;
+  // the value resolves to the default silently. Measured need may promote it.
+  "font-family": {
+    field: "fontFamily",
+    parse: (value) => {
+      for (const part of value.split(",")) {
+        const generic = part.trim().toLowerCase().replace(/^["']|["']$/g, "");
+        if (generic === "monospace" || generic === "ui-monospace") return 1;
+      }
+      return 0;
     },
   },
 
@@ -1210,6 +1657,143 @@ export const PROPERTIES: Record<string, PropertyRule> = {
           `effects on input types and on a select's picker, and dziri has neither yet).`,
       );
     },
+  },
+
+  // `cursor` — the SDL system cursor shown on hover. Tailwind's cursor-* classes.
+  // Values map to SDL_SystemCursor enum: 0 SDL_SYSTEM_CURSOR_AUTO (default),
+  // 1 SDL_SYSTEM_CURSOR_DEFAULT, 2 SDL_SYSTEM_CURSOR_POINTER, 3 SDL_SYSTEM_CURSOR_TEXT, etc.
+  cursor: {
+    field: "cursor",
+    parse: (value) => {
+      const v = value.toLowerCase();
+      const cursors: Record<string, number> = {
+        auto: 0,
+        default: 1,
+        pointer: 2,
+        text: 3,
+        grab: 4,
+        grabbing: 5,
+        wait: 6,
+        "not-allowed": 7,
+        move: 8,
+        "ns-resize": 9,
+        "ew-resize": 10,
+        "nwse-resize": 11,
+        "nesw-resize": 12,
+        "col-resize": 13,
+        "row-resize": 14,
+        "all-scroll": 15,
+        "zoom-in": 16,
+        "zoom-out": 17,
+        help: 18,
+        progress: 19,
+      };
+      if (v in cursors) return cursors[v];
+      throw new CssError(
+        `cursor: "${value}" is not a value dziri accepts.\n` +
+          `  Supported: ${Object.keys(cursors).join(", ")}`,
+      );
+    },
+  },
+
+  // `border-spacing` — horizontal and vertical distance between table cell borders.
+  // Applied to `<table>` but dziri doesn't render tables; paint-only.
+  // Two-value form: h v; single value means both. CSS default is 2px.
+  "border-spacing": (value, out) => {
+    const parts = value.trim().split(/\s+/);
+    if (parts.length < 1 || parts.length > 2) {
+      throw new CssError(`border-spacing takes 1 or 2 values, got "${value}"`);
+    }
+    const h = parseLength(parts[0]!);
+    const v = parts[1] === undefined ? h : parseLength(parts[1]);
+    if (!Number.isFinite(h) || !Number.isFinite(v)) {
+      throw new CssError(`border-spacing: "${value}" — lengths must be numbers, not keywords`);
+    }
+    out.borderSpacingH = h;
+    out.borderSpacingV = v;
+  },
+
+  // `scroll-margin` and its per-side variants. Paint-only (no layout effect).
+  // Shorthand form expands to four sides like margin/padding.
+  "scroll-margin": (value, out) => {
+    const parts = value.trim().split(/\s+/).filter(p => p);
+    if (parts.length < 1 || parts.length > 4) {
+      throw new CssError(`scroll-margin takes 1 to 4 values, got "${value}"`);
+    }
+    const v = parts.map(parseLength);
+    const [t, r, b, l] = v.length === 1 ? [v[0], v[0], v[0], v[0]] 
+                         : v.length === 2 ? [v[0], v[1], v[0], v[1]]
+                         : v.length === 3 ? [v[0], v[1], v[2], v[1]]
+                         : [v[0], v[1], v[2], v[3]];
+    out.scrollMarginTop = t;
+    out.scrollMarginRight = r;
+    out.scrollMarginBottom = b;
+    out.scrollMarginLeft = l;
+  },
+
+  "scroll-margin-top": {
+    field: "scrollMarginTop",
+    parse: parseLength,
+  },
+
+  "scroll-margin-right": {
+    field: "scrollMarginRight",
+    parse: parseLength,
+  },
+
+  "scroll-margin-bottom": {
+    field: "scrollMarginBottom",
+    parse: parseLength,
+  },
+
+  "scroll-margin-left": {
+    field: "scrollMarginLeft",
+    parse: parseLength,
+  },
+
+  // Logical aliases: scroll-margin-block and scroll-margin-inline expand to top+bottom and left+right
+  "scroll-margin-block": (value, out) => {
+    const parts = value.trim().split(/\s+/).filter(p => p);
+    if (parts.length < 1 || parts.length > 2) {
+      throw new CssError(`scroll-margin-block takes 1 or 2 values, got "${value}"`);
+    }
+    const v = parts.map(parseLength);
+    const [block, inlineStart, inlineEnd] = v.length === 1 
+      ? [v[0], 0, 0] 
+      : [v[0], 0, 0]; // block-start and block-end both set to v[0] or v[1]
+    // Actually: block-start is v[0], block-end is v[1]
+    out.scrollMarginTop = v[0];
+    out.scrollMarginBottom = v.length === 2 ? v[1] : v[0];
+  },
+
+  "scroll-margin-block-start": {
+    field: "scrollMarginTop",
+    parse: parseLength,
+  },
+
+  "scroll-margin-block-end": {
+    field: "scrollMarginBottom",
+    parse: parseLength,
+  },
+
+  "scroll-margin-inline": (value, out) => {
+    const parts = value.trim().split(/\s+/).filter(p => p);
+    if (parts.length < 1 || parts.length > 2) {
+      throw new CssError(`scroll-margin-inline takes 1 or 2 values, got "${value}"`);
+    }
+    const v = parts.map(parseLength);
+    out.scrollMarginLeft = v[0];
+    out.scrollMarginRight = v.length === 2 ? v[1] : v[0];
+  },
+
+  "scroll-margin-inline-start": {
+    field: "scrollMarginLeft",
+    parse: parseLength,
+  },
+
+  "scroll-margin-inline-end": {
+    field: "scrollMarginRight",
+    parse: parseLength,
   },
 
   // Clamped rather than refused out of range: CSS says `opacity` clamps to

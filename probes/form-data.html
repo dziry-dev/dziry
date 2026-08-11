@@ -1,0 +1,178 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>form-data</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  #stage { position: absolute; left: -9999px }
+</style>
+<h3>which fields does a form submit, and as what?</h3>
+<div id="stage"></div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * dziri is about to build a form payload from the `name` attributes in a subtree,
+   * and every rule below is one people state from memory and get wrong. The entry set
+   * is not "the fields" — it is a filtered, ordered, renamed projection of them, and
+   * each filter costs the compiler a different amount:
+   *
+   * - **Exclusions.** Nameless, disabled, `type=button`, `type=reset`, an unchecked
+   *   checkbox, an unchecked radio. All but one of those are compile-time facts, so
+   *   whether the exception is real decides whether dziri needs live state to build a
+   *   payload at all.
+   * - **`<fieldset disabled>`.** If disabledness is *inherited*, "is this field
+   *   disabled" is a walk up the ancestors rather than an attribute read, and dziri's
+   *   `disabled` handling is per-element today.
+   * - **Defaulted values.** A checked checkbox with no `value` submits *something*, and
+   *   an `<option>` with no `value` submits *something*. Both defaults are invented by
+   *   the parser rather than written by the author, so dziri has to invent the same one
+   *   or diverge on the commonest markup there is.
+   * - **The submitter.** A `<button name>` is in the payload only when it is the button
+   *   that submitted, which is the one entry that is not a property of the markup.
+   * - **Ordering and duplicates.** Two fields sharing a name is legal and is how a
+   *   multi-value field is written. Whether the pair keeps tree order decides whether
+   *   dziri can emit an array at build time.
+   *
+   * `type=file` and `type=image` are measured only to record that they are out of
+   * dziri's scope, not to implement them.
+   */
+
+  const stage = document.getElementById("stage");
+
+  /** Every entry of a form's payload, as `name=value` in iteration order. */
+  const entries = (form, submitter) =>
+    [...new FormData(form, submitter).entries()]
+      .map(([k, v]) => `${k}=${v instanceof File ? `File(${v.name || "∅"})` : JSON.stringify(v)}`)
+      .join(" ") || "(empty)";
+
+  const CASES = [
+    // --- what is in, what is out ------------------------------------------------
+    ["text, named", `<input name=a value=x>`],
+    ["text, nameless", `<input value=x>`],
+    ["text, empty value", `<input name=a>`],
+    ["text, name but disabled", `<input name=a value=x disabled>`],
+    ["text, readonly", `<input name=a value=x readonly>`],
+    ["hidden", `<input type=hidden name=a value=x>`],
+    // Is disabledness inherited from an ancestor, or read off the field?
+    ["inside <fieldset disabled>", `<fieldset disabled><input name=a value=x></fieldset>`],
+    // ...and does the first <legend>'s content escape it, as the spec claims?
+    ["<fieldset disabled> + legend field",
+      `<fieldset disabled><legend><input name=leg value=x></legend><input name=a value=y></fieldset>`],
+
+    // --- checkboxes: the invented default ---------------------------------------
+    ["checkbox, unchecked", `<input type=checkbox name=a>`],
+    ["checkbox, checked, no value", `<input type=checkbox name=a checked>`],
+    ["checkbox, checked, value=1", `<input type=checkbox name=a value=1 checked>`],
+    ["checkbox, checked, value=''", `<input type=checkbox name=a value="" checked>`],
+    ["checkbox pair, both checked", `<input type=checkbox name=a value=1 checked><input type=checkbox name=a value=2 checked>`],
+
+    // --- radios ------------------------------------------------------------------
+    ["radio, none checked", `<input type=radio name=a value=1><input type=radio name=a value=2>`],
+    ["radio, second checked", `<input type=radio name=a value=1><input type=radio name=a value=2 checked>`],
+    ["radio, checked, no value", `<input type=radio name=a checked>`],
+
+    // --- selects: the other invented default -------------------------------------
+    ["select, nothing marked selected", `<select name=a><option value=1>one<option value=2>two</select>`],
+    ["select, second selected", `<select name=a><option value=1>one<option value=2 selected>two</select>`],
+    ["select, option without value", `<select name=a><option>one<option>two</select>`],
+    ["select, option value='' ", `<select name=a><option value="">any<option value=1>one</select>`],
+    // Whitespace matters here: if the label is the value, is it the raw text or trimmed?
+    ["select, padded option text", `<select name=a><option>  two  </option></select>`],
+    ["select multiple, none selected", `<select name=a multiple><option value=1>one<option value=2>two</select>`],
+    ["select multiple, both selected", `<select name=a multiple><option value=1 selected>one<option value=2 selected>two</select>`],
+    ["select, disabled option selected", `<select name=a><option value=1 disabled selected>one<option value=2>two</select>`],
+    ["optgroup, option inside", `<select name=a><optgroup label=g><option value=1>one</optgroup></select>`],
+
+    // --- textarea ----------------------------------------------------------------
+    ["textarea", `<textarea name=a>hello</textarea>`],
+    // The line ending is the question: the DOM value and the payload disagree.
+    ["textarea with newline", `<textarea name=a>one\ntwo</textarea>`],
+
+    // --- buttons -----------------------------------------------------------------
+    ["button[name], not submitter", `<input name=a value=x><button type=submit name=b value=y>go</button>`],
+    ["input[type=button][name]", `<input type=button name=b value=y>`],
+    ["input[type=reset][name]", `<input type=reset name=b value=y>`],
+    ["input[type=submit][name], not submitter", `<input type=submit name=b value=y>`],
+
+    // --- ordering and duplicates --------------------------------------------------
+    ["two names, source order b then a", `<input name=b value=1><input name=a value=2>`],
+    ["same name twice", `<input name=a value=1><input name=a value=2>`],
+
+    // --- typed inputs: is the payload ever not a string? ---------------------------
+    ["number, valid", `<input type=number name=a value=31>`],
+    ["number, junk typed in", `<input type=number name=a>`, (host) => { host.querySelector("input").value = "12abc"; }],
+    ["range, untouched", `<input type=range name=a min=0 max=10>`],
+    ["date, empty", `<input type=date name=a>`],
+    ["email", `<input type=email name=a value="x@y.z">`],
+    ["file, empty", `<input type=file name=a>`],
+
+    // --- the form owner is not the ancestor ---------------------------------------
+    ["field outside, form=id", `<input name=a value=in>`, null, `<input name=out value=out form=F>`],
+  ];
+
+  for (const [label, markup, prepare, outside] of CASES) {
+    stage.innerHTML = `<form id=F>${markup}</form>${outside ?? ""}`;
+    const form = stage.querySelector("form");
+    prepare?.(form);
+    log(label.padEnd(32) + " -> " + entries(form));
+  }
+
+  // --- the submitter, which is the one entry the markup does not decide -----------
+  log("");
+  stage.innerHTML = `<form id=F>
+    <input name=a value=x>
+    <button type=submit name=b value=first>one</button>
+    <button type=submit name=b value=second>two</button>
+    <button type=submit>nameless</button>
+    <button type=submit name=c>valueless</button>
+  </form>`;
+  {
+    const form = stage.querySelector("form");
+    const [first, second, nameless, valueless] = form.querySelectorAll("button");
+    log("submitter: none".padEnd(32) + " -> " + entries(form));
+    log("submitter: first".padEnd(32) + " -> " + entries(form, first));
+    log("submitter: second".padEnd(32) + " -> " + entries(form, second));
+    log("submitter: nameless".padEnd(32) + " -> " + entries(form, nameless));
+    log("submitter: name, no value".padEnd(32) + " -> " + entries(form, valueless));
+
+    // What a real submission reports, as opposed to what `new FormData(form, x)` builds:
+    // `event.submitter` is how a listener would find the same button, and dziri's own
+    // submit path knows the button already — so the pair has to agree.
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      log(
+        "requestSubmit(second): submitter".padEnd(32) +
+          " -> " + (e.submitter ? `${e.submitter.tagName}[value=${e.submitter.value}]` : "null") +
+          " · payload " + entries(form, e.submitter),
+      );
+    });
+    form.requestSubmit(second);
+  }
+
+  // --- does the payload track live state, or the attributes? ----------------------
+  //
+  // The whole design question for dziri: a compiled payload could be built from what the
+  // author wrote, if what the author wrote is what a browser submits. It is not — this
+  // pair is what proves the payload has to read live state.
+  log("");
+  stage.innerHTML = `<form id=F>
+    <input name=t value=authored>
+    <input type=checkbox name=c value=1>
+    <select name=s><option value=1>one<option value=2>two</select>
+  </form>`;
+  {
+    const form = stage.querySelector("form");
+    log("before any interaction".padEnd(32) + " -> " + entries(form));
+    form.querySelector("input[name=t]").value = "typed";
+    form.querySelector("input[name=c]").checked = true;
+    form.querySelector("select").selectedIndex = 1;
+    log("after value/checked/index writes".padEnd(32) + " -> " + entries(form));
+    log("attributes still say".padEnd(32) + " -> " +
+      `t=${JSON.stringify(form.querySelector("input[name=t]").getAttribute("value"))} ` +
+      `c=${form.querySelector("input[name=c]").hasAttribute("checked")} ` +
+      `s=${form.querySelector("option[value='2']").hasAttribute("selected")}`);
+  }
+
+  report();
+</script>

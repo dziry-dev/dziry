@@ -141,9 +141,37 @@ export type Props = {
    * Runs when this `<form>` is submitted: Enter in one of its fields, or a click on its
    * submit button.
    *
-   * There is no event object and nothing to `preventDefault` — dziri never navigates, so
-   * a submission is only ever a call into app code, and the values are in the signals the
-   * fields are bound to.
+   * **It receives the form's payload** — an object keyed by the `name` of every control in
+   * the form, exactly as a browser collects them, and typed by what each control is:
+   *
+   * ```tsx
+   * <form onSubmit={(data) => save(data)}>
+   *   <input name="email" />
+   *   <input name="age" type="number" />
+   *   <input name="terms" type="checkbox" />
+   *   <select name="plan"><option>pro</option></select>
+   *   <button>Save</button>
+   * </form>
+   * ```
+   *
+   * gives `data.email` a string, `data.age` a number or `undefined`, `data.terms` a
+   * boolean, and `data.plan` the chosen option's value.
+   *
+   * A field needs no `bind:value` to be in it: the compiler declares a cell for every named
+   * field that has none, so the browser-shaped form above works with no state module at
+   * all. A field that *does* carry `bind:value` uses the author's signal, so the payload and
+   * the rendered text cannot disagree.
+   *
+   * The inclusion rules are the browser's, measured in `probes/form-data.html`: a control
+   * with no `name` is not in the payload, nor is a disabled one — including one disabled by
+   * an enclosing `<fieldset disabled>` — nor is an unticked checkbox's value. Two controls
+   * sharing a name give an array, in document order.
+   *
+   * With a `validate={…}` the argument is that schema's **output** instead, and this does
+   * not run at all when validation fails — see [`onInvalid`].
+   *
+   * There is no event object and nothing to `preventDefault`: dziri never navigates, so a
+   * submission is only ever a call into app code.
    *
    * **Enter does not always submit**, and the conditions are measured rather than
    * intuited (`probes/implicit-submission.html`). A form with no submit button submits
@@ -152,7 +180,45 @@ export type Props = {
    * all of it, so what an author has to know is just this: give the form a submit button
    * and Enter will work.
    */
-  onSubmit?: (() => void) | string;
+  // `any` for the same reason `onClick` uses it: a schema narrows this to its own output
+  // type, which this position cannot know, and `unknown` would make every author cast
+  // before reading a field off their own payload.
+  onSubmit?: ((data: any) => void) | (() => void) | string;
+  /**
+   * Checks this `<form>`'s payload before `onSubmit` sees it.
+   *
+   * Three kinds of thing are accepted, and the first two need no dependency at all:
+   *
+   * ```tsx
+   * <form validate={Login} onSubmit={save}>     // Zod, Valibot, ArkType — or an Effect schema
+   * <form validate={(d) => (d.age < 18 ? [{ path: ["age"], message: "too young" }] : null)}>
+   * ```
+   *
+   * Anything carrying `~standard` — the Standard Schema interop spec, which Zod 4, Valibot
+   * and ArkType implement natively — is used through it. An **Effect** schema does not
+   * carry it (measured on effect 3.22), so it is recognised by its `ast` and converted with
+   * Effect's own `Schema.standardSchemaV1` after a lazy import; `effect` is never a
+   * dependency of dziri, only of the app that passed one.
+   *
+   * A schema **narrows what `onSubmit` receives**: the payload goes in, the schema's output
+   * comes out, so `Schema.NumberFromString` or `z.coerce.date()` hands the handler the
+   * number or the `Date` rather than the string.
+   *
+   * Like every other reference in a tree, it has to be a module-level export — the
+   * generated artifact imports it by name.
+   */
+  validate?: unknown;
+  /**
+   * Runs instead of `onSubmit` when `validate` rejected the payload.
+   *
+   * The argument is the issues, normalised to `{ path, message }[]` whichever validator
+   * produced them, so an app that moves from Zod to Effect does not rewrite its error
+   * rendering.
+   *
+   * Optional, and a form without one does nothing at all on a bad payload — which is what a
+   * browser does with a form that fails its own constraints, minus the bubble.
+   */
+  onInvalid?: ((issues: any) => void) | string;
   /**
    * Form attributes, kept rather than ignored: a selector can test them.
    *
@@ -171,16 +237,20 @@ export type Props = {
   type?: string;
   name?: string;
   /**
-   * `value` is deliberately absent.
+   * `value` is deliberately absent **from this type**, and present on tags.
    *
-   * Adding it broke two demo pages instantly, and the way it broke them is the
+   * Adding it here broke two demo pages instantly, and the way it broke them is the
    * argument: a component written `Props & { value: unknown }` intersects to
    * `string & unknown`, so every component that takes a prop called `value` —
    * which is most of them — would have to start writing `Omit<Props, "value">`.
    * A framework type that claims the commonest prop name in the language is
-   * hostile, and dziri spells an input's value `bind:value`. An authored
-   * `value=` attribute still reaches the IR from HTML, so `[value="x"]` selectors
-   * work; it is only the JSX prop that is withheld.
+   * hostile.
+   *
+   * What changed since is that the restriction moved to where it belongs rather than being
+   * dropped: `<input value="pro">` and `<option value="pro">` are legal, through
+   * [`ElementProps`], because a *tag* is not something a component's props intersect with.
+   * A radio's `value` is what its group submits, so a form could not be written in JSX
+   * without it.
    */
   placeholder?: string;
   checked?: boolean;
@@ -256,6 +326,16 @@ export type Props = {
   /** `<label for=…>`; spelled `htmlFor` because `for` is a reserved word. */
   htmlFor?: string;
   /**
+   * `<a href=…>`, and nothing navigates with it.
+   *
+   * Here for the same reason `label` on `<optgroup>` is: it is a real attribute a
+   * selector can test — `a[href]` is how a stylesheet tells a link from an anchor —
+   * and leaving it out made the most ordinary `<a>` on the web a type error. dziri
+   * never navigates anywhere; in-app routes go through the typed route signal, and
+   * what an external link should do is an unsettled API.md question, not a prop.
+   */
+  href?: string;
+  /**
    * A string signal this element edits. Focus it by clicking, then typing appends
    * and Backspace deletes. Its value is displayed automatically when the element
    * has no children of its own.
@@ -276,8 +356,16 @@ export type Props = {
    *
    * Writable, deliberately: this used to be a `ReadonlySignal`, which let a
    * `derived()` typecheck in a position the host assigns to.
+   *
+   * **Inside a `map()` row it takes the row's own property** — `bind:value={job.title}`
+   * — and that is why the type admits a bare `string`. A list callback runs against a
+   * recording proxy, so `job.title` is *typed* as the item's property while being a
+   * recorded path at build time; there is no signal object to name, because a row's
+   * state lives in the array. Widening the type is what makes the honest spelling
+   * compile, and the cost is that a literal `bind:value="hi"` now type-checks — refused
+   * by the compiler instead, naming the two things this accepts.
    */
-  "bind:value"?: Signal<string>;
+  "bind:value"?: Signal<string> | string;
   /**
    * Inline declarations, applied after the cascade and beating every selector —
    * the same precedence a browser gives them.
@@ -658,13 +746,23 @@ export function jsx(
 
   // An editable with no children displays its own value, so `bind:value` alone is
   // enough to both show and edit — reusing the ordinary text-binding machinery.
+  //
+  // A row's property takes the *item* part shape rather than the signal one, which is what
+  // makes the display half of a per-row field free: `{job.title}` written by hand compiles
+  // to exactly this, so the arena's per-row slots already know how to render it. The write
+  // half is the new mechanism, and it is in `compile.ts`.
   const bound = props["bind:value"];
   if (bound && children.length === 0) {
-    children.push({ type: "dyntext", parts: [{ source: bound }] });
+    children.push(
+      isRecorder(bound)
+        ? { type: "dyntext", parts: [{ item: pathOf(bound) }] }
+        : { type: "dyntext", parts: [{ source: bound }] },
+    );
   }
 
   const droppedSignals: string[] = [];
   const attrs = attrsOf(props, names.classes, droppedSignals);
+  const { errorClassName } = props as { errorClassName?: string };
 
   // `disabled={sig}` is consumed rather than dropped, so it must not be warned about.
   // Pulled out here beside `bind:value` — both are props whose value is a signal the
@@ -685,6 +783,13 @@ export function jsx(
     onFocus: props.onFocus ?? null,
     onBlur: props.onBlur ?? null,
     onSubmit: props.onSubmit ?? null,
+    // Optional fields, so the three other places an `Element` is built by hand — a
+    // fragment, the document root, the HTML front end — need no edit to stay valid.
+    ...(props.onInvalid === undefined ? {} : { onInvalid: props.onInvalid }),
+    ...(props.validate === undefined ? {} : { validate: props.validate }),
+    // Read through a cast because `errorClassName` lives on `ElementProps` — what a *tag*
+    // accepts — rather than on `Props`, which is what components extend. See `ElementProps`.
+    ...(errorClassName === undefined ? {} : { errorClassName }),
     classWhen: names.classWhen,
     bindValue: bound ?? null,
     style: styleAttr(props.style, type),
@@ -720,6 +825,11 @@ function attrsOf(
   const out = new Map<string, string>();
   for (const [key, value] of Object.entries(props)) {
     if (key === "children" || key === "className" || key === "class" || key === "style") continue;
+    // A *class list*, like the two above it, so it is kept as its own field rather than
+    // becoming an attribute. `kebab` would spell it `error-class-name`, which is a name no
+    // author wants to write in an `.html` document and a value no selector should match
+    // against — `[error-class-name~="x"]` is not a question anyone is asking.
+    if (key === "errorClassName") continue;
     if (key.startsWith("bind:")) continue;
     if (typeof value === "string") out.set(kebab(key).toLowerCase(), value);
     else if (value === true) out.set(kebab(key).toLowerCase(), "");
@@ -792,11 +902,162 @@ type Tag =
   | "textarea"
   | "fieldset"
   | "legend"
-  | "form";
+  | "form"
+  // Document text. All of these compile today — the parser takes any tag and the
+  // cascade matches it — and the headings already have UA-sheet rules. Being here
+  // means being *nameable in JSX*, not being fully rendered: `<em>` is upright and
+  // `<ul>` unmarked until `font-style` and `list-style-type` become style fields,
+  // which the unstyled demo window (windows/plain) shows rather than hides.
+  | "h1"
+  | "h2"
+  | "h3"
+  | "h4"
+  | "h5"
+  | "h6"
+  | "a"
+  | "b"
+  | "strong"
+  | "i"
+  | "em"
+  | "code"
+  | "small"
+  | "pre"
+  | "blockquote"
+  | "hr"
+  | "ul"
+  | "ol"
+  | "li";
+
+/**
+ * What a **tag** accepts, as opposed to what a component does.
+ *
+ * The two were the same type until a form needed `value`, and the split is what lets that
+ * attribute exist at all. `Props` is withheld from claiming `value` on purpose — see its own
+ * comment there — because authors write `Props & { value: number }` for their own components
+ * and an intersection with `string` makes that prop `never`. Two live examples in this repo:
+ * `windows/main/pages/features.tsx` and `pages/reactivity.tsx`.
+ *
+ * None of that applies to a tag. `<input value="pro">` is an *attribute*, it is always text,
+ * and no component's props type is involved — so the restriction only ever needed to be on
+ * the half that components extend.
+ *
+ * It is not cosmetic. A radio's `value` **is** what its group submits, and an `<option>`'s is
+ * what a `<select>` submits; without this, every radio in a JSX form would submit the string
+ * `"on"` and the payload could not tell them apart.
+ */
+type ElementProps = Props & {
+  /**
+   * `<input value>`, `<option value>` — the authored attribute.
+   *
+   * A field's *default value* for a text input, and the *submitted value* for a checkbox,
+   * radio or option. A string, always: an attribute is text a selector can compare against,
+   * so `[value="pro"]` means what it says. To change one at run time, bind it —
+   * `bind:value` — rather than passing a signal here.
+   */
+  value?: string;
+  /**
+   * `<input form="login">` — the id of the form this control belongs to.
+   *
+   * **Ownership, not a hint.** The control is that form's for every purpose: it is in that
+   * form's payload, it can be that form's default submit button, and it counts towards that
+   * form's implicit-submission rules — even when it is written outside the form, or inside a
+   * different one. All three are measured (`probes/form-owner.html`).
+   *
+   * An id that names no form leaves the control owned by **nothing**, rather than falling
+   * back to its ancestor. That is also measured, and it is the behaviour a typo produces.
+   *
+   * Here rather than on `Props` for the same reason `value` is: `form` is an ordinary prop
+   * name a component might want, and a tag is not something a component's props intersect
+   * with.
+   */
+  form?: string;
+  /**
+   * Names a **group** of controls, and nests the payload.
+   *
+   * Put it on anything that wraps a control — the div that holds a label, an input and an
+   * error message. What it does is give everything inside it a path prefix:
+   *
+   * ```tsx
+   * <div field="email"><input /></div>                        // { email: string }
+   * <div field="position"><input name="x" /><input name="y" /></div>
+   *                                                           // { position: { x, y } }
+   * <div field="address"><div field="city"><input /></div></div>
+   *                                                           // { address: { city } }
+   * ```
+   *
+   * A control with no `name` takes the wrapper's path as its own, so a wrapper holding one
+   * bare input *is* that field. Named controls inside become its properties. Wrappers nest,
+   * and an element without `field` is transparent — a layout div nests nothing.
+   *
+   * **Not a browser attribute.** HTML has no nesting at all: `name="user[email]"` is the
+   * literal key `"user[email]"` in `FormData`, and the bracket convention is invented by
+   * server-side parsers, each with its own dialect (measured, `probes/form-nested-names.html`).
+   * dziri nests by *structure* instead, because a compiler can see the structure — so there is
+   * no path syntax to parse, and a conflict is a build error rather than the silent
+   * last-write-wins every one of those parsers has.
+   */
+  field?: string;
+  /**
+   * Classes to add to this `field` wrapper while it has a validation error.
+   *
+   * The one piece of error state there is. It compiles to the same style-table patches a
+   * conditional class does, so the whole subtree restyles — the input's border and the
+   * message's visibility both come from a class on the wrapper:
+   *
+   * ```tsx
+   * <div field="email" errorClassName="group/error">
+   *   <input className="error:border-red-500" />
+   *   <span error className="hidden error:block" />
+   * </div>
+   * ```
+   *
+   * With Tailwind, define the variant in its **prefix** form — `@custom-variant error
+   * (.group\/error &)` — which emits `.group\/error .error\:block`, a plain descendant
+   * selector. Tailwind's default form emits `:is(:where(.group\/error) *)`, and the `*`
+   * inside `:is()` is not a selector dziri parses.
+   *
+   * A wrapper is in error when any issue's path has the wrapper's path as a **prefix**, so a
+   * `field="position"` wrapper lights up for an issue at `position.x`.
+   */
+  errorClassName?: string;
+  /**
+   * Marks this element as the place its `field` wrapper's error message is written.
+   *
+   * ```tsx
+   * <span error className="hidden error:block" />
+   * ```
+   *
+   * The element's text becomes an ordinary text run bound to a cell the compiler declares —
+   * the same mechanism as a field's value cell, and the same idea as `::placeholder`, whose
+   * text also comes from somewhere other than `content`. Its own children are replaced, so
+   * placeholder text inside it is only ever seen at build time.
+   */
+  error?: boolean;
+  /**
+   * When this `<form>` checks itself. `"submit"` unless you say otherwise.
+   *
+   * - `"submit"` — only when the form is submitted. Costs nothing while typing.
+   * - `"change"` — as each field changes, including every keystroke.
+   * - `"blur"` — when a field loses focus. Suits a rule that is expensive to check often.
+   *
+   * **After a failed submit a form always re-validates as its fields change**, whatever this
+   * says, so an error the user has already been shown clears itself the moment they fix it.
+   * That is behaviour rather than a second attribute because it is not a preference — React
+   * Hook Form spells it `reValidateMode: onChange` and defaults it the same way.
+   *
+   * And before any submit, a field may only show an error once its value has *moved* off the
+   * one it was compiled with, so a pristine form does not turn red as you tab through it.
+   * That gate is what other libraries store as `touched`; here it needs no state at all,
+   * because the initial value is a constant the compiler wrote down.
+   *
+   * The trigger is named, not the handler: `"change"`, not `"onChange"`.
+   */
+  validateOn?: "submit" | "change" | "blur";
+};
 
 export declare namespace JSX {
   type Element = Node;
   type ElementType = Tag | Component<never>;
-  type IntrinsicElements = Record<Tag, Props>;
+  type IntrinsicElements = Record<Tag, ElementProps>;
   type ElementChildrenAttribute = { children: {} };
 }

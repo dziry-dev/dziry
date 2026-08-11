@@ -328,10 +328,18 @@ the shared-memory protocol and the layout/paint pipeline, both of which are inte
 ### A1 · Tailwind conformance
 - **Conformance harness first, over a curated corpus.** Headless Chrome as a build-time oracle:
   compile a utility, diff computed values against `getComputedStyle`. But "generate every utility"
-  is infinite — Tailwind v4's JIT produces arbitrary values like `min-h-[calc(100vh-4rem)]` that we
-  cannot test because we don't support `calc`. So the corpus is **~200 curated utilities covering
-  the common cases**, tested exhaustively, with everything else documented as best-effort.
-  Coverage-as-a-percentage is only meaningful against a defined denominator.
+  is infinite — Tailwind v4's JIT produces arbitrary values — so the corpus is **~200 curated
+  utilities covering the common cases**, tested exhaustively, with everything else documented as
+  best-effort. Coverage-as-a-percentage is only meaningful against a defined denominator.
+- **calc(), percentages and viewport units — done** (2026-08-10). A length on the wire is a sum
+  of channels: px the compiler folds, plus a fraction of the containing block (`widthPct` & co.,
+  which Taffy resolves natively), plus a fraction of the window (`widthVp` & co., which the
+  engine resolves when it builds the Taffy style and re-resolves on resize). That covers
+  `w-1/2`'s `calc(1 / 2 * 100%)`, `w-full`, `h-screen`/`100dvh`, and `min-h-[calc(100vh-4rem)]`.
+  The one shape refused — honestly, at compile time — is a percentage summed with an absolute
+  part (`calc(100% - 2rem)`), because Taffy takes a percent *or* a length and has no calc.
+  Padding/margin/gap have no percentage channel yet (Tailwind never emits one); `vmin`/`vmax`
+  and cross-axis viewport units (`width: 50vh`) are refused by name.
 - `oklch()`/`oklab()` parsing (Tailwind v4's default). Verify the converted values survive Skia's
   colour pipeline without gamut clipping — Skia has its own colour-space handling.
 - CSS custom properties, statically resolved. Tailwind v4 leans on `--tw-*` heavily; static
@@ -339,41 +347,27 @@ the shared-memory protocol and the layout/paint pipeline, both of which are inte
 - **Attribute selectors and `data-state`.** shadcn uses `data-[state=open]:` throughout. Needs
   attribute selectors in the parser, a way for primitives to expose state as attributes, and those
   compiling to variants. Invisible today and on the critical path for Tier 2.
-- **Media queries — real `@media` blocks, not only Tailwind variants.** *This is now the thing
-  standing between dziri and a narrow window that looks right.* Reported 2026-08-01 from the real
-  window at ~400 px as "even buttons are out of container", and measured rather than assumed:
-  `layout-diff`'s `row-too-narrow` reproduces `app.css`'s `.newrow` — a `flex: 1` field and two
-  content-sized buttons in a container too small for their combined minimum — and **Chrome
-  overflows it by the same amount dziri does**, to within 0.05 px. A flex row past its minimum
-  overflows; that is CSS, not a bug, and no engine fix would change it.
+- **Media queries — real `@media` blocks, not only Tailwind variants. Done.** Reported
+  2026-08-01 from the real window at ~400 px as "even buttons are out of container", and measured
+  rather than assumed: `layout-diff`'s `row-too-narrow` reproduces `app.css`'s `.newrow` — a
+  `flex: 1` field and two content-sized buttons in a container too small for their combined
+  minimum — and **Chrome overflows it by the same amount dziri does**, to within 0.05 px. A flex
+  row past its minimum overflows; that is CSS, not a bug, and no engine fix would change it.
 
-  What a browser would do instead is *stop being a row* below some width, and dziri cannot
-  express that: `parseCss` warn-and-skips every at-rule, so the demo's two-column layout can
-  never reflow to one column and its rows can never wrap. Text wrapping was the first obvious
-  bug at narrow widths; this is the second, and it is the last big one that is about layout
-  rather than about content.
+  What a browser does instead is *stop being a row* below some width, and that is now
+  expressible. **Done, both front-ends** (2026-08-09 and earlier; verified end-to-end 2026-08-10).
+  `md:flex` and `@media (min-width: 768px) { … }` are the same mechanism reached two
+  ways: one predicate bit per distinct threshold (`MediaBits`, bits from
+  `Predicate.FIRST_GLOBAL`), a `media` table on the wire, and the engine evaluating
+  the bits *between the resize and the relayout* (`engine.rs::evaluate_media`,
+  `layout.rs::set_globals`), so Bun never participates and a busy app cannot stall a
+  breakpoint. Nested blocks intersect, range syntax (`width >= 48rem`) parses, and an
+  axis the engine cannot answer — `orientation` — skips the rule with a warning.
 
-  An earlier draft said
-  "media queries compile to signals", meaning `md:flex` became a conditional class over a
-  `windowWidth >= 768` predicate. That covers Tailwind's *variant* syntax and nothing else:
-  an author writing `@media (min-width: 768px) { .card { padding: 8px } }` in a stylesheet
-  must get the same result. Both forms compile to the same thing — a style-table patch plus a
-  predicate — so this is one mechanism with two front-ends, not two features.
-
-  **They evaluate at startup and on every resize, on the same path as layout.** That has one
-  consequence worth stating before it is built: **the patches must be applied engine-side.**
-  The engine owns the window and repaints a resize on its own schedule — that is the whole
-  point of A0 step 3 — so routing a resize through Bun to re-apply patches would lag a frame
-  and stall entirely whenever Bun is busy, which is exactly the failure the render thread
-  exists to prevent. So the compiler emits the predicates and their `(field, slot, value)`
-  writes into a table the engine reads, and the engine re-evaluates them between the resize
-  and the relayout. Bun never participates.
-
-  This needs a **schema addition** (a `media` table: predicate kind, threshold, and a run of
-  patch entries) and it needs `parseCss` to handle nested blocks first — today a `@media`
-  body is silently dropped *and* the next rule fails to parse, which is one of the review's
-  findings. Same predicate machinery then covers `dark:`, `prefers-reduced-motion` and high
-  contrast, whose inputs are OS state rather than window size.
+  What is left is the non-axis predicates: `dark:`, `prefers-reduced-motion`, high
+  contrast. Those are OS state, not a threshold over a number, and the `media` table
+  is rows of *(axis, side, threshold)* — they want a global bit set from SDL/OS state
+  instead, which is the one shape the table cannot currently express.
 - `group-*`/`peer-*` variants — a pseudo-class on a **non-subject** compound, which the parser
   currently rejects. Real work: hovering `.group` patches its subtree's style pointers.
 - Property sweep: gradients, shadows, transforms, opacity, overflow, `space-*`, `divide-*`,
@@ -450,7 +444,13 @@ winit-versus-SDL3 choice reversible.
   bullet names. Same division `hit_test` already lives by: the compiler says which nodes are
   hittable, the chains say in what order.
 - Enter/Space activation through the same dispatch as a click, including `dispatchItem`.
-- `onSubmit` on `bind:value`; distinct `onChange` vs `onInput` semantics.
+- ~~`onSubmit` on `bind:value`~~ — **built**, and wider than this line asked for: `onSubmit`
+  receives the whole form's **payload**, collected by `name` from the form's subtree the way a
+  browser collects one and typed by each control's kind. The bullet assumed a bound field, and
+  the measurement (`probes/form-data.html`) is what changed the design — a browser reads live
+  state from every named control, bound or not, so the compiler declares a cell for each field
+  that has none. `validate={schema}` takes any Standard Schema or an Effect schema without dziri
+  depending on either. Still `onChange` vs `onInput` to distinguish.
 - `:focus-visible` — ring for keyboard focus only, which is the difference between polished and
   broken.
 - Skip hidden subtrees; autofocus.
@@ -579,6 +579,43 @@ written down in the first place:
   one; a *disabled* submit button blocks outright rather than being skipped; and the submitting
   field need not be a text field. All of it is markup, so it resolves to `{ node, button, direct }`
   per form and the host is left with "walk up to the form, is this a textarea".
+- **`field` wrappers, nesting and error state** — done, and the part that was not on this list at
+  all. `field` on a wrapper names a group and the wrapper chain *is* the payload's path, so
+  `{ position: { x, y } }` needs no bracket syntax and no parser: measured, no browser nests
+  anything (`name="user[email]"` is that literal string key at both the `FormData` and wire
+  layers), so the convention belongs to server-side parsers and dziri can do better than adopt
+  one of their dialects — it sees the structure. A path claimed as both a value and a group is a
+  build error rather than a silent last-write-wins.
+
+  Error state is **one class**. `errorClassName` puts it on the wrapper while any issue's path
+  starts with the wrapper's own, and it compiles to the style-table patches a conditional class
+  already uses — so the input's border and the message's visibility both come from a class on the
+  div and none of the styling is JavaScript. Two wrappers sharing the class string stay
+  independent, because patches are keyed on the driving cell and slots intern over the whole
+  variant vector.
+
+  What is *not* there is the part worth recording: no per-field `touched` or `dirty` as styling
+  hooks. `touched` exists in React Hook Form and Formik to gate error display, which `validateOn`
+  does here; `dirty` is internal and needs no storage at all, since the initial value is a
+  compile-time constant. Per field the runtime keeps exactly two things — a boolean and a
+  message. Vocabulary checked against the shipped types of all three libraries rather than
+  recalled: none of them has an `onDirty` trigger.
+- **`alert()`** — done, and it needed no protocol change and nothing vendored. SDL3 is already
+  linked and ships `SDL_ShowSimpleMessageBox`, so an OS dialog was one import away: a Win32 task
+  dialog, an `NSAlert`, the GTK box. It runs on the engine thread because SDL will only show one
+  from the thread that initialised video, so app code posts a message — and headless is a no-op,
+  which is what keeps every golden and screenshot working through a handler that ends in one.
+  `confirm()` is the same call with an answer and is *not* built: the thread that would answer is
+  the one the dialog is blocking.
+- **The form's payload** — done, and it is the second half of the same entry. `onSubmit` is handed
+  an object keyed by `name`, with the browser's inclusion rules measured rather than recalled
+  (BROWSER-FACTS, "What a form actually submits") and the value's *type* taken from the control's
+  kind. The one thing that could not be compiled is the values themselves: the probe's last three
+  rows show a payload tracking live state while the attributes still say what the author wrote. So
+  each field gets a cell — the author's `bind:value` signal, or one the compiler declares in the
+  artifact — which is what lets `<form><input name="email"></form>` work with no state module.
+  `validate={…}` runs before the handler and takes any Standard Schema, an Effect schema, or a
+  predicate, with dziri depending on none of them.
 - **`onChange` inside a list row** — done, and the cause was a layer below the symptom. A list
   arena is `capacity` copies of one template, and the copy was *structural only*: anything in a
   side table keyed by node id stayed behind, so a control in a row had exactly one control row —

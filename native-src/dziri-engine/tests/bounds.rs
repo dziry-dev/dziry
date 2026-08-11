@@ -286,7 +286,14 @@ fn a_border_reserves_room_like_padding() {
         init_style(t, 1);
 
         // The root's own size comes from the window (200x100), not the table.
-        t.set_f32(STYLES, styles::BORDER_WIDTH, 0, 10.0);
+        for field in [
+            styles::BORDER_TOP_WIDTH,
+            styles::BORDER_RIGHT_WIDTH,
+            styles::BORDER_BOTTOM_WIDTH,
+            styles::BORDER_LEFT_WIDTH,
+        ] {
+            t.set_f32(STYLES, field, 0, 10.0);
+        }
         for field in [
             styles::PAD_TOP,
             styles::PAD_RIGHT,
@@ -328,7 +335,14 @@ fn a_nonsense_border_width_reserves_nothing() {
             let t = engine.tables_mut();
             init_style(t, 0);
             init_style(t, 1);
-            t.set_f32(STYLES, styles::BORDER_WIDTH, 0, width);
+            for field in [
+                styles::BORDER_TOP_WIDTH,
+                styles::BORDER_RIGHT_WIDTH,
+                styles::BORDER_BOTTOM_WIDTH,
+                styles::BORDER_LEFT_WIDTH,
+            ] {
+                t.set_f32(STYLES, field, 0, width);
+            }
             t.set_u8(STYLES, styles::ALIGN_ITEMS, 0, align::STRETCH);
             t.set_f32(STYLES, styles::FLEX_GROW, 1, 1.0);
 
@@ -1568,7 +1582,14 @@ fn an_absolute_child_insets_from_its_parents_padding_box() {
         }
         t.set_f32(STYLES, styles::WIDTH, 0, 100.0);
         t.set_f32(STYLES, styles::HEIGHT, 0, 60.0);
-        t.set_f32(STYLES, styles::BORDER_WIDTH, 0, 4.0);
+        for field in [
+            styles::BORDER_TOP_WIDTH,
+            styles::BORDER_RIGHT_WIDTH,
+            styles::BORDER_BOTTOM_WIDTH,
+            styles::BORDER_LEFT_WIDTH,
+        ] {
+            t.set_f32(STYLES, field, 0, 4.0);
+        }
         for pad in [
             styles::PAD_TOP,
             styles::PAD_RIGHT,
@@ -1710,4 +1731,133 @@ fn an_empty_field_is_one_line_high_and_an_empty_box_is_not() {
         field > 16.0 && field < 32.0,
         "a 16px font's line box should be a little over 16px, got {field}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Percentage and viewport lengths
+//
+// A length on the wire is a sum of channels — px the compiler resolved, a
+// fraction of the containing block (`Pct`), a fraction of the window (`Vp`) —
+// and these pin what each channel resolves against, and when.
+// ---------------------------------------------------------------------------
+
+/// `width: 50%` is half the *parent*, not half the window.
+#[test]
+fn a_percentage_width_resolves_against_the_parent() {
+    let mut engine = Engine::new(&config(3, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        // Root fills the 200px window; the middle box is a fixed 120px wide, so
+        // 50% on the leaf can only be 60 — half of 200 would be 100.
+        t.set_f32(STYLES, styles::WIDTH, 1, 120.0);
+        t.set_f32(STYLES, styles::WIDTH_PCT, 2, 0.5);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 2);
+        link(t, 0, &[1]);
+        link(t, 1, &[2]);
+    }
+    engine.tick().expect("tick");
+    assert_eq!(bound(&engine, 2)[2], 60.0, "50% of the 120px parent");
+}
+
+/// `height: 100vh` is the window's height, whatever the parent is.
+#[test]
+fn a_viewport_length_resolves_against_the_window() {
+    let mut engine = Engine::new(&config(3, 3)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        for slot in 0..3 {
+            init_style(t, slot);
+        }
+        // The parent is 20px high; the leaf asks for the full window — 100, not 20.
+        // `flex-shrink: 0` because the default 1 would shrink it back into the
+        // parent — which is correct CSS, and not what this test is about.
+        t.set_f32(STYLES, styles::HEIGHT, 1, 20.0);
+        t.set_f32(STYLES, styles::HEIGHT, 2, f32::NAN);
+        t.set_f32(STYLES, styles::HEIGHT_VP, 2, 1.0);
+        t.set_f32(STYLES, styles::FLEX_SHRINK, 2, 0.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        leaf(t, 2, 2);
+        link(t, 0, &[1]);
+        link(t, 1, &[2]);
+    }
+    engine.tick().expect("tick");
+    assert_eq!(bound(&engine, 2)[3], 100.0, "100vh is the 100px window");
+}
+
+/// `calc(100vh - 4rem)` — the header-offset pattern — is px and viewport summed.
+#[test]
+fn a_viewport_length_sums_with_the_px_part() {
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_f32(STYLES, styles::HEIGHT, 1, f32::NAN);
+        t.set_f32(STYLES, styles::HEIGHT_VP, 1, 1.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, -64.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+    }
+    engine.tick().expect("tick");
+    assert_eq!(bound(&engine, 1)[3], 36.0, "100vh - 64px in a 100px window");
+}
+
+/// A viewport length is resolved when the style is built, so a resize restyles.
+#[test]
+fn a_resize_re_resolves_viewport_lengths() {
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_f32(STYLES, styles::WIDTH, 1, f32::NAN);
+        t.set_f32(STYLES, styles::WIDTH_VP, 1, 0.5);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+    }
+    engine.tick().expect("tick");
+    assert_eq!(bound(&engine, 1)[2], 100.0, "50vw of the 200px window");
+
+    engine.resize(400, 200).expect("resize");
+    engine.tick().expect("tick");
+    assert_eq!(
+        bound(&engine, 1)[2],
+        200.0,
+        "after the resize it is 50vw of 400px, not the stale 100"
+    );
+}
+
+/// `top: 25%` positions from the containing block, like CSS.
+#[test]
+fn a_percentage_inset_offsets_from_the_parent() {
+    let mut engine = Engine::new(&config(2, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_u8(STYLES, styles::POSITION, 1, protocol::position::ABSOLUTE);
+        t.set_f32(STYLES, styles::INSET_TOP, 1, 0.0);
+        t.set_f32(STYLES, styles::INSET_TOP_PCT, 1, 0.25);
+        t.set_f32(STYLES, styles::WIDTH, 1, 10.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 10.0);
+
+        leaf(t, 0, 0);
+        leaf(t, 1, 1);
+        link(t, 0, &[1]);
+    }
+    engine.tick().expect("tick");
+    // The root is the 200x100 window, so 25% of its height is 25.
+    assert_eq!(bound(&engine, 1), [0.0, 25.0, 10.0, 10.0]);
 }

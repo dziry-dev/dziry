@@ -22,7 +22,7 @@ import { join } from "node:path";
 import cssProperties from "mdn-data/css/properties.json";
 import { parseSelector, splitSelectorList } from "../src/compiler/css.ts";
 import { CssError } from "../src/compiler/diagnostics.ts";
-import { PROPERTIES } from "../src/compiler/properties.ts";
+import { expandDeclaration, PROPERTIES } from "../src/compiler/properties.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const TMP = join(ROOT, ".tw-tmp");
@@ -85,7 +85,10 @@ async function compileAll(classes: string[]): Promise<string> {
   await writeFile(join(TMP, "in.css"), `@import "tailwindcss";\n`);
   await writeFile(join(TMP, "content.html"), `<div class="${classes.join(" ")}"></div>`);
   const p = Bun.spawn(
-    ["bunx", "@tailwindcss/cli", "-i", join(TMP, "in.css"), "-o", join(TMP, "out.css"), "--content", join(TMP, "content.html")],
+    // `--bun` is load-bearing: without it bunx defers to the bin's `node` shebang,
+    // and the CLI then runs on whatever Node is on PATH — measured failing on a
+    // system Node 16 (`isBuiltin` missing) while every other script here runs Bun.
+    ["bunx", "--bun", "@tailwindcss/cli", "-i", join(TMP, "in.css"), "-o", join(TMP, "out.css"), "--content", join(TMP, "content.html")],
     { cwd: ROOT, stdout: "ignore", stderr: "pipe" },
   );
   if ((await p.exited) !== 0) throw new Error(`tailwind CLI failed:\n${await new Response(p.stderr).text()}`);
@@ -174,8 +177,8 @@ function classNamesIn(selector: string): string[] {
   return names;
 }
 
-function rulesByClass(css: string, known: Set<string>): Map<string, { props: Set<string>; values: string }> {
-  const out = new Map<string, { props: Set<string>; values: string }>();
+function rulesByClass(css: string, known: Set<string>): Map<string, { props: Set<string>; decls: [string, string][] }> {
+  const out = new Map<string, { props: Set<string>; decls: [string, string][] }>();
   let selStart = 0;
   const stack: string[] = [];
 
@@ -227,9 +230,16 @@ function rulesByClass(css: string, known: Set<string>): Map<string, { props: Set
         // own `getClassList()`. Anything else is a scrape artifact, and counting
         // it inflates both the numerator and the denominator.
         if (!known.has(name)) continue;
-        const entry = out.get(name) ?? { props: new Set<string>(), values: "" };
-        for (const p of props) entry.props.add(p);
-        entry.values += body;
+        const entry = out.get(name) ?? { props: new Set<string>(), decls: [] };
+        for (const decl of body.split(";")) {
+          const colon = decl.indexOf(":");
+          if (colon === -1) continue;
+          const prop = decl.slice(0, colon).trim();
+          const value = decl.slice(colon + 1).trim();
+          if (!/^[a-z-]+$/.test(prop) && !prop.startsWith("--")) continue;
+          entry.props.add(prop);
+          entry.decls.push([prop, value]);
+        }
         out.set(name, entry);
       }
     }
@@ -238,68 +248,23 @@ function rulesByClass(css: string, known: Set<string>): Map<string, { props: Set
 }
 
 /**
- * Value-level features dziri's parser would also have to learn. A class can be
- * blocked by *how* a value is written even when the property itself is supported.
+ * There is no VALUE_FEATURES list anymore, and the history of why matters.
+ *
+ * It was a list of regexes over a class's declaration text — "calc() over
+ * percentages", "percentage length" — and it counted wrong in *both* directions.
+ * It reported `w-full` working while `width: 100%` threw a fatal CssError, and
+ * reported `opacity: 50%` blocked while the parser folded it; it flagged
+ * `--tw-scale-x: 75%`, a custom property whose value is only ever consumed
+ * through `var()` somewhere else. The file's own lesson, recorded when
+ * `@property` left the list: a `test` over value text cannot see a property
+ * name, and a blocker that never fires is indistinguishable from a feature that
+ * works.
+ *
+ * The replacement is not a better regex: the declarations are run through
+ * `expandDeclaration` itself, below. The compiler is the only authority on what
+ * it accepts, the check cannot drift from it, and a new parser feature moves the
+ * number on its own.
  */
-const VALUE_FEATURES: { name: string; test: RegExp }[] = [
-  // `color-mix()` is implemented for the one form that folds exactly: against a
-  // transparent operand, which is how Tailwind spells every opacity modifier.
-  // Narrowed rather than deleted, same as calc() below.
-  //
-  // What is left is `currentcolor`, which `parseColor` has no value for — there
-  // is no inherited colour at parse time. A mix between two *visible* colours is
-  // also unsupported (it needs real interpolation, and `parseColorMix` throws
-  // rather than approximating), but it gets no entry here because the corpus
-  // contains none: every color-mix Tailwind v4 emits is against `transparent`.
-  // If that changes, this is the line that has to grow — a regex for a form that
-  // does not occur is untested either way.
-  { name: "color-mix() with currentcolor", test: /color-mix\([^;]*currentcolor/ },
-
-  // `var()` and plain `calc()` are gone from this list because they are
-  // implemented: the compiler resolves custom properties through the cascade and
-  // folds calc() to a number. What is left of calc() is the part that cannot be
-  // folded — a length that is not knowable until layout runs. Those are still
-  // blockers, and narrowing the pattern rather than deleting the entry is what
-  // keeps this honest: the number moved because the feature landed, not because
-  // the measuring stick was shortened.
-  { name: "calc() over percentages / viewport units", test: /calc\([^)]*(%|\d(vw|vh|vmin|vmax)\b)/ },
-
-  // A bare percentage length, which `parseLength` rejects outright
-  // (`css.ts:1044`) for the same reason as the calc() case above: there is no
-  // parent box to resolve it against until layout runs.
-  //
-  // This entry was missing, and its absence was not a rounding error. Nothing
-  // else here tests for a percentage *outside* calc(), so every class Tailwind
-  // emits as a plain `%` length counted as working — including `w-full` and
-  // `h-full`, which are `width: 100%` and `height: 100%` and throw a fatal
-  // CssError through `compile.ts:290`. The tool reported support for two of the
-  // most-used classes in Tailwind while the compiler refused to build them.
-  //
-  // The `[^;(){}]*` is the whole trick: it forbids an opening paren between the
-  // colon and the `%`, which is what separates a percentage used as a length
-  // from one used as a component inside a function. `width: 50%` matches;
-  // `oklch(70% 0.1 200)` does not, because its `%` is a lightness; gradient
-  // stops and `calc(100% - 1rem)` do not either, and the calc() entry above
-  // already owns the latter.
-  { name: "percentage length", test: /:[^;(){}]*\d%/ },
-
-  // `@property` was listed here and is now implemented — the compiler records
-  // `initial-value` and honours `inherits: false`, which is what Tailwind's
-  // `--tw-*` transform variables need.
-  //
-  // Worth recording how it left this list, because the entry was wrong in a way
-  // that flattered the number: `test` was matched against declaration *values*
-  // while the pattern `/^--tw-/` describes a property *name*, so it never fired.
-  // For as long as it sat here, `translate-x-4` counted as working — the property
-  // was supported and `var()` was not a blocker — while it rendered nothing at
-  // all, because `--tw-translate-y` had no value and CSS drops a declaration whose
-  // `var()` cannot resolve. The percentage did not move when `@property` landed;
-  // it became true.
-  //
-  // The lesson for anything added below: a `test` over `values` cannot see a
-  // property name, and a blocker that never fires is indistinguishable from a
-  // feature that works.
-];
 
 const supported = dziriSupported();
 const classes = await tailwindClasses();
@@ -307,6 +272,42 @@ console.log(`tailwind-coverage  ${classes.length} classes from the installed tai
 
 const css = await compileAll(classes);
 const rules = rulesByClass(css, new Set(classes));
+
+/**
+ * The `@property` registrations Tailwind emits, as name -> initial value.
+ *
+ * `var()` cannot be judged statically without these: `translate-x-4` reads
+ * `var(--tw-translate-x)`, whose initial `0` lives in a registration, not in any
+ * class's own declarations. A registration without `initial-value`
+ * (`syntax: "*"` above one) has no initial — which is CSS's way of saying the
+ * variable is *unset*, and a declaration that references it drops.
+ */
+const REGISTERED = new Map<string, string>();
+for (const m of css.matchAll(/@property\s+(--[\w-]+)\s*\{([^}]*)\}/g)) {
+  const initial = /initial-value:\s*([^;]+)/.exec(m[2]!);
+  if (initial) REGISTERED.set(m[1]!, initial[1]!.trim());
+}
+
+/**
+ * Resolves `var()` the way the cascade would for a class standing alone: the
+ * class's own `--*` declarations, then the `@property` initials, then the
+ * fallback inside the `var()`. `null` when a variable is unresolvable — which is
+ * not a blocker: CSS drops the declaration, and so does dziri's compiler, so the
+ * class computes exactly as a browser computes it.
+ */
+function resolveVars(
+  value: string,
+  own: Map<string, string>,
+): string | null {
+  let v = value;
+  for (let depth = 0; /var\(/.test(v) && depth < 10; depth++) {
+    v = v.replace(/var\(\s*(--[\w-]+)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/g, (m, name, fb) => {
+      const hit = own.get(name) ?? REGISTERED.get(name) ?? fb?.trim();
+      return hit ?? "unresolvable";
+    });
+  }
+  return /var\(|unresolvable/.test(v) ? null : v;
+}
 
 // Not every enumerable class emits a rule on its own — some only produce one in a
 // variant or container context. They are outside the denominator because there is
@@ -323,20 +324,49 @@ const selectorWhy = selectorBlockers(css, new Set(classes));
 const blockers = new Map<string, Set<string>>();
 let clean = 0;
 
-for (const [name, { props, values }] of rules) {
-  const why = new Set<string>();
-  for (const p of props) {
-    // Declaring a custom property is no longer a blocker — the compiler keeps
-    // `--*` declarations, inherits them, and substitutes `var()` before any
-    // property parser runs. Only `--tw-*` is still special, and `VALUE_FEATURES`
-    // says why.
-    if (p.startsWith("--")) continue;
-    if (!supported.has(p)) why.add(`property: ${p}`);
+// Warnings are data here, not output — the parser's answer is what counts, and a
+// `shadow-md` blur warning does not block the class that carries it.
+const warn = console.warn;
+console.warn = () => {};
+try {
+  for (const [name, { decls }] of rules) {
+    const why = new Set<string>();
+    const own = new Map<string, string>();
+    for (const [p, v] of decls) if (p.startsWith("--")) own.set(p, v);
+    for (const [p, v] of decls) {
+      // Declaring a custom property is not a blocker — the compiler keeps `--*`
+      // declarations, inherits them, and substitutes `var()` before any property
+      // parser runs. What the *substituted* value does is checked where it lands,
+      // which is the declaration naming a real property.
+      if (p.startsWith("--")) continue;
+      if (!supported.has(p)) {
+        why.add(`property: ${p}`);
+        continue;
+      }
+      // An unresolvable var() drops the declaration, as it does in a browser —
+      // `scrollbar-thumb-*` colours a var that only exists once the base class
+      // sets it, and standing alone the rule computes to nothing. Not a blocker.
+      const resolved = resolveVars(v, own);
+      if (resolved === null) continue;
+      // The value check *is* the compiler, since it is cheap enough to run. A
+      // regex over the value text was the previous implementation, and it counted
+      // wrong in both directions: `w-full` was reported working while
+      // `width: 100%` threw, and `opacity: 50%` was reported blocked while the
+      // parser folded it. An error's first line is the reason; the distinct
+      // reasons are what the ranking counts.
+      try {
+        expandDeclaration(p, resolved, {} as never);
+      } catch (e) {
+        if (!(e instanceof CssError)) throw e;
+        why.add(`value: ${e.message.split("\n")[0]!.trim()}`);
+      }
+    }
+    for (const s of selectorWhy.get(name) ?? []) why.add(s);
+    if (why.size) blockers.set(name, why);
+    else clean++;
   }
-  for (const f of VALUE_FEATURES) if (f.test.test(values)) why.add(f.name);
-  for (const s of selectorWhy.get(name) ?? []) why.add(s);
-  if (why.size) blockers.set(name, why);
-  else clean++;
+} finally {
+  console.warn = warn;
 }
 
 const impact = new Map<string, number>();

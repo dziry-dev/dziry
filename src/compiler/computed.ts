@@ -234,6 +234,33 @@ function coerceOverflow(style: ComputedStyle): ComputedStyle {
   return style;
 }
 
+/**
+ * The viewport rule: `visible` on the window root means `auto`.
+ *
+ * Measured, not assumed — Chromium 152, `probes/viewport-default-scroll.html`, recorded
+ * in BROWSER-FACTS.md. An unstyled page taller than its window scrolls while both `html`
+ * and `body` compute `overflow: visible`; page scrolling is a *viewport* behaviour, not a
+ * UA stylesheet rule. That is why this is not `body { overflow: auto }` in `ua-sheet.ts`:
+ * a UA rule would let an author's explicit `overflow: visible` beat it and kill page
+ * scrolling, where Chromium measures explicit `visible` changing nothing.
+ *
+ * `hidden` and `clip` are left alone, and both mean "no page scroll": `hidden` directly,
+ * and `clip` because the viewport interprets it as `hidden` — same probe, row 7.
+ *
+ * Applied to the root's rows at compile time rather than special-cased in the engine,
+ * because everything downstream already agrees about `SCROLL`: Taffy computes the
+ * scrollable extent, paint clips and translates, the wheel finds the box, the bar draws.
+ * One coerced value buys all four; a root check in the engine would be the same rule
+ * duplicated at every consumer.
+ */
+export function coerceViewportOverflow(style: ComputedStyle): ComputedStyle {
+  const coerce = (v: number) => (v === Overflow.VISIBLE ? Overflow.SCROLL : v);
+  if (style.overflowX === Overflow.VISIBLE || style.overflowY === Overflow.VISIBLE) {
+    return { ...style, overflowX: coerce(style.overflowX), overflowY: coerce(style.overflowY) };
+  }
+  return style;
+}
+
 /** Style for a text node: inherited properties only, everything else initial. */
 export function textStyle(parent: ComputedStyle): ComputedStyle {
   return inheritFrom(parent);

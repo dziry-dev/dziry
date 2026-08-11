@@ -510,12 +510,52 @@ IR text nodes would be laid out as two flex items — stacked vertically, since 
 
 **Dynamic lists are arenas, not reconciliation.** Each list owns a contiguous run of
 homogeneous item subtrees with their internal links materialized once, spliced into its
-container's child chain. `src/runtime/list.ts`
-only rewrites the child chain, so layout, paint and hit-testing need no knowledge of lists at
-all. Measured in `src/spike-list.ts`: relinking 1000 items is 0.005 ms, reversing them 0.004 ms,
-and scrolling a 30-row window over 2000 items 0.052 ms — independent of the total, which is
-what makes `dataOffset` virtualization the same mechanism rather than a second one. Live cost
-is linear (2000 live rows = 9.5 ms), so virtualization is required above ~1000 live nodes.
+container's child chain. `src/runtime/list-runtime.ts` only rewrites the child chain, so
+layout, paint and hit-testing need no knowledge of lists at all. Relinking 1000 items is
+0.005 ms, reversing them 0.004 ms, and scrolling a 30-row window over 2000 items 0.052 ms —
+independent of the total, which is what makes `dataOffset` virtualization the same mechanism
+rather than a second one. *(Those three were taken in `src/spike-list.ts`, deleted with the
+old runtime in A0. The mechanism survives in `list-runtime.ts`; the numbers have not been
+re-taken against it.)*
+
+**Virtualization is required above ~4000 live nodes, not ~1000.** The old figure — "2000 live
+rows = 9.5 ms" — was the deleted TypeScript runtime measured cold-cold, as the layout section
+below already notes: it included populating the advance cache with 306 `sk_font_measure_text`
+FFI calls. The Rust engine does 2000 nodes in **1.20 ms**. Measured 2026-08-01,
+`bun run bench --sizes 1000,2000,4000,8000,16000`:
+
+| nodes | idle | paint | layout | µs/node (layout) |
+| ---: | ---: | ---: | ---: | ---: |
+| 1000 | 0.002 ms | 0.135 ms | **0.618 ms** | 0.62 |
+| 2000 | 0.003 ms | 0.161 ms | **1.202 ms** | 0.60 |
+| 4000 | 0.006 ms | 0.213 ms | **2.437 ms** | 0.61 |
+| 8000 | 0.014 ms | 0.333 ms | **7.461 ms** | 0.93 |
+| 16000 | 0.029 ms | 0.545 ms | **18.898 ms** | 1.18 |
+
+Layout is flat at **0.60 µs/node up to 4000**, then the per-node constant rises. The shape is
+linear work with a growing constant, not a quadratic term — a doubling costs 2.5–2.9×, not 4×.
+It is the working set leaving cache. A `TaffyTree` holds **1267 B/node** of real heap — counted
+with a global allocator, so it includes SlotMap slack and the children `Vec`s that summing
+`size_of` misses. The split: `Style` 536, `Cache` 448, two `Layout`s 168 (`NodeData` keeps
+unrounded *and* final, to avoid double-rounding), ~115 of slot and parent/context overhead.
+Against that, all of our own per-node tables together are ~100 B. Taffy is 93% of it.
+
+The machine these were taken on has a 16 MB L3 (2 MB L2, i7-10700K), and the *touched* set is
+5.07 MB at 4000 nodes, 10.14 MB at 8000 and 20.27 MB at 16000 — the per-node cost bends exactly
+across that boundary.
+
+**Reducing capacity does not help layout.** Setting `NODE_HEADROOM` to 1.0 cuts the allocation
+33% (15.15 MB → 10.14 MB at 8000 nodes) and moves layout by **+1%** — allocated-but-untouched
+slots are never walked, so they never enter cache. The same change cuts *idle* by **34%**,
+because `commit()`'s memcmp is over capacity-sized spans. So the two are not interchangeable:
+headroom is an idle lever, not a layout one.
+
+The only thing that moves layout is shrinking the **per-live-node** footprint: letting Taffy
+borrow styles from the shared tables through `LayoutPartialTree` instead of storing a 536-byte
+`Style` per node — a duplicate, AoS copy of styles we already hold as SoA. Retaining `Cache`
+and both `Layout`s, that projects to 616 B/node, which would put 8000 nodes at 4.93 MB —
+roughly today's 4000-node footprint — and by the curve above should return them to ~0.61 µs/node
+(≈4.9 ms, from 7.1). Not done, and that projection is unverified.
 
 Rejected: **capacity reservation** (`max={N}` in markup) — it exists only to avoid an
 allocator, costs wasted traversal, and has a truncation cliff. Append-only growth avoids the
@@ -593,7 +633,7 @@ Everything not listed here is a compiler bug if it happens at run time.
 | Window size | An OS input |
 | One dirty bit | Drives event-driven repaint |
 | Scroll offset, and the target it is gliding to | Where the user left a box, plus the clock. Question 1 of the gate: neither the wheel nor the time exists at build time. Two `[f32; 2]` per node and one `exp` in `tick`; the curve and its time constant are compile-time constants and the host is never told a scroll happened |
-| A transition or animation in flight: which two interned rows, and how far between them | Question 1 again, and it answers the same way — the clock does not exist at build time. Everything *else* about a tween does: both endpoints are style rows the cascade already resolved, the mask is a compile-time bitmask over 25 animatable fields, and the curve is four control points in a table. So the runtime trace is one `Live` per **animating** node — a from, a to, a `t` and a direction — plus one `u16` per node recording the row it last resolved to, which *is* the change detection, since a transition can only start when a node's slot changes. `runtime-surface` is unchanged at 7333 bytes: none of this is in `src/runtime/`, and Bun's per-frame cost is the `tick()` it was already making. The list changes when a **predicate** changes, never when a frame passes, and a finished tween is dropped rather than kept settled — which is also what makes a reversal take the full duration when the outgoing transition had completed and the measured shortened one when it had not. `native-src/dziri-engine/src/anim.rs` |
+| A transition or animation in flight: which two interned rows, and how far between them | Question 1 again, and it answers the same way: the clock does not exist at build time. Everything *else* about a tween does — both endpoints are style rows the cascade already resolved, the mask is a compile-time bitmask, the curve is four control points in a table. So the runtime trace is one `Live` per *animating* node (not per node), holding a from, a to, a `t` and a direction, plus one `u16` per node recording the row it last resolved to — which is the whole change-detection mechanism, since a transition can only start when a node's slot changes. `runtime-surface` is unchanged at 7333 bytes: none of this is in `src/runtime/`, and Bun's per-frame cost is the `tick()` it was already calling. The list changes when a **predicate** changes, never when a frame passes, and a finished tween is dropped rather than kept settled — which is also what makes a reversal take the full duration when the first transition had completed and the shortened one when it had not, measured. See `native-src/dziri-engine/src/anim.rs` |
 
 Known open problems: a dynamic class on a *container* restyles its descendants (measured: one
 root boolean changed 11 of 12 nodes on the sample app), so conditional classes are not a
@@ -896,8 +936,10 @@ following a *position* rather than a row. A fully pure alternative exists — de
 the key by hashing with deterministic probing — and would matter if snapshot/resume or hot reload
 ever needed to preserve rows.
 
-`src/runtime/list.ts` and `src/spike-list.ts` remain as the standalone measurement of the arena
-mechanism (relink 1000 items in 0.005 ms, scroll cost independent of total).
+`src/runtime/list.ts` and `src/spike-list.ts` *were* the standalone measurement of the arena
+mechanism (relink 1000 items in 0.005 ms, scroll cost independent of total). Both were deleted
+with the old runtime in A0; `src/runtime/list-runtime.ts` carries the mechanism forward, and
+the numbers have not been re-taken against it.
 
 **Still open:** `<When cond>` driving `hidden` for conditional visibility — `hidden` is already
 honoured by layout, paint and hit-testing, so it is a small compiler addition — and per-row event

@@ -34,6 +34,7 @@
 use std::collections::HashMap;
 
 use crate::error::EngineError;
+use crate::protocol;
 use skia_safe::font::Edging;
 use skia_safe::font_style::{Slant, Weight, Width};
 use skia_safe::textlayout::{
@@ -49,6 +50,16 @@ const FAMILIES: &[&str] = &["Segoe UI", "Arial", "Tahoma"];
 const FAMILIES: &[&str] = &["SF Pro Text", "Helvetica Neue", "Helvetica", "Arial"];
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 const FAMILIES: &[&str] = &["DejaVu Sans", "Liberation Sans", "Noto Sans", "Arial"];
+
+/// The face `font-family: monospace` resolves to, tried in order like [`FAMILIES`].
+/// Falls back to the default family rather than erroring: text in the wrong face
+/// beats no text, and the platform lists here make a total miss unlikely.
+#[cfg(target_os = "windows")]
+const MONO_FAMILIES: &[&str] = &["Cascadia Mono", "Consolas", "Courier New"];
+#[cfg(target_os = "macos")]
+const MONO_FAMILIES: &[&str] = &["SF Mono", "Menlo", "Monaco", "Courier New"];
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+const MONO_FAMILIES: &[&str] = &["DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono"];
 
 /// Stands in for "no constraint" when Taffy asks for a max-content width.
 ///
@@ -93,14 +104,69 @@ const MEASURE_LIMIT: usize = 4096;
 /// empty fields at one font size costs one Skia layout in total.
 const STRUT: &str = "x";
 
-/// `(font size bits, weight, text hash, available width bits)`.
+/// `(font size bits, weight, style|family, leading bits, text hash, available width bits)`.
 ///
 /// Sizes and widths are keyed on their bit pattern so `16.0` and `16.000001` stay
 /// distinct rather than silently merging, and so infinity is an ordinary key.
-type MeasureKey = (u32, u16, u64, u32);
+/// Style and family share one byte — two flags today, and the packing is private
+/// to this key.
+type MeasureKey = (u32, u16, u8, u32, u64, u32);
+
+/// Everything the style table says about type selection, as one copyable value.
+///
+/// Exists because the third and fourth axes arrived: `(size, weight)` threaded
+/// through nine call sites, and threading four positionals through the same nine
+/// is how arguments get transposed. The field order is the column order.
+#[derive(Clone, Copy, PartialEq)]
+pub struct FontSpec {
+    pub size: f32,
+    pub weight: u16,
+    /// `protocol::font_style` — `NORMAL` or `ITALIC`.
+    pub style: u8,
+    /// `protocol::font_family` — a *generic*: `DEFAULT` or `MONOSPACE`.
+    pub family: u8,
+    /// The `line-height` multiplier, already folded: a px value arrives divided
+    /// by the size. 0 is `normal` — the paragraph is never told anything.
+    pub leading: f32,
+}
+
+impl FontSpec {
+    pub fn new(size: f32, weight: u16, style: u8, family: u8) -> Self {
+        Self {
+            size,
+            weight,
+            style,
+            family,
+            leading: 0.0,
+        }
+    }
+
+    /// The default face at this size and weight — what every caller that predates
+    /// `font-style`/`font-family` meant, and what controls' own chrome still means.
+    pub fn plain(size: f32, weight: u16) -> Self {
+        Self::new(size, weight, 0, 0)
+    }
+
+    /// Sets the `line-height` multiplier. A method rather than a fifth positional,
+    /// because most construction sites have no opinion.
+    pub fn with_leading(mut self, leading: f32) -> Self {
+        self.leading = leading;
+        self
+    }
+
+    fn key_byte(self) -> u8 {
+        (self.style & 0x0f) | (self.family << 4)
+    }
+}
 
 pub struct Measurer {
-    family: String,
+      /// Kept for `decoration_metrics`, which needs a raw typeface where the
+      /// paragraph path goes through the collection.
+      mgr: FontMgr,
+      family: String,
+    /// What `font-family: monospace` resolves to. Falls back to `family` when the
+    /// platform knows none of [`MONO_FAMILIES`], so index 1 always names a face.
+    mono_family: String,
     /// Owns font fallback. One collection, reused: building one per paragraph
     /// would re-resolve the platform font manager on every measure.
     fonts: FontCollection,
@@ -141,11 +207,23 @@ impl Measurer {
             family = font_mgr.family_name(0);
         }
 
+        let mono_family = MONO_FAMILIES
+            .iter()
+            .find(|name| {
+                font_mgr
+                    .match_family_style(name, FontStyle::normal())
+                    .is_some()
+            })
+            .map(|name| (*name).to_string())
+            .unwrap_or_else(|| family.clone());
+
         let mut fonts = FontCollection::new();
         fonts.set_default_font_manager(FontMgr::new(), None);
 
         Ok(Self {
+            mgr: font_mgr,
             family,
+            mono_family,
             fonts,
             measured: HashMap::new(),
             order: std::collections::VecDeque::new(),
@@ -162,14 +240,34 @@ impl Measurer {
     /// up to whole pixels. It is on by default and browsers do not do it, so
     /// leaving it on costs up to a pixel of disagreement per line for nothing —
     /// checked against Chrome with `bun run layout-diff` rather than assumed.
-    fn style(&self, size: f32, weight: u16, align: TextAlign) -> ParagraphStyle {
+    fn style(&self, spec: FontSpec, align: TextAlign) -> ParagraphStyle {
         let mut text_style = TextStyle::new();
-        text_style.set_font_size(size);
-        text_style.set_font_families(&[self.family.as_str()]);
+        text_style.set_font_size(spec.size);
+        let family = if spec.family == protocol::font_family::MONOSPACE {
+            self.mono_family.as_str()
+        } else {
+            self.family.as_str()
+        };
+        text_style.set_font_families(&[family]);
+        if spec.leading > 0.0 && spec.leading.is_finite() {
+            // `height_override` is what makes the multiplier bind every line,
+            // first included — CSS applies `line-height` to the whole block, and
+            // SkParagraph's default without the override only honours it from the
+            // second line on.
+            text_style.set_height(spec.leading);
+            text_style.set_height_override(true);
+        }
         text_style.set_font_style(FontStyle::new(
-            Weight::from(weight as i32),
+            Weight::from(spec.weight as i32),
             Width::NORMAL,
-            Slant::Upright,
+            // Italic, not Oblique: for a face with a true italic Skia picks it, and
+            // for one without the platform synthesizes a slant either way. The
+            // compiler folds `oblique` into this value on the same grounds.
+            if spec.style == protocol::font_style::ITALIC {
+                Slant::Italic
+            } else {
+                Slant::Upright
+            },
         ));
 
         let mut para = ParagraphStyle::new();
@@ -195,12 +293,11 @@ impl Measurer {
     pub fn paragraph(
         &mut self,
         text: &str,
-        size: f32,
-        weight: u16,
+        spec: FontSpec,
         width: f32,
         align: TextAlign,
     ) -> Paragraph {
-        let para_style = self.style(size, weight, align);
+        let para_style = self.style(spec, align);
         let mut paragraph = self.build(text, &para_style);
         // A non-finite or negative width would be a caller bug rather than a
         // constraint, and Skia has no defined answer for it.
@@ -226,8 +323,8 @@ impl Measurer {
     /// types — which is the bug being fixed here, only smaller and harder to see. The
     /// glyph is irrelevant: a single line's height comes from ascent + descent + line
     /// gap, so any character measures the same.
-    pub fn line_height(&mut self, size: f32, weight: u16) -> f32 {
-        self.measure(STRUT, size, weight, f32::INFINITY).1
+    pub fn line_height(&mut self, spec: FontSpec) -> f32 {
+        self.measure(STRUT, spec, f32::INFINITY).1
     }
 
     /// The size a text node wants, given whatever space Taffy is offering.
@@ -235,20 +332,16 @@ impl Measurer {
     /// `available_width` is now honoured, which is the whole of this milestone:
     /// infinity asks for max-content, zero or less asks for min-content, and a
     /// definite width asks what the text does when wrapped to it.
-    pub fn measure(
-        &mut self,
-        text: &str,
-        size: f32,
-        weight: u16,
-        available_width: f32,
-    ) -> (f32, f32) {
+    pub fn measure(&mut self, text: &str, spec: FontSpec, available_width: f32) -> (f32, f32) {
         if text.is_empty() {
             return (0.0, 0.0);
         }
 
         let key = (
-            size.to_bits(),
-            weight,
+            spec.size.to_bits(),
+            spec.weight,
+            spec.key_byte(),
+            spec.leading.to_bits(),
             hash_str(text),
             available_width.to_bits(),
         );
@@ -256,7 +349,7 @@ impl Measurer {
             return wh;
         }
 
-        let style = self.style(size, weight, TextAlign::Left);
+        let style = self.style(spec, TextAlign::Left);
         let mut paragraph = self.build(text, &style);
 
         let raw = if available_width.is_finite() && available_width > 0.0 {
@@ -350,6 +443,184 @@ pub fn paint_paragraph(paragraph: &mut Paragraph, canvas: &Canvas, at: Point, pa
     });
 }
 
+/// What a `text-decoration` needs from the font, per line: where each line goes
+/// and how thick it is.
+///
+/// From the font's own metrics where it has them — Segoe UI does — and from the
+/// heuristics CSS's own spec text names where it does not: a thickness of
+/// 1/12em and the underline just below the baseline. `ascent` is the *positive*
+/// magnitude (Skia reports it negative), because that is the form the overline
+/// arithmetic wants.
+#[derive(Clone, Copy)]
+pub struct DecoMetrics {
+    pub underline_pos: f32,
+    pub underline_thick: f32,
+    pub strikeout_pos: f32,
+    pub strikeout_thick: f32,
+    pub ascent: f32,
+}
+
+impl Measurer {
+    /// The decoration metrics for a spec. Not cached: paint calls it once per
+    /// decorated run, and decorated runs are the rare kind.
+    pub fn decoration_metrics(&self, spec: FontSpec) -> DecoMetrics {
+        let family = if spec.family == protocol::font_family::MONOSPACE {
+            self.mono_family.as_str()
+        } else {
+            self.family.as_str()
+        };
+        let style = FontStyle::new(
+            Weight::from(spec.weight as i32),
+            Width::NORMAL,
+            if spec.style == protocol::font_style::ITALIC {
+                Slant::Italic
+            } else {
+                Slant::Upright
+            },
+        );
+        let fallback = DecoMetrics {
+            underline_pos: spec.size * 0.1,
+            underline_thick: spec.size / 12.0,
+            strikeout_pos: -spec.size * 0.25,
+            strikeout_thick: spec.size / 12.0,
+            ascent: spec.size * 0.8,
+        };
+        let Some(tf) = self.mgr.match_family_style(family, style) else {
+            return fallback;
+        };
+        let font = skia_safe::Font::from_typeface(tf, spec.size);
+        let (_, m) = font.metrics();
+        DecoMetrics {
+            underline_pos: m.underline_position().unwrap_or(fallback.underline_pos),
+            underline_thick: m.underline_thickness().unwrap_or(fallback.underline_thick),
+            strikeout_pos: m.strikeout_position().unwrap_or(fallback.strikeout_pos),
+            strikeout_thick: m.strikeout_thickness().unwrap_or(fallback.strikeout_thick),
+            ascent: -m.ascent,
+        }
+    }
+}
+
+/// What the style table says about a decoration, resolved for paint: the colour
+/// already fell back to the run's `fg` when nothing was said, and `thickness` of
+/// 0 has become the font's own metric by then.
+pub struct Decoration<'a> {
+    pub line: u8,
+    pub colour: u32,
+    pub style: u8,
+    pub thickness: f32,
+    /// NaN is auto — the font's metric position, unshifted.
+    pub offset: f32,
+    pub metrics: &'a DecoMetrics,
+}
+
+/// Draws a paragraph's text decorations, line by line.
+///
+/// A separate pass from [`paint_paragraph`] because that one redraws every run's
+/// glyphs by hand — SkParagraph's own `paint` would draw decorations for free
+/// and loses subpixel AA doing it, so the decorations are re-derived here from
+/// the line metrics: each line's left edge, width and baseline are exactly what
+/// a decoration line is drawn from.
+pub fn paint_decorations(paragraph: &Paragraph, canvas: &Canvas, at: Point, deco: &Decoration) {
+    if deco.line == 0 {
+        return;
+    }
+    let mut paint = Paint::default();
+    paint.set_color(skia_safe::Color::from(deco.colour));
+    paint.set_anti_alias(true);
+
+    for line in paragraph.get_line_metrics().iter() {
+        let x0 = at.x + line.left as f32;
+        let w = line.width as f32;
+        if w <= 0.0 {
+            continue;
+        }
+        let baseline = at.y + line.baseline as f32;
+
+        // (y of the line's centre, thickness) per decoration kind. The underline
+        // is the font's position plus any authored offset; the overline hugs the
+        // ascent; the strikeout is the font's strikeout metric.
+        let mut strokes: Vec<(f32, f32)> = Vec::with_capacity(3);
+        if deco.line & 1 != 0 {
+            let y = baseline
+                + deco.metrics.underline_pos
+                + if deco.offset.is_finite() { deco.offset } else { 0.0 };
+            strokes.push((y, deco.thickness));
+        }
+        if deco.line & 2 != 0 {
+            strokes.push((baseline - deco.metrics.ascent, deco.thickness));
+        }
+        if deco.line & 4 != 0 {
+            strokes.push((baseline + deco.metrics.strikeout_pos, deco.thickness));
+        }
+
+        for (y, thick) in strokes {
+            draw_deco_line(canvas, &paint, x0, y, w, thick.max(0.5), deco.style);
+        }
+    }
+}
+
+/// One decoration stroke in the style asked for. `double` splits the thickness
+/// into two lines a thickness apart; `dashed` and `dotted` are dash effects;
+/// `wavy` is a sine path, the only one that is not a straight line at all.
+fn draw_deco_line(canvas: &Canvas, paint: &Paint, x0: f32, y: f32, w: f32, thickness: f32, style: u8) {
+    use protocol::decoration_style as ds;
+    match style {
+        ds::DOUBLE => {
+            let t = (thickness / 2.0).max(0.5);
+            for dy in [0.0, t * 2.0] {
+                canvas.draw_line((x0, y + dy), (x0 + w, y + dy), &stroke(paint, t, None));
+            }
+        }
+        ds::DASHED | ds::DOTTED => {
+            // Dotted is a dash whose marks are points: near-zero on-interval and
+            // round caps, which Skia renders as circles of the stroke's width.
+            let (on, off, round) = if style == ds::DOTTED {
+                (0.1, thickness * 1.5, true)
+            } else {
+                (thickness * 3.0, thickness * 2.0, false)
+            };
+            let effect = skia_safe::PathEffect::dash(&[on, off], 0.0);
+            let mut p = stroke(paint, thickness, effect);
+            if round {
+                p.set_stroke_cap(skia_safe::paint::Cap::Round);
+            }
+            canvas.draw_line((x0, y), (x0 + w, y), &p);
+        }
+        ds::WAVY => {
+            // A sine with a wavelength twice the thickness and an amplitude of
+            // half of one — the proportions every platform's wavy underline has.
+            let amp = (thickness / 2.0).max(0.5);
+            let wavelength = (thickness * 2.0).max(4.0);
+            let mut path = skia_safe::Path::new();
+            path.move_to((x0, y));
+            let mut x = 0.0f32;
+            let mut up = true;
+            while x < w {
+                let nx = (x + wavelength / 2.0).min(w);
+                let mid = (x + nx) / 2.0;
+                path.quad_to(
+                    (x0 + mid, if up { y - amp } else { y + amp }),
+                    (x0 + nx, y),
+                );
+                x = nx;
+                up = !up;
+            }
+            canvas.draw_path(&path, &stroke(paint, amp, None));
+        }
+        _ => {
+            canvas.draw_line((x0, y), (x0 + w, y), &stroke(paint, thickness, None));
+        }
+    }
+}
+
+fn stroke(paint: &Paint, width: f32, effect: Option<skia_safe::PathEffect>) -> Paint {
+    let mut p = paint.clone();
+    p.set_style(skia_safe::paint::Style::Stroke);
+    p.set_stroke_width(width);
+    p.set_path_effect(effect);
+    p
+}
+
 /// FNV-1a. Short strings, no allocation, and no dependency for something this
 /// small.
 fn hash_str(s: &str) -> u64 {
@@ -370,7 +641,7 @@ mod tests {
     #[test]
     fn max_content_agrees_with_what_measure_str_reported() {
         let mut m = Measurer::new().expect("font manager");
-        let (width, height) = m.measure("Hello", 16.0, 400, f32::INFINITY);
+        let (width, height) = m.measure("Hello", FontSpec::plain(16.0, 400), f32::INFINITY);
 
         assert!(width > 0.0, "measured nothing");
         assert!(height > 0.0, "no line height");
@@ -391,8 +662,8 @@ mod tests {
         let mut m = Measurer::new().expect("font manager");
         let text = "The quick brown fox jumps over the lazy dog near the river bank";
 
-        let (wide_w, wide_h) = m.measure(text, 16.0, 400, f32::INFINITY);
-        let (narrow_w, narrow_h) = m.measure(text, 16.0, 400, 200.0);
+        let (wide_w, wide_h) = m.measure(text, FontSpec::plain(16.0, 400), f32::INFINITY);
+        let (narrow_w, narrow_h) = m.measure(text, FontSpec::plain(16.0, 400), 200.0);
 
         assert!(
             narrow_w <= 200.0,
@@ -415,9 +686,9 @@ mod tests {
         let mut m = Measurer::new().expect("font manager");
         let text = "The quick brown fox jumps over the lazy dog near the river bank";
 
-        let narrow = m.measure(text, 16.0, 400, 200.0);
-        let wider = m.measure(text, 16.0, 400, 400.0);
-        let narrow_again = m.measure(text, 16.0, 400, 200.0);
+        let narrow = m.measure(text, FontSpec::plain(16.0, 400), 200.0);
+        let wider = m.measure(text, FontSpec::plain(16.0, 400), 400.0);
+        let narrow_again = m.measure(text, FontSpec::plain(16.0, 400), 200.0);
 
         assert_ne!(narrow, wider, "width is not part of the key");
         assert_eq!(narrow, narrow_again, "the cache changed its mind");
@@ -436,8 +707,12 @@ mod tests {
     #[test]
     fn an_unbreakable_token_is_broken_by_cluster_not_overflowed() {
         let mut m = Measurer::new().expect("font manager");
-        let (w, h) = m.measure("Unbreakablesupercalifragilistic", 16.0, 400, 40.0);
-        let (_, one_line) = m.measure("x", 16.0, 400, f32::INFINITY);
+        let (w, h) = m.measure(
+            "Unbreakablesupercalifragilistic",
+            FontSpec::plain(16.0, 400),
+            40.0,
+        );
+        let (_, one_line) = m.measure("x", FontSpec::plain(16.0, 400), f32::INFINITY);
 
         assert!(w <= 40.0, "Skia breaks the token to fit, got {w}");
         assert!(
@@ -449,8 +724,8 @@ mod tests {
     #[test]
     fn min_content_is_the_longest_word() {
         let mut m = Measurer::new().expect("font manager");
-        let (min_w, min_h) = m.measure("aaa bbbbbbbbbbbb cc", 16.0, 400, 0.0);
-        let (word_w, _) = m.measure("bbbbbbbbbbbb", 16.0, 400, f32::INFINITY);
+        let (min_w, min_h) = m.measure("aaa bbbbbbbbbbbb cc", FontSpec::plain(16.0, 400), 0.0);
+        let (word_w, _) = m.measure("bbbbbbbbbbbb", FontSpec::plain(16.0, 400), f32::INFINITY);
 
         assert!(
             (min_w - word_w).abs() < 1.0,
@@ -463,7 +738,11 @@ mod tests {
     fn the_measure_cache_stays_bounded() {
         let mut m = Measurer::new().expect("font manager");
         for i in 0..(MEASURE_LIMIT + 500) {
-            m.measure(&format!("row {i}"), 16.0, 400, f32::INFINITY);
+            m.measure(
+                &format!("row {i}"),
+                FontSpec::plain(16.0, 400),
+                f32::INFINITY,
+            );
         }
         assert_eq!(m.measure_cache_len(), MEASURE_LIMIT);
     }
@@ -471,6 +750,9 @@ mod tests {
     #[test]
     fn an_empty_string_is_free() {
         let mut m = Measurer::new().expect("font manager");
-        assert_eq!(m.measure("", 16.0, 400, f32::INFINITY), (0.0, 0.0));
+        assert_eq!(
+            m.measure("", FontSpec::plain(16.0, 400), f32::INFINITY),
+            (0.0, 0.0)
+        );
     }
 }

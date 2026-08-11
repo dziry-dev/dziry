@@ -258,12 +258,29 @@ export function resolveRefs(
     return { specifier: "", name: out, expression: out };
   };
 
+  /**
+   * A cell the *compiler* declared — a form field's value, or a field wrapper's error state.
+   *
+   * The fourth reference with no export name, and the simplest: it already knows what it is
+   * called, because the compiler chose the name. Like a component-local signal it is
+   * declared by the artifact rather than imported, so `record` is deliberately not called —
+   * there is no import to add.
+   */
+  const asCompilerCell = (value: unknown): ResolvedRef | null => {
+    const cell = (value as { cell?: unknown } | null)?.cell;
+    if (typeof cell !== "string" || cell === "") return null;
+    return { specifier: "", name: cell, expression: cell };
+  };
+
   /** The name the artifact declares a local under. */
   const localName = (slot: number): string => `local_${slot}`;
 
   const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
   const lookup = (value: unknown, what: string): ResolvedRef => {
+    const cell = asCompilerCell(value);
+    if (cell) return cell;
+
     const asLocalRef = asLocal(value);
     if (asLocalRef) return asLocalRef;
 
@@ -314,7 +331,33 @@ export function resolveRefs(
   }
 
   for (const editable of result.editables) {
+    // Already named: a field whose cell the compiler declared. There is no export to look
+    // up, in the same way there is none for a component-local signal — the artifact
+    // declares it rather than importing it.
+    if (editable.name !== "") continue;
     editable.name = lookup(editable.ref, `the bind:value on node ${editable.node}`).name;
+  }
+
+  for (const form of result.forms) {
+    for (const field of form.fields) {
+      // Already named: a cell the compiler declared. Nothing to name at all: a named submit
+      // button, whose contribution comes from the gesture rather than from a cell — it has
+      // no `ref`, and asking `lookup` to find an export for `null` reported it as an
+      // unresolvable `bind:value` on a node the author never bound.
+      if (field.name !== "" || field.kind === "submitter") continue;
+      field.name = lookup(field.ref, `the bind:value on node ${field.node}`).name;
+    }
+    // The array behind a `field` wrapper holding a `map()`. Resolvable for the same reason the
+    // list's own binding is — it is the same signal object, so this adds no import the module
+    // did not already need, and a `record` on a name already recorded is a set insert.
+    for (const array of form.arrays) {
+      array.name = lookup(
+        array.source,
+        `the array behind field="${array.path.join(".")}" in the form at node ${form.node}`,
+      ).name;
+    }
+    if (form.validate === null || form.validate === undefined) continue;
+    form.validateName = lookup(form.validate, `the validate on the form at node ${form.node}`).name;
   }
 
   for (const entry of result.disabled) {

@@ -264,6 +264,20 @@ export const SCENARIOS: Scenario[] = [
    * for.
    */
   { name: "controls", args: ["--route", "controls", "--size", "1040x1400"] },
+  /**
+   * The forms page at rest — every field wrapper quiet.
+   *
+   * At rest is the state worth pinning, and not for lack of ambition: the error classes are
+   * driven by *validation*, which runs on the app thread, and this harness never dispatches
+   * events to it — `--click` presses the engine and screenshots the result. So a shot of a
+   * form in error is not reachable from here, and the error state is asserted where it can be,
+   * in `src/compiler/form.test.tsx`, by submitting a real artifact and reading the patch.
+   *
+   * What this does catch is the half a unit test cannot: that a form of six field wrappers
+   * lays out, that a `type=number` field gets a box rather than the four-pixel strip it drew
+   * before `number` was typeable, and that the message spans take no room while empty.
+   */
+  { name: "forms", args: ["--route", "forms", "--size", "1040x900"] },
   {
     name: "controls-checked",
     args: ["--route", "controls", "--size", "1040x1400", "--click", labelTextOf(control(ControlKind.CHECKBOX, 0))],

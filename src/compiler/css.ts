@@ -123,13 +123,18 @@ const SUPPORTED_PSEUDO = new Set<string>([
  * the light-DOM options render into, not a wrapper they become children of, and this keeps
  * that property.
  */
-export type PseudoElement = "before" | "after" | "placeholder" | "selection" | "picker";
+export type PseudoElement = "before" | "after" | "placeholder" | "selection" | "picker" | "marker";
 
 const SUPPORTED_PSEUDO_ELEMENT = new Set<string>([
   "before",
   "after",
   "placeholder",
   "selection",
+  // The box `walkMarker` generates for an li: its default content is the
+  // compiler's (a bullet, or the item's compile-time ordinal), and this entry is
+  // what lets `li::marker { color: … }` restyle it — the promise the old refusal
+  // message made ("lands with the parts they draw"), kept.
+  "marker",
 ]);
 
 /**
@@ -234,7 +239,17 @@ export type Compound = {
 export type Selector = {
   /** Left-to-right; the last entry is the subject of the selector. */
   compounds: Compound[];
-  pseudo: Pseudo;
+  /**
+   * The interaction pseudo-classes on the subject — **all** of them, because a
+   * compound may name several and the rule then applies only while every one
+   * holds. `:checked:disabled` is the case that made this a list: as a single
+   * slot it kept whichever was written last, so the UA sheet's greyed-out fill
+   * for a disabled *checked* checkbox silently applied to every disabled one,
+   * and a disabled unchecked radio grew a dot. Empty means the rule has no state
+   * condition and contributes to every variant, which is what `"none"` used to
+   * spell.
+   */
+  pseudos: Pseudo[];
   /**
    * The pseudo-element this rule styles, or `null` for the element itself.
    *
@@ -1210,7 +1225,7 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
   // `:root` on its own, which is the only form of it that means anything here.
   // Specificity is a pseudo-class's (0,1,0), as the spec says.
   if (src.trim() === ":root") {
-    return { compounds: [], pseudo: "none", element: null, specificity: [0, 1, 0], root: true };
+    return { compounds: [], pseudos: [], element: null, specificity: [0, 1, 0], root: true };
   }
 
   // `:host` matches the shadow host from inside a shadow tree. dziri has no
@@ -1219,11 +1234,11 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
   // `:root, :host` for its theme block, and refusing half of a selector list
   // would throw away the `:root` half with it.
   if (src.trim() === ":host") {
-    return { compounds: [], pseudo: "none", element: null, specificity: [0, 1, 0], never: true };
+    return { compounds: [], pseudos: [], element: null, specificity: [0, 1, 0], never: true };
   }
 
   const compounds: Compound[] = [];
-  let pseudo: Pseudo = "none";
+  const pseudos: Pseudo[] = [];
   let element: PseudoElement | null = null;
   const spec: [number, number, number] = [0, 0, 0];
 
@@ -1372,10 +1387,10 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
             }
             throw new CssError(
               `unsupported pseudo-element "::${name}".\n` +
-                `  Supported: ::before, ::after, ::placeholder, ::selection, ` +
+                `  Supported: ::before, ::after, ::placeholder, ::selection, ::marker, ` +
                 `::picker(select).\n` +
-                `  The remaining control-specific ones (::picker-icon, ::checkmark, ` +
-                `::marker) are the same machinery and\n` +
+                `  The remaining control-specific ones (::picker-icon, ::checkmark) are ` +
+                `the same machinery and\n` +
                 `  land with the parts they draw.`,
               partAt,
             );
@@ -1453,7 +1468,13 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
             partAt,
           );
         }
-        pseudo = name as Pseudo;
+        // Pushed, not assigned: `:checked:disabled` names two conditions and the
+        // rule holds only while both do. Assignment kept the last one written,
+        // which turned "grey out the disabled checked box" into "grey out every
+        // disabled box" — found by a filled dot on a disabled unchecked radio.
+        // The duplicate spelling `:hover:hover` still counts twice in
+        // specificity, as the spec says, but needs recording only once.
+        if (!pseudos.includes(name as Pseudo)) pseudos.push(name as Pseudo);
         spec[1]++;
       } else {
         compound.tag = token.toLowerCase();
@@ -1464,7 +1485,7 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
     compounds.push(compound);
   }
 
-  return { compounds, pseudo, element, specificity: spec };
+  return { compounds, pseudos, element, specificity: spec };
 }
 
 /**

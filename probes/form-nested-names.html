@@ -1,0 +1,141 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>form-nested-names</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  #stage { position: absolute; left: -9999px }
+</style>
+<h3>does a browser do anything with a nested-looking name?</h3>
+<div id="stage"></div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * dziri is considering `name="user[email]"` — or `user.email` — collapsing into a nested
+   * object. Before designing that, the question is whether it would be *reproducing* a
+   * browser behaviour or *inventing* one, because those two need different amounts of
+   * justification and the answer is usually assumed rather than checked.
+   *
+   * Four things are asked, and each is a claim someone might make from memory:
+   *
+   * 1. **Does `FormData` nest?** The bracket convention is old enough that it feels like
+   *    part of the platform. If `entries()` shows `user` holding an object, dziri should
+   *    match it exactly; if it shows the literal string as a key, dziri would be adding
+   *    something HTML does not have.
+   * 2. **Does the *wire format* nest?** `FormData` is an API, and what a server receives is
+   *    a urlencoded body — a different layer, and the one every server-side parser reads.
+   * 3. **Do the dialects survive intact?** `a[b]`, `a[b][c]`, `a[]`, `a.b`, `a[0]`, and the
+   *    odd ones out — an unclosed `a[b`, a leading `[a]`, an empty `a[][]`. Whatever a
+   *    browser does to these is the constraint on what dziri could parse.
+   * 4. **Is there an enctype for it?** `application/json` was a real W3C proposal for
+   *    exactly this — the vendored MDN prose lists only three enctypes, so it should have
+   *    shipped nowhere. Worth checking rather than trusting the doc, since the doc is prose.
+   */
+
+  const stage = document.getElementById("stage");
+
+  /** The keys `FormData` reports, as authored. */
+  const keys = (form) => [...new FormData(form).keys()].map((k) => JSON.stringify(k)).join(" ");
+
+  /** The urlencoded body a server would receive — the layer a nesting parser reads. */
+  const wire = (form) => new URLSearchParams(new FormData(form)).toString();
+
+  const NAMES = [
+    // The PHP/Rails/qs convention, and the one the JSON-forms proposal used.
+    "user[email]",
+    "user[address][city]",
+    "tags[]",
+    "items[0]",
+    "items[0][qty]",
+    // The dotted convention, which is what a JS author reaches for first.
+    "user.email",
+    "user.address.city",
+    // Malformed, because a parser has to decide and a browser might have normalised already.
+    "user[email",
+    "[email]",
+    "user[]-[]",
+    "a[][]",
+    // A control: an ordinary name, so the rows above are read against something.
+    "email",
+  ];
+
+  log("— what `FormData` reports for each name —");
+  for (const name of NAMES) {
+    stage.innerHTML = `<form><input name="${name}" value="x"></form>`;
+    const form = stage.querySelector("form");
+    log(("  " + name).padEnd(26) + " key " + keys(form).padEnd(28) + " wire " + wire(form));
+  }
+
+  // Two fields whose names *look* like they build one object. If nesting existed anywhere,
+  // this is where it would show: one key holding two values rather than two keys.
+  log("");
+  log("— two names that would merge, if anything merged them —");
+  stage.innerHTML = `<form>
+    <input name="user[email]" value="a@b.co">
+    <input name="user[name]" value="Med">
+  </form>`;
+  {
+    const form = stage.querySelector("form");
+    log("  keys  " + keys(form));
+    log("  wire  " + wire(form));
+    log("  get('user')      " + JSON.stringify(new FormData(form).get("user")));
+    log("  get('user[email]') " + JSON.stringify(new FormData(form).get("user[email]")));
+  }
+
+  // The repeated-bracket convention, which is the one case where a *server* parser really
+  // does build an array. Does the browser do any of that work?
+  log("");
+  log("— the repeated `tags[]` convention —");
+  stage.innerHTML = `<form>
+    <input name="tags[]" value="a">
+    <input name="tags[]" value="b">
+  </form>`;
+  {
+    const form = stage.querySelector("form");
+    log("  keys      " + keys(form));
+    log("  getAll    " + JSON.stringify(new FormData(form).getAll("tags[]")));
+    log("  wire      " + wire(form));
+  }
+
+  // ...and the same shape with a plain name, which is the comparison that matters: if the
+  // brackets change nothing, then `tags[]` and `tags` differ only in the key's spelling.
+  stage.innerHTML = `<form>
+    <input name="tags" value="a">
+    <input name="tags" value="b">
+  </form>`;
+  {
+    const form = stage.querySelector("form");
+    log("  plain `tags` keys   " + keys(form));
+    log("  plain `tags` wire   " + wire(form));
+  }
+
+  // --- is there an enctype for JSON? -----------------------------------------
+  //
+  // `application/json` was a W3C proposal for exactly this transform. The vendored MDN
+  // prose lists three enctypes and not that one, but prose is not a measurement.
+  log("");
+  log("— enctype —");
+  stage.innerHTML = `<form enctype="application/json" method="post"><input name="a" value="1"></form>`;
+  {
+    const form = stage.querySelector("form");
+    log("  authored enctype=application/json -> form.enctype = " + JSON.stringify(form.enctype));
+    log("  and its payload is still            " + wire(form));
+  }
+  for (const enc of ["application/x-www-form-urlencoded", "multipart/form-data", "text/plain"]) {
+    stage.innerHTML = `<form enctype="${enc}" method="post"><input name="a" value="1"></form>`;
+    log(("  " + enc).padEnd(42) + " -> " + JSON.stringify(stage.querySelector("form").enctype));
+  }
+
+  // Does anything else in the platform parse the convention? `URLSearchParams` is what a
+  // server-side JS parser would start from, so if the nesting lived anywhere native, here.
+  log("");
+  log("— does any platform parser nest? —");
+  {
+    const parsed = new URLSearchParams("user[email]=a%40b.co&tags[]=a&tags[]=b");
+    log("  URLSearchParams keys  " + [...parsed.keys()].map((k) => JSON.stringify(k)).join(" "));
+    log("  .get('user')          " + JSON.stringify(parsed.get("user")));
+  }
+
+  report();
+</script>

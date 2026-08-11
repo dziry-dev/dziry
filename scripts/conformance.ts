@@ -57,7 +57,11 @@ const CORPUS: Check[] = [
   { decl: "background: #18181b", field: "bg", prop: "background-color", kind: "color" },
   { decl: "background: rgb(20, 30, 40)", field: "bg", prop: "background-color", kind: "color" },
   { decl: "color: #e4e4e7", field: "fg", prop: "color", kind: "color" },
-  { decl: "border-color: #3f3f46", field: "borderColor", prop: "border-top-color", kind: "color" },
+  { decl: "border-color: #3f3f46", field: "borderTopColor", prop: "border-top-color", kind: "color" },
+  // The side that shares nothing with the first, so a t/r/b/l mix-up shows.
+  { decl: "border-color: #111111 #222222 #333333 #444444", field: "borderLeftColor", prop: "border-left-color", kind: "color" },
+  { decl: "border-right-color: rgb(20, 30, 40)", field: "borderRightColor", prop: "border-right-color", kind: "color" },
+  { decl: "border-inline-color: #3f3f46", field: "borderRightColor", prop: "border-right-color", kind: "color" },
 
   // `color-mix()` against `transparent` is how Tailwind v4 spells every opacity
   // modifier, and the fold in `parseColorMix` rests on one claim: CSS
@@ -83,7 +87,11 @@ const CORPUS: Check[] = [
   // field at all — so bare `border-width: 2px` paints in dziri and paints
   // nothing in a browser. Recorded in BROWSER-FACTS.md; testing the shorthand
   // here keeps this case about width rather than re-reporting that divergence.
-  { decl: "border: 2px solid #3f3f46", field: "borderWidth", prop: "border-top-width", kind: "px" },
+  { decl: "border: 2px solid #3f3f46", field: "borderTopWidth", prop: "border-top-width", kind: "px" },
+  { decl: "border-width: 1px 2px 3px 4px; border-style: solid", field: "borderBottomWidth", prop: "border-bottom-width", kind: "px" },
+  { decl: "border-left-width: 5px; border-left-style: solid", field: "borderLeftWidth", prop: "border-left-width", kind: "px" },
+  // `none` zeroes the width however wide the value says — the side is the style.
+  { decl: "border-width: 8px; border-style: solid none", field: "borderRightWidth", prop: "border-right-width", kind: "px" },
   { decl: "border-radius: 6px", field: "radTL", prop: "border-top-left-radius", kind: "px" },
   // The corner CSS puts last, to pin the shorthand's expansion rather than only its
   // first value — the case the one-field version could not have failed.

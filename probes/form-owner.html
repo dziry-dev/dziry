@@ -1,0 +1,183 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>form-owner</title>
+<style>
+  body { font: 12px ui-monospace, monospace; padding: 16px }
+  #out { white-space: pre; line-height: 1.5 }
+  #stage { display: flex; flex-direction: column; gap: 2px }
+  #stage form, #stage .case { display: inline-flex; gap: 4px }
+  input, button { font: inherit }
+</style>
+<h3>which form owns a control, and where the submitter's entry goes</h3>
+<div id="stage"></div>
+<script type="module">
+  import { log, report } from "./_harness.js";
+
+  /**
+   * Two questions left open by `form-data.html`, both of which dziri now has to answer.
+   *
+   * **The form owner is not the ancestor.** A `form="id"` attribute re-parents a control, and
+   * *for which purposes* is the part worth measuring rather than assuming. The payload is the
+   * obvious one and is already measured. Implicit submission asks two more — which button
+   * Enter clicks, and how many fields block it — and both are counts over "the form's
+   * controls". If ownership feeds those too, then dziri's `resolveForms`, which scans a
+   * subtree, is the wrong shape and not merely incomplete.
+   *
+   * **Where the submitter's entry goes.** The earlier probe measured *that* a named submit
+   * button contributes `name=value` when it is the submitter — in a form where that button
+   * happened to be last, so "at its document position" and "appended at the end" predict the
+   * same table. Here the button precedes the field, which separates them.
+   */
+
+  const stage = document.getElementById("stage");
+  const seen = [];
+
+  const entries = (form, submitter) =>
+    [...new FormData(form, submitter).entries()].map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(" ") ||
+    "(empty)";
+
+  // --- ownership, as the payload sees it -------------------------------------
+  //
+  // No input needed: `new FormData(form)` answers it directly, so these run before the
+  // driven cases below and share the stage by being torn down as they go.
+  log("— ownership, as the payload sees it —");
+
+  const OWNERSHIP = [
+    [
+      "field after the form, form=F",
+      `<form id=F><input name=inner value=1></form><input name=outer value=2 form=F>`,
+    ],
+    [
+      "field before the form, form=F",
+      `<input name=outer value=2 form=F><form id=F><input name=inner value=1></form>`,
+    ],
+    [
+      "field inside G, form=F",
+      `<form id=F><input name=inner value=1></form><form id=G><input name=moved value=2 form=F></form>`,
+    ],
+    ["field inside F, form=F (redundant)", `<form id=F><input name=inner value=1 form=F></form>`],
+    ["field inside F, form=nonexistent", `<form id=F><input name=inner value=1 form=ZZZ></form>`],
+  ];
+
+  for (const [label, markup] of OWNERSHIP) {
+    stage.innerHTML = markup;
+    const f = stage.querySelector("#F");
+    const g = stage.querySelector("#G");
+    log(label.padEnd(34) + " F -> " + entries(f).padEnd(30) + (g ? " G -> " + entries(g) : ""));
+  }
+
+  // --- the submitter's entry, and where it sits ------------------------------
+  log("");
+  log("— the submitter's entry, in a form where its position is decidable —");
+
+  stage.innerHTML = `<form id=F>
+    <button type=submit name=btn value=first>one</button>
+    <input name=a value=x>
+    <button type=submit name=btn value=second>two</button>
+  </form>`;
+  {
+    const form = stage.querySelector("#F");
+    const [first, second] = form.querySelectorAll("button");
+    log("submitter = the first button".padEnd(34) + " -> " + entries(form, first));
+    log("submitter = the last button".padEnd(34) + " -> " + entries(form, second));
+  }
+
+  stage.innerHTML =
+    `<form id=F><input name=a value=x></form>` +
+    `<button type=submit name=btn value=outside form=F>go</button>`;
+  {
+    const form = stage.querySelector("#F");
+    log(
+      "submitter = a button outside it".padEnd(34) +
+        " -> " + entries(form, stage.querySelector("button")),
+    );
+  }
+
+  // --- ownership, as implicit submission sees it -----------------------------
+  //
+  // The half that decides how much dziri has to rebuild, and the half that needs real keys:
+  // a synthetic Enter runs listeners and performs no default action, so implicit submission
+  // is unreachable from page script. Every case is built up front and driven by the runner —
+  // click the field, press Enter — which is the same shape `implicit-submission.html` uses.
+  log("");
+  log("— ownership, as implicit submission sees it —");
+  stage.innerHTML = "";
+
+  const SUBMISSION = [
+    // The control: one field, no button, submits directly. Already measured, here so the
+    // rows below are read against it rather than against a memory of it.
+    ["no button; 1 field in", `<form id=F><input name=a></form>`],
+    // Does a button that is not a descendant become the default button?
+    [
+      "button after the form, form=F",
+      `<form id=F><input name=a></form><button type=submit name=btn value=outside form=F>go</button>`,
+    ],
+    // ...and an unassociated one must not be found, or the rule is "any button on the page".
+    [
+      "button after the form, no form=",
+      `<form id=F><input name=a></form><button type=submit value=stray>go</button>`,
+    ],
+    // Two candidates. "First in tree order" is measured for two descendants; with one of each
+    // it decides whether the order is over the *document* or over the subtree.
+    [
+      "inner button, then outside form=F",
+      `<form id=F><input name=a><button type=submit value=inner>y</button></form>` +
+        `<button type=submit value=outside form=F>x</button>`,
+    ],
+    // Does an associated field count towards "exactly one blocking field"? One inside, one
+    // outside, no button: if both count Enter does nothing; if only the inner one, it submits.
+    ["no button; 1 field in, 1 form=F", `<form id=F><input name=a></form><input name=b form=F>`],
+    // A descendant button whose `form=` points elsewhere — still F's default button?
+    [
+      "inner button, form=G",
+      `<form id=F><input name=a><button type=submit value=defected form=G>go</button></form>` +
+        `<form id=G></form>`,
+    ],
+  ];
+
+  const plan = [];
+  SUBMISSION.forEach(([label, markup], i) => {
+    const wrap = document.createElement("div");
+    wrap.className = "case";
+    // `innerHTML` on a detached div would drop a `form=` reference at parse time, since the
+    // referenced form is in the same fragment — so the wrapper is attached first and the ids
+    // are made unique per case, or six `#F`s would all resolve to the first one.
+    stage.appendChild(wrap);
+    wrap.innerHTML = markup.replaceAll("F", `F${i}`).replaceAll("G", `G${i}`);
+
+    const form = wrap.querySelector(`#F${i}`);
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      seen.push(`submit${e.submitter ? `:${e.submitter.value}` : ""}`);
+    });
+    for (const b of wrap.querySelectorAll("button, input[type=submit]")) {
+      b.addEventListener("click", () => seen.push(`click:${b.value}`));
+    }
+    plan.push([label, form.querySelector("input") ?? wrap.querySelector("input"), form]);
+  });
+
+  const steps = [];
+  const labels = [];
+  plan.forEach(([, field], i) => {
+    const r = field.getBoundingClientRect();
+    steps.push({ x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), down: 1, up: 1 });
+    labels.push(null);
+    steps.push({ key: "Enter" });
+    labels.push(i);
+  });
+
+  window.__probeMouse = steps;
+  window.__probeStep = (n) => {
+    const i = labels[n];
+    if (i === null || i === undefined) return;
+    const [label, , form] = plan[i];
+    // The payload beside the outcome, because "it submitted" and "it submitted *this*" are
+    // different findings and the associated field's entry is the second one.
+    log(label.padEnd(34) + " Enter -> " + (seen.join(", ") || "nothing").padEnd(28) +
+      " payload " + entries(form));
+    seen.length = 0;
+  };
+  window.__probeMouseDone = () => report();
+
+  document.title = "ready";
+</script>

@@ -1,0 +1,66 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>viewport-default-scroll</title>
+<style>#out{font:12px ui-monospace,monospace;white-space:pre;line-height:1.5}</style>
+<h3>does an unstyled page scroll, and what do overflow values on html/body do to the viewport?</h3>
+<script type="module">
+  import { log, frame, mount, report } from "./_harness.js";
+
+  const html = document.documentElement;
+  const body = document.body;
+
+  // Three observables per case, because no single one answers the question:
+  //   gutter    innerWidth - html.clientWidth. >0 means the viewport reserved a
+  //             classic scrollbar, which is the visible half of "user-scrollable".
+  //   scrollTo  scrollY after scrollTo(0,150). Moves for auto/scroll AND for
+  //             hidden — hidden is still a scroll container, only user scrolling
+  //             is off — so this alone cannot answer "does the wheel work".
+  //   computed  getComputedStyle overflow-y of html and body, to pin down that
+  //             propagation to the viewport does NOT change the computed values.
+  async function probe(name, htmlOverflow, bodyOverflow, tall) {
+    html.style.overflow = htmlOverflow ?? "";
+    body.style.overflow = bodyOverflow ?? "";
+    mount(tall ? '<div style="height:3000px"></div>' : "");
+    await frame();
+
+    const gutter = innerWidth - html.clientWidth;
+    scrollTo(0, 150);
+    await frame();
+    const scrolled = scrollY;
+
+    log(
+      name.padEnd(38) +
+        " gutter=" + String(gutter).padEnd(4) +
+        " scrollTo->" + String(scrolled).padEnd(5) +
+        " html=" + getComputedStyle(html).overflowY.padEnd(9) +
+        " body=" + getComputedStyle(body).overflowY,
+    );
+
+    scrollTo(0, 0);
+    await frame();
+  }
+
+  log("=== tall content (3000px), nothing else styled ===");
+  await probe("unstyled", null, null, true);
+  await probe("html overflow:visible (explicit)", "visible", null, true);
+  await probe("body overflow:visible (explicit)", null, "visible", true);
+
+  log("");
+  log("=== hidden, and where it lands ===");
+  await probe("html overflow:hidden", "hidden", null, true);
+  await probe("body overflow:hidden (html unset)", null, "hidden", true);
+  await probe("body hidden, html auto", "auto", "hidden", true);
+
+  log("");
+  log("=== clip ===");
+  await probe("html overflow:clip", "clip", null, true);
+
+  log("");
+  log("=== content that fits ===");
+  await probe("unstyled, short content", null, null, false);
+
+  log("");
+  log("scrollingElement = " + (document.scrollingElement === html ? "html" : "body"));
+
+  report();
+</script>

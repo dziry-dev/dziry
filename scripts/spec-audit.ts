@@ -30,8 +30,14 @@ const SPEC = cssProperties as unknown as Record<string, Spec>;
 const PROPERTY: Record<string, string> = {
   bg: "background-color",
   fg: "color",
-  borderColor: "border-top-color",
-  borderWidth: "border-top-width",
+  borderTopColor: "border-top-color",
+  borderRightColor: "border-right-color",
+  borderBottomColor: "border-bottom-color",
+  borderLeftColor: "border-left-color",
+  borderTopWidth: "border-top-width",
+  borderRightWidth: "border-right-width",
+  borderBottomWidth: "border-bottom-width",
+  borderLeftWidth: "border-left-width",
   radius: "border-top-left-radius",
   padT: "padding-top",
   padR: "padding-right",
@@ -78,6 +84,14 @@ const PROPERTY: Record<string, string> = {
   overflowY: "overflow-y",
   accentColor: "accent-color",
   caretColor: "caret-color",
+  outlineColor: "outline-color",
+  outlineWidth: "outline-width",
+  outlineOffset: "outline-offset",
+  decorationLine: "text-decoration-line",
+  decorationColor: "text-decoration-color",
+  decorationStyle: "text-decoration-style",
+  decorationThickness: "text-decoration-thickness",
+  underlineOffset: "text-underline-offset",
   appearance: "appearance",
   opacity: "opacity",
   // The decomposed transform. Only the fields that correspond to a whole CSS
@@ -91,6 +105,18 @@ const PROPERTY: Record<string, string> = {
   originPctX: "transform-origin",
   originPctY: "transform-origin",
 };
+
+/** Shared by the four border width fields — see DELIBERATE. */
+const BORDER_WIDTH_REASON =
+  "spec `medium` (3px); dziri 0 — with no `border-style` field, style is always `none`, " +
+  "and a none-border computes to width 0. Revisit if border-style lands.";
+
+/** Shared by the four border colour fields — see DELIBERATE. */
+const BORDER_COLOR_REASON =
+  "spec `currentcolor`; dziri alpha-0 — the table-wide convention for \"nothing was said\" " +
+  "(scrollbar-color, accent-color and caret-color spell auto the same way). The live " +
+  "currentcolor fallback is unimplemented, and BROWSER-FACTS.md (\"An omitted border colour " +
+  "is currentcolor, not transparent\") records what implementing it would have to do.";
 
 /**
  * Divergences that are decisions, each with where the reasoning lives. Listed
@@ -111,9 +137,31 @@ const DELIBERATE: Record<string, string> = {
   gridRowSpan: "not grid-row-end; dziri stores a span, not a line",
   gridCols: "0 means no explicit tracks; the spec's `none` has no numeric equivalent",
   gridRows: "0 means no explicit tracks; the spec's `none` has no numeric equivalent",
-  borderWidth:
-    "spec `medium` (3px); dziri 0 — with no `border-style` field, style is always `none`, " +
-    "and a none-border computes to width 0. Revisit if border-style lands.",
+  borderTopWidth: BORDER_WIDTH_REASON,
+  borderRightWidth: BORDER_WIDTH_REASON,
+  borderBottomWidth: BORDER_WIDTH_REASON,
+  borderLeftWidth: BORDER_WIDTH_REASON,
+  borderTopColor: BORDER_COLOR_REASON,
+  borderRightColor: BORDER_COLOR_REASON,
+  borderBottomColor: BORDER_COLOR_REASON,
+  borderLeftColor: BORDER_COLOR_REASON,
+  outlineColor:
+    "spec `invert` (Chrome computes `currentcolor`); dziri alpha-0 — the \"nothing was said\" " +
+    "convention, and the live currentcolor fallback is the same unimplemented piece the " +
+    "border colours record",
+  outlineWidth:
+    "spec `medium` (3px); dziri 0 — no `outline-style` field, so style is always `none` " +
+    "and a none-outline computes to width 0, as with the border widths",
+  decorationColor:
+    "spec `currentcolor`; dziri alpha-0 — and unlike the border colours this one *is* " +
+    "implemented: paint resolves alpha-0 to the run's own fg",
+  decorationLine:
+    "spec says NOT inherited; dziri inherits — CSS propagates decorations to inline " +
+    "descendants and dziri's text runs are separate nodes, so inheritance is how " +
+    "`underline` reaches the text. It also crosses block boundaries, which CSS stops at",
+  decorationStyle: "spec `solid`; dziri 0 — 0 *is* solid in the schema's encoding",
+  decorationThickness: "spec `auto`; dziri 0 — 0 means auto (the font's own metric)",
+  underlineOffset: "spec `auto`; dziri NaN — the table's \"nothing was said\" for lengths",
   // The transform is stored decomposed, so its initial `none` has to be spelled
   // as whatever each component's *identity* is — and for a scale that is 1, not
   // 0. A literal reading of the spec value here would mean every untransformed
@@ -124,6 +172,22 @@ const DELIBERATE: Record<string, string> = {
   // which this stores as the fraction 0.5 per axis.
   originPctX: "spec `50% 50%`; dziri 0.5 — stored as a fraction, and per axis",
   originPctY: "spec `50% 50%`; dziri 0.5 — same",
+};
+
+/**
+ * Inheritance flags that differ from the spec on purpose, with why.
+ *
+ * `DELIBERATE` covers initial values only; it cannot excuse an inheritance flag,
+ * and the decoration fields needed one — the spec's "not inherited" is paired
+ * with *propagation to inline descendants*, and dziri's text runs are separate
+ * nodes, so inheritance is the mechanism that reaches them.
+ */
+const DELIBERATE_INHERIT: Record<string, string> = {
+  decorationLine: "propagates to inlines per spec; dziri's text runs are separate nodes",
+  decorationColor: "same — the colour follows the line",
+  decorationStyle: "same",
+  decorationThickness: "same",
+  underlineOffset: "same",
 };
 
 /**
@@ -202,9 +266,14 @@ for (const [field] of STYLE_FIELDS as unknown as [string][]) {
   const initialOk = Array.isArray(spec.initial) ? true : agrees(field, dziriInitial, spec.initial);
 
   if (!inheritOk) {
-    problems.push(
-      `${field.padEnd(14)} ${prop.padEnd(22)} inheritance: spec says ${spec.inherited}, dziri says ${dziriInherits}`,
-    );
+    const why = DELIBERATE_INHERIT[field];
+    if (why) {
+      known.push(`${field.padEnd(14)} inheritance: spec ${spec.inherited}, dziri ${dziriInherits} — ${why}`);
+    } else {
+      problems.push(
+        `${field.padEnd(14)} ${prop.padEnd(22)} inheritance: spec says ${spec.inherited}, dziri says ${dziriInherits}`,
+      );
+    }
     continue;
   }
   if (initialOk) {

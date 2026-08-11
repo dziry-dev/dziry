@@ -19,6 +19,7 @@
 
 use sdl3::event::{Event as SdlEvent, EventWatch, EventWatchCallback, WindowEvent};
 use sdl3::keyboard::Mod;
+use sdl3::messagebox::{show_simple_message_box, MessageBoxFlag};
 use sdl3::mouse::MouseButton;
 use sdl3::pixels::{Color as SdlColor, PixelFormat};
 use sdl3::rect::Rect;
@@ -322,6 +323,35 @@ impl Window {
 
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// Shows a native modal message box, parented to this window, and **blocks until it is
+    /// dismissed**.
+    ///
+    /// `SDL_ShowSimpleMessageBox`, which is already linked — there is nothing to add and
+    /// nothing to vendor. Every platform's own dialog: a Win32 task dialog, an `NSAlert`, the
+    /// GTK/portal box on Linux. That matters beyond convenience, because a dialog drawn *by
+    /// dziri* would be the one part of the app that does not look like the system.
+    ///
+    /// **It blocks the thread it is called on**, which is the engine thread, so the window
+    /// does not repaint while the box is up. That is what a modal is; a browser's `alert()`
+    /// stops the page the same way. It is safe here for the reason it is safe there: SDL's box
+    /// runs the platform's own modal loop, so the dialog itself stays responsive.
+    ///
+    /// Called from the thread that initialised video, which is required — SDL's own docs say
+    /// a message box may only be shown from the thread that set up the video subsystem, and
+    /// the handle guard already pins every call to that thread.
+    pub fn alert(&self, level: u32, title: &str, message: &str) -> Result<(), EngineError> {
+        // Anything that is not a known level is information rather than an error: a wrong
+        // integer from across the boundary should not turn a notice into an alarm.
+        let flags = match level {
+            1 => MessageBoxFlag::WARNING,
+            2 => MessageBoxFlag::ERROR,
+            _ => MessageBoxFlag::INFORMATION,
+        };
+
+        show_simple_message_box(flags, title, message, self.canvas.window())
+            .map_err(|e| EngineError::sdl(format!("SDL_ShowSimpleMessageBox: {e}")))
     }
 
     /// The window's size in *pixels*, which is not its size in points on a HiDPI

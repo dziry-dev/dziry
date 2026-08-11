@@ -19,11 +19,14 @@
  *
  * ## Adding to this file
  *
- * Only add what `html-coverage` reports, and re-run it afterwards — the count is
- * the review. Rules are grouped by the finding that justifies them so a reader
- * can trace any line back to a measurement rather than to taste. Values come from
- * Chrome's computed output as reported by that tool, not from memory or from
- * another browser's sheet.
+ * Only add what a measurement justifies, and name the measurement. Most rules
+ * come from `html-coverage` — re-run it afterwards, the count is the review. The
+ * control-appearance block instead cites `probes/control-metrics.html` via
+ * BROWSER-FACTS.md, because what a UA-drawn tick looks like is not a computed
+ * style any tool can diff. Either way a reader can trace any line back to a
+ * measurement rather than to taste; nothing here comes from memory or from
+ * another browser's sheet, and the handful of values no API exposes are marked
+ * as stated conventions where they sit.
  *
  * Properties dziri has no field for yet cannot be set here at all. As of
  * 2026-08-01 that blocks 17 findings across four properties — `font-style`,
@@ -56,6 +59,39 @@ h3 { font-weight: 700; font-size: 18.72px; margin-block-start: 18.72px;   margin
 h4 { font-weight: 700;                     margin-block-start: 21.28px;   margin-block-end: 21.28px }
 h5 { font-weight: 700; font-size: 13.28px; margin-block-start: 22.1776px; margin-block-end: 22.1776px }
 h6 { font-weight: 700; font-size: 10.72px; margin-block-start: 24.9776px; margin-block-end: 24.9776px }
+
+/* Text-level semantics and block spacing — every value below is html-coverage's
+   Chrome column, 2026-08-10. What is still blocked on STYLE_FIELDS: a/u/ins/del/s
+   want text-decoration-line and li wants list-style-type. Those stay in the
+   differ table rather than being half-written here.
+
+   16px margins written as px, not 1em, for the reason the headings' are: em
+   resolves against the root in css.ts, which happens to be right at the default
+   font size and wrong the moment a root size becomes settable. */
+b, strong { font-weight: 700 }
+small, sub, sup { font-size: 13.3333px }
+
+/* The two fields protocol v26 added, at their Chrome defaults. monospace is a
+   generic the engine resolves to one platform face at startup; italic is a slant
+   the face provides or the platform synthesizes. No font-size here on purpose:
+   the "monospace shrinks to 13px" lore did not survive measurement —
+   html-coverage reports only the family differing for these elements. (And no
+   backticks in this comment: the sheet is a template literal. Third build this
+   has cost.) */
+i, em, cite, dfn, var, address { font-style: italic }
+code, kbd, samp, pre { font-family: monospace }
+
+p, blockquote, dl, figure, pre { margin-block-start: 16px; margin-block-end: 16px }
+hr { margin-block-start: 8px; margin-block-end: 8px }
+
+ul, ol, menu {
+  margin-block-start: 16px;
+  margin-block-end: 16px;
+  padding-inline-start: 40px;
+}
+
+fieldset { padding-inline-start: 12px }
+dialog { padding-inline-start: 16px }
 
 /* Form controls — structure, not appearance.
 
@@ -102,16 +138,230 @@ h6 { font-weight: 700; font-size: 10.72px; margin-block-start: 24.9776px; margin
    sizing against a floor, which is min-inline-size, and dziri has the field but no
    percentage or anchor-size value to put in it.
 
-   Appearance — the picker's background and border, radii, the tick on a checkbox —
-   is deliberately absent. That is a decision about how dziri's controls look, it
-   belongs in a theme rather than in the sheet that makes elements behave like
-   themselves, and html-coverage has nothing to say about it. */
+   Appearance — the picker's background and border, the tick on a checkbox — used
+   to be deliberately absent here, on the grounds that it belonged in a theme. The
+   unstyled demo window (windows/plain) refuted that by rendering: a checkbox that
+   draws nothing is not "unthemed", it is indistinguishable from missing, and a
+   browser's controls look like controls with no stylesheet anywhere. The
+   appearance block further down is the correction. */
 select::picker(select) { position: absolute; left: 0; right: 0 }
 
 /* Chrome's sheet gives the picker's button no border of its own; the border
    belongs to the select. Stated so an author styling select does not get a
-   doubled edge they never asked for. */
-select button { border-width: 0 }
+   doubled edge they never asked for.
+
+   The background and padding joined the border when buttons gained a default
+   appearance below: a select's internal button is structure, and without this
+   reset every select would wear a grey pill inside its own border. Same-origin,
+   higher specificity, so it wins over the button rule without leaving UA. */
+select button {
+  border-width: 0;
+  background-color: transparent;
+  padding: 0;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* The arrow that says "this opens". Chromium draws a triangle as part of the
+   native widget, so there is no glyph or colour to measure — U+25BE at a 4px
+   offset is a stated convention, drawn the way app.css draws its own: an ::after
+   box on the internal button, which an author's select button::after replaces. */
+select button::after { content: "\\25BE"; padding-left: 4px }
+
+/* Form controls — appearance.
+
+   This paragraph used to say appearance was deliberately absent and belonged in a
+   theme. That was wrong in exactly the way the unstyled demo window made visible:
+   a browser's unstyled checkbox is still a checkbox — box, border, tick — and a
+   control that draws nothing reads as broken, not as unthemed. What belongs in a
+   theme is a *different* look, not the existence of one.
+
+   Values are Chromium 151's, measured in probes/control-metrics.html and recorded
+   in BROWSER-FACTS.md ("What box each form control gets from the UA sheet"),
+   with three approximations, each forced by a missing field and stated here:
+
+   - border-style does not exist, so Chrome's "2px inset" and "2px outset" become
+     solid at the same width. The colour of an inset edge is not a computed value
+     anywhere, so #767676 — Chromium's control grey — is a stated convention.
+   - font-family does not exist, so controls keep the page font where Chrome
+     switches them to Arial. The 13.3333px size is real and kept: it is most of
+     why an unstyled form reads smaller than the text around it.
+   - The tick and the dot have no DOM ("read off pixels", same entry): the tick is
+     a glyph on a generated box, the dot an empty circle at 6px of 13 — inside the
+     measured 45-50% — both centred by the flex rules, exactly as a theme would.
+
+   The accent is #3390ff, the same stated convention the focus ring and
+   ::selection use, because Chrome's own accent computes to auto and cannot be
+   read. One invented colour in this file, used three times, stays one thing to
+   keep in step.
+
+   A field's measured width is a function of size= and the font (29 + 7 x size at
+   Chrome's 13.3333px Arial), which a sheet cannot express — 169px is that formula
+   at the default size="20", a constant standing in for a rule. */
+input {
+  width: 169px;
+  border-width: 2px;
+  border-color: #767676;
+  padding-top: 1px; padding-bottom: 1px;
+  padding-left: 2px; padding-right: 2px;
+  background-color: #ffffff;
+  font-size: 13.3333px;
+}
+
+input[type="hidden"] { display: none }
+
+textarea {
+  width: 162px;
+  border-width: 1px;
+  border-color: #767676;
+  padding: 2px;
+  background-color: #ffffff;
+  font-size: 13.3333px;
+}
+
+select {
+  border-width: 1px;
+  border-color: #767676;
+  background-color: #ffffff;
+  font-size: 13.3333px;
+}
+
+button, input[type="submit"], input[type="reset"], input[type="button"] {
+  width: auto;
+  border-width: 2px;
+  border-color: #767676;
+  padding-top: 1px; padding-bottom: 1px;
+  padding-left: 6px; padding-right: 6px;
+  background-color: #f0f0f0;
+  font-size: 13.3333px;
+}
+
+/* Two approximations of inline flow, which dziri does not have.
+
+   A label computes display:inline in Chrome, so a checkbox and its words share a
+   line; dziri's default box is a column, which stacked every label's control on
+   top of its own caption. A row that centres its items is the nearest true
+   thing, and it is what every hand-written form was already doing (app.css ROW).
+
+   A select and a button are inline-blocks: they shrink to their content where a
+   column's stretch makes them page-wide bars. dziri has no fit-content width, so
+   align-self:flex-start is the spelling that stops the stretch — in a row parent
+   it top-aligns instead, which is roughly where a baseline would put them. An
+   author's own align-self or width wins on origin, like everything here. */
+label { flex-direction: row; align-items: center }
+button, select { align-self: flex-start }
+
+/* 13x13 with a 3px margin, measured; the radio's missing margin-bottom is
+   Chrome's own quirk, kept because matching it is cheaper than remembering why
+   we did not. The border is the box: unchecked draws grey, checked accent. */
+input[type="checkbox"], input[type="radio"] {
+  width: 13px;
+  height: 13px;
+  margin: 3px;
+  border-width: 2px;
+  border-color: #767676;
+  padding: 0;
+  background-color: transparent;
+  justify-content: center;
+  align-items: center;
+}
+input[type="radio"] { border-radius: 9999px; margin-bottom: 0 }
+input[type="checkbox"] { border-radius: 2px }
+
+/* The tick: present but transparent until :checked, so checking changes two
+   colours and no geometry — the same reason app.css draws it this way. */
+input[type="checkbox"]::before {
+  content: "\\2713";
+  color: transparent;
+  font-size: 9px;
+  font-weight: 700;
+}
+input[type="checkbox"]:checked {
+  background-color: #3390ff;
+  border-color: #3390ff;
+}
+input[type="checkbox"]:checked::before { color: #ffffff }
+
+/* The dot: an empty box with a radius rather than a glyph, because a glyph sits
+   on a baseline and a box sits where flex centres it. 6 of 13px is 46%. */
+input[type="radio"]::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background-color: transparent;
+}
+input[type="radio"]:checked { border-color: #3390ff }
+input[type="radio"]:checked::before { background-color: #3390ff }
+
+/* The picker floats over the page, so it cannot be transparent: options drawn
+   straight onto whatever is beneath are unreadable, which is worse than any
+   colour choice. White with the control grey, and the focused option carries
+   the accent — that highlight is the engine's own pending-choice state, and
+   without a colour it is invisible. */
+select::picker(select) {
+  background-color: #ffffff;
+  border-width: 1px;
+  border-color: #767676;
+}
+option:focus {
+  background-color: #3390ff;
+  color: #ffffff;
+}
+
+/* :disabled, exactly as measured — probes/disabled-control-styles.html, recorded
+   in BROWSER-FACTS.md. Two shapes worth noticing, both verbatim from Chromium:
+   button and the text fields grey out with *alpha* colours, so a disabled field
+   over a dark card darkens with the card instead of going pastel; a select keeps
+   its white background and instead fades the whole element to 0.7 opacity with
+   its own darker grey. A disabled option computes no change at all, so there is
+   deliberately no rule for it. */
+button:disabled, input[type="submit"]:disabled, input[type="reset"]:disabled,
+input[type="button"]:disabled {
+  color: rgba(16, 16, 16, 0.3);
+  background-color: rgba(239, 239, 239, 0.3);
+  border-color: rgba(118, 118, 118, 0.3);
+}
+
+input:disabled, textarea:disabled {
+  color: #545454;
+  background-color: rgba(239, 239, 239, 0.3);
+  border-color: rgba(118, 118, 118, 0.3);
+}
+
+/* The border grey is measured; extending it to the checked fill is the sheet's
+   own call, because a disabled checked box's fill is painted like the tick and
+   computes nothing. Grey fill under the white tick reads as "chosen, but off",
+   which is the meaning being drawn. */
+input[type="checkbox"]:disabled, input[type="radio"]:disabled {
+  background-color: transparent;
+  border-color: #545454;
+}
+input[type="checkbox"]:checked:disabled {
+  background-color: #545454;
+  border-color: #545454;
+}
+input[type="radio"]:checked:disabled::before { background-color: #545454 }
+
+select:disabled {
+  color: #6d6d6d;
+  border-color: rgba(118, 118, 118, 0.3);
+  opacity: 0.7;
+}
+
+/* A list box's *selection*, as opposed to its focus. Without this, an unstyled
+   multiple-select is a working control that looks broken in a specific, misleading
+   way: ctrl+click builds a set the engine tracks correctly, but the only visible
+   highlight is the single focus bar — so it reads as "can only select one". The
+   selection is :checked on each chosen option, drawn here so every member of the
+   set shows. Scoped to the listbox attribute because a dropdown's committed option
+   also carries :checked, and painting it in the picker would show two bars — the
+   focus the arrows move plus a phantom — where Chromium shows one. */
+select[data-dziri-listbox] option:checked {
+  background-color: #3390ff;
+  color: #ffffff;
+}
 
 /* A list box: a select with multiple, or with a size above one.
 

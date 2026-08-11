@@ -40,6 +40,33 @@ export type Element = {
   /** `<form>` only. Runs on Enter in a field, and on a click of the submit button. */
   onSubmit: unknown;
   /**
+   * `<form>` only. Runs instead of `onSubmit` when [`validate`] rejected the payload.
+   *
+   * Optional rather than nullable, unlike the four handlers above it, because it arrived
+   * later and the alternative was editing every hand-built `Element` literal in the
+   * compiler to say `onInvalid: null`. The walk tests it with `??`, so the two spellings
+   * behave identically.
+   */
+  onInvalid?: unknown;
+  /**
+   * `<form>` only. The schema or predicate its payload is checked against.
+   *
+   * Held as `unknown` all the way to the runtime, which decides what it is by shape. That
+   * is not laziness: typing it would mean naming Zod, Valibot, ArkType and Effect here, and
+   * the whole point of the Standard Schema interop spec is that a consumer names none of
+   * them. See `src/runtime/forms.ts`.
+   */
+  validate?: unknown;
+  /**
+   * Classes this `field` wrapper wears while it has a validation error.
+   *
+   * Its own field rather than an entry in [`attrs`] because it is a *class list*, like
+   * `class` and `className` — and because `kebab("errorClassName")` is `error-class-name`,
+   * which is neither a name to write in an `.html` document nor a value a selector should
+   * be able to test.
+   */
+  errorClassName?: string;
+  /**
    * Props that held a signal and were dropped, by name.
    *
    * Only the JSX front end can produce these — HTML attributes are always strings — and
@@ -287,6 +314,9 @@ export function parseHtml(src: string): Element {
       onFocus: attrs.get("onfocus") ?? null,
       onBlur: attrs.get("onblur") ?? null,
       onSubmit: attrs.get("onsubmit") ?? null,
+      // An `.html` document names its handler; there is no `validate` spelling for one,
+      // because a schema is an object and an attribute holds text.
+      ...(attrs.has("oninvalid") ? { onInvalid: attrs.get("oninvalid") } : {}),
       classWhen: null,
       bindValue: null,
       style: attrs.get("style") ?? null,

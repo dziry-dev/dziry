@@ -1000,6 +1000,19 @@ impl Engine {
         }
     }
 
+    /// Shows a native modal message box and blocks until it is dismissed.
+    ///
+    /// Headless is a **no-op rather than an error**, and that is the interesting decision:
+    /// every golden scenario and every screenshot runs with no window, so a form handler that
+    /// ends in `alert("saved")` would otherwise fail the build's own harness rather than the
+    /// app. A notice nobody can see is not a failure — there is nobody to notify.
+    pub fn alert(&self, level: u32, title: &str, message: &str) -> Result<(), EngineError> {
+        match self.window.as_ref() {
+            Some(window) => window.alert(level, title, message),
+            None => Ok(()),
+        }
+    }
+
     fn present(&mut self) -> Result<(), EngineError> {
         if self.window.is_none() {
             return Ok(());

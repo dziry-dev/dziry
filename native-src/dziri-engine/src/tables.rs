@@ -927,8 +927,8 @@ mod tests {
         // the classification is per-field rather than per-table: recolouring a
         // border is finished when `commit` copies the bytes, while *widening* it
         // moves every descendant, because `style_of` reserves it in Taffy's box.
-        assert!(!protocol::styles::LAYOUT_AFFECTING[protocol::styles::BORDER_COLOR]);
-        assert!(protocol::styles::LAYOUT_AFFECTING[protocol::styles::BORDER_WIDTH]);
+        assert!(!protocol::styles::LAYOUT_AFFECTING[protocol::styles::BORDER_TOP_COLOR]);
+        assert!(protocol::styles::LAYOUT_AFFECTING[protocol::styles::BORDER_TOP_WIDTH]);
         // Not because Taffy reads it — it does not — but because the measure
         // callback does.
         assert!(protocol::styles::LAYOUT_AFFECTING[protocol::styles::FONT_SIZE]);

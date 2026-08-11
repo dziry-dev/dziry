@@ -17,8 +17,8 @@
 import { findRow } from "../find-row.ts";
 import type { CompiledUi } from "../ir.ts";
 import type { ItemPath } from "../compiler/item-path.ts";
-import { ControlKind } from "../protocol/generated.ts";
-import { Dirty } from "./bindings.ts";
+import { ControlFlags, ControlKind } from "../protocol/generated.ts";
+import { Dirty, editText, type Erase } from "./bindings.ts";
 import { batch, type ReadonlySignal } from "./signal.ts";
 
 /**
@@ -63,6 +63,18 @@ export type ItemHandlerRef = {
   fn: (item: never, index: number, value?: unknown) => void;
 };
 
+/**
+ * A `bind:value` inside a row, pointed at the row's own property.
+ *
+ * The only two-way binding with no signal behind it, because a row does not have one: the
+ * array is the state, and `path` says which property of an item this element edits. Typing
+ * therefore replaces the item — see [`typeIntoRow`].
+ */
+export type ItemEditableRef = {
+  offset: number;
+  path: ItemPath;
+};
+
 export type ListBindingRef = {
   list: number;
   signal: ReadonlySignal<unknown[]>;
@@ -71,6 +83,7 @@ export type ListBindingRef = {
   slotsPerItem: number;
   bindings: ItemBindingRef[];
   itemHandlers: ItemHandlerRef[];
+  itemEditables: ItemEditableRef[];
   /** Which data index each slot currently renders, set by `updateList`. */
   slotData?: Int32Array;
 };
@@ -182,17 +195,6 @@ function growArena(ui: CompiledUi, ref: ListBindingRef, needed: number): void {
       // points inside its own item subtree — a label beside a checkbox in the same
       // row — so copying it unshifted would make every replica operate item 0's
       // control. `-1` stays `-1`.
-      //
-      // **The controls table is still not extended here, and that is now a real gap
-      // rather than a deferred one.** This comment used to say a control in a list row
-      // was unemitted; the compiler emits one control row per replica now
-      // (`replicateListControls`), so a control inside a list works — up to the
-      // *compiled* capacity. Past it, growth appends rows that are not controls, are not
-      // tab stops, and emit no `CHANGE`.
-      //
-      // Filling it is a table append plus a re-sort of `ui.controls` and the same for
-      // `ui.tabStops`, and it also needs the engine's `control_capacity` to grow, which
-      // is why it is not a two-line change here. Named in ROADMAP A3.
       nodes.activates[dst] = nodes.activates[src]! === -1 ? -1 : nodes.activates[src]! + shift;
     }
 
@@ -241,12 +243,108 @@ function growArena(ui: CompiledUi, ref: ListBindingRef, needed: number): void {
     ui.interactive = extra;
   }
 
+  growControls(ui, oldStart, stride, newStart, capacity);
+  growTabStops(ui, oldStart, stride, newStart, capacity);
+
   lists.arenaStart[ref.list] = newStart;
   lists.capacity[ref.list] = capacity;
   ref.slotStart = slotStart;
 
   // Slot identity is meaningless in a new arena; every item is reassigned below.
   slotKeys.delete(ref);
+}
+
+/**
+ * Gives a regrown arena the control rows its template has.
+ *
+ * The compiler does this once for the compiled capacity (`replicateListControls`); this is
+ * the same operation for the slots growth appends, and without it the ninth row of a
+ * capacity-8 list is a box that draws, refuses focus and emits no `CHANGE` — a form row you
+ * can see and cannot fill. That was the last thing standing between a list and a *form*
+ * list, since an author adding rows has no way to know where the compiled capacity fell.
+ *
+ * **Appending keeps the table sorted**, which is the property the engine's binary search
+ * needs: growth allocates past `nodes.count`, so every new node id is larger than every
+ * existing one. The stale rows of the abandoned arena stay behind and stay sorted; they name
+ * nodes nothing links to, so they are unreachable rather than wrong.
+ *
+ * `flags` deliberately keeps only `DISABLED`. A fresh slot has never been interacted with, so
+ * copying `CHECKED` off the template would tick every checkbox in every new row — and
+ * `DISABLED` is markup, which every replica does share.
+ */
+function growControls(
+  ui: CompiledUi,
+  oldStart: number,
+  stride: number,
+  newStart: number,
+  capacity: number,
+): void {
+  const { controls } = ui;
+  const template: number[] = [];
+  for (let r = 0; r < controls.count; r++) {
+    const node = controls.node[r]!;
+    if (node >= oldStart && node < oldStart + stride) template.push(r);
+  }
+  if (template.length === 0) return;
+
+  const added = capacity * template.length;
+  const count = controls.count + added;
+
+  const node = growI32(controls.node, count);
+  const kind = growU8(controls.kind, count);
+  const group = growI32(controls.group, count);
+  const flags = growU8(controls.flags, count);
+  const label = growI32(controls.label, count);
+  const rows = growI32(controls.rows, count);
+
+  let at = controls.count;
+  for (let item = 0; item < capacity; item++) {
+    const shift = newStart + item * stride - oldStart;
+    for (const r of template) {
+      node[at] = controls.node[r]! + shift;
+      kind[at] = controls.kind[r]!;
+      // A radio group is `(form, name)` and every row shares both, so a new replica joins
+      // the group its template is in — which is what makes one row's radio clear the others'.
+      group[at] = controls.group[r]!;
+      flags[at] = controls.flags[r]! & ControlFlags.DISABLED;
+      // Inside the item subtree, so it shifts. A label pointing outside the arena would be
+      // a control in a row labelled by static text, which the compiler does not produce.
+      label[at] = controls.label[r]! === -1 ? -1 : controls.label[r]! + shift;
+      rows[at] = controls.rows[r]!;
+      at++;
+    }
+  }
+
+  controls.node = node;
+  controls.kind = kind;
+  controls.group = group;
+  controls.flags = flags;
+  controls.label = label;
+  controls.rows = rows;
+  controls.count = count;
+}
+
+/** The same append for Tab's reachable set, which is a sorted array rather than a table. */
+function growTabStops(
+  ui: CompiledUi,
+  oldStart: number,
+  stride: number,
+  newStart: number,
+  capacity: number,
+): void {
+  const offsets: number[] = [];
+  for (const stop of ui.tabStops) {
+    if (stop >= oldStart && stop < oldStart + stride) offsets.push(stop - oldStart);
+  }
+  if (offsets.length === 0) return;
+
+  const next = new Int32Array(ui.tabStops.length + capacity * offsets.length);
+  next.set(ui.tabStops);
+  let at = ui.tabStops.length;
+  for (let item = 0; item < capacity; item++) {
+    for (const offset of offsets) next[at++] = newStart + item * stride + offset;
+  }
+  ui.tabStops = next;
 }
 
 /**
@@ -488,6 +586,70 @@ export function dispatchItemChange(
 
   batch(() => handler.fn(row.item as never, row.index, value));
   return true;
+}
+
+/**
+ * Routes a keystroke into a `bind:value` inside a list row.
+ *
+ * Tried before [`typeInto`], and it has to be: a row's element is in an arena, so it is in
+ * no `editables` table at all — the compiler lifted the binding into the list the same way
+ * it lifts a row's handlers. Returning false means "not a row of mine", which is what lets
+ * the host fall through to the ordinary signal-backed path.
+ *
+ * **The write is a whole new item, not a mutation.** A signal compares with `Object.is`, so
+ * editing `items[i].title` in place would leave the array identical to itself and publish
+ * nothing: the row would keep the text it had, and only the caret would move. Replacing the
+ * item — and the array — is what makes an ordinary `signal.set` propagate, which is also
+ * what re-renders the row's slot through the path it was already bound by.
+ */
+export function typeIntoRow(
+  ui: CompiledUi,
+  refs: ListBindingRef[],
+  node: number,
+  input: { text: string | null; erase?: Erase; caret?: number; anchor?: number },
+): boolean {
+  const row = rowOf(ui, refs, node);
+  if (!row) return false;
+
+  const target = row.ref.itemEditables.find((e) => e.offset === row.offset);
+  if (!target) return false;
+
+  const current = readPath(row.item, target.path);
+  const edit = editText(current === undefined || current === null ? "" : String(current), input);
+  if (typeof edit !== "string") return edit;
+
+  const signal = row.ref.signal as unknown as { value: unknown[]; set: (v: unknown[]) => void };
+  const items = signal.value ?? [];
+  const next = items.slice();
+  next[row.index] = writeItem(items[row.index], target.path, edit);
+  batch(() => {
+    signal.set(next);
+  });
+  return true;
+}
+
+/**
+ * One item with `path` set to `value`, copying only the objects along the way.
+ *
+ * Structural sharing rather than a deep clone: everything the path does not pass through is
+ * the same reference afterwards, so a row carrying a large object is not rebuilt on every
+ * keystroke. An array on the path stays an array — `items[0].tags[1]` has to keep its
+ * indices, and a plain-object copy would turn it into `{0: …, 1: …}`.
+ */
+function writeItem(item: unknown, path: ItemPath, value: string): unknown {
+  if (path.length === 0) return value;
+
+  const [step, ...rest] = path;
+  const key = step as string | number;
+
+  if (Array.isArray(item)) {
+    const copy = item.slice();
+    copy[key as number] = writeItem(item[key as number], rest, value);
+    return copy;
+  }
+
+  const source = (item ?? {}) as Record<string | number, unknown>;
+  return { ...source, [key]: writeItem(source[key], rest, value) };
 }
 
 void findRow;

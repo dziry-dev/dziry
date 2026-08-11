@@ -813,8 +813,14 @@ test("a layout-affecting style patch reaches the engine", () => {
   const before = engine.bounds(row)[3];
 
   // `.compact` rewrites padding in the style table; node pointers never change.
-  const compact = patches.find((p) => p.affectsLayout);
-  expect(compact).toBeDefined();
+  //
+  // Named rather than found by `affectsLayout` alone, which is what this used to do. Form
+  // field errors are conditional classes too and one of them shows a message with
+  // `display: block`, so they affect layout as well — and being earlier in the table, one of
+  // them was what the loose search returned. The test then flipped an unrelated toggle and
+  // reported that a padding change had not reached the engine.
+  const compact = patches.find((p) => p.affectsLayout && p.className === "compact");
+  expect(compact, "the demo needs a layout-affecting `.compact` toggle").toBeDefined();
   (compact!.signal as unknown as { value: boolean }).value = true;
 
   applyStylePatches(ui, patches);

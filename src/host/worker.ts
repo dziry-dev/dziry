@@ -38,10 +38,13 @@ import {
   dispatch,
   dispatchChange,
   formSubmittedByPress,
+  revalidate,
   submitForm,
   submitFrom,
   typeInto,
 } from "../runtime/bindings.ts";
+import { setAlertSink } from "../runtime/alert.ts";
+import { applyFieldChange } from "../runtime/forms.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
 import { applyDisabled, subscribeDisabled } from "../runtime/controls.ts";
 import type { Signal } from "../runtime/signal.ts";
@@ -50,6 +53,7 @@ import {
   subscribeLists,
   dispatchItem,
   dispatchItemChange,
+  typeIntoRow,
 } from "../runtime/list-runtime.ts";
 import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
@@ -178,6 +182,17 @@ function start(
 
   const { stylePatches, listBindings, editables, disabledBindings } = generated;
   const { routeNodes, initialRoute, windowConfig, windowId } = generated;
+
+  /**
+   * `alert()` reaches the engine thread from here, and nowhere else.
+   *
+   * The window's own title is the default, so a box with nothing said about it is still
+   * labelled the way the rest of the app is — the alternative is SDL's empty title bar, which
+   * looks like a bug rather than a default.
+   */
+  setAlertSink(({ message, title, level }) =>
+    post({ t: "alert", message, title: title || windowConfig.title, level }),
+  );
 
   /** `--route routing`, for starting somewhere other than the initial route. */
   const requested = (() => {
@@ -416,6 +431,9 @@ function start(
             // too — the queue preserves it and this loop drains in order.
             case EventKind.FOCUS_OUT:
               if (!dispatchItem(ui, listBindings, e.node, "blur")) dispatch(ui, e.node, "blur");
+              // `validateOn="blur"` — the trigger a browser has no equivalent of, and the one
+              // that suits a field whose rule is expensive to check on every keystroke.
+              if (revalidate(ui, e.node, "blur")) dirty = true;
               break;
 
             case EventKind.CHANGE:
@@ -428,16 +446,38 @@ function start(
               // `e.selected` is empty for every control but a list box, whose answer is a
               // set and so cannot be `e.a`. It was read on the engine thread, beside the
               // drain, because this side has no engine handle to ask with.
+              // Before the handler, and unconditionally: a form's payload has to be current
+              // by the time *anything* app-side runs, including an `onChange` that submits
+              // the form it is in. The engine owns checkedness and the chosen option, so
+              // this event is the only place Bun can learn either.
+              applyFieldChange(ui, e.node, e.a, e.selected);
               if (!dispatchItemChange(ui, listBindings, e.node, e.a)) {
                 dispatchChange(ui, e.node, e.a, e.selected);
               }
+              // After the cell is written and the handler has run, so a validator sees the
+              // value the user just chose. Does nothing unless the form asked for it or a
+              // submit has already failed.
+              if (revalidate(ui, e.node, "change")) dirty = true;
               break;
 
             case EventKind.TEXT_INPUT:
               // `b` is the caret, which the engine owns. Without it this could only append,
               // so clicking into the middle of a field and typing put the text at the end.
-              if (typeInto(editables, e.node, { text: e.text, caret: e.b, anchor: e.c })) {
+              //
+              // A row's field first, and it has to be first for the same reason a row's
+              // handler does: the node is in an arena, so it appears in no `editables` table
+              // and the ordinary path would decline it. `typeIntoRow` returns false for
+              // anything that is not one of its rows, so the fall-through is exact.
+              if (typeIntoRow(ui, listBindings, e.node, { text: e.text, caret: e.b, anchor: e.c })) {
                 dirty = true;
+                revalidate(ui, e.node, "change");
+              } else if (typeInto(editables, e.node, { text: e.text, caret: e.b, anchor: e.c })) {
+                dirty = true;
+                // A keystroke *is* a change for a text field — the engine sends `CHANGE` for
+                // controls whose state it owns, and a field's value is Bun's. So the trigger
+                // has to be fired from here as well or `validateOn="change"` would work for a
+                // checkbox and not for the field it is next to.
+                revalidate(ui, e.node, "change");
               }
               break;
 
@@ -451,8 +491,16 @@ function start(
                 // engine has already shifted it by the time this runs, and deliberately
                 // does not for Delete.
                 const erase = e.a === KEY_BACKSPACE ? "backward" : "forward";
-                if (typeInto(editables, e.node, { text: null, erase, caret: e.b, anchor: e.c })) {
+                const key = { text: null, erase, caret: e.b, anchor: e.c } as const;
+                if (typeIntoRow(ui, listBindings, e.node, key)) {
                   dirty = true;
+                  revalidate(ui, e.node, "change");
+                } else if (typeInto(editables, e.node, key)) {
+                  dirty = true;
+                  // Erasing is a change too, and it is the one that matters most for a
+                  // `required` rule: clearing a field is exactly when its error should
+                  // come back.
+                  revalidate(ui, e.node, "change");
                 }
               } else if (e.a === KEY_RETURN) {
                 // Implicit submission. The engine has already activated the focused node

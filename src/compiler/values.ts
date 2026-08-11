@@ -483,11 +483,12 @@ export function extendVarEnv(
  * in the style table rather than in an evaluator the engine carries. Nothing about
  * `calc(1rem + 2px)` needs to survive to run time.
  *
- * What is deliberately *not* folded is anything whose value depends on layout —
- * percentages, `vw`/`vh`, and the other viewport units. Those cannot be a number
- * until the box or the window exists, so they are rejected here with the same
- * message any other unsupported length gets, rather than being guessed at. When
- * they matter they need Taffy's own calc support, which is a different change.
+ * What does not fold to one number — percentages, which resolve against the
+ * containing block, and viewport units, which resolve against the window — is not
+ * rejected either: it goes through {@link lengthCalc}, which keeps the components
+ * separate so the engine can finish the sum at layout time. This function stays
+ * px-only; it serves the fields (border widths, radii, gaps, padding, margins)
+ * that have no percentage or viewport channel.
  *
  * Nested `calc()` is unwrapped rather than special-cased: the spec says a nested
  * one is just a parenthesised sub-expression, and that is what stripping the
@@ -496,7 +497,7 @@ export function extendVarEnv(
 function foldCalc(raw: string, resolve: (token: string) => number = parseLength): number {
   const inner = raw.trim().slice(raw.trim().indexOf("(") + 1, -1);
   const tokens = tokeniseCalc(inner.replace(/\bcalc\(/g, "("));
-  const parser = new CalcParser(tokens, raw, resolve);
+  const parser = new CalcParser(tokens, raw, numberArith(resolve));
   const value = parser.expression();
   parser.expectEnd();
   return value;
@@ -543,27 +544,65 @@ const MATH_CONSTANTS: Record<string, number> = {
 };
 
 /**
+ * The arithmetic a `calc()` is evaluated over.
+ *
+ * The parser is generic in it because the grammar — precedence, parens, unary
+ * minus — is the same whether the answer is one number or the four components of
+ * a length layout has to finish. What differs is what the operators *mean*: over
+ * numbers they are the four operations; over length components, multiplication
+ * and division need a scalar on one side, exactly as CSS specifies.
+ */
+type CalcArith<N> = {
+  /** A bare number. In a length calc this is a scalar, not a length. */
+  scalar(n: number): N;
+  /** A dimensioned atom — `4px`, `50%`, `100vh`, `12deg` — in the caller's units. */
+  atom(tok: string): N;
+  add(a: N, b: N, whole: string): N;
+  sub(a: N, b: N, whole: string): N;
+  mul(a: N, b: N, whole: string): N;
+  div(a: N, b: N, whole: string): N;
+  neg(a: N): N;
+};
+
+/** calc() over plain numbers — px lengths, degrees, percentage atoms. */
+function numberArith(resolve: (token: string) => number): CalcArith<number> {
+  return {
+    scalar: (n) => n,
+    atom: resolve,
+    add: (a, b) => a + b,
+    sub: (a, b) => a - b,
+    mul: (a, b) => a * b,
+    div: (a, b, whole) => {
+      if (b === 0) throw new CssError(`division by zero in "${whole}"`);
+      return a / b;
+    },
+    neg: (a) => -a,
+  };
+}
+
+/**
  * Recursive descent over `+ -` then `* /` then atoms, which is the precedence CSS
  * specifies. Written out rather than reached for from a library because the
  * grammar is four lines and the error messages matter more than the parser does.
  */
-class CalcParser {
+class CalcParser<N> {
   #tokens: string[];
   #at = 0;
   #whole: string;
-  #resolve: (token: string) => number;
+  #arith: CalcArith<N>;
 
   /**
-   * `resolve` turns one dimensioned atom into a number, and it is a parameter
-   * because `calc()` appears in more than one kind of value. Tailwind writes
-   * every negative utility as a multiplication — `-rotate-12` is
-   * `calc(12deg * -1)` — so an angle has to fold here too, and folding it with
-   * the length parser reports "bad length" for a perfectly good angle.
+   * The arithmetic is a parameter because `calc()` appears in more than one kind
+   * of value. Tailwind writes every negative utility as a multiplication —
+   * `-rotate-12` is `calc(12deg * -1)` — so an angle has to fold here too, and
+   * folding it with the length parser reports "bad length" for a perfectly good
+   * angle. Lengths that layout has to finish fold over components instead; see
+   * `lengthCalc`.
    */
-  constructor(tokens: string[], whole: string, resolve: (token: string) => number = parseLength) {
+  constructor(tokens: string[], whole: string, arith: CalcArith<N>) {
     this.#tokens = tokens;
     this.#whole = whole;
-    this.#resolve = resolve;
+    this.#arith = arith;
   }
 
   #peek(): string | undefined {
@@ -576,32 +615,35 @@ class CalcParser {
     }
   }
 
-  expression(): number {
+  expression(): N {
     let left = this.term();
     for (;;) {
       const op = this.#peek();
       if (op !== "+" && op !== "-") return left;
       this.#at++;
       const right = this.term();
-      left = op === "+" ? left + right : left - right;
+      left =
+        op === "+"
+          ? this.#arith.add(left, right, this.#whole)
+          : this.#arith.sub(left, right, this.#whole);
     }
   }
 
-  term(): number {
+  term(): N {
     let left = this.atom();
     for (;;) {
       const op = this.#peek();
       if (op !== "*" && op !== "/") return left;
       this.#at++;
       const right = this.atom();
-      if (op === "/" && right === 0) {
-        throw new CssError(`division by zero in "${this.#whole}"`);
-      }
-      left = op === "*" ? left * right : left / right;
+      left =
+        op === "*"
+          ? this.#arith.mul(left, right, this.#whole)
+          : this.#arith.div(left, right, this.#whole);
     }
   }
 
-  atom(): number {
+  atom(): N {
     const tok = this.#peek();
     if (tok === undefined) throw new CssError(`"${this.#whole}" ends mid-expression`);
     this.#at++;
@@ -613,7 +655,7 @@ class CalcParser {
       return value;
     }
     // Unary minus, as in `calc(-1 * var(--x))` once the var has been substituted.
-    if (tok === "-") return -this.atom();
+    if (tok === "-") return this.#arith.neg(this.atom());
     if (tok === "+") return this.atom();
     if (tok === "(" || tok === ")" || tok === "*" || tok === "/") {
       throw new CssError(`unexpected "${tok}" in "${this.#whole}"`);
@@ -634,12 +676,14 @@ class CalcParser {
      * meaningful rather than nowhere.
      */
     const constant = MATH_CONSTANTS[tok.toLowerCase()];
-    if (constant !== undefined) return constant;
+    if (constant !== undefined) return this.#arith.scalar(constant);
 
     // A bare number is a scalar (a multiplier); anything else is dimensioned, and
-    // the resolver this parser was built with is what decides which units it can
+    // the arithmetic this parser was built with is what decides which units it can
     // answer for.
-    return /^-?[\d.]+(e[-+]?\d+)?$/i.test(tok) ? Number(tok) : this.#resolve(tok);
+    return /^-?[\d.]+(e[-+]?\d+)?$/i.test(tok)
+      ? this.#arith.scalar(Number(tok))
+      : this.#arith.atom(tok);
   }
 }
 
@@ -649,7 +693,12 @@ export function parseLength(raw: string): number {
   if (v === "auto") return AUTO;
   if (v === "0") return 0;
   if (v.startsWith("calc(")) return foldCalc(v);
-  if (v.endsWith("%")) throw new CssError(`percentage lengths are not supported ("${raw}")`);
+  if (v.endsWith("%")) {
+    throw new CssError(
+      `percentage lengths are not supported here ("${raw}") — sizing, inset and ` +
+        `flex-basis take them; this property does not`,
+    );
+  }
 
   const m = v.match(/^(-?[\d.]+)(px|pt|rem|em)?$/);
   if (!m) throw new CssError(`bad length "${raw}"`);
@@ -668,6 +717,173 @@ export function parseLength(raw: string): number {
     default:
       throw new CssError(`bad length unit in "${raw}"`);
   }
+}
+
+/**
+ * A length as the four components the wire carries separately.
+ *
+ * `px` is resolved now; the other three are fractions of something only the
+ * engine knows — `pct` of the containing block, `vw`/`vh` of the window. A
+ * length is constant exactly when all three fractions are 0, which is what
+ * `calc(var(--spacing) * 4)` folds to and what `w-1/2` does not.
+ *
+ * The channels never mix in one value: a percentage alongside a px or viewport
+ * part is refused, because Taffy takes a percent *or* a length and has no calc
+ * to sum them. That is the one shape left unsupported — `calc(100% - 2rem)` —
+ * and the error says so rather than approximating it.
+ */
+export type LengthDims = {
+  px: number;
+  /** Fraction of the containing block's size on the field's axis. */
+  pct: number;
+  /** Fraction of the window's width. */
+  vw: number;
+  /** Fraction of the window's height. */
+  vh: number;
+};
+
+/**
+ * One atom of a length calc: a dimensioned token or a scalar.
+ *
+ * Scalar and dims are kept apart because the operators treat them differently —
+ * `calc(1 / 2 * 100%)` is scalar division then a scalar-dims multiplication, and
+ * `calc(4px + 2)` is invalid CSS that a fused representation could not refuse.
+ */
+type CalcAtom = { scalar: true; n: number } | ({ scalar: false } & LengthDims);
+
+const scalarAtom = (n: number): CalcAtom => ({ scalar: true, n });
+// `-0` is a real product of `calc(x * -1)` with a zero part, and it must not
+// survive: the interner's key stringifies it as "0" while a deep-equal test sees
+// a different number from 0.
+const noNegZero = (n: number): number => (n === 0 ? 0 : n);
+const dimsAtom = (px: number, pct: number, vw: number, vh: number): { scalar: false } & LengthDims => ({
+  scalar: false,
+  px: noNegZero(px),
+  pct: noNegZero(pct),
+  vw: noNegZero(vw),
+  vh: noNegZero(vh),
+});
+
+/**
+ * The viewport's small/large/dynamic variants all fold to the plain unit. A
+ * dziri window has no browser chrome that grows or shrinks, so the four sizes
+ * are one size — the same collapse SDL3's viewport already makes.
+ */
+const VIEWPORT_UNITS: Record<string, "vw" | "vh"> = {
+  vw: "vw",
+  svw: "vw",
+  lvw: "vw",
+  dvw: "vw",
+  vh: "vh",
+  svh: "vh",
+  lvh: "vh",
+  dvh: "vh",
+};
+
+/** One dimensioned length atom — `4px`, `50%`, `100vh` — as components. */
+function lengthDimsAtom(tok: string): { scalar: false } & LengthDims {
+  const m = /^(-?[\d.]+(?:e[-+]?\d+)?)([a-z%]+)$/.exec(tok.toLowerCase());
+  if (!m) throw new CssError(`bad length "${tok}"`);
+  const n = Number(m[1]);
+  const unit = m[2]!;
+
+  if (unit === "%") return dimsAtom(0, n / 100, 0, 0);
+  const vp = VIEWPORT_UNITS[unit];
+  if (vp === "vw") return dimsAtom(0, 0, n / 100, 0);
+  if (vp === "vh") return dimsAtom(0, 0, 0, n / 100);
+  if (unit === "vmin" || unit === "vmax") {
+    throw new CssError(
+      `${unit} picks between the viewport's axes at run time, which no field here can ` +
+        `express — write the vw or vh you mean ("${tok}")`,
+    );
+  }
+  switch (unit) {
+    case "px":
+      return dimsAtom(n, 0, 0, 0);
+    case "pt":
+      return dimsAtom(n * (96 / 72), 0, 0, 0);
+    // rem/em resolve against the root's 16px default, as parseLength's.
+    case "rem":
+    case "em":
+      return dimsAtom(n * 16, 0, 0, 0);
+    default:
+      throw new CssError(`bad length unit in "${tok}"`);
+  }
+}
+
+/** calc() over length components — the arithmetic CSS's type rules describe. */
+const DIMS_ARITH: CalcArith<CalcAtom> = {
+  scalar: scalarAtom,
+  atom: lengthDimsAtom,
+  add: (a, b, whole) => {
+    if (a.scalar && b.scalar) return scalarAtom(a.n + b.n);
+    if (a.scalar || b.scalar) {
+      throw new CssError(`cannot add a bare number to a length in "${whole}"`);
+    }
+    return dimsAtom(a.px + b.px, a.pct + b.pct, a.vw + b.vw, a.vh + b.vh);
+  },
+  sub: (a, b, whole) => {
+    if (a.scalar && b.scalar) return scalarAtom(a.n - b.n);
+    if (a.scalar || b.scalar) {
+      throw new CssError(`cannot subtract a bare number and a length in "${whole}"`);
+    }
+    return dimsAtom(a.px - b.px, a.pct - b.pct, a.vw - b.vw, a.vh - b.vh);
+  },
+  mul: (a, b, whole) => {
+    if (a.scalar && b.scalar) return scalarAtom(a.n * b.n);
+    if (a.scalar && !b.scalar) return dimsAtom(b.px * a.n, b.pct * a.n, b.vw * a.n, b.vh * a.n);
+    if (!a.scalar && b.scalar) return dimsAtom(a.px * b.n, a.pct * b.n, a.vw * b.n, a.vh * b.n);
+    throw new CssError(`cannot multiply two lengths in "${whole}"`);
+  },
+  div: (a, b, whole) => {
+    if (b.scalar ? b.n === 0 : b.px === 0 && b.pct === 0 && b.vw === 0 && b.vh === 0) {
+      throw new CssError(`division by zero in "${whole}"`);
+    }
+    if (a.scalar && b.scalar) return scalarAtom(a.n / b.n);
+    if (!a.scalar && b.scalar) return dimsAtom(a.px / b.n, a.pct / b.n, a.vw / b.n, a.vh / b.n);
+    throw new CssError(`cannot divide by a length in "${whole}"`);
+  },
+  neg: (a) => (a.scalar ? scalarAtom(-a.n) : dimsAtom(-a.px, -a.pct, -a.vw, -a.vh)),
+};
+
+/**
+ * Parses a length that may be dynamic: a percentage, a viewport unit, or a
+ * `calc()` mixing absolute and viewport parts.
+ *
+ * `parseLength`'s sibling, not its replacement: this is for the fields that carry
+ * the percentage and viewport channels — sizing, inset, flex-basis. Everywhere
+ * else keeps refusing percentages, because there is nowhere to put the fraction.
+ */
+export function lengthCalc(raw: string): LengthDims {
+  const v = raw.trim().toLowerCase();
+  if (v === "auto") return { px: AUTO, pct: 0, vw: 0, vh: 0 };
+
+  const out = (d: LengthDims, whole: string): LengthDims => {
+    if (d.pct !== 0 && (d.px !== 0 || d.vw !== 0 || d.vh !== 0)) {
+      throw new CssError(
+        `"${whole}" mixes a percentage with an absolute or viewport length, which ` +
+          `dziri cannot resolve: the percentage is relative to the containing block at ` +
+          `layout time and the rest is known now. Write the two parts as separate ` +
+          `properties, or pick one unit.`,
+      );
+    }
+    return { px: d.px, pct: d.pct, vw: d.vw, vh: d.vh };
+  };
+
+  if (v.startsWith("calc(")) {
+    const inner = v.slice(v.indexOf("(") + 1, -1);
+    const parser = new CalcParser(tokeniseCalc(inner.replace(/\bcalc\(/g, "(")), raw, DIMS_ARITH);
+    const r = parser.expression();
+    parser.expectEnd();
+    // A dimensionless calc was a px length under parseLength; stay lenient.
+    return out(r.scalar ? { px: r.n, pct: 0, vw: 0, vh: 0 } : r, raw);
+  }
+
+  // A bare number is a px length, as parseLength has it — `width: 0` is the
+  // common case and calc() elsewhere already permits the omission.
+  if (/^-?[\d.]+$/.test(v)) return { px: Number(v), pct: 0, vw: 0, vh: 0 };
+
+  return out(lengthDimsAtom(v), raw);
 }
 
 /**
@@ -916,7 +1132,11 @@ export const TRANSITIONABLE: Record<string, AnimatableField[]> = {
   color: ["fg"],
   "background-color": ["bg"],
   background: ["bg"],
-  "border-color": ["borderColor"],
+  "border-color": ["borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor"],
+  "border-top-color": ["borderTopColor"],
+  "border-right-color": ["borderRightColor"],
+  "border-bottom-color": ["borderBottomColor"],
+  "border-left-color": ["borderLeftColor"],
   "border-radius": ["radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft"],
   "border-top-left-radius": ["radiusTopLeft"],
   "border-top-right-radius": ["radiusTopRight"],
@@ -948,6 +1168,8 @@ export const TRANSITIONABLE: Record<string, AnimatableField[]> = {
   ],
   "accent-color": ["accentColor"],
   "caret-color": ["caretColor"],
+  "outline-color": ["outlineColor"],
+  "text-decoration-color": ["decorationColor"],
   "scrollbar-color": ["scrollbarThumb", "scrollbarTrack"],
 };
 
@@ -985,7 +1207,7 @@ const LAYOUT_TRANSITIONABLE: Record<string, StyleField[]> = {
   "max-height": ["maxH"],
   padding: ["padT", "padR", "padB", "padL"],
   margin: ["marT", "marR", "marB", "marL"],
-  "border-width": ["borderWidth"],
+  "border-width": ["borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth"],
   "font-size": ["fontSize"],
   "font-weight": ["fontWeight"],
   gap: ["gapRow", "gapCol"],

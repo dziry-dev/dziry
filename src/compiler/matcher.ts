@@ -357,7 +357,11 @@ export function collectDecls(
       // `p { color: blue }` reaches the generated box only through inheritance —
       // which is why this is an equality test and not a superset one.
       if ((sel.element ?? null) !== element) continue;
-      if (!states.includes(sel.pseudo)) continue;
+      // Every named state must be live, not any: `:checked:disabled` is a rule
+      // about the intersection. A selector with no pseudo-classes passes
+      // vacuously, which is what makes base rules part of every variant's
+      // cascade.
+      if (!sel.pseudos.every((p) => states.includes(p))) continue;
       if (!matches(sel, path)) continue;
       candidates.push({
         specificity: sel.specificity,
@@ -475,7 +479,7 @@ export function hasPseudoRule(
   for (const rule of rules) {
     for (const sel of rule.selectors) {
       if ((sel.element ?? null) !== element) continue;
-      if (sel.pseudo === pseudo && matches(sel, path)) return true;
+      if (sel.pseudos.includes(pseudo) && matches(sel, path)) return true;
     }
   }
   return false;

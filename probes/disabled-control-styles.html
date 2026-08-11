@@ -1,0 +1,46 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>disabled-control-styles</title>
+<style>#out{font:12px ui-monospace,monospace;white-space:pre;line-height:1.5}</style>
+<h3>what getComputedStyle says :disabled changes, per control</h3>
+<script type="module">
+  import { log, frame, mount, report } from "./_harness.js";
+
+  // System colours (GrayText etc.) resolve to rgb() in getComputedStyle, unlike
+  // accent-color's `auto` — so unlike the tick and the dot, this whole answer is
+  // readable from the DOM.
+  const CASES = [
+    ["button", '<button>x</button>'],
+    ["input[type=text]", '<input type="text" value="x">'],
+    ["input[type=checkbox]", '<input type="checkbox" checked>'],
+    ["input[type=radio]", '<input type="radio" checked>'],
+    ["select", "<select><option>x</option></select>"],
+    ["textarea", "<textarea>x</textarea>"],
+    ["option", "<select><option>x</option></select>"],
+  ];
+
+  const PROPS = ["color", "backgroundColor", "borderTopColor", "opacity"];
+
+  for (const [name, html] of CASES) {
+    const read = (host) => {
+      const el = name === "option" ? host.querySelector("option") : host.firstElementChild;
+      const s = getComputedStyle(el);
+      return PROPS.map((p) => `${p}=${s[p]}`).join(" ");
+    };
+
+    const host = mount(html);
+    await frame();
+    const enabled = read(host);
+
+    const target = name === "option" ? host.querySelector("option") : host.firstElementChild;
+    target.disabled = true;
+    await frame();
+    const disabled = read(host);
+
+    log(`=== ${name} ===`);
+    log(`  enabled   ${enabled}`);
+    log(`  disabled  ${disabled}`);
+  }
+
+  report();
+</script>

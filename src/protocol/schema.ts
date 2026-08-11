@@ -230,10 +230,26 @@ const STYLES: Table = {
     // paint
     { name: "bg", type: "u32", affects: "paint", interp: "color" },
     { name: "fg", type: "u32", affects: "paint", interp: "color", inherited: true },
-    { name: "borderColor", type: "u32", affects: "paint", interp: "color" },
+    // Four sides, like the widths. Alpha 0 is "nothing said" per side — a side
+    // with no colour paints nothing even if it has a width, the convention the
+    // single field already had.
+    { name: "borderTopColor", type: "u32", affects: "paint", interp: "color" },
+    { name: "borderRightColor", type: "u32", affects: "paint", interp: "color" },
+    { name: "borderBottomColor", type: "u32", affects: "paint", interp: "color" },
+    { name: "borderLeftColor", type: "u32", affects: "paint", interp: "color" },
     // Layout, not paint: the engine reserves the border in Taffy's box, so a
-    // width change moves the content. `borderColor` above stays paint-only.
-    { name: "borderWidth", type: "f32", affects: "layout" },
+    // width change moves the content.
+    //
+    // Four sides, because that is what CSS has — `border-t-2 border-b-red-500`
+    // is not expressible otherwise, and folding the logical border properties
+    // onto one field would paint all four edges for any one of them. The width
+    // of a side is also its *visibility*: `border-style: none` on a side means
+    // no border however wide it is, and the compiler encodes that as width 0
+    // rather than carrying a style enum nothing else would read.
+    { name: "borderTopWidth", type: "f32", affects: "layout" },
+    { name: "borderRightWidth", type: "f32", affects: "layout" },
+    { name: "borderBottomWidth", type: "f32", affects: "layout" },
+    { name: "borderLeftWidth", type: "f32", affects: "layout" },
     // Four corners, not one radius. CSS has no single-radius property — it has
     // four longhands and a shorthand over them — and the one-field version could
     // not express `rounded-t-lg`, which is most of what Tailwind's radius
@@ -301,6 +317,33 @@ const STYLES: Table = {
     // one of the seven left.
     { name: "selectionBg", type: "u32", affects: "paint", inherited: true },
     { name: "selectionFg", type: "u32", affects: "paint", inherited: true },
+    // `outline` — a ring drawn *outside* the border box, so it is all paint and
+    // layout never hears about it. No style field, the border convention:
+    // `outline-style: none` compiles to width 0, and the patterned styles paint
+    // solid with a warning. Offset is signed — a negative one draws the ring
+    // *inside* the box, which is how a focus ring on a filled button reads.
+    { name: "outlineColor", type: "u32", affects: "paint", interp: "color" },
+    { name: "outlineWidth", type: "f32", affects: "paint" },
+    { name: "outlineOffset", type: "f32", affects: "paint" },
+    // `text-decoration`. `line` is a bit set (underline 1, overline 2,
+    // line-through 4), which is the one place a decoration differs from every
+    // other style here: two of them can be on at once. The colour's alpha-0
+    // means currentcolor — resolved to `fg` at paint, since the cascade cannot
+    // substitute a keyword that names the very field being computed.
+    // `thickness` 0 is auto (the font's own metric); `underlineOffset` NaN is
+    // auto likewise. All paint: a decoration never moves a line.
+    //
+    // Marked inherited even though the spec says the property is not: CSS
+    // *propagates* a decoration to inline descendants, and dziri's text runs
+    // are separate nodes — so inheritance is how `underline` on an element
+    // reaches its text. The divergence: it also crosses block boundaries,
+    // which CSS stops at. Underlining one more box beats not underlining the
+    // link.
+    { name: "decorationLine", type: "u8", affects: "paint", inherited: true, doc: "bit set: 1 underline, 2 overline, 4 line-through" },
+    { name: "decorationColor", type: "u32", affects: "paint", interp: "color", inherited: true },
+    { name: "decorationStyle", type: "u8", affects: "paint", inherited: true, doc: "0 solid, 1 double, 2 dotted, 3 dashed, 4 wavy" },
+    { name: "decorationThickness", type: "f32", affects: "paint", inherited: true, doc: "0 = auto (font metric)" },
+    { name: "underlineOffset", type: "f32", affects: "paint", inherited: true, doc: "px; NaN = auto (font metric)" },
     // box
     { name: "padTop", type: "f32", affects: "layout", ir: "padT" },
     { name: "padRight", type: "f32", affects: "layout", ir: "padR" },
@@ -322,6 +365,8 @@ const STYLES: Table = {
     { name: "flexGrow", type: "f32", affects: "layout", ir: "grow" },
     { name: "flexShrink", type: "f32", affects: "layout", ir: "shrink" },
     { name: "flexBasis", type: "f32", affects: "layout", ir: "basis" },
+    // Fraction of the containing block, resolved by Taffy — see `widthPct`.
+    { name: "flexBasisPct", type: "f32", affects: "layout", ir: "basisPct" },
     { name: "gapRow", type: "f32", affects: "layout" },
     { name: "gapColumn", type: "f32", affects: "layout", ir: "gapCol" },
     { name: "gridColumns", type: "u16", affects: "layout", doc: "repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N", ir: "gridCols" },
@@ -331,18 +376,67 @@ const STYLES: Table = {
     { name: "gridRowStart", type: "i16", affects: "layout" },
     { name: "gridRowSpan", type: "i16", affects: "layout" },
     // sizing — NaN means auto
+    //
+    // Each of the six has two companions, and a length is the *sum* of its
+    // channels: px the compiler resolved, plus `Pct` — a fraction of the
+    // containing block, which Taffy resolves natively — plus `Vp`, a fraction
+    // of the window on the field's own axis, which the engine resolves when it
+    // builds the Taffy style and re-resolves on resize. That is where
+    // `width: 50%`, `w-1/2` (`calc(1 / 2 * 100%)`) and `h-screen` (`100vh`)
+    // live; the channels exist because none of those is a number at compile
+    // time, and the compiler still refuses the one shape Taffy cannot express —
+    // a percentage summed with an absolute part, `calc(100% - 2rem)`.
+    //
+    // The small/large/dynamic viewport variants fold to the plain unit at
+    // compile time: a dziri window has no browser chrome, so the four sizes a
+    // mobile browser distinguishes are one size here.
+    //
+    // Padding, margin and gap have no `Pct` companions — percentages are valid
+    // CSS there but Tailwind never emits them, and adding the channels is one
+    // row each when a measurement says otherwise.
     { name: "width", type: "f32", affects: "layout" },
+    { name: "widthPct", type: "f32", affects: "layout", doc: "fraction of containing-block width" },
+    { name: "widthVp", type: "f32", affects: "layout", doc: "fraction of the window's width" },
     { name: "height", type: "f32", affects: "layout" },
+    { name: "heightPct", type: "f32", affects: "layout", doc: "fraction of containing-block height" },
+    { name: "heightVp", type: "f32", affects: "layout", doc: "fraction of the window's height" },
     { name: "minWidth", type: "f32", affects: "layout", ir: "minW" },
+    { name: "minWidthPct", type: "f32", affects: "layout", ir: "minWPct" },
+    { name: "minWidthVp", type: "f32", affects: "layout", ir: "minWVp" },
     { name: "minHeight", type: "f32", affects: "layout", ir: "minH" },
+    { name: "minHeightPct", type: "f32", affects: "layout", ir: "minHPct" },
+    { name: "minHeightVp", type: "f32", affects: "layout", ir: "minHVp" },
     { name: "maxWidth", type: "f32", affects: "layout", ir: "maxW" },
+    { name: "maxWidthPct", type: "f32", affects: "layout", ir: "maxWPct" },
+    { name: "maxWidthVp", type: "f32", affects: "layout", ir: "maxWVp" },
     { name: "maxHeight", type: "f32", affects: "layout", ir: "maxH" },
+    { name: "maxHeightPct", type: "f32", affects: "layout", ir: "maxHPct" },
+    { name: "maxHeightVp", type: "f32", affects: "layout", ir: "maxHVp" },
     { name: "aspectRatio", type: "f32", affects: "layout" },
     { name: "position", type: "u8", affects: "layout", doc: "0 relative, 1 absolute" },
     { name: "insetTop", type: "f32", affects: "layout", ir: "insetT" },
     { name: "insetRight", type: "f32", affects: "layout", ir: "insetR" },
     { name: "insetBottom", type: "f32", affects: "layout", ir: "insetB" },
     { name: "insetLeft", type: "f32", affects: "layout", ir: "insetL" },
+    // Inset percentages, resolved by Taffy against the containing block exactly
+    // as CSS resolves `top: 50%`. No viewport channel — nothing in the measured
+    // Tailwind corpus positions from the window.
+    { name: "insetTopPct", type: "f32", affects: "layout", ir: "insetTPct" },
+    { name: "insetRightPct", type: "f32", affects: "layout", ir: "insetRPct" },
+    { name: "insetBottomPct", type: "f32", affects: "layout", ir: "insetBPct" },
+    { name: "insetLeftPct", type: "f32", affects: "layout", ir: "insetLPct" },
+    // `border-spacing` — horizontal and vertical space between table borders.
+    // CSS property for `<table>`, but dziri doesn't render tables; paint-only as a no-op.
+    // Two f32 fields for H and V spacing. NaN means unset (use browser default 2px).
+    { name: "borderSpacingH", type: "f32", affects: "paint" },
+    { name: "borderSpacingV", type: "f32", affects: "paint" },
+    // `scroll-margin` — distance the browser adds when scrolling an element into view.
+    // Four per-side fields (top/right/bottom/left). Paint-only (no layout effect).
+    // NaN means unset (default 0). Logical aliases (scroll-margin-inline, etc.) expand here.
+    { name: "scrollMarginTop", type: "f32", affects: "paint" },
+    { name: "scrollMarginRight", type: "f32", affects: "paint" },
+    { name: "scrollMarginBottom", type: "f32", affects: "paint" },
+    { name: "scrollMarginLeft", type: "f32", affects: "paint" },
     // text
     //
     // `layout`, and not for the obvious reason: neither appears in Taffy's
@@ -353,6 +447,26 @@ const STYLES: Table = {
     // guarded by comparing styles for equality. See `LayoutTree::apply_style`.
     { name: "fontSize", type: "f32", affects: "layout", inherited: true },
     { name: "fontWeight", type: "u16", affects: "layout", inherited: true },
+    // The remaining two axes of font selection, both reaching layout through the
+    // measure callback exactly as the two above do. `fontStyle` is a slant flag
+    // rather than an angle: CSS `oblique <angle>` is a non-goal until a probe
+    // shows something needs it. `fontFamily` is a *generic* family, not a name —
+    // dziri resolves one concrete face per generic at startup, which is the
+    // compile-time-first answer to font selection: an author names a category,
+    // never a file. 0 is whatever the platform gave `Measurer::new`.
+    { name: "fontStyle", type: "u8", affects: "layout", inherited: true, doc: "0 normal, 1 italic" },
+    { name: "fontFamily", type: "u8", affects: "layout", inherited: true, doc: "generic family: 0 default, 1 monospace" },
+    // `line-height`, as two channels because CSS has two forms: a multiplier of
+    // the font size (`1.5`, `150%`) and an absolute length (`24px`). The engine
+    // folds the px form against the resolved font size — a division the compiler
+    // cannot do, because the cascade answers font-size and line-height
+    // independently and neither expander can see the other's result.
+    // `lineHeight` 0 is `normal`; `lineHeightPx` NaN is "no absolute value".
+    { name: "lineHeight", type: "f32", affects: "layout", inherited: true, doc: "multiplier of font size; 0 = normal" },
+    { name: "lineHeightPx", type: "f32", affects: "layout", inherited: true, doc: "absolute px; NaN = unset" },
+    // `text-indent` — indentation of the first line of text. NaN means unset (default 0).
+    // Layout property because it affects text positioning. Inherited.
+    { name: "textIndent", type: "f32", affects: "layout", inherited: true, doc: "px; NaN = unset" },
     {
       name: "lineClamp",
       type: "u16",
@@ -390,6 +504,11 @@ const STYLES: Table = {
     { name: "accentColor", type: "u32", affects: "paint", interp: "color", inherited: true },
     { name: "caretColor", type: "u32", affects: "paint", interp: "color", inherited: true },
     { name: "appearance", type: "u8", affects: "paint", doc: "0 none, 1 auto" },
+    // `cursor` — the SDL system cursor shown when hovering this node.
+    // Inherited, because a label should show the pointer cursor even if its
+    // input is far away. Values: 0 auto, 1 default, 2 pointer, 3 text, 4 grab,
+    // 5 grabbing, 6 wait, 7 not-allowed, 8 move, 9 ns-resize, 10 ew-resize, etc.
+    { name: "cursor", type: "u8", affects: "paint", inherited: true, doc: "SDL_SystemCursor enum" },
     // `opacity` and `transform`, and every one of them is `paint` — measured,
     // not assumed. A transformed box does not move its parent's height or its
     // own siblings, so Taffy never needs to hear about a change here.
@@ -775,6 +894,21 @@ export const ENUMS: EnumDef[] = [
     values: { VISIBLE: 0, HIDDEN: 1, ELLIPSIS: 2, SCROLL: 3, CLIP: 4 },
   },
   {
+    name: "FontStyle",
+    doc: "`styles.fontStyle`. A slant flag; `oblique <angle>` is a non-goal until measured.",
+    ty: "u8",
+    values: { NORMAL: 0, ITALIC: 1 },
+  },
+  {
+    name: "FontFamily",
+    doc:
+      "`styles.fontFamily`. A *generic* family, never a name: the engine resolves one " +
+      "concrete face per generic at startup, so an author picks a category and the platform " +
+      "picks the font. `DEFAULT` is whatever `Measurer::new` resolved.",
+    ty: "u8",
+    values: { DEFAULT: 0, MONOSPACE: 1 },
+  },
+  {
     name: "ScrollbarWidth",
     doc:
       "`styles.scrollbarWidth`. The whole grammar: Chromium 151 rejects `thick` and a " +
@@ -793,6 +927,14 @@ export const ENUMS: EnumDef[] = [
       "rather than merely whether. Measured against Chromium 151 — see BROWSER-FACTS.md.",
     ty: "u8",
     values: { NONE: 0, AUTO: 1, BASE_SELECT: 2 },
+  },
+  {
+    name: "DecorationStyle",
+    doc:
+      "`styles.decorationStyle`. `text-decoration-style`'s five keywords, in spec " +
+      "order — SOLID is 0, which is also the initial value.",
+    ty: "u8",
+    values: { SOLID: 0, DOUBLE: 1, DOTTED: 2, DASHED: 3, WAVY: 4 },
   },
   {
     name: "MediaKind",
@@ -1335,7 +1477,13 @@ export const ENUMS: EnumDef[] = [
  * height of its own and presses on it do nothing. Not a wrong picture — an inert one —
  * but the column bump means it never gets that far.
  */
-export const PROTOCOL_VERSION = 25;
+/*
+ * v26 — `fontStyle` and `fontFamily` join the styles table: the two remaining
+ * axes of font selection, both inherited, both reaching layout through the
+ * measure callback like `fontSize`. `fontFamily` is a generic-family enum, not
+ * a name — the engine resolves one concrete face per generic at startup.
+ */
+export const PROTOCOL_VERSION = 35;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

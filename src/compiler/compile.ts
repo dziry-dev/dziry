@@ -19,11 +19,13 @@ import {
   STYLE_FIELDS,
   type CompiledUi,
   type ComputedStyle,
+  type FieldKind,
   type RouteNodes,
   type WindowConfig,
 } from "../ir.ts";
 import { parseHtml, type DynList, type Element, type Node, type TextPart } from "./html.ts";
-import { isItemSentinel, ItemExpressionError } from "./item-path.ts";
+import { isItemSentinel, isRecorder, ItemExpressionError, pathOf } from "./item-path.ts";
+import { isSignal } from "../runtime/signal.ts";
 import { isParamSentinel, ParamExpressionError } from "./route-args.ts";
 import { allLocals } from "./reactive-runtime.ts";
 import { type VariantCompiled } from "./variant-compile.ts";
@@ -32,6 +34,17 @@ import { EMPTY_VARS, extendVarEnv, substituteVars, type VarEnv } from "./values.
 import { parseContent, parseInlineStyle } from "./properties.ts";
 import { UA_SHEET } from "./ua-sheet.ts";
 import { listboxOf, optionsOf, uaParts, type UaParts } from "./ua-structure.ts";
+import {
+  collectFields,
+  formKeys,
+  formOwnership,
+  isSubmitButton,
+  type FieldArray,
+  type FieldCell,
+  type FieldGroup,
+  type FieldSpec,
+  type Ownership,
+} from "./fields.ts";
 import {
   collectDecls,
   hasPseudoElementRule,
@@ -42,6 +55,7 @@ import {
 } from "./matcher.ts";
 import {
   applyDecls,
+  coerceViewportOverflow,
   inheritFrom,
   StyleInterner,
   textStyle,
@@ -238,7 +252,7 @@ export type BuiltHandler = {
    * *not* shared is the argument: a click handler takes the list item, a change handler
    * takes the new value, and that split lives at the dispatch site.
    */
-  kind: "click" | "change" | "focus" | "blur" | "submit";
+  kind: "click" | "change" | "focus" | "blur" | "submit" | "invalid";
 };
 
 /**
@@ -262,6 +276,29 @@ export type BuiltDisabled = {
   name: string;
 };
 
+/** One named control of a form, paired with the node the walk gave it. */
+export type BuiltField = {
+  node: number;
+  kind: FieldKind;
+  value: string;
+  /** The compiled initial value, for the dirty test. See [`FormField.initial`]. */
+  initial: string | boolean | number | number[];
+  options: string[];
+  disabled: boolean;
+  /**
+   * The control row a `disabled={signal}` writes, or -1.
+   *
+   * Resolved after the walk for the reason every other row index is: the controls table is
+   * not final until `replicateListControls` has appended each list row's replicas and
+   * re-sorted it.
+   */
+  row: number;
+  /** The author's `bind:value` signal, or null when the compiler declared the cell. */
+  ref: unknown;
+  /** The cell's name — pre-filled for a declared cell, resolved for an authored one. */
+  name: string;
+};
+
 export type BuiltForm = {
   node: number;
   /** The button Enter clicks, or -1 when Enter must click nothing. */
@@ -274,6 +311,34 @@ export type BuiltForm = {
    * happens. A checkbox and a `<select>` do not count towards the one.
    */
   direct: boolean;
+  /** Every named control in this form, in document order. */
+  fields: BuiltField[];
+  /** The payload's keys and value shapes, decided by `formKeys`. */
+  keys: { path: string[]; shape: string; fields: number[] }[];
+  /** Every `field` wrapper in this form, with the cells its error state lives in. */
+  groups: {
+    node: number;
+    path: string[];
+    errorCell: string;
+    messageCell: string;
+    fields: number[];
+  }[];
+  /**
+   * Repeating rows: a `field` wrapper holding a `map()`. See [`FormBinding.arrays`].
+   *
+   * `source` is the array signal as authored; the resolve pass fills `name` with the export
+   * it is held under — the same one the list binding itself is named by, since it is the
+   * same object.
+   */
+  arrays: { path: string[]; source: unknown; name: string }[];
+  /** `submit` unless the author said otherwise. */
+  validateOn: string;
+  /** Every control this form owns, sorted. See [`FormBinding.owns`]. */
+  owns: Int32Array;
+  /** The `validate={…}` as authored; the resolve pass replaces it with an export name. */
+  validate: unknown;
+  /** Filled in by the resolve pass. Empty when there is no `validate`. */
+  validateName: string;
 };
 
 /** A bound text run inside a list item, addressed relative to the item root. */
@@ -305,7 +370,7 @@ export type BuiltItemHandler = {
    * emitted first. A click would then run the change handler, with a click handler's
    * arguments. That is not a lookup miss, it is a wrong call that succeeds.
    */
-  kind: "click" | "change" | "focus" | "blur" | "submit";
+  kind: "click" | "change" | "focus" | "blur" | "submit" | "invalid";
 };
 
 export type BuiltList = {
@@ -324,8 +389,26 @@ export type BuiltList = {
   keyPath: (string | number)[];
   bindings: BuiltItemBinding[];
   itemHandlers: BuiltItemHandler[];
+  itemEditables: BuiltItemEditable[];
   /** First string slot of item 0's block; each item owns `bindings.length` slots. */
   slotStart: number;
+};
+
+/**
+ * A `bind:value` inside a list row, whose target is the row's own data.
+ *
+ * The one two-way binding that names no signal, because a row *has* no signal: the state
+ * of every row lives in the one array the author holds, and this says which property of
+ * an item this element edits. Typing therefore writes `items.set(…)` with a new item at
+ * that index — see `typeIntoRow`.
+ *
+ * Addressed by offset within the item for the same reason a row handler is: one compiled
+ * element serves every replica, and which row it currently *is* only exists at run time.
+ */
+export type BuiltItemEditable = {
+  offset: number;
+  /** The recorded property path — `["title"]` for `bind:value={job.title}`. */
+  path: (string | number)[];
 };
 
 /** A node that routes keystrokes into a string signal while focused. */
@@ -455,7 +538,41 @@ function needsControlRow(el: Element, path: Element[] = []): boolean {
  * `bind:value` survive this long. `disabled` and `readonly` are excluded because a
  * browser does not accept typing into those either, so there is nothing to warn about.
  */
-const TEXT_ENTRY_TYPES = new Set(["", "text", "search", "tel", "url", "email", "password"]);
+const TEXT_ENTRY_TYPES = new Set([
+  "",
+  "text",
+  "search",
+  "tel",
+  "url",
+  "email",
+  "password",
+  /**
+   * `number` and `range` are typed into as well, and leaving them out was visible.
+   *
+   * An `<input type="number">` compiled to a box with no editor and no line height: four
+   * pixels of border, which is what the forms demo drew where its age field should have been.
+   * A browser routes both to the same text editor and adds chrome dziri does not have — a
+   * spinner, a slider track — so being typeable is the part that transfers.
+   *
+   * This set is **not** the implicit-submission blocking set, which is what it used to be as
+   * well. That one is measured (`probes/implicit-submission.html`) and was measured over the
+   * six above, so widening it here would have silently changed a rule nobody re-measured.
+   * See `blocksImplicitSubmission`.
+   */
+  "number",
+  "range",
+]);
+
+/**
+ * The `input` types the "exactly one field" rule counts, as measured.
+ *
+ * Deliberately its own set rather than [`TEXT_ENTRY_TYPES`]: the two were one set until
+ * `number` had to be typeable, and the blocking membership is a *measurement* over the six
+ * text keywords. Whether a `number` blocks implicit submission has not been measured, so it is
+ * left out rather than assumed — the probe to settle it is a two-line addition to
+ * `probes/implicit-submission.html`.
+ */
+const BLOCKING_TYPES = new Set(["", "text", "search", "tel", "url", "email", "password"]);
 
 /**
  * A text-entry box, by tag and type alone.
@@ -590,6 +707,13 @@ export type CompileResult = {
   controls: BuiltControl[];
   /** Every `<form>`, with Enter's outcome already resolved. */
   forms: BuiltForm[];
+  /**
+   * Cells the artifact declares for named fields that carry no `bind:value`.
+   *
+   * Emitted like component-local state and for the same reason: there is no export to
+   * import, because nobody wrote one. See `fields.ts`.
+   */
+  fieldCells: FieldCell[];
   /** Signals driving a control's DISABLED flag, resolved to control rows. */
   disabled: BuiltDisabled[];
   /** Diagnostics worth surfacing but not worth failing over. */
@@ -729,8 +853,53 @@ export function compileTree(
    */
   const pendingAnchors: Array<{ list: number; container: number; after: number }> = [];
   const editables: BuiltEditable[] = [];
+  /**
+   * `bind:value={row.title}` sightings, before the list they belong to is known.
+   *
+   * Collected flat and lifted by [`walkList`], because the walk reaches the element before
+   * it finishes the template it is inside. Anything still here at the end was a recorded
+   * path outside a `map()` — impossible from JSX, and a build error rather than a silent
+   * dead field if it ever becomes possible.
+   */
+  const itemEditableCandidates: { node: number; path: (string | number)[]; where: string }[] = [];
   /** Node ids of elements carrying `bind:value`, so their text run can be flagged. */
   const editableFields = new Set<number>();
+
+  /**
+   * Every named control inside a `<form>`, decided before the walk starts.
+   *
+   * Before, because the walk *needs* the answer: a named text field with no `bind:value`
+   * gets a cell the compiler declares, and its text run has to be bound to that cell as the
+   * run is created. Resolving it afterwards would mean revisiting nodes the walk has
+   * already finished with.
+   *
+   * See `fields.ts` — the rules are a browser's, and measured rather than recalled.
+   */
+  /**
+   * Which form owns each control, resolved once and read by three separate questions.
+   *
+   * Shared with `resolveForms` deliberately: the payload, the default button and the
+   * blocking-field count are all counts over *owned* controls, and computing ownership twice
+   * is how two of them come to disagree.
+   */
+  const ownership = formOwnership(rootEl);
+  const {
+    specs: fieldSpecs,
+    cells: fieldCells,
+    groups: fieldGroups,
+    arrays: fieldArrays,
+  } = collectFields(rootEl, (message) => warnings.push(message), ownership);
+
+  /**
+   * The element marked `error` in each `field` wrapper, so the walk can bind its run.
+   *
+   * Read during the walk the same way a declared field cell is, and for the same reason: the
+   * run has to be *created* bound, not patched afterwards.
+   */
+  const messageCellOf = new Map<Element, string>();
+  for (const group of fieldGroups) {
+    if (group.messageEl !== null) messageCellOf.set(group.messageEl, group.messageCell);
+  }
 
   /**
    * Every element that got a node, so the label pass can start from markup.
@@ -801,7 +970,7 @@ export function compileTree(
     const existing = selectGroups.get(select);
     if (existing !== undefined) return existing;
     const id = groupIds.size;
-    groupIds.set(` select${selectGroups.size}`, id);
+    groupIds.set(`\u0000select${selectGroups.size}`, id);
     selectGroups.set(select, id);
     return id;
   };
@@ -955,6 +1124,15 @@ export function compileTree(
      * `background-color` into this element's cascade would paint the *field* blue.
      */
     overlay?: Partial<ComputedStyle>,
+    /**
+     * This element is the window root, whose box is the viewport.
+     *
+     * The viewport interprets `overflow: visible` as `auto` — see
+     * {@link coerceViewportOverflow} — and the rule has to reach **every** state's
+     * resolved style, not just the base: a variant row that kept `VISIBLE` would turn
+     * the page unscrollable on hover.
+     */
+    viewport?: boolean,
   ): {
     style: ComputedStyle;
     styleId: number;
@@ -974,8 +1152,10 @@ export function compileTree(
     };
 
     /** The cascade's answer with {@link overlay} on top, which is what gets interned. */
-    const withOverlay = (resolved: ComputedStyle): ComputedStyle =>
-      overlay === undefined ? resolved : { ...resolved, ...overlay };
+    const withOverlay = (resolved: ComputedStyle): ComputedStyle => {
+      const laid = overlay === undefined ? resolved : { ...resolved, ...overlay };
+      return viewport ? coerceViewportOverflow(laid) : laid;
+    };
 
     const base = inline(collectDecls(rules, path, ["none"], media, 0, element));
     // Custom properties inherit *unless registered otherwise*, so the environment
@@ -1228,6 +1408,101 @@ export function compileTree(
   }
 
   /**
+   * The `::marker` box for an `<li>` — the bullet, or the ordinal.
+   *
+   * Beside [`walkPlaceholder`] for the same reason that one is beside
+   * [`walkPseudoElement`]: the box does not owe its existence to a `content` rule.
+   * A browser's marker comes from `display: list-item` plus a *counter*, and both
+   * halves of that are compile-time facts here — which li this is among its list's
+   * children is knowable the way nothing about a browser's DOM is. So `2.` is a
+   * resolved string in the IR and the runtime never counts anything: the
+   * compile-time-first answer to CSS counters, for the one place HTML needs them.
+   *
+   * What this deliberately does not reach:
+   *
+   * - **An li in a dynamic list gets a bullet even inside `<ol>`**, with a build
+   *   warning. Every arena row is stamped from one template, so a per-row ordinal
+   *   is a runtime string — exactly the boundary `content` already refuses to
+   *   cross for `:checked` ticks.
+   * - **Placement is an approximation.** Chrome right-aligns marker text to a
+   *   fixed gap from the content edge; with no text-align field the offset here
+   *   is estimated from the marker's length at the li's own font size, so `9.`
+   *   and `10.` land a couple of pixels apart where Chrome aligns their dots.
+   * - `list-style-type` values other than the defaults, `start`, `value`, and
+   *   `list-style-position: inside`. All are `li::marker { content: … }` away
+   *   for an author, which is also the override that beats every default below.
+   */
+  function walkMarker(
+    el: Element,
+    path: Element[],
+    ownStyle: ComputedStyle,
+    parentVars: VarEnv,
+    where: string,
+    parent: number,
+  ): number {
+    if (el.tag !== "li") return -1;
+    const list = path.length >= 2 ? path[path.length - 2] : undefined;
+    if (list === undefined || !["ul", "ol", "menu"].includes(list.tag)) return -1;
+
+    let text = "•";
+    if (list.tag === "ol") {
+      const items = list.children.filter((c) => c.type === "element" && c.tag === "li");
+      const index = items.indexOf(el);
+      if (index !== -1) {
+        text = `${index + 1}.`;
+      } else {
+        // Not among the list's static children: this li is a dynamic-list
+        // template, stamped once per row, and an ordinal cannot be one string.
+        warnings.push(
+          `an <li> inside a dynamic list gets a bullet marker, not its number.\n` +
+            `    Every row is stamped from one compiled template, so a per-row ordinal would\n` +
+            `    be a runtime string — the same protocol boundary that keeps \`content\` from\n` +
+            `    depending on \`:checked\`. Style \`li::marker\` or number the items yourself.\n` +
+            `    ${where}`,
+        );
+      }
+    }
+
+    // An author's `li::marker { content: "→" }` replaces the default outright.
+    const authored = collectDecls(rules, path, ["none"], media, 0, "marker").get("content");
+    if (authored !== undefined) {
+      try {
+        const parsed = parseContent(authored);
+        if (parsed !== null) text = parsed;
+      } catch (e) {
+        throw new Error(`${where}::marker: ${(e as Error).message}`);
+      }
+    }
+
+    // Out of flow in the list's 40px gutter, so the marker costs the li no room —
+    // the same absolute-box trick ::placeholder uses. The offset estimates the
+    // marker's own width at ~0.55em per character plus a 0.4em gap, because there
+    // is no text-align field to right-align with; stated in the doc above.
+    const offset = (text.length * 0.55 + 0.4) * ownStyle.fontSize;
+    const defaults = new Map<string, string>([
+      ["position", "absolute"],
+      ["left", `${-offset}px`],
+      ["top", "0px"],
+    ]);
+
+    const inherited = inheritFrom(ownStyle);
+    const r = resolveVariants(path, el, inherited, parentVars, where, "marker", defaults);
+
+    return (
+      nodes.push({
+        kind: NodeKind.TEXT,
+        style: r.styleId,
+        mask: r.mask,
+        run: r.run,
+        text: internString(text),
+        parent,
+        children: [],
+        generated: true,
+      }) - 1
+    );
+  }
+
+  /**
    * The `::picker(select)` box for a `<select>`, holding its options.
    *
    * Beside [`walkPlaceholder`] rather than inside [`walkPseudoElement`] for the same
@@ -1375,6 +1650,8 @@ export function compileTree(
       null,
       undefined,
       selectionColors(path, inherited, parentVars, where),
+      // The node with no parent is the window root, and its box is the viewport.
+      parent === -1,
     );
 
     const self = nodes.length;
@@ -1464,20 +1741,45 @@ export function compileTree(
     if (el.onFocus) handlers.push({ node: self, ref: el.onFocus, name: "", kind: "focus" });
     if (el.onBlur) handlers.push({ node: self, ref: el.onBlur, name: "", kind: "blur" });
     if (el.onSubmit) handlers.push({ node: self, ref: el.onSubmit, name: "", kind: "submit" });
+    if (el.onInvalid) handlers.push({ node: self, ref: el.onInvalid, name: "", kind: "invalid" });
+
+    // A named field with no `bind:value` is editable through the cell the compiler
+    // declared for it — the whole reason `<form><input name="email"></form>` works with
+    // no state module. `name` is pre-set, so the resolve pass leaves it alone; there is
+    // no export to look up, exactly as for a component-local signal.
+    const cell = fieldSpecs.get(el)?.cell ?? "";
     if (el.bindValue) {
-      editables.push({ node: self, ref: el.bindValue, name: "" });
-      // Read back when this element's children are walked, a few lines below — the
-      // element is pushed before its children, so the run always finds its field here.
+      // A row's own property rather than a signal — `bind:value={job.title}` inside a
+      // `map()`. Collected here and lifted into the list by `walkList`, exactly as a row's
+      // handlers are: this node is the *template's*, and the binding belongs to whichever
+      // row a replica is rendering.
+      if (isRecorder(el.bindValue)) {
+        itemEditableCandidates.push({ node: self, path: pathOf(el.bindValue), where });
+        editableFields.add(self);
+      } else if (isSignal(el.bindValue)) {
+        editables.push({ node: self, ref: el.bindValue, name: "" });
+        editableFields.add(self);
+      } else {
+        // A plain string, which the widened prop type now admits. It cannot be a field: a
+        // literal has nowhere to store what the user types, and freezing one into the box
+        // would look like a working input that forgets every keystroke.
+        warnings.push(
+          `bind:value on <${el.tag}> was given a plain value, not a signal.\n` +
+            `    bind:value is two-way, so it needs somewhere to write: a signal(), or — inside\n` +
+            `    a map() row — the row's own property, as in bind:value={job.title}.\n` +
+            `    ${where}`,
+        );
+      }
+    } else if (cell !== "" && isTextEntry(el)) {
+      editables.push({ node: self, ref: null, name: cell });
       editableFields.add(self);
-    }
-    else if (isTextEntry(el)) {
+    } else if (isTextEntry(el)) {
       warnings.push(
         `<${el.tag}${typeOf(el) ? ` type="${typeOf(el)}"` : ""}> has no bind:value, so it cannot ` +
           `be typed into — it compiles to a styled box.\n` +
-          `    Add bind:value={someSignal} to make it a field. A value nobody declared has ` +
-          `nowhere to live:\n` +
-          `    the text a user types is held by a signal, and an engine-owned text buffer for ` +
-          `unbound fields is A5.`,
+          `    Add bind:value={someSignal} to make it a field, or give it a name inside a\n` +
+          `    <form>, which declares a cell for it and puts it in the payload. A value nobody\n` +
+          `    declared has nowhere to live.`,
       );
     }
 
@@ -1521,6 +1823,9 @@ export function compileTree(
       });
     }
 
+    // `::marker` precedes even `::before`, per css-lists; being absolute it does
+    // not take a sibling's room either way, but the order costs nothing to state.
+    const marker = walkMarker(el, path, style, vars, where, self);
     // `::before` is "an immediate child of the originating element", first in
     // order; `::after` is last. Ordinary children in between — so the generated
     // boxes are siblings of the real content, which is exactly what the spec
@@ -1555,6 +1860,7 @@ export function compileTree(
       return self;
     }
 
+    if (marker !== -1) nodes[self]!.children.push(marker);
     if (before !== -1) nodes[self]!.children.push(before);
 
     // An unbound field gets an empty text run, so *every* text-entry field has one.
@@ -1571,23 +1877,54 @@ export function compileTree(
     // so the strut, the placeholder's emptiness test and paint all take one path. It is
     // also where an engine-owned text buffer will write, so nothing here moves again
     // when unbound fields start holding text.
-    if (isTextEntryTag(el) && el.bindValue === null && kids.length === 0) {
+    //
+    // A field with a **compiler-declared cell** takes the same run and binds it, which is
+    // what makes typing into `<input name="email">` show up: the keystroke splices the
+    // cell, the binding rewrites the slot, and the ordinary text path draws it. It also
+    // takes this branch when it has children, which only a `<textarea>` can — its content
+    // is its *default value*, already read into the cell's initial, so rendering it as a
+    // static child as well would draw it twice and never update.
+    const ownsRun = isTextEntryTag(el) && el.bindValue === null && cell !== "";
+    if (isTextEntryTag(el) && el.bindValue === null && (kids.length === 0 || ownsRun)) {
       const runStyle = styles.intern(textStyle(style));
-      nodes[self]!.children.push(
-        nodes.push({
-          kind: NodeKind.TEXT,
-          style: runStyle,
-          mask: 0,
-          run: [runStyle],
-          text: internString(""),
-          parent: self,
-          children: [],
-          editable: true,
-        }) - 1,
-      );
+      const initial = ownsRun ? String(fieldSpecs.get(el)?.initial ?? "") : "";
+      const slot = ownsRun ? reserveSlot(initial) : internString("");
+      const run = nodes.push({
+        kind: NodeKind.TEXT,
+        style: runStyle,
+        mask: 0,
+        run: [runStyle],
+        text: slot,
+        parent: self,
+        children: [],
+        editable: true,
+      }) - 1;
+      nodes[self]!.children.push(run);
+      if (ownsRun) textBindings.push({ node: run, slot, parts: [{ export: cell }] });
     }
 
-    for (const child of kids) {
+    // `<span error />` — its text is its wrapper's message, so the run is created bound to
+    // that cell and the authored children are dropped. Dropped rather than kept: whatever is
+    // written inside is placeholder prose for the author's benefit, and rendering it as well
+    // would show "error goes here" in a shipped app until the first failure.
+    const messageCell = messageCellOf.get(el);
+    if (messageCell !== undefined) {
+      const runStyle = styles.intern(textStyle(style));
+      const slot = reserveSlot("");
+      const run = nodes.push({
+        kind: NodeKind.TEXT,
+        style: runStyle,
+        mask: 0,
+        run: [runStyle],
+        text: slot,
+        parent: self,
+        children: [],
+      }) - 1;
+      nodes[self]!.children.push(run);
+      textBindings.push({ node: run, slot, parts: [{ export: messageCell }] });
+    }
+
+    for (const child of ownsRun || messageCell !== undefined ? [] : kids) {
       const childIndex = walkChild(child, path, style, self, vars);
       if (childIndex !== -1) nodes[self]!.children.push(childIndex);
     }
@@ -1647,6 +1984,16 @@ export function compileTree(
         kind: handler.kind,
       });
       handlers.splice(h, 1);
+    }
+
+    // Two-way bindings inside the template belong to the row too, and for a sharper reason
+    // than handlers do: the *target* is per-row, not just the dispatch. Lifted the same way.
+    const itemEditables: BuiltItemEditable[] = [];
+    for (let e = itemEditableCandidates.length - 1; e >= 0; e--) {
+      const candidate = itemEditableCandidates[e]!;
+      if (candidate.node < arenaStart || candidate.node >= arenaStart + stride) continue;
+      itemEditables.unshift({ offset: candidate.node - arenaStart, path: candidate.path });
+      itemEditableCandidates.splice(e, 1);
     }
 
     // Item bindings were recorded as ordinary text bindings; lift them out.
@@ -1740,6 +2087,7 @@ export function compileTree(
       keyPath: node.keyPath,
       bindings,
       itemHandlers,
+      itemEditables,
       slotStart,
     });
 
@@ -1817,11 +2165,26 @@ export function compileTree(
 
   resolveActivation(nodes, nodeOfEl, controls, labelEls, warnings);
   resolveControlLabels(nodes, nodeOfEl, controls, labelHosts);
+  // A recorded path can only be produced inside a `map()` callback, so every candidate
+  // should have been claimed by the list whose template contained it. One left over means
+  // an item proxy escaped its callback — reported rather than dropped, because a field
+  // bound to nothing looks exactly like a working one until it is typed into.
+  for (const orphan of itemEditableCandidates) {
+    warnings.push(
+      `bind:value={item.${orphan.path.join(".")}} is not inside the map() it belongs to.\n` +
+        `    A row's property can only be edited by an element in that row's template, because\n` +
+        `    the write goes back into the array through the row a replica is rendering.\n` +
+        `    ${orphan.where}`,
+    );
+  }
+
   resolveAutofocus(nodes, autofocusCandidates, warnings);
   // After both resolve passes, because `activates` and a control's `label` are node ids
   // those passes fill in — replicating before them would copy two -1s.
   replicateListControls(nodes, controls, lists);
-  const forms = resolveForms(rootEl, nodeOfEl);
+  // After `replicateListControls` for the same reason `resolveDisabled` is: a field's
+  // control row is an index into a table that pass appends to and re-sorts.
+  const forms = resolveForms(rootEl, nodeOfEl, fieldSpecs, controls, ownership, fieldGroups, fieldArrays, (m) => warnings.push(m));
   // After `replicateListControls`, which appends replica rows and re-sorts: a row index
   // taken before that points at a different control.
   const disabled = resolveDisabled(disabledCandidates, controls, lists);
@@ -1851,6 +2214,7 @@ export function compileTree(
     keyframes: tweens.keyframes,
     controls,
     forms,
+    fieldCells,
     disabled,
     warnings,
   };
@@ -2188,21 +2552,6 @@ function resolveAutofocus(
  * for exactly the reason `buildTabStops` gives.
  */
 /**
- * Whether Enter anywhere in a form would click this element.
- *
- * Measured, `probes/implicit-submission.html`: a bare `<button>` is a submit button
- * because `type` defaults to `submit`; `type="button"` is not one and does not rescue a
- * form that would otherwise not submit; and `<input type=submit>` counts too.
- */
-function isSubmitButton(el: Element): boolean {
-  if (el.tag === "button") {
-    const type = typeOf(el);
-    return type === "" || type === "submit";
-  }
-  return el.tag === "input" && typeOf(el) === "submit";
-}
-
-/**
  * Whether this element is one of the fields the "exactly one" rule counts.
  *
  * The membership is measured rather than reasoned, and the measurement is worth keeping
@@ -2211,7 +2560,10 @@ function isSubmitButton(el: Element): boolean {
  * count either** — a form holding one text input and one textarea still submits on Enter.
  */
 function blocksImplicitSubmission(el: Element): boolean {
-  return el.tag === "input" && TEXT_ENTRY_TYPES.has(typeOf(el));
+  // `BLOCKING_TYPES`, not the typeable set — see its comment. They were one set until
+  // `number` needed a box, and sharing it would have widened a measured rule as a side effect
+  // of a layout fix.
+  return el.tag === "input" && BLOCKING_TYPES.has(typeOf(el));
 }
 
 /**
@@ -2220,29 +2572,79 @@ function blocksImplicitSubmission(el: Element): boolean {
  * A whole browser algorithm collapsing to one integer per form, which is the
  * compile-time-first claim landing about as cleanly as it ever does: which button is
  * first in tree order, whether it is disabled, and how many fields block are all
- * properties of the markup. What is left for run time is one lookup — walk up from the
- * focused node to a form — and one test the host can do from the tags it already has.
+ * properties of the markup. What is left for run time is one lookup — from the focused
+ * node to its form — and one test the host can do from the tags it already has.
  *
- * A nested form is not descended into. That is invalid HTML which parses anyway, and
- * giving the inner form's button to the outer one would be a quiet wrong answer where
- * ignoring it is a quiet right one.
+ * **Every question here is asked of the form's *owned* controls rather than of its
+ * subtree**, and that is measured rather than tidied: a `form="F"` button written outside F
+ * is F's default button, a descendant button whose `form=` names another form is *not*, and
+ * an associated field outside F still counts towards F's "exactly one blocking field". A
+ * subtree scan gets all three wrong. See `fields.ts::formOwnership` for the table.
  */
-function resolveForms(root: Element, nodeOf: Map<Element, number>): BuiltForm[] {
+function resolveForms(
+  root: Element,
+  nodeOf: Map<Element, number>,
+  fieldSpecs: Map<Element, FieldSpec>,
+  controls: BuiltControl[],
+  ownership: Ownership,
+  fieldGroups: FieldGroup[],
+  fieldArrays: FieldArray[],
+  warn: (message: string) => void,
+): BuiltForm[] {
   const out: BuiltForm[] = [];
+
+  /** Whether `path` is `prefix` or sits under it. */
+  const startsWith = (path: readonly string[], prefix: readonly string[]): boolean =>
+    prefix.every((segment, i) => path[i] === segment);
+
+  /**
+   * `validateOn`, checked rather than trusted.
+   *
+   * Three values, and a fourth spelling is a build warning rather than a silent `submit`:
+   * `validateOn="onChange"` is exactly what someone coming from React Hook Form would write,
+   * and a form that then only validated on submit would look like a broken feature.
+   */
+  const validateOnOf = (el: Element): string => {
+    // `validate-on`, because a JSX prop is kebab-cased on its way into the attribute map —
+    // `kebab("validateOn")`. The undashed spelling is accepted too, since that is what an
+    // `.html` document would plausibly write and the parser does not kebab anything.
+    //
+    // Reading only `validateon` was the first version, and it compiled every form as
+    // `"submit"` while the markup said otherwise: no error, no warning, just a feature that
+    // did nothing. The generated table is what showed it.
+    const raw = el.attrs.get("validate-on") ?? el.attrs.get("validateon");
+    if (raw === undefined || raw === "") return "submit";
+    if (raw === "submit" || raw === "change" || raw === "blur") return raw;
+    warn(
+      `validateOn="${raw}" is not one of submit, change or blur — treated as "submit".\n` +
+        `    dziri names the trigger rather than the handler, so it is "change" and not\n` +
+        `    "onChange". There is no "touched" or "all": a form re-validates as its fields\n` +
+        `    change once a submit has failed, whatever this says.`,
+    );
+    return "submit";
+  };
+
+  /**
+   * This form's named controls, in document order.
+   *
+   * From the spec map's insertion order, which *is* document order — `collectFields` walks
+   * the whole document once — and that matters beyond tidiness: a field written **before**
+   * the form it names comes first in that form's payload, measured. A subtree scan could not
+   * produce that order because the field is not in the subtree.
+   */
+  const fieldsOf = (form: Element): FieldSpec[] =>
+    [...fieldSpecs.values()].filter((spec) => spec.form === form);
 
   const collect = (form: Element): { button: Element | null; blocking: number } => {
     let button: Element | null = null;
     let blocking = 0;
-    const scan = (el: Element): void => {
-      for (const child of el.children) {
-        if (child.type !== "element") continue;
-        if (child.tag === "form") continue;
-        if (button === null && isSubmitButton(child)) button = child;
-        if (blocksImplicitSubmission(child)) blocking += 1;
-        scan(child);
-      }
-    };
-    scan(form);
+    // Document order, so "the first submit button" means the first in the document among the
+    // ones this form owns — which is what the measurement shows and is not the same as the
+    // first in the subtree.
+    for (const owned of ownership.byForm.get(form) ?? []) {
+      if (button === null && isSubmitButton(owned)) button = owned;
+      if (blocksImplicitSubmission(owned)) blocking += 1;
+    }
     return { button, blocking };
   };
 
@@ -2256,10 +2658,63 @@ function resolveForms(root: Element, nodeOf: Map<Element, number>): BuiltForm[] 
         // with one field the skip-then-fall-through reading predicts a submit and the
         // block reading predicts nothing, and nothing is what happened.
         const usable = button !== null && !(button as Element).attrs.has("disabled");
+        // A spec whose element never became a node cannot be read at run time, so it is
+        // dropped rather than emitted pointing at -1. Nothing produces one today —
+        // `collectFields` does not descend into a `map()` template, which is the one place
+        // an element is compiled somewhere other than where it was written — and it is a
+        // cheap guard against a walk that starts skipping something new.
+        const specs = fieldsOf(el).filter((spec) => nodeOf.has(spec.el));
+        const fields: BuiltField[] = specs.map((spec) => ({
+          node: nodeOf.get(spec.el)!,
+          kind: spec.kind,
+          value: spec.value,
+          // `?? ""` covers a submitter, which has no cell and so was given no initial.
+          initial: spec.initial ?? "",
+          options: spec.options,
+          disabled: spec.disabled,
+          row: controls.findIndex((row) => row.node === nodeOf.get(spec.el)),
+          ref: spec.cell === "" ? spec.el.bindValue : null,
+          name: spec.cell,
+        }));
+
+        // A wrapper whose element got no node cannot be reached at run time; dropped for the
+        // same reason a field would be.
+        const groups = fieldGroups
+          .filter((g) => g.form === el && nodeOf.has(g.el))
+          .map((g) => ({
+            node: nodeOf.get(g.el)!,
+            path: g.path,
+            errorCell: g.errorCell,
+            messageCell: g.messageCell,
+            // Which controls are *under* this wrapper, by path prefix. Used for the dirty
+            // test, and resolved here because a path comparison is a build-time question.
+            fields: specs.flatMap((spec, i) => (startsWith(spec.path, g.path) ? [i] : [])),
+          }));
+
         out.push({
           node,
           button: usable ? nodeOf.get(button as Element) ?? -1 : -1,
           direct: button === null && blocking === 1,
+          fields,
+          groups,
+          arrays: fieldArrays
+            .filter((a) => a.form === el)
+            .map((a) => ({ path: a.path, source: a.source, name: "" })),
+          validateOn: validateOnOf(el),
+          keys: formKeys(specs.map((spec) => ({ path: spec.path, kind: spec.kind, el: spec.el }))),
+          // Sorted, because the runtime binary-searches it the way it searches `textAreas`.
+          // Every control this form owns, named or not — the *set*, where `fields` is only
+          // the part that has a payload entry. Enter pressed in an associated field written
+          // outside the form has to find that form, and a parent walk cannot: the field is
+          // not a descendant.
+          owns: new Int32Array(
+            (ownership.byForm.get(el) ?? [])
+              .map((owned) => nodeOf.get(owned))
+              .filter((n): n is number => n !== undefined)
+              .sort((a, b) => a - b),
+          ),
+          validate: el.validate ?? null,
+          validateName: "",
         });
       }
     }
@@ -2523,7 +2978,25 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     tabStops: buildTabStops(result.nodes),
     autofocus: buildAutofocus(result.nodes),
     textAreas: buildTextAreas(result.nodes),
-    forms: result.forms,
+    // Enter's outcome survives — it is pure structure — while the *fields* do not, for the
+    // same reason `handlers` does not: a field holds a cell, and a cell is either an export
+    // this path never resolves or one the artifact declares, and there is no artifact here.
+    // `compileTree` is where the field table can be inspected, and where its tests look.
+    forms: result.forms.map((f) => ({
+      node: f.node,
+      button: f.button,
+      direct: f.direct,
+      // Ownership *is* pure structure, so it survives here beside `button` and `direct`.
+      owns: f.owns,
+      validateOn: f.validateOn as "submit" | "change" | "blur",
+      fields: [],
+      keys: [],
+      // Empty for the reason `fields` is: an array field holds the author's signal, and a
+      // signal is a reference this path has no artifact to resolve against.
+      arrays: [],
+      groups: [],
+      validate: null,
+    })),
     // Empty on the in-memory path for the same reason `handlers` is: a binding needs its
     // signal resolved to an export, which only the generated-module path does.
     disabledBindings: [],
@@ -2756,13 +3229,28 @@ export function emit(
     ...result.textBindings.flatMap((b) => b.parts).map((p) => ("export" in p ? p.export : "")),
     ...result.handlers.map((h) => h.name),
     ...locals.map((l) => `signal(${JSON.stringify(l.initial)})`),
+    ...result.fieldCells.map((c) => `signal(${JSON.stringify(c.initial)})`),
   ].join("\n");
 
   const needsComputed =
     (variants?.patches ?? []).some((p) => p.exportExpression) || emitted.includes("computed(");
+
+  /**
+   * Every cell the artifact *declares*, which is what decides the `signal` import.
+   *
+   * Counting only `fieldCells` was wrong and had been for as long as `field` wrappers have
+   * existed: a wrapper's two error cells are declared by the same block, so a form whose
+   * wrappers happen to declare no field cell emitted `signal(false)` with no import and threw
+   * `signal is not defined` at import time — a broken artifact rather than a failing build.
+   *
+   * It stayed unreachable by luck. A wrapper normally holds a control with no `bind:value`,
+   * which declares a cell and drags the import in; it takes a wrapper whose only control is
+   * bound by the author, or one holding a `map()`, to have wrappers and no field cells.
+   */
+  const declaresCells = locals.length > 0 || result.fieldCells.length > 0 || result.forms.some((f) => f.groups.length > 0);
   const runtimeNames = [
     ...(needsComputed ? ["computed"] : []),
-    ...(locals.length > 0 ? ["signal"] : []),
+    ...(declaresCells ? ["signal"] : []),
     ...(/\$\(/.test(emitted) ? ["$"] : []),
     ...(/\$m\(/.test(emitted) ? ["$m"] : []),
   ];
@@ -2863,6 +3351,93 @@ export function emit(
     )
     .join("\n");
 
+  /**
+   * Cells for named form fields nobody declared a signal for.
+   *
+   * The same shape as `localsSource`, and for the same reason: a value the compiler
+   * invented has no export to import, so the artifact declares it. Not exported — the
+   * payload is the only way to read one, which is what keeps a form's fields from becoming
+   * a second, undocumented state API.
+   */
+  /**
+   * Every `field` wrapper's two cells, in the order the groups were found.
+   *
+   * Two per wrapper and no more: whether it has an error, and the message. `dirty` is absent
+   * because it needs no storage — the initial value is a compile-time constant, so it is a
+   * comparison rather than a flag — and `touched` is absent because `validateOn` does the job
+   * it exists for in other form libraries.
+   */
+  const groupCells = result.forms.flatMap((f) => f.groups);
+
+  const fieldCellsSource =
+    result.fieldCells.length === 0 && groupCells.length === 0
+      ? ""
+      : `/** Form state. Declared here: nobody wrote an export for a field the compiler named. */\n` +
+        [
+          ...result.fieldCells.map(
+            (c) => `const ${c.name} = signal(${JSON.stringify(c.initial)});   // ${c.what}`,
+          ),
+          ...groupCells.flatMap((g) => [
+            `const ${g.errorCell} = signal(false);   // ${g.path.join(".")} has an error`,
+            `const ${g.messageCell} = signal("");   // ${g.path.join(".")}'s message`,
+          ]),
+        ].join("\n") +
+        `\n\n`;
+
+  const formSource = result.forms
+    .map((f) => {
+      const fields = f.fields
+        .map(
+          (field) =>
+            `      { node: ${field.node}, kind: ${JSON.stringify(field.kind)}, ` +
+            `value: ${JSON.stringify(field.value)}, initial: ${JSON.stringify(field.initial)}, ` +
+            `options: ${JSON.stringify(field.options)}, ` +
+            `disabled: ${field.disabled}, row: ${field.row}, ` +
+            // A submitter has no cell and therefore no name to resolve. Emitting `null` here
+            // rather than letting `identifier` refuse an empty string, which is what it did
+            // until a named submit button existed to emit — the first one would have failed
+            // the build from inside the emitter, pointing at nothing.
+            `signal: ${field.name === "" ? "null" : resolved(field.name, `the field at node ${field.node}`)} },`,
+        )
+        .join("\n");
+      const keys = f.keys
+        .map(
+          (key) =>
+            `      { path: ${JSON.stringify(key.path)}, shape: ${JSON.stringify(key.shape)}, ` +
+            `fields: ${typedArray("Int32Array", key.fields)} },`,
+        )
+        .join("\n");
+      const arrays = f.arrays
+        .map(
+          (a) =>
+            `      { path: ${JSON.stringify(a.path)}, ` +
+            `signal: ${resolved(a.name, `the map() behind field="${a.path.join(".")}"`)} },`,
+        )
+        .join("\n");
+      const groups = f.groups
+        .map(
+          (g) =>
+            `      { node: ${g.node}, path: ${JSON.stringify(g.path)}, ` +
+            `error: ${g.errorCell}, message: ${g.messageCell}, ` +
+            `fields: ${typedArray("Int32Array", g.fields)} },`,
+        )
+        .join("\n");
+
+      return (
+        `  {\n` +
+        `    node: ${f.node}, button: ${f.button}, direct: ${f.direct},\n` +
+        `    validateOn: ${JSON.stringify(f.validateOn)},\n` +
+        `    owns: ${typedArray("Int32Array", [...f.owns])},\n` +
+        `    fields: [\n${fields}\n    ],\n` +
+        `    keys: [\n${keys}\n    ],\n` +
+        `    groups: [\n${groups}\n    ],\n` +
+        `    arrays: [\n${arrays}\n    ],\n` +
+        `    validate: ${f.validateName === "" ? "null" : identifier(f.validateName, `the validate on the form at node ${f.node}`)},\n` +
+        `  },`
+      );
+    })
+    .join("\n");
+
   const listBindingSource = result.lists
     .map((l) => {
       const binds = l.bindings
@@ -2875,6 +3450,9 @@ export function emit(
       const rowHandlers = l.itemHandlers
         .map((h) => `      { offset: ${h.offset}, kind: "${h.kind}", fn: ${h.name} },`)
         .join("\n");
+      const rowEditables = l.itemEditables
+        .map((e) => `      { offset: ${e.offset}, path: ${JSON.stringify(e.path)} },`)
+        .join("\n");
 
       return (
         `  {\n` +
@@ -2885,6 +3463,7 @@ export function emit(
         `    slotsPerItem: ${l.bindings.length},\n` +
         `    bindings: [\n${binds}\n    ],\n` +
         `    itemHandlers: [\n${rowHandlers}\n    ],\n` +
+        `    itemEditables: [\n${rowEditables}\n    ],\n` +
         `  },`
       );
     })
@@ -3000,12 +3579,17 @@ export const autofocus = ${typedArray("Int32Array", [...buildAutofocus(nodes)])}
 /** Text areas, sorted. Enter in one types rather than submitting — measured. */
 export const textAreas = ${typedArray("Int32Array", [...buildTextAreas(nodes)])};
 
-/** Every \`<form>\`, with Enter's outcome resolved at build time. */
+${localsSource}${fieldCellsSource}/**
+ * Every \`<form>\`: Enter's outcome, the fields it submits, and its payload's shape.
+ *
+ * **After the cells above**, which is required rather than tidy — a field holds the cell
+ * itself rather than a name to look up, and \`const\` is not hoisted.
+ */
 export const forms = [
-${result.forms.map((f) => `  { node: ${f.node}, button: ${f.button}, direct: ${f.direct} },`).join("\n")}
+${formSource}
 ] satisfies FormBinding[];
 
-${localsSource}/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
+/** Dynamic text runs. Literal chunks interleaved with the signals they read. */
 export const textBindings = [
 ${textBindingSource}
 ] satisfies TextBinding[];

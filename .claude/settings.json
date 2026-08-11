@@ -5,27 +5,5 @@
     "command": "node \".claude/statusline.cjs\"",
     "padding": 0
   },
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "if": "Edit",
-            "command": "bun run scripts/hooks/after-edit.ts",
-            "timeout": 60,
-            "statusMessage": "Checking citations"
-          },
-          {
-            "type": "command",
-            "if": "Write",
-            "command": "bun run scripts/hooks/after-edit.ts",
-            "timeout": 60,
-            "statusMessage": "Checking citations"
-          }
-        ]
-      }
-    ]
-  }
+  "hooks": {}
 }

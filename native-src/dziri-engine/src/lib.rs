@@ -980,6 +980,55 @@ pub unsafe extern "C" fn dziri_engine_font_family(
     })
 }
 
+/// Shows a native modal message box, and blocks until the user dismisses it.
+///
+/// `level` is 0 information, 1 warning, 2 error; anything else is information, because a bad
+/// integer should not turn a notice into an alarm.
+///
+/// **The first thing to cross this boundary as text going *in*.** Everything else that carries
+/// a string — `dziri_last_error`, `dziri_engine_font_family` — writes one *out*, so there was
+/// no inbound convention to follow and this establishes the obvious one: a pointer and a byte
+/// length, UTF-8, no NUL. Not a C string, because the caller is Bun and a length is what it
+/// already has; requiring a terminator would mean a copy on that side to add one and a scan on
+/// this side to find it again.
+///
+/// Invalid UTF-8 is replaced rather than refused. The bytes come from a `TextEncoder` on the
+/// other side, so this cannot happen without memory corruption — and if it has happened, a
+/// dialog reading "saved ✔" with one broken glyph is a better outcome than an error status
+/// nobody was expecting from an alert.
+///
+/// # Safety
+/// `title` and `message` must each be readable for the length beside them, or null with a
+/// length of 0.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_alert(
+    handle: Handle,
+    level: u32,
+    title: *const u8,
+    title_len: u32,
+    message: *const u8,
+    message_len: u32,
+) -> i32 {
+    // SAFETY: the caller's promise, narrowed — a null pointer is read as an empty string
+    // rather than dereferenced, which is what a caller with nothing to say will pass.
+    let read = |ptr: *const u8, len: u32| -> String {
+        if ptr.is_null() || len == 0 {
+            return String::new();
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+
+    let title = read(title, title_len);
+    let message = read(message, message_len);
+
+    with(handle, |engine| match engine.alert(level, &title, &message) {
+        Ok(()) => status::OK,
+        // The error carries its own category, so it is reported rather than flattened.
+        Err(e) => fail(e.status, &e.to_string()),
+    })
+}
+
 /// Milliseconds spent in the last `tick`.
 ///
 /// # Safety

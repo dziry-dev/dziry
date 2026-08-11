@@ -6,7 +6,7 @@
  * here is what survived the "does the runtime really need to know this?" filter.
  */
 
-import type { ReadonlySignal } from "./runtime/signal.ts";
+import type { ReadonlySignal, Signal } from "./runtime/signal.ts";
 import {
   Align as SchemaAlign,
   Display as SchemaDisplay,
@@ -151,8 +151,16 @@ export const LAYOUT_FIELDS: StyleField[] = STYLE_FIELDS.filter((f) => f[3]).map(
 export const INITIAL_STYLE: ComputedStyle = {
   bg: 0x00000000, // transparent
   fg: 0xff000000, // black
-  borderColor: 0x00000000,
-  borderWidth: 0,
+  // Per side, as CSS has them. Alpha 0 is "nothing said" for the colours; 0px
+  // for the widths, which is also how `border-style: none` is spelled.
+  borderTopColor: 0x00000000,
+  borderRightColor: 0x00000000,
+  borderBottomColor: 0x00000000,
+  borderLeftColor: 0x00000000,
+  borderTopWidth: 0,
+  borderRightWidth: 0,
+  borderBottomWidth: 0,
+  borderLeftWidth: 0,
   radTL: 0,
   radTR: 0,
   radBR: 0,
@@ -171,6 +179,18 @@ export const INITIAL_STYLE: ComputedStyle = {
   // The real default is a UA rule on `body::selection`; see `ua-sheet.ts`.
   selectionBg: 0x00000000,
   selectionFg: 0x00000000,
+  // `outline: none medium currentcolor` — a width of 0 spells the `none`, as
+  // with the border, and alpha 0 is "nothing said" for the colour.
+  outlineColor: 0x00000000,
+  outlineWidth: 0,
+  outlineOffset: 0,
+  // No decoration, solid, auto thickness and offset. The colour inherits and
+  // alpha 0 falls back to the text's own `fg` at paint — `currentcolor`.
+  decorationLine: 0,
+  decorationColor: 0x00000000,
+  decorationStyle: 0,
+  decorationThickness: 0,
+  underlineOffset: NaN,
   padT: 0,
   padR: 0,
   padB: 0,
@@ -201,6 +221,7 @@ export const INITIAL_STYLE: ComputedStyle = {
   grow: 0,
   shrink: 1,
   basis: AUTO,
+  basisPct: 0,
   gapRow: 0,
   gapCol: 0,
   gridCols: 0,
@@ -213,19 +234,54 @@ export const INITIAL_STYLE: ComputedStyle = {
   justifyItems: UNSET,
   justifySelf: UNSET,
   width: AUTO,
+  // The percentage and viewport channels of a length are 0 initially — "no
+  // fraction" — regardless of what the px channel holds, `auto` included.
+  widthPct: 0,
+  widthVp: 0,
   height: AUTO,
+  heightPct: 0,
+  heightVp: 0,
   minW: NaN,
+  minWPct: 0,
+  minWVp: 0,
   maxW: Infinity,
+  maxWPct: 0,
+  maxWVp: 0,
   minH: NaN,
+  minHPct: 0,
+  minHVp: 0,
   maxH: Infinity,
+  maxHPct: 0,
+  maxHVp: 0,
   aspectRatio: AUTO,
   position: Position.RELATIVE,
   insetT: AUTO,
   insetR: AUTO,
   insetB: AUTO,
   insetL: AUTO,
+  insetTPct: 0,
+  insetRPct: 0,
+  insetBPct: 0,
+  insetLPct: 0,
+  // `border-spacing` initial value is NaN (unset, browser default ~2px)
+  borderSpacingH: NaN,
+  borderSpacingV: NaN,
+  // `scroll-margin` initial is 0 on all sides
+  scrollMarginTop: 0,
+  scrollMarginRight: 0,
+  scrollMarginBottom: 0,
+  scrollMarginLeft: 0,
   fontSize: 16,
   fontWeight: 400,
+  // `font-style: normal` and `font-family`'s initial, which for dziri is "the
+  // face the platform resolved at startup" — a generic slot, not a name.
+  fontStyle: 0,
+  fontFamily: 0,
+  // `line-height: normal` — no multiplier, no absolute length.
+  lineHeight: 0,
+  lineHeightPx: NaN,
+  // `text-indent: 0` by default. NaN means unset.
+  textIndent: NaN,
   overflowX: Overflow.VISIBLE,
   overflowY: Overflow.VISIBLE,
   scrollbarWidth: ScrollbarWidth.AUTO,
@@ -244,6 +300,8 @@ export const INITIAL_STYLE: ComputedStyle = {
   // something the UA stylesheet asks for on the elements that are controls,
   // rather than something every element gets.
   appearance: Appearance.NONE,
+  // `cursor` initial value is `auto` — the default system cursor. 0 = auto.
+  cursor: 0,
   opacity: 1,
   // `transform: none` decomposed. Note which identity each field takes: 0 for the
   // additive ones and **1 for the scales**, so an untransformed node composes to
@@ -505,20 +563,24 @@ export type HandlerBinding = {
    *
    * The argument differs with it, which is why the two dispatch paths are separate
    * functions rather than one with a branch: a click handler is called with the list
-   * item and index (or nothing), a change handler with the control's new value.
+   * item and index (or nothing), a change handler with the control's new value, and a
+   * submit handler with its form's payload.
    */
-  kind: "click" | "change" | "focus" | "blur" | "submit";
-  fn: (value?: unknown) => void;
+  kind: "click" | "change" | "focus" | "blur" | "submit" | "invalid";
+  /**
+   * `any` rather than `unknown`, and the artifact is what forces it.
+   *
+   * A handler is written by the author with the parameter type *they* wanted —
+   * `(issues: { path, message }[]) => void` for an `onInvalid`, `(data: Login) => void` for a
+   * validated submit — and a `(value?: unknown) => void` field refuses every one of those,
+   * because a function taking a narrower parameter is not assignable to one taking `unknown`.
+   * The generated module says `satisfies HandlerBinding[]`, so the refusal lands as a type
+   * error *in generated code*, pointing at a line the author did not write.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  fn: (value?: any) => void;
 };
 
-/**
- * One `<form>`, with Enter's outcome already decided by the compiler.
- *
- * The measured algorithm (`BROWSER-FACTS.md`, "Implicit submission") asks four questions
- * and three of them are answered by the markup alone: which submit button comes first, is
- * it disabled, how many fields block. Only "is the focused node inside this form, and is
- * it a textarea" is left for run time, and both are lookups rather than rules.
- */
 /**
  * A boolean signal driving one control's `DISABLED` flag.
  *
@@ -537,6 +599,197 @@ export type DisabledBinding = {
   signal: ReadonlySignal<boolean>;
 };
 
+/**
+ * How one control contributes to its form's payload.
+ *
+ * Every kind here is a *compile-time* property of the markup — the tag, the `type`, the
+ * presence of a `value` attribute. What is not compile-time is the value itself, and the
+ * probe is unambiguous about that: writing `input.value`, `input.checked` and
+ * `select.selectedIndex` changed the payload while the attributes still said what the
+ * author wrote (`probes/form-data.html`, "after value/checked/index writes"). So a field
+ * is a kind plus a live cell, and never a constant.
+ *
+ * Strings rather than an enum, and for a reason this repo has already paid for once:
+ * `ir.ts` is a *value* import, so a runtime module reaching in here for a constant drags
+ * `STYLE_FIELDS` and its eighty rows into the bundle — the mistake `find-row.ts` exists to
+ * undo. A string literal costs the artifact a few bytes and the runtime nothing, and it is
+ * the same shape `HandlerBinding.kind` already uses.
+ */
+export type FieldKind =
+  /** `<input>` of a text-like type, and `<textarea>`. A string cell. */
+  | "text"
+  /** `<input type=number|range>`. A string cell the payload parses. */
+  | "number"
+  /** `<input type=checkbox>`. A boolean cell. */
+  | "checkbox"
+  /** `<input type=radio>`. A boolean cell; the group's payload is the checked one's value. */
+  | "radio"
+  /** `<select>`. A cell holding the chosen option's index. */
+  | "select"
+  /** `<select multiple>` and `<select size=n>`. A cell holding the selected indices. */
+  | "selectMultiple"
+  /**
+   * A named submit button. Contributes its `value` **only when it is the button that
+   * submitted**, which is the one entry no cell can hold — it is a property of the gesture
+   * rather than of the form. Measured, `probes/form-owner.html`, including its position:
+   * the entry sits where the button is written, not at the end.
+   */
+  | "submitter";
+
+/**
+ * One named control inside a `<form>`.
+ *
+ * `signal` is the live cell, and where it comes from differs: a `bind:value` field uses the
+ * author's own signal, and everything else uses one the *compiler* declared in the artifact.
+ * That is what makes a browser-shaped form — `<input name="email">` and nothing else — work
+ * without the author declaring state for every field.
+ */
+export type FormField = {
+  /** The control's node. */
+  node: number;
+  kind: FieldKind;
+  /**
+   * The `value` attribute as authored.
+   *
+   * A checked checkbox or radio with no `value` submits the string `"on"` — measured,
+   * `probes/form-data.html` — and that default is applied here at build time rather than
+   * being invented at submit.
+   */
+  value: string;
+  /**
+   * The live cell. What it holds depends on [`kind`]: a string for `text` and `number`, a
+   * boolean for `checkbox` and `radio`, the chosen index for `select`, and the selected
+   * indices for `selectMultiple`.
+   *
+   * **`null` for a `submitter`**, which is the one kind with nothing to hold: whether a named
+   * submit button contributes depends on which button was pressed, and that is not a value
+   * that persists between submissions.
+   */
+  signal: ReadonlySignal<unknown> | null;
+  /**
+   * The value this field was compiled with — a browser's "default value".
+   *
+   * Here so the dirty test needs no stored flag: "has this moved" is a comparison against a
+   * constant. Exact for a cell the compiler declared, since it seeded it. For a `bind:value`
+   * field it is the `value` attribute, which is all the markup said — an author whose signal
+   * starts somewhere else will see that field read as dirty from the first frame, and the
+   * only cost of that is an error message appearing a little earlier than it might.
+   */
+  initial: string | boolean | number | readonly number[];
+  /**
+   * Each `<option>`'s submitted value, in document order — `SELECT` kinds only.
+   *
+   * Document order and *including* disabled options, because that is the order the engine
+   * indexes by: `select::options_of` walks the subtree and filters on nothing. An index
+   * that means something different on the two sides would submit the wrong option and look
+   * like a selection bug.
+   */
+  options: readonly string[];
+  /**
+   * The markup disables this field, so it contributes nothing — measured, and it is
+   * inherited from a `<fieldset disabled>` rather than read off the control.
+   */
+  disabled: boolean;
+  /**
+   * The control row whose `DISABLED` flag a `disabled={signal}` writes, or -1.
+   *
+   * Separate from [`disabled`] because the two are answered at different times. A literal
+   * `disabled` attribute is settled here; a signal is not, and the payload has to ask the
+   * controls table at submit — which Bun can do, since author-owned disabledness is the one
+   * control flag Bun writes rather than the engine.
+   */
+  row: number;
+};
+
+/**
+ * One key of the payload, and the shape its value takes.
+ *
+ * Decided at build time, which is the whole reason this table exists rather than the
+ * runtime grouping by name as it goes. A schema — and an author reading a type — needs the
+ * key set and the value shapes to be the same on every submit; grouping at run time would
+ * make `tags` an array when two boxes are ticked and a string when one is.
+ */
+export type FormKey = {
+  /**
+   * Where this value sits in the payload — `["position", "x"]` writes `data.position.x`.
+   *
+   * A path rather than a name because a `field` wrapper is a namespace, and nesting is
+   * structural: the wrapper chain *is* the path. No browser does this (measured,
+   * `probes/form-nested-names.html`: `name="user[email]"` is the literal key
+   * `"user[email]"`), so it is dziri's, and it is resolved here rather than parsed at run
+   * time the way every server-side bracket parser does it.
+   */
+  path: string[];
+  /**
+   * - `text` — one string.
+   * - `number` — a number, or `undefined` when the field is empty or unparseable.
+   * - `boolean` — a lone valueless checkbox: `true` / `false` rather than present / absent.
+   * - `one` — a string, or `undefined` when nothing in the group is checked.
+   * - `many` — every checked value, in document order. Empty rather than missing.
+   */
+  shape: "text" | "number" | "boolean" | "one" | "many";
+  /** Indices into [`FormBinding.fields`], in document order. */
+  fields: Int32Array;
+};
+
+/**
+ * One `field` wrapper's error state — the only state a form keeps per field.
+ *
+ * Two cells, and nothing else. What other form libraries keep per field is either derived or
+ * unneeded here: `dirty` is `cell !== initial` against a value the compiler baked in, so it
+ * needs no storage, and `touched` exists in those libraries to gate error display, which
+ * `validateOn` does instead.
+ */
+export type FormGroup = {
+  /** The wrapper's node. */
+  node: number;
+  /** The wrapper's path. An issue belongs to it when this is a prefix of the issue's path. */
+  path: string[];
+  /** True while this wrapper has an error; drives its `errorClassName` patch. */
+  error: Signal<boolean>;
+  /** The first matching issue's message, or `""`. Drives the element marked `error`. */
+  message: Signal<string>;
+  /**
+   * Indices into [`FormBinding.fields`] of the controls under this wrapper.
+   *
+   * For the dirty test: before a submit has been attempted, a wrapper may only show an error
+   * once one of its own controls differs from the value the compiler baked in.
+   */
+  fields: Int32Array;
+};
+
+/**
+ * One `field` wrapper whose contents are a `map()`, and the array that is its value.
+ *
+ * The payload's only entry that is not built from cells. A row's controls live in a list
+ * arena — `capacity` interchangeable replicas of one template — so there is no per-row cell
+ * to declare and nothing stable to declare it against; the array has one entry per row
+ * already, and the author owns it because adding a row *is* writing to it.
+ *
+ * So the value is a read of that signal, which also settles the questions a repeating row
+ * would otherwise raise: reordering rows reorders the payload for free, a removed row is
+ * gone rather than blank, and what a row contains is the item type rather than something
+ * derived from markup. The cost is that the entry is the item as authored — the `key`
+ * property included.
+ */
+export type FormArray = {
+  /** Where the array sits in the payload. The wrapper chain, like every other path. */
+  path: string[];
+  /** The rows. */
+  signal: ReadonlySignal<unknown[]>;
+};
+
+/** When a form checks itself. See `Props.validateOn`. */
+export type ValidateOn = "submit" | "change" | "blur";
+
+/**
+ * One `<form>`, with Enter's outcome already decided by the compiler.
+ *
+ * The measured algorithm (`BROWSER-FACTS.md`, "Implicit submission") asks four questions
+ * and three of them are answered by the markup alone: which submit button comes first, is
+ * it disabled, how many fields block. Only "is the focused node inside this form, and is
+ * it a textarea" is left for run time, and both are lookups rather than rules.
+ */
 export type FormBinding = {
   /** The `<form>` element's node. */
   node: number;
@@ -544,6 +797,47 @@ export type FormBinding = {
   button: number;
   /** Enter submits directly, with no button. Exactly one blocking field and no button. */
   direct: boolean;
+  /** Every named control in the form, in document order. See [`FormField`]. */
+  fields: FormField[];
+  /** The payload's keys and their shapes, resolved at build time. See [`FormKey`]. */
+  keys: FormKey[];
+  /** Every `field` wrapper, with its error cells. See [`FormGroup`]. */
+  groups: FormGroup[];
+  /**
+   * Repeating rows: a `field` wrapper holding a `map()`, and its array. See [`FormArray`].
+   *
+   * Separate from [`keys`] because it is answered differently rather than because it is a
+   * different feature — every other key is built by reading cells, and this one is a read of
+   * the array the rows came from.
+   */
+  arrays: FormArray[];
+  /**
+   * When this form validates. `submit` by default.
+   *
+   * After a failed submit a form always re-validates as its fields change, whatever this
+   * says — which is the behaviour every form library defaults to (React Hook Form spells it
+   * `reValidateMode: onChange`) and the reason it is behaviour here rather than a second
+   * attribute: "stop showing me red once I have fixed it" is not a preference.
+   */
+  validateOn: ValidateOn;
+  /**
+   * Every control this form **owns**, sorted — the set, where `fields` is the subset with a
+   * payload entry.
+   *
+   * It exists because ownership is not ancestry. A `form="F"` control is F's for every
+   * purpose (measured, `probes/form-owner.html`), so Enter pressed in one written *outside*
+   * F has to submit F — and the parent walk that answers this for ordinary markup cannot,
+   * since the field is not a descendant. Sorted for `findRow`, like `textAreas`.
+   */
+  owns: Int32Array;
+  /**
+   * The schema or predicate `validate={…}` was given, or null.
+   *
+   * Deliberately `unknown`: the runtime decides what it is by shape rather than by type,
+   * because the alternative is a dependency on every validation library anyone might use.
+   * See `src/runtime/forms.ts`.
+   */
+  validate: unknown;
 };
 
 export type CompiledUi = {

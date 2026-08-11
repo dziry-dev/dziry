@@ -86,10 +86,18 @@ if (all.length === 0) {
 /** ```lang meta\n …body… \n``` */
 const FENCE = /^([ \t]*)```([A-Za-z0-9]+)([^\n]*)\n([\s\S]*?)^[ \t]*```[ \t]*$/gm;
 
-/** The authoring surface, injected so a fragment need not repeat the import. */
+/**
+ * The authoring surface, injected so a fragment need not repeat the import.
+ *
+ * **`alert` has to be here, and the reason is the feature's own footgun.** Bun defines a global
+ * `alert(message?)`, so a snippet that did not import dziri's resolved to *that* one — and the
+ * two-argument example in the signals page failed with "Expected 0-1 arguments, but got 2",
+ * which is exactly what an author who forgets the import gets at run time. Leaving it out would
+ * have made this harness disagree with the page it was checking.
+ */
 const PREAMBLE = [
-  'import { $, batch, bind, cn, computed, Fragment, isSignal, Outlet, signal, useRoute, useRouter, Window } from "dziri";',
-  'import type { Args, Child, ClassArg, ClassSpec, Component, MapOptions, Props, ReadonlySignal, Route, Router, Signal, StyleObject, WindowConfig, WindowProps } from "dziri";',
+  'import { $, alert, batch, bind, cn, computed, Fragment, isSignal, Outlet, signal, useRoute, useRouter, Window } from "dziri";',
+  'import type { AlertLevel, Args, Child, ClassArg, ClassSpec, Component, MapOptions, Props, ReadonlySignal, Route, Router, Signal, StyleObject, WindowConfig, WindowProps } from "dziri";',
 ].join("\n");
 
 type Example = { page: Page; startLine: number; lang: string; body: string; file: string };

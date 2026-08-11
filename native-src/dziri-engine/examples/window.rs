@@ -177,8 +177,24 @@ fn main() {
 
         // Card: a rounded panel with a border.
         t.set_u32(STYLES, styles::BG, CARD, 0xff1a_1d24);
-        t.set_u32(STYLES, styles::BORDER_COLOR, CARD, 0xff2f_3540);
-        t.set_f32(STYLES, styles::BORDER_WIDTH, CARD, 1.0);
+        for (i, field) in [
+            styles::BORDER_TOP_COLOR,
+            styles::BORDER_RIGHT_COLOR,
+            styles::BORDER_BOTTOM_COLOR,
+            styles::BORDER_LEFT_COLOR,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            t.set_u32(STYLES, field, CARD, 0xff2f_3540);
+            let width = [
+                styles::BORDER_TOP_WIDTH,
+                styles::BORDER_RIGHT_WIDTH,
+                styles::BORDER_BOTTOM_WIDTH,
+                styles::BORDER_LEFT_WIDTH,
+            ][i];
+            t.set_f32(STYLES, width, CARD, 1.0);
+        }
         radius(t, CARD, 10.0);
         pad(t, CARD, 20.0);
         t.set_f32(STYLES, styles::GAP_ROW, CARD, 12.0);

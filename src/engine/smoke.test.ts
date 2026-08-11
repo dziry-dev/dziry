@@ -200,6 +200,36 @@ test("events cross the boundary as data", () => {
 });
 
 /**
+ * `alert()` headless, which is the only way it can be tested at all.
+ *
+ * A real message box blocks the calling thread until somebody clicks it, so a test that opened
+ * one would hang the suite. What is checkable is everything up to that point: the symbol is
+ * bound with the right signature, the strings cross as pointer + length, and with no window the
+ * engine does nothing and says OK.
+ *
+ * That last part is the load-bearing one. Every golden scenario and every screenshot runs
+ * headless, so a handler ending in `alert("saved")` must not fail them — and the alternative,
+ * returning an error status, would have made this feature unusable in the harness that proves
+ * the rest of the app works.
+ */
+test("alert is a no-op with no window, and its strings cross intact", () => {
+  expect(engine.alert.bind(engine, "saved")).not.toThrow();
+  expect(engine.alert.bind(engine, "saved", "Title")).not.toThrow();
+  expect(engine.alert.bind(engine, "broke", "Offline", 2)).not.toThrow();
+
+  // An empty message and an empty title are both passed as a null pointer with length 0,
+  // which the Rust side reads as an empty string rather than dereferencing.
+  expect(engine.alert.bind(engine, "")).not.toThrow();
+
+  // Non-ASCII, because the boundary is bytes and a length: this is the case a `CString` or a
+  // `char*` scan would get wrong, and the reason the length travels beside the pointer.
+  expect(engine.alert.bind(engine, "enregistré ✔ 保存", "Résumé")).not.toThrow();
+
+  // The engine is still usable afterwards — the call is not supposed to disturb anything.
+  engine.tick();
+});
+
+/**
  * Last, and it has to be: a caught panic poisons the engine, so every call after
  * this one fails fast by design. The real assertion is that the process is still
  * here to run the next line — an unwind reaching Bun aborts it with no message.

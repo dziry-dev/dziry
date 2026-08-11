@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 25;
+pub const PROTOCOL_VERSION: u32 = 35;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,13 +15,13 @@ pub const PROTOCOL_VERSION: u32 = 25;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x96d27e1f;
+pub const SCHEMA_HASH: u32 = 0xff6ce4f1;
 
 pub const TABLE_COUNT: usize = 11;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
-pub const MAX_FIELD_COUNT: usize = 82;
+pub const MAX_FIELD_COUNT: usize = 125;
 pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "nodes",
     "styles",
@@ -149,98 +149,149 @@ pub mod styles {
     /// Field indices, in descriptor order.
     pub const BG: usize = 0;
     pub const FG: usize = 1;
-    pub const BORDER_COLOR: usize = 2;
-    pub const BORDER_WIDTH: usize = 3;
-    pub const RADIUS_TOP_LEFT: usize = 4;
-    pub const RADIUS_TOP_RIGHT: usize = 5;
-    pub const RADIUS_BOTTOM_RIGHT: usize = 6;
-    pub const RADIUS_BOTTOM_LEFT: usize = 7;
-    pub const RING_OUTER_WIDTH: usize = 8;
-    pub const RING_OUTER_COLOR: usize = 9;
-    pub const RING_INNER_WIDTH: usize = 10;
-    pub const RING_INNER_COLOR: usize = 11;
-    pub const RING_INSET_WIDTH: usize = 12;
-    pub const RING_INSET_COLOR: usize = 13;
-    pub const SELECTION_BG: usize = 14;
-    pub const SELECTION_FG: usize = 15;
-    pub const PAD_TOP: usize = 16;
-    pub const PAD_RIGHT: usize = 17;
-    pub const PAD_BOTTOM: usize = 18;
-    pub const PAD_LEFT: usize = 19;
-    pub const MARGIN_TOP: usize = 20;
-    pub const MARGIN_RIGHT: usize = 21;
-    pub const MARGIN_BOTTOM: usize = 22;
-    pub const MARGIN_LEFT: usize = 23;
-    pub const DISPLAY: usize = 24;
-    pub const FLEX_DIRECTION: usize = 25;
-    pub const FLEX_WRAP: usize = 26;
-    pub const JUSTIFY_CONTENT: usize = 27;
-    pub const ALIGN_ITEMS: usize = 28;
-    pub const ALIGN_SELF: usize = 29;
-    pub const JUSTIFY_ITEMS: usize = 30;
-    pub const JUSTIFY_SELF: usize = 31;
-    pub const FLEX_GROW: usize = 32;
-    pub const FLEX_SHRINK: usize = 33;
-    pub const FLEX_BASIS: usize = 34;
-    pub const GAP_ROW: usize = 35;
-    pub const GAP_COLUMN: usize = 36;
-    pub const GRID_COLUMNS: usize = 37;
-    pub const GRID_ROWS: usize = 38;
-    pub const GRID_COLUMN_START: usize = 39;
-    pub const GRID_COLUMN_SPAN: usize = 40;
-    pub const GRID_ROW_START: usize = 41;
-    pub const GRID_ROW_SPAN: usize = 42;
-    pub const WIDTH: usize = 43;
-    pub const HEIGHT: usize = 44;
-    pub const MIN_WIDTH: usize = 45;
-    pub const MIN_HEIGHT: usize = 46;
-    pub const MAX_WIDTH: usize = 47;
-    pub const MAX_HEIGHT: usize = 48;
-    pub const ASPECT_RATIO: usize = 49;
-    pub const POSITION: usize = 50;
-    pub const INSET_TOP: usize = 51;
-    pub const INSET_RIGHT: usize = 52;
-    pub const INSET_BOTTOM: usize = 53;
-    pub const INSET_LEFT: usize = 54;
-    pub const FONT_SIZE: usize = 55;
-    pub const FONT_WEIGHT: usize = 56;
-    pub const LINE_CLAMP: usize = 57;
-    pub const OVERFLOW_X: usize = 58;
-    pub const OVERFLOW_Y: usize = 59;
-    pub const SCROLLBAR_WIDTH: usize = 60;
-    pub const SCROLLBAR_THUMB: usize = 61;
-    pub const SCROLLBAR_TRACK: usize = 62;
-    pub const ACCENT_COLOR: usize = 63;
-    pub const CARET_COLOR: usize = 64;
-    pub const APPEARANCE: usize = 65;
-    pub const OPACITY: usize = 66;
-    pub const TRANSLATE_X: usize = 67;
-    pub const TRANSLATE_Y: usize = 68;
-    pub const TRANSLATE_PERCENT_X: usize = 69;
-    pub const TRANSLATE_PERCENT_Y: usize = 70;
-    pub const ROTATE: usize = 71;
-    pub const SCALE_X: usize = 72;
-    pub const SCALE_Y: usize = 73;
-    pub const SKEW_X: usize = 74;
-    pub const SKEW_Y: usize = 75;
-    pub const TRANSFORM_ORIGIN_PERCENT_X: usize = 76;
-    pub const TRANSFORM_ORIGIN_PERCENT_Y: usize = 77;
-    pub const TRANSFORM_ORIGIN_X: usize = 78;
-    pub const TRANSFORM_ORIGIN_Y: usize = 79;
-    pub const TRANSITION: usize = 80;
-    pub const ANIMATION: usize = 81;
+    pub const BORDER_TOP_COLOR: usize = 2;
+    pub const BORDER_RIGHT_COLOR: usize = 3;
+    pub const BORDER_BOTTOM_COLOR: usize = 4;
+    pub const BORDER_LEFT_COLOR: usize = 5;
+    pub const BORDER_TOP_WIDTH: usize = 6;
+    pub const BORDER_RIGHT_WIDTH: usize = 7;
+    pub const BORDER_BOTTOM_WIDTH: usize = 8;
+    pub const BORDER_LEFT_WIDTH: usize = 9;
+    pub const RADIUS_TOP_LEFT: usize = 10;
+    pub const RADIUS_TOP_RIGHT: usize = 11;
+    pub const RADIUS_BOTTOM_RIGHT: usize = 12;
+    pub const RADIUS_BOTTOM_LEFT: usize = 13;
+    pub const RING_OUTER_WIDTH: usize = 14;
+    pub const RING_OUTER_COLOR: usize = 15;
+    pub const RING_INNER_WIDTH: usize = 16;
+    pub const RING_INNER_COLOR: usize = 17;
+    pub const RING_INSET_WIDTH: usize = 18;
+    pub const RING_INSET_COLOR: usize = 19;
+    pub const SELECTION_BG: usize = 20;
+    pub const SELECTION_FG: usize = 21;
+    pub const OUTLINE_COLOR: usize = 22;
+    pub const OUTLINE_WIDTH: usize = 23;
+    pub const OUTLINE_OFFSET: usize = 24;
+    pub const DECORATION_LINE: usize = 25;
+    pub const DECORATION_COLOR: usize = 26;
+    pub const DECORATION_STYLE: usize = 27;
+    pub const DECORATION_THICKNESS: usize = 28;
+    pub const UNDERLINE_OFFSET: usize = 29;
+    pub const PAD_TOP: usize = 30;
+    pub const PAD_RIGHT: usize = 31;
+    pub const PAD_BOTTOM: usize = 32;
+    pub const PAD_LEFT: usize = 33;
+    pub const MARGIN_TOP: usize = 34;
+    pub const MARGIN_RIGHT: usize = 35;
+    pub const MARGIN_BOTTOM: usize = 36;
+    pub const MARGIN_LEFT: usize = 37;
+    pub const DISPLAY: usize = 38;
+    pub const FLEX_DIRECTION: usize = 39;
+    pub const FLEX_WRAP: usize = 40;
+    pub const JUSTIFY_CONTENT: usize = 41;
+    pub const ALIGN_ITEMS: usize = 42;
+    pub const ALIGN_SELF: usize = 43;
+    pub const JUSTIFY_ITEMS: usize = 44;
+    pub const JUSTIFY_SELF: usize = 45;
+    pub const FLEX_GROW: usize = 46;
+    pub const FLEX_SHRINK: usize = 47;
+    pub const FLEX_BASIS: usize = 48;
+    pub const FLEX_BASIS_PCT: usize = 49;
+    pub const GAP_ROW: usize = 50;
+    pub const GAP_COLUMN: usize = 51;
+    pub const GRID_COLUMNS: usize = 52;
+    pub const GRID_ROWS: usize = 53;
+    pub const GRID_COLUMN_START: usize = 54;
+    pub const GRID_COLUMN_SPAN: usize = 55;
+    pub const GRID_ROW_START: usize = 56;
+    pub const GRID_ROW_SPAN: usize = 57;
+    pub const WIDTH: usize = 58;
+    pub const WIDTH_PCT: usize = 59;
+    pub const WIDTH_VP: usize = 60;
+    pub const HEIGHT: usize = 61;
+    pub const HEIGHT_PCT: usize = 62;
+    pub const HEIGHT_VP: usize = 63;
+    pub const MIN_WIDTH: usize = 64;
+    pub const MIN_WIDTH_PCT: usize = 65;
+    pub const MIN_WIDTH_VP: usize = 66;
+    pub const MIN_HEIGHT: usize = 67;
+    pub const MIN_HEIGHT_PCT: usize = 68;
+    pub const MIN_HEIGHT_VP: usize = 69;
+    pub const MAX_WIDTH: usize = 70;
+    pub const MAX_WIDTH_PCT: usize = 71;
+    pub const MAX_WIDTH_VP: usize = 72;
+    pub const MAX_HEIGHT: usize = 73;
+    pub const MAX_HEIGHT_PCT: usize = 74;
+    pub const MAX_HEIGHT_VP: usize = 75;
+    pub const ASPECT_RATIO: usize = 76;
+    pub const POSITION: usize = 77;
+    pub const INSET_TOP: usize = 78;
+    pub const INSET_RIGHT: usize = 79;
+    pub const INSET_BOTTOM: usize = 80;
+    pub const INSET_LEFT: usize = 81;
+    pub const INSET_TOP_PCT: usize = 82;
+    pub const INSET_RIGHT_PCT: usize = 83;
+    pub const INSET_BOTTOM_PCT: usize = 84;
+    pub const INSET_LEFT_PCT: usize = 85;
+    pub const BORDER_SPACING_H: usize = 86;
+    pub const BORDER_SPACING_V: usize = 87;
+    pub const SCROLL_MARGIN_TOP: usize = 88;
+    pub const SCROLL_MARGIN_RIGHT: usize = 89;
+    pub const SCROLL_MARGIN_BOTTOM: usize = 90;
+    pub const SCROLL_MARGIN_LEFT: usize = 91;
+    pub const FONT_SIZE: usize = 92;
+    pub const FONT_WEIGHT: usize = 93;
+    pub const FONT_STYLE: usize = 94;
+    pub const FONT_FAMILY: usize = 95;
+    pub const LINE_HEIGHT: usize = 96;
+    pub const LINE_HEIGHT_PX: usize = 97;
+    pub const TEXT_INDENT: usize = 98;
+    pub const LINE_CLAMP: usize = 99;
+    pub const OVERFLOW_X: usize = 100;
+    pub const OVERFLOW_Y: usize = 101;
+    pub const SCROLLBAR_WIDTH: usize = 102;
+    pub const SCROLLBAR_THUMB: usize = 103;
+    pub const SCROLLBAR_TRACK: usize = 104;
+    pub const ACCENT_COLOR: usize = 105;
+    pub const CARET_COLOR: usize = 106;
+    pub const APPEARANCE: usize = 107;
+    pub const CURSOR: usize = 108;
+    pub const OPACITY: usize = 109;
+    pub const TRANSLATE_X: usize = 110;
+    pub const TRANSLATE_Y: usize = 111;
+    pub const TRANSLATE_PERCENT_X: usize = 112;
+    pub const TRANSLATE_PERCENT_Y: usize = 113;
+    pub const ROTATE: usize = 114;
+    pub const SCALE_X: usize = 115;
+    pub const SCALE_Y: usize = 116;
+    pub const SKEW_X: usize = 117;
+    pub const SKEW_Y: usize = 118;
+    pub const TRANSFORM_ORIGIN_PERCENT_X: usize = 119;
+    pub const TRANSFORM_ORIGIN_PERCENT_Y: usize = 120;
+    pub const TRANSFORM_ORIGIN_X: usize = 121;
+    pub const TRANSFORM_ORIGIN_Y: usize = 122;
+    pub const TRANSITION: usize = 123;
+    pub const ANIMATION: usize = 124;
 
-    pub const FIELD_COUNT: usize = 82;
+    pub const FIELD_COUNT: usize = 125;
     pub const ELEM_SIZES: [usize; FIELD_COUNT] = [
-        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1,
-        1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1,
-        1, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2,
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 1, 4, 4,
+        4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4,
+        4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        4, 4, 4, 2, 1, 1, 4, 4, 4, 2, 1, 1, 1, 4, 4, 4, 4, 1, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+        4, 4, 4, 2, 2,
     ];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = [
         "bg",
         "fg",
-        "borderColor",
-        "borderWidth",
+        "borderTopColor",
+        "borderRightColor",
+        "borderBottomColor",
+        "borderLeftColor",
+        "borderTopWidth",
+        "borderRightWidth",
+        "borderBottomWidth",
+        "borderLeftWidth",
         "radiusTopLeft",
         "radiusTopRight",
         "radiusBottomRight",
@@ -253,6 +304,14 @@ pub mod styles {
         "ringInsetColor",
         "selectionBg",
         "selectionFg",
+        "outlineColor",
+        "outlineWidth",
+        "outlineOffset",
+        "decorationLine",
+        "decorationColor",
+        "decorationStyle",
+        "decorationThickness",
+        "underlineOffset",
         "padTop",
         "padRight",
         "padBottom",
@@ -272,6 +331,7 @@ pub mod styles {
         "flexGrow",
         "flexShrink",
         "flexBasis",
+        "flexBasisPct",
         "gapRow",
         "gapColumn",
         "gridColumns",
@@ -281,19 +341,46 @@ pub mod styles {
         "gridRowStart",
         "gridRowSpan",
         "width",
+        "widthPct",
+        "widthVp",
         "height",
+        "heightPct",
+        "heightVp",
         "minWidth",
+        "minWidthPct",
+        "minWidthVp",
         "minHeight",
+        "minHeightPct",
+        "minHeightVp",
         "maxWidth",
+        "maxWidthPct",
+        "maxWidthVp",
         "maxHeight",
+        "maxHeightPct",
+        "maxHeightVp",
         "aspectRatio",
         "position",
         "insetTop",
         "insetRight",
         "insetBottom",
         "insetLeft",
+        "insetTopPct",
+        "insetRightPct",
+        "insetBottomPct",
+        "insetLeftPct",
+        "borderSpacingH",
+        "borderSpacingV",
+        "scrollMarginTop",
+        "scrollMarginRight",
+        "scrollMarginBottom",
+        "scrollMarginLeft",
         "fontSize",
         "fontWeight",
+        "fontStyle",
+        "fontFamily",
+        "lineHeight",
+        "lineHeightPx",
+        "textIndent",
         "lineClamp",
         "overflowX",
         "overflowY",
@@ -303,6 +390,7 @@ pub mod styles {
         "accentColor",
         "caretColor",
         "appearance",
+        "cursor",
         "opacity",
         "translateX",
         "translateY",
@@ -328,12 +416,15 @@ pub mod styles {
     /// every non-empty commit schedules is the entire response. A colour-only
     /// theme patch is the case this exists for.
     pub const LAYOUT_AFFECTING: [bool; FIELD_COUNT] = [
-        false, false, false, true, false, false, false, false, false, false, false, false, false,
-        false, false, false, true, true, true, true, true, true, true, true, true, true, true,
+        false, false, false, false, false, false, true, true, true, true, false, false, false,
+        false, false, false, false, false, false, false, false, false, false, false, false, false,
+        false, false, false, false, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
         true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+        true, true, true, true, true, true, true, true, true, true, true, true, true, true, true,
+        true, false, false, false, false, false, false, true, true, true, true, true, true, true,
         true, true, true, false, false, false, false, false, false, false, false, false, false,
-        false, false, false, false, false, false, false, false, false, false, false, false,
+        false, false, false, false, false, false, false, false, false, false, false, false, false,
     ];
 
     /// How each field is interpolated partway through a tween.
@@ -342,9 +433,11 @@ pub mod styles {
     /// themselves. See the `Interp` doc comment in schema.ts for why a colour is
     /// not a number here.
     pub const INTERP: [u8; FIELD_COUNT] = [
-        2, 2, 2, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        0, 2, 2, 2, 2, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 2, 2, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 0, 0,
     ];
 
     /// Which bit of a tween's `mask` each field owns, or 255 for "not animatable".
@@ -354,19 +447,22 @@ pub mod styles {
     /// field order, which is why `interp` is in `SCHEMA_HASH`: renumbering it on
     /// one side only would animate a neighbouring property.
     pub const ANIM_BIT: [u8; FIELD_COUNT] = [
-        0, 1, 2, 255, 3, 4, 5, 6, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        0, 1, 2, 3, 4, 5, 255, 255, 255, 255, 6, 7, 8, 9, 255, 255, 255, 255, 255, 255, 255, 255,
+        10, 255, 255, 255, 11, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
         255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
         255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
-        255, 255, 255, 255, 7, 8, 9, 10, 255, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
-        24, 255, 255,
+        255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+        255, 255, 255, 255, 255, 255, 255, 255, 255, 12, 13, 14, 15, 255, 255, 16, 17, 18, 19, 20,
+        21, 22, 23, 24, 25, 26, 27, 28, 29, 255, 255,
     ];
 
     /// The field index each mask bit refers to, low bit first — `ANIM_BIT` inverted.
     ///
     /// The engine walks a mask's set bits and needs the field for each; searching
     /// `ANIM_BIT` for a value would be a linear scan per bit per animating node.
-    pub const ANIM_FIELDS: [usize; 25] = [
-        0, 1, 2, 4, 5, 6, 7, 61, 62, 63, 64, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
+    pub const ANIM_FIELDS: [usize; 30] = [
+        0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 22, 26, 103, 104, 105, 106, 109, 110, 111, 112, 113, 114,
+        115, 116, 117, 118, 119, 120, 121, 122,
     ];
 }
 
@@ -601,6 +697,18 @@ pub mod overflow {
     pub const CLIP: u8 = 4;
 }
 
+/// `styles.fontStyle`. A slant flag; `oblique <angle>` is a non-goal until measured.
+pub mod font_style {
+    pub const NORMAL: u8 = 0;
+    pub const ITALIC: u8 = 1;
+}
+
+/// `styles.fontFamily`. A *generic* family, never a name: the engine resolves one concrete face per generic at startup, so an author picks a category and the platform picks the font. `DEFAULT` is whatever `Measurer::new` resolved.
+pub mod font_family {
+    pub const DEFAULT: u8 = 0;
+    pub const MONOSPACE: u8 = 1;
+}
+
 /// `styles.scrollbarWidth`. The whole grammar: Chromium 151 rejects `thick` and a `<length>` outright, measured — MDN's scrollbars guide is wrong about both. `NONE` hides the bar without disabling the wheel, which is exactly what the property means.
 pub mod scrollbar_width {
     pub const AUTO: u8 = 0;
@@ -613,6 +721,15 @@ pub mod appearance {
     pub const NONE: u8 = 0;
     pub const AUTO: u8 = 1;
     pub const BASE_SELECT: u8 = 2;
+}
+
+/// `styles.decorationStyle`. `text-decoration-style`'s five keywords, in spec order — SOLID is 0, which is also the initial value.
+pub mod decoration_style {
+    pub const SOLID: u8 = 0;
+    pub const DOUBLE: u8 = 1;
+    pub const DOTTED: u8 = 2;
+    pub const DASHED: u8 = 3;
+    pub const WAVY: u8 = 4;
 }
 
 /// `media.kind`. Which axis a threshold tests, and which side of it counts as true. `MIN_*` holds at the threshold and above, `MAX_*` at it and below — the same inclusive bounds `min-width`/`max-width` have in CSS, which is why a `min-width: 768px` and a `max-width: 768px` query are both true at exactly 768.

@@ -1,0 +1,7 @@
+# Boundary rules. `tsarch check` exits non-zero when an `error` rule is broken,
+# which is what makes this enforceable in CI.
+#
+# Constraints: mustNotDependOn | mayOnlyDependOn | mustDependOn
+#              mustNotUseExternal | onlyViaPort | layered
+rules:
+  []

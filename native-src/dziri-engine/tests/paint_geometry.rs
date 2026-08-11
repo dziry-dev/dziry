@@ -104,8 +104,22 @@ fn painted_root(radius: f32, border_width: f32) -> Engine {
         let t = engine.tables_mut();
         init_style(t, 0);
         t.set_u32(STYLES, styles::BG, 0, BG);
-        t.set_u32(STYLES, styles::BORDER_COLOR, 0, BORDER);
-        t.set_f32(STYLES, styles::BORDER_WIDTH, 0, border_width);
+        for field in [
+            styles::BORDER_TOP_COLOR,
+            styles::BORDER_RIGHT_COLOR,
+            styles::BORDER_BOTTOM_COLOR,
+            styles::BORDER_LEFT_COLOR,
+        ] {
+            t.set_u32(STYLES, field, 0, BORDER);
+        }
+        for field in [
+            styles::BORDER_TOP_WIDTH,
+            styles::BORDER_RIGHT_WIDTH,
+            styles::BORDER_BOTTOM_WIDTH,
+            styles::BORDER_LEFT_WIDTH,
+        ] {
+            t.set_f32(STYLES, field, 0, border_width);
+        }
         // All four corners, which is what a single `border-radius` means.
         t.set_f32(STYLES, styles::RADIUS_TOP_LEFT, 0, radius);
         t.set_f32(STYLES, styles::RADIUS_TOP_RIGHT, 0, radius);
@@ -1032,4 +1046,224 @@ fn a_box_with_no_ring_paints_none() {
             "nothing may appear at x={x} with every ring width zero"
         );
     }
+}
+
+/// Per-side borders: a box with only a top border in a different colour paints
+/// exactly one edge, and the diagonal at the corner belongs to the sides that
+/// meet there.
+#[test]
+fn a_one_sided_border_paints_one_edge() {
+    const RED: u32 = 0xff00_ff00;
+    let mut engine = Engine::new(&config()).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        t.set_u32(STYLES, styles::BG, 0, BG);
+        // Top only: 8px red. Every other side has no width and no colour.
+        t.set_f32(STYLES, styles::BORDER_TOP_WIDTH, 0, 8.0);
+        t.set_u32(STYLES, styles::BORDER_TOP_COLOR, 0, RED);
+
+        t.set_u8(NODES, nodes::KIND, 0, protocol::node_kind::BOX);
+        t.set_u16(NODES, nodes::STYLE, 0, 0);
+        t.set_i32(NODES, nodes::TEXT, 0, -1);
+        t.set_i32(NODES, nodes::PARENT, 0, -1);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, -1);
+        t.set_i32(NODES, nodes::NEXT_SIBLING, 0, -1);
+        t.set_i16(NODES, nodes::LIST, 0, -1);
+    }
+    engine.tick().expect("tick");
+
+    let at = |engine: &mut Engine, x: usize, y: usize| {
+        let got = pixel(engine, x, y);
+        nearest(got, &[(BG, "background"), (RED, "red border"), (SURFACE, "surface")])
+    };
+
+    assert_eq!(at(&mut engine, 60, 3), "red border", "the top edge");
+    assert_eq!(at(&mut engine, 60, 12), "background", "below it");
+    assert_eq!(at(&mut engine, 3, 60), "background", "no left edge");
+    assert_eq!(at(&mut engine, 116, 60), "background", "no right edge");
+    assert_eq!(at(&mut engine, 60, 116), "background", "no bottom edge");
+    // The diagonal corner join: 4px along the top edge and 2px down is above the
+    // diagonal (y < x), so it belongs to the top side.
+    assert_eq!(at(&mut engine, 6, 2), "red border", "the corner is shared, not lost");
+}
+
+/// Two adjacent sides in different colours meet on the corner diagonal.
+#[test]
+fn adjacent_border_colours_split_the_corner_on_the_diagonal() {
+    const RED: u32 = 0xff00_ff00;
+    let mut engine = Engine::new(&config()).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        t.set_u32(STYLES, styles::BG, 0, BG);
+        t.set_f32(STYLES, styles::BORDER_TOP_WIDTH, 0, 12.0);
+        t.set_f32(STYLES, styles::BORDER_LEFT_WIDTH, 0, 12.0);
+        t.set_u32(STYLES, styles::BORDER_TOP_COLOR, 0, RED);
+        t.set_u32(STYLES, styles::BORDER_LEFT_COLOR, 0, BORDER);
+
+        t.set_u8(NODES, nodes::KIND, 0, protocol::node_kind::BOX);
+        t.set_u16(NODES, nodes::STYLE, 0, 0);
+        t.set_i32(NODES, nodes::TEXT, 0, -1);
+        t.set_i32(NODES, nodes::PARENT, 0, -1);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, -1);
+        t.set_i32(NODES, nodes::NEXT_SIBLING, 0, -1);
+        t.set_i16(NODES, nodes::LIST, 0, -1);
+    }
+    engine.tick().expect("tick");
+
+    let at = |engine: &mut Engine, x: usize, y: usize| {
+        let got = pixel(engine, x, y);
+        nearest(got, &[(BG, "background"), (RED, "red top"), (BORDER, "blue left"), (SURFACE, "surface")])
+    };
+
+    // Above the diagonal (y < x): the top side's. Below (y > x): the left's.
+    assert_eq!(at(&mut engine, 9, 3), "red top");
+    assert_eq!(at(&mut engine, 3, 9), "blue left");
+    // And the fill resumes inside both.
+    assert_eq!(at(&mut engine, 60, 60), "background");
+}
+
+/// An outline is a ring *outside* the border box — `outline: 4px solid` at
+/// offset 2 occupies a 4px band 2px out, and nothing inside the box moves.
+#[test]
+fn an_outline_rings_outside_the_border_box() {
+    const GREEN: u32 = 0xff00_ff00;
+    let mut engine = Engine::new(&config_of(2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        // A 40x40 child at (30, 30), so the ring is on screen on all four sides.
+        t.set_u32(STYLES, styles::BG, 0, SURFACE);
+        t.set_u32(STYLES, styles::BG, 1, BG);
+        t.set_u8(STYLES, styles::POSITION, 1, protocol::position::ABSOLUTE);
+        t.set_f32(STYLES, styles::INSET_TOP, 1, 30.0);
+        t.set_f32(STYLES, styles::INSET_LEFT, 1, 30.0);
+        t.set_f32(STYLES, styles::WIDTH, 1, 40.0);
+        t.set_f32(STYLES, styles::HEIGHT, 1, 40.0);
+        t.set_u32(STYLES, styles::OUTLINE_COLOR, 1, GREEN);
+        t.set_f32(STYLES, styles::OUTLINE_WIDTH, 1, 4.0);
+        t.set_f32(STYLES, styles::OUTLINE_OFFSET, 1, 2.0);
+
+        for node in 0..2 {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        t.set_i32(NODES, nodes::PARENT, 1, 0);
+    }
+    engine.tick().expect("tick");
+
+    let at = |engine: &mut Engine, x: usize, y: usize| {
+        let got = pixel(engine, x, y);
+        nearest(got, &[(GREEN, "outline"), (BG, "box"), (SURFACE, "surface")])
+    };
+
+    // The box spans 30..70; the band is 24..28 above it (30 - 2 - 4).
+    assert_eq!(at(&mut engine, 50, 26), "outline", "in the band above");
+    assert_eq!(at(&mut engine, 50, 29), "surface", "the offset gap is empty");
+    assert_eq!(at(&mut engine, 50, 50), "box", "the box itself is untouched");
+    assert_eq!(at(&mut engine, 50, 20), "surface", "past the band");
+}
+
+/// An underline is a horizontal band below the text's baseline, in the run's
+/// own colour when `decorationColor` says nothing.
+#[test]
+fn an_underline_sits_below_the_baseline() {
+    let mut engine = Engine::new(&config_of(2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        // White text, white underline, on the black surface the engine clears to.
+        t.set_u32(STYLES, styles::FG, 1, 0xffff_ffff);
+        t.set_f32(STYLES, styles::FONT_SIZE, 1, 40.0);
+        t.set_u8(STYLES, styles::DECORATION_LINE, 1, 1); // underline
+
+        let mut cursor = 0;
+        t.push_string(0, "iiii", &mut cursor).expect("string arena");
+
+        for node in 0..2 {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_u8(NODES, nodes::KIND, 1, protocol::node_kind::TEXT);
+        t.set_i32(NODES, nodes::TEXT, 1, 0);
+        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::MEASURABLE);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        t.set_i32(NODES, nodes::PARENT, 1, 0);
+    }
+    engine.tick().expect("tick");
+
+    // The text box is at the top of the window; a 40px line sits inside ~50px.
+    // "iiii" is four narrow glyphs: the underline is wider than the glyphs' ink
+    // at its y, so a lit pixel directly below the descent is the decoration.
+    let mut underlined = false;
+    for y in 44..56usize {
+        for x in 0..40usize {
+            let p = pixel(&mut engine, x, y);
+            if p >> 24 != 0 && (p >> 16) & 0xff > 200 {
+                underlined = true;
+            }
+        }
+    }
+    assert!(underlined, "no pixels below the text — the underline did not draw");
+}
+
+/// `line-through` crosses the glyphs, mid-x-height.
+#[test]
+fn a_strikethrough_crosses_the_glyphs() {
+    let mut engine = Engine::new(&config_of(2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_u32(STYLES, styles::FG, 1, 0xffff_ffff);
+        t.set_f32(STYLES, styles::FONT_SIZE, 1, 40.0);
+        t.set_u8(STYLES, styles::DECORATION_LINE, 1, 4); // line-through
+
+        let mut cursor = 0;
+        t.push_string(0, "iiii", &mut cursor).expect("string arena");
+
+        for node in 0..2 {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_u8(NODES, nodes::KIND, 1, protocol::node_kind::TEXT);
+        t.set_i32(NODES, nodes::TEXT, 1, 0);
+        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::MEASURABLE);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        t.set_i32(NODES, nodes::PARENT, 1, 0);
+    }
+    engine.tick().expect("tick");
+
+    // A strikeout sits around the x-height — inside the glyph band, not below it.
+    // "i" has no ink at its sides at that height, so a lit pixel *between* the
+    // glyphs is the line.
+    let mut crossed = false;
+    for y in 12..30usize {
+        for x in 3..8usize {
+            let p = pixel(&mut engine, x, y);
+            if p >> 24 != 0 && (p >> 16) & 0xff > 200 {
+                crossed = true;
+            }
+        }
+    }
+    assert!(crossed, "nothing crossed the glyphs — the strikeout did not draw");
 }

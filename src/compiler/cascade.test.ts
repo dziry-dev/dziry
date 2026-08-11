@@ -143,7 +143,7 @@ test("hover and focus merge per property instead of one winning", () => {
   expect(run.length).toBe(4);
 
   const bg = (slot: number) => styles.bg[slot]!;
-  const border = (slot: number) => styles.borderColor[slot]!;
+  const border = (slot: number) => styles.borderTopColor[slot]!;
 
   expect(bg(run[0]!)).toBe(0xff000000);
   expect(bg(run[1]!)).toBe(0xffff0000); // hover only
@@ -188,6 +188,35 @@ test(":checked and :disabled are predicates like any other", () => {
   const both = variants.slots[at(Predicate.CHECKED | Predicate.DISABLED)]!;
   expect(styles.accentColor[both]!).toBe(0xff16a34a);
   expect(styles.bg[both]!).toBe(0xffcccccc);
+});
+
+test("a rule may require two states at once, and holds in neither alone", () => {
+  // `:checked:disabled` on one compound. For as long as pseudo-classes have
+  // parsed here this compiled to whichever was written *last* — a single slot,
+  // silently assigned over — so the UA sheet's grey fill for a disabled checked
+  // checkbox applied to every disabled one, and a disabled unchecked radio grew
+  // a dot. The selector now records all its states and the rule contributes only
+  // to combinations where every one is live.
+  const html = `<body><div class="box"></div></body>`;
+  const css = `
+    .box { background: #ffffff }
+    .box:checked:disabled { background: #545454 }
+  `;
+
+  const ui = toCompiledUi(compile(html, css));
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const { variants } = ui;
+
+  const mask = variants.mask[0]!;
+  expect(mask).toBe(Predicate.CHECKED | Predicate.DISABLED);
+
+  const start = variants.runStart[0]!;
+  const at = (live: number) => variants.slots[start + compactBits(live, mask)]!;
+
+  expect(styles.bg[at(0)]!).toBe(0xffffffff);
+  expect(styles.bg[at(Predicate.CHECKED)]!).toBe(0xffffffff);
+  expect(styles.bg[at(Predicate.DISABLED)]!).toBe(0xffffffff);
+  expect(styles.bg[at(Predicate.CHECKED | Predicate.DISABLED)]!).toBe(0xff545454);
 });
 
 test("::before and ::after emit real nodes, in document order", () => {
@@ -310,15 +339,21 @@ test("attribute selectors tell one input type from another", () => {
   const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
   const at = (n: number, f: StyleField) => styles[f][ui.nodes.style[n]!]!;
 
+  // Nodes 1, 3, 5: the UA sheet's default appearance gives the checkbox its tick
+  // and the radio its dot as *generated boxes*, so each control is followed by
+  // its own ::before. The author's 1px beats the UA sheet's 2px on origin, which
+  // this asserts by the by.
+  const [checkbox, radio, text] = [1, 3, 5];
+
   // All three get the tag rule; only their own type rule applies.
-  for (const n of [1, 2, 3]) expect(at(n, "borderWidth")).toBe(1);
-  expect(at(1, "radTL")).toBe(4);
-  expect(at(2, "radTL")).toBe(9);
-  expect(at(3, "radTL")).toBe(0);
+  for (const n of [checkbox, radio, text]) expect(at(n, "borderTopWidth")).toBe(1);
+  expect(at(checkbox, "radTL")).toBe(4);
+  expect(at(radio, "radTL")).toBe(9);
+  expect(at(text, "radTL")).toBe(0);
 
   // Presence, not value.
-  expect(at(3, "fg")).toBe(0xffff0000);
-  expect(at(1, "fg")).not.toBe(0xffff0000);
+  expect(at(text, "fg")).toBe(0xffff0000);
+  expect(at(checkbox, "fg")).not.toBe(0xffff0000);
 });
 
 test("every attribute operator, against the spec's semantics", () => {
@@ -765,7 +800,7 @@ test("hover and focus still merge when a conditional class is present", () => {
 
   // And the toggle still patches the same slot: `.theme .btn` raises the border
   // colour when it is on, which is a patch entry rather than a second slot.
-  const borderPatch = compiled.patches[0]!.entries.find((e) => e.field === "borderColor");
+  const borderPatch = compiled.patches[0]!.entries.find((e) => e.field === "borderTopColor");
   expect(borderPatch).toBeDefined();
   expect(borderPatch!.on).toContain(0xff444444);
 });
@@ -922,9 +957,9 @@ test("currentcolor resolves to the element's own colour, whatever the declaratio
 
   // Written *before* `color`, which must not matter: `currentcolor` is a computed-value
   // rule, not a fold over declarations in order.
-  expect(styleOf(html, `.a { border-color: currentcolor; color: #ff0000 }`, "borderColor")).toBe(
-    0xffff0000,
-  );
+  expect(
+    styleOf(html, `.a { border-color: currentcolor; color: #ff0000 }`, "borderTopColor"),
+  ).toBe(0xffff0000);
 
   // The element's own colour beats the inherited one.
   expect(
@@ -1009,9 +1044,9 @@ test("the IR for one small document is exactly this", () => {
       "    #1 box  style=1",
       '      #2 text "Hi"  style=2',
       "    #3 box  style=3",
-      '      #4 button "Go"  style=4 hover=5 focus-visible=6',
+      '      #4 button "Go"  style=4 hover=5 focus-visible=8 disabled=6',
       "      #5 box  style=3",
-      '        #6 text "x"  style=8',
+      '        #6 text "x"  style=12',
       "",
       // Seven, not six: the UA sheet gives `h1` a margin, and margins do not
       // inherit — so the heading and its text run are no longer the same computed
@@ -1028,29 +1063,54 @@ test("the IR for one small document is exactly this", () => {
       // derives which fields are colours from the wire type now instead of naming three of
       // them. Half the palette — both scrollbar colours, `accentColor`, `caretColor` — had
       // been dumping as raw integers.
-      // Nine, not seven: the UA sheet's `:focus-visible` ring gives the button a second
-      // predicate, and a variant run is the *cross product* of the predicates a node's
-      // rules mention — so `hover` and `focus-visible` together need four slots, of which
-      // two are new. That growth is the cost model of precompiled variants, visible here
-      // in miniature, and it is why the ring rule is scoped to focusable tags rather than
-      // written as a bare `:focus-visible`: universal, it would do this to every node in
-      // the document.
-      "styles (9 unique)",
+      // Thirteen, not seven: the UA sheet gives the button a `:focus-visible` ring
+      // and a `:disabled` appearance, and a variant run is the *cross product* of
+      // the predicates a node's rules mention — three predicates is an eight-slot
+      // run, of which the interner keeps the six that resolve distinctly. That
+      // growth is the cost model of precompiled variants, visible here in
+      // miniature, and it is why every state rule in the UA sheet is scoped to the
+      // tags that can be in that state rather than written bare.
+      //
+      // The disabled rows keep the author's own backgrounds — `.btn`'s blues beat
+      // the UA grey on origin, per property — while `fg=#101010@0.30` is Chromium's
+      // measured disabled text, an *alpha* over whatever is behind
+      // (probes/disabled-control-styles.html).
+      // `overflowX/Y=3` on the root and only the root: the viewport rule. `visible`
+      // on the window root means `auto` (probes/viewport-default-scroll.html), so an
+      // unstyled window scrolls like an unstyled browser page — coerced at the end of
+      // the cascade, never declared, which is why no other slot carries it.
+      "styles (13 unique)",
       "    0  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff " +
-        "padT=8 padR=8 padB=8 padL=8 gapRow=4 gapCol=4",
+        "padT=8 padR=8 padB=8 padL=8 gapRow=4 gapCol=4 overflowX=3 overflowY=3",
       "    1  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff " +
         "marT=21.44 marB=21.44 fontSize=20 fontWeight=700",
       "    2  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff fontSize=20 fontWeight=700",
       "    3  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff direction=row gapRow=4 gapCol=4",
-      "    4  bg=#123456 fg=#eeeeee borderColor=#abcdef borderWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
-        "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
-      "    5  bg=#2244aa fg=#eeeeee borderColor=#abcdef borderWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
-        "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
-      "    6  bg=#123456 fg=#eeeeee borderColor=#abcdef borderWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
-        "ringOuterWidth=2 ringOuterColor=#3390ff selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
-      "    7  bg=#2244aa fg=#eeeeee borderColor=#abcdef borderWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
-        "ringOuterWidth=2 ringOuterColor=#3390ff selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6",
-      "    8  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff",
+      // `alignSelf=0` and `fontSize=13.3333` on every button row are the UA sheet's
+      // default control appearance showing through where `.btn` said nothing: the
+      // shrink-to-fit stand-in and Chrome's measured control font size. The author's
+      // background, border, radius and padding all beat the UA values on origin.
+      "    4  bg=#123456 fg=#eeeeee borderTopColor=#abcdef borderRightColor=#abcdef borderBottomColor=#abcdef borderLeftColor=#abcdef borderTopWidth=1 borderRightWidth=1 borderBottomWidth=1 borderLeftWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6 alignSelf=0 fontSize=13.3333",
+      "    5  bg=#2244aa fg=#eeeeee borderTopColor=#abcdef borderRightColor=#abcdef borderBottomColor=#abcdef borderLeftColor=#abcdef borderTopWidth=1 borderRightWidth=1 borderBottomWidth=1 borderLeftWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6 alignSelf=0 fontSize=13.3333",
+      "    6  bg=#123456 fg=#101010@0.30 borderTopColor=#abcdef borderRightColor=#abcdef borderBottomColor=#abcdef borderLeftColor=#abcdef borderTopWidth=1 borderRightWidth=1 borderBottomWidth=1 borderLeftWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6 alignSelf=0 fontSize=13.3333",
+      "    7  bg=#2244aa fg=#101010@0.30 borderTopColor=#abcdef borderRightColor=#abcdef borderBottomColor=#abcdef borderLeftColor=#abcdef borderTopWidth=1 borderRightWidth=1 borderBottomWidth=1 borderLeftWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "selectionBg=#3390ff selectionFg=#ffffff padT=2 padR=6 padB=2 padL=6 alignSelf=0 fontSize=13.3333",
+      "    8  bg=#123456 fg=#eeeeee borderTopColor=#abcdef borderRightColor=#abcdef borderBottomColor=#abcdef borderLeftColor=#abcdef borderTopWidth=1 borderRightWidth=1 borderBottomWidth=1 borderLeftWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "ringOuterWidth=2 ringOuterColor=#3390ff selectionBg=#3390ff selectionFg=#ffffff " +
+        "padT=2 padR=6 padB=2 padL=6 alignSelf=0 fontSize=13.3333",
+      "    9  bg=#2244aa fg=#eeeeee borderTopColor=#abcdef borderRightColor=#abcdef borderBottomColor=#abcdef borderLeftColor=#abcdef borderTopWidth=1 borderRightWidth=1 borderBottomWidth=1 borderLeftWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "ringOuterWidth=2 ringOuterColor=#3390ff selectionBg=#3390ff selectionFg=#ffffff " +
+        "padT=2 padR=6 padB=2 padL=6 alignSelf=0 fontSize=13.3333",
+      "   10  bg=#123456 fg=#101010@0.30 borderTopColor=#abcdef borderRightColor=#abcdef borderBottomColor=#abcdef borderLeftColor=#abcdef borderTopWidth=1 borderRightWidth=1 borderBottomWidth=1 borderLeftWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "ringOuterWidth=2 ringOuterColor=#3390ff selectionBg=#3390ff selectionFg=#ffffff " +
+        "padT=2 padR=6 padB=2 padL=6 alignSelf=0 fontSize=13.3333",
+      "   11  bg=#2244aa fg=#101010@0.30 borderTopColor=#abcdef borderRightColor=#abcdef borderBottomColor=#abcdef borderLeftColor=#abcdef borderTopWidth=1 borderRightWidth=1 borderBottomWidth=1 borderLeftWidth=1 radTL=6 radTR=6 radBR=6 radBL=6 " +
+        "ringOuterWidth=2 ringOuterColor=#3390ff selectionBg=#3390ff selectionFg=#ffffff " +
+        "padT=2 padR=6 padB=2 padL=6 alignSelf=0 fontSize=13.3333",
+      "   12  fg=#eeeeee selectionBg=#3390ff selectionFg=#ffffff",
       "",
       "strings (3)",
       '    0  "Hi"',

@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 25;
+export const PROTOCOL_VERSION = 35;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,12 +19,12 @@ export const PROTOCOL_VERSION = 25;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x96d27e1f;
+export const SCHEMA_HASH = 0xff6ce4f1;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
   nodes: [1, 2, 4, 4, 4, 4, 2, 1, 1, 4],
-  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 2, 2, 1, 1, 1, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2],
+  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 1, 1, 4, 4, 4, 2, 1, 1, 1, 4, 4, 4, 4, 1, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2],
   variants: [4, 4, 4],
   variantSlots: [2],
   media: [4, 1, 4],
@@ -39,7 +39,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
 /** Field names per table, in descriptor order — used to name a mismatch. */
 export const FIELD_NAMES: Record<TableName, string[]> = {
   nodes: ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags", "activates"],
-  styles: ["bg", "fg", "borderColor", "borderWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "ringOuterWidth", "ringOuterColor", "ringInnerWidth", "ringInnerColor", "ringInsetWidth", "ringInsetColor", "selectionBg", "selectionFg", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "fontSize", "fontWeight", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance", "opacity", "translateX", "translateY", "translatePercentX", "translatePercentY", "rotate", "scaleX", "scaleY", "skewX", "skewY", "transformOriginPercentX", "transformOriginPercentY", "transformOriginX", "transformOriginY", "transition", "animation"],
+  styles: ["bg", "fg", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "ringOuterWidth", "ringOuterColor", "ringInnerWidth", "ringInnerColor", "ringInsetWidth", "ringInsetColor", "selectionBg", "selectionFg", "outlineColor", "outlineWidth", "outlineOffset", "decorationLine", "decorationColor", "decorationStyle", "decorationThickness", "underlineOffset", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "flexBasisPct", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "widthPct", "widthVp", "height", "heightPct", "heightVp", "minWidth", "minWidthPct", "minWidthVp", "minHeight", "minHeightPct", "minHeightVp", "maxWidth", "maxWidthPct", "maxWidthVp", "maxHeight", "maxHeightPct", "maxHeightVp", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "insetTopPct", "insetRightPct", "insetBottomPct", "insetLeftPct", "borderSpacingH", "borderSpacingV", "scrollMarginTop", "scrollMarginRight", "scrollMarginBottom", "scrollMarginLeft", "fontSize", "fontWeight", "fontStyle", "fontFamily", "lineHeight", "lineHeightPx", "textIndent", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance", "cursor", "opacity", "translateX", "translateY", "translatePercentX", "translatePercentY", "rotate", "scaleX", "scaleY", "skewX", "skewY", "transformOriginPercentX", "transformOriginPercentY", "transformOriginX", "transformOriginY", "transition", "animation"],
   variants: ["node", "mask", "runStart"],
   variantSlots: ["style"],
   media: ["bit", "kind", "value"],
@@ -59,7 +59,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
  * can be checked against it rather than trusted to agree.
  */
 export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
-  styles: [false, false, false, true, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
+  styles: [false, false, false, false, false, false, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
 };
 
 /**
@@ -75,29 +75,34 @@ export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
 export const ANIM_BIT = {
   bg: 0,
   fg: 1,
-  borderColor: 2,
-  radiusTopLeft: 3,
-  radiusTopRight: 4,
-  radiusBottomRight: 5,
-  radiusBottomLeft: 6,
-  scrollbarThumb: 7,
-  scrollbarTrack: 8,
-  accentColor: 9,
-  caretColor: 10,
-  opacity: 11,
-  translateX: 12,
-  translateY: 13,
-  translatePercentX: 14,
-  translatePercentY: 15,
-  rotate: 16,
-  scaleX: 17,
-  scaleY: 18,
-  skewX: 19,
-  skewY: 20,
-  transformOriginPercentX: 21,
-  transformOriginPercentY: 22,
-  transformOriginX: 23,
-  transformOriginY: 24,
+  borderTopColor: 2,
+  borderRightColor: 3,
+  borderBottomColor: 4,
+  borderLeftColor: 5,
+  radiusTopLeft: 6,
+  radiusTopRight: 7,
+  radiusBottomRight: 8,
+  radiusBottomLeft: 9,
+  outlineColor: 10,
+  decorationColor: 11,
+  scrollbarThumb: 12,
+  scrollbarTrack: 13,
+  accentColor: 14,
+  caretColor: 15,
+  opacity: 16,
+  translateX: 17,
+  translateY: 18,
+  translatePercentX: 19,
+  translatePercentY: 20,
+  rotate: 21,
+  scaleX: 22,
+  scaleY: 23,
+  skewX: 24,
+  skewY: 25,
+  transformOriginPercentX: 26,
+  transformOriginPercentY: 27,
+  transformOriginX: 28,
+  transformOriginY: 29,
 } as const;
 
 /**
@@ -112,7 +117,7 @@ export const ANIM_BIT = {
 export type AnimatableField = keyof typeof ANIM_BIT;
 
 /** Every animatable field's mask bit at once — what `transition-property: all` means here. */
-export const ANIM_ALL = 0x1ffffff;
+export const ANIM_ALL = 0x3fffffff;
 
 export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "tweens", "keyframes", "controls", "layout", "strings"] as const;
 export type TableName = (typeof TABLE_NAMES)[number];
@@ -136,86 +141,129 @@ export const F = {
   styles: {
     bg: 0,
     fg: 1,
-    borderColor: 2,
-    borderWidth: 3,
-    radiusTopLeft: 4,
-    radiusTopRight: 5,
-    radiusBottomRight: 6,
-    radiusBottomLeft: 7,
-    ringOuterWidth: 8,
-    ringOuterColor: 9,
-    ringInnerWidth: 10,
-    ringInnerColor: 11,
-    ringInsetWidth: 12,
-    ringInsetColor: 13,
-    selectionBg: 14,
-    selectionFg: 15,
-    padTop: 16,
-    padRight: 17,
-    padBottom: 18,
-    padLeft: 19,
-    marginTop: 20,
-    marginRight: 21,
-    marginBottom: 22,
-    marginLeft: 23,
-    display: 24, // 0 flex, 1 grid, 2 block, 3 none
-    flexDirection: 25,
-    flexWrap: 26,
-    justifyContent: 27,
-    alignItems: 28,
-    alignSelf: 29,
-    justifyItems: 30, // Grid only
-    justifySelf: 31, // Grid only
-    flexGrow: 32,
-    flexShrink: 33,
-    flexBasis: 34,
-    gapRow: 35,
-    gapColumn: 36,
-    gridColumns: 37, // repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N
-    gridRows: 38,
-    gridColumnStart: 39,
-    gridColumnSpan: 40,
-    gridRowStart: 41,
-    gridRowSpan: 42,
-    width: 43,
-    height: 44,
-    minWidth: 45,
-    minHeight: 46,
-    maxWidth: 47,
-    maxHeight: 48,
-    aspectRatio: 49,
-    position: 50, // 0 relative, 1 absolute
-    insetTop: 51,
-    insetRight: 52,
-    insetBottom: 53,
-    insetLeft: 54,
-    fontSize: 55,
-    fontWeight: 56,
-    lineClamp: 57, // 0 = unlimited; drives SkParagraph maxLines
-    overflowX: 58, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
-    overflowY: 59, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
-    scrollbarWidth: 60, // 0 auto, 1 thin, 2 none
-    scrollbarThumb: 61,
-    scrollbarTrack: 62,
-    accentColor: 63,
-    caretColor: 64,
-    appearance: 65, // 0 none, 1 auto
-    opacity: 66, // 0..1, initial 1
-    translateX: 67,
-    translateY: 68,
-    translatePercentX: 69, // fraction of own border-box width
-    translatePercentY: 70, // fraction of own border-box height
-    rotate: 71, // degrees, unnormalised
-    scaleX: 72, // initial 1
-    scaleY: 73, // initial 1
-    skewX: 74, // degrees
-    skewY: 75, // degrees
-    transformOriginPercentX: 76, // initial 0.5
-    transformOriginPercentY: 77, // initial 0.5
-    transformOriginX: 78, // px, added to the percentage
-    transformOriginY: 79, // px, added to the percentage
-    transition: 80, // tween row + 1, or 0 for none
-    animation: 81, // tween row + 1, or 0 for none
+    borderTopColor: 2,
+    borderRightColor: 3,
+    borderBottomColor: 4,
+    borderLeftColor: 5,
+    borderTopWidth: 6,
+    borderRightWidth: 7,
+    borderBottomWidth: 8,
+    borderLeftWidth: 9,
+    radiusTopLeft: 10,
+    radiusTopRight: 11,
+    radiusBottomRight: 12,
+    radiusBottomLeft: 13,
+    ringOuterWidth: 14,
+    ringOuterColor: 15,
+    ringInnerWidth: 16,
+    ringInnerColor: 17,
+    ringInsetWidth: 18,
+    ringInsetColor: 19,
+    selectionBg: 20,
+    selectionFg: 21,
+    outlineColor: 22,
+    outlineWidth: 23,
+    outlineOffset: 24,
+    decorationLine: 25, // bit set: 1 underline, 2 overline, 4 line-through
+    decorationColor: 26,
+    decorationStyle: 27, // 0 solid, 1 double, 2 dotted, 3 dashed, 4 wavy
+    decorationThickness: 28, // 0 = auto (font metric)
+    underlineOffset: 29, // px; NaN = auto (font metric)
+    padTop: 30,
+    padRight: 31,
+    padBottom: 32,
+    padLeft: 33,
+    marginTop: 34,
+    marginRight: 35,
+    marginBottom: 36,
+    marginLeft: 37,
+    display: 38, // 0 flex, 1 grid, 2 block, 3 none
+    flexDirection: 39,
+    flexWrap: 40,
+    justifyContent: 41,
+    alignItems: 42,
+    alignSelf: 43,
+    justifyItems: 44, // Grid only
+    justifySelf: 45, // Grid only
+    flexGrow: 46,
+    flexShrink: 47,
+    flexBasis: 48,
+    flexBasisPct: 49,
+    gapRow: 50,
+    gapColumn: 51,
+    gridColumns: 52, // repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N
+    gridRows: 53,
+    gridColumnStart: 54,
+    gridColumnSpan: 55,
+    gridRowStart: 56,
+    gridRowSpan: 57,
+    width: 58,
+    widthPct: 59, // fraction of containing-block width
+    widthVp: 60, // fraction of the window's width
+    height: 61,
+    heightPct: 62, // fraction of containing-block height
+    heightVp: 63, // fraction of the window's height
+    minWidth: 64,
+    minWidthPct: 65,
+    minWidthVp: 66,
+    minHeight: 67,
+    minHeightPct: 68,
+    minHeightVp: 69,
+    maxWidth: 70,
+    maxWidthPct: 71,
+    maxWidthVp: 72,
+    maxHeight: 73,
+    maxHeightPct: 74,
+    maxHeightVp: 75,
+    aspectRatio: 76,
+    position: 77, // 0 relative, 1 absolute
+    insetTop: 78,
+    insetRight: 79,
+    insetBottom: 80,
+    insetLeft: 81,
+    insetTopPct: 82,
+    insetRightPct: 83,
+    insetBottomPct: 84,
+    insetLeftPct: 85,
+    borderSpacingH: 86,
+    borderSpacingV: 87,
+    scrollMarginTop: 88,
+    scrollMarginRight: 89,
+    scrollMarginBottom: 90,
+    scrollMarginLeft: 91,
+    fontSize: 92,
+    fontWeight: 93,
+    fontStyle: 94, // 0 normal, 1 italic
+    fontFamily: 95, // generic family: 0 default, 1 monospace
+    lineHeight: 96, // multiplier of font size; 0 = normal
+    lineHeightPx: 97, // absolute px; NaN = unset
+    textIndent: 98, // px; NaN = unset
+    lineClamp: 99, // 0 = unlimited; drives SkParagraph maxLines
+    overflowX: 100, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
+    overflowY: 101, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
+    scrollbarWidth: 102, // 0 auto, 1 thin, 2 none
+    scrollbarThumb: 103,
+    scrollbarTrack: 104,
+    accentColor: 105,
+    caretColor: 106,
+    appearance: 107, // 0 none, 1 auto
+    cursor: 108, // SDL_SystemCursor enum
+    opacity: 109, // 0..1, initial 1
+    translateX: 110,
+    translateY: 111,
+    translatePercentX: 112, // fraction of own border-box width
+    translatePercentY: 113, // fraction of own border-box height
+    rotate: 114, // degrees, unnormalised
+    scaleX: 115, // initial 1
+    scaleY: 116, // initial 1
+    skewX: 117, // degrees
+    skewY: 118, // degrees
+    transformOriginPercentX: 119, // initial 0.5
+    transformOriginPercentY: 120, // initial 0.5
+    transformOriginX: 121, // px, added to the percentage
+    transformOriginY: 122, // px, added to the percentage
+    transition: 123, // tween row + 1, or 0 for none
+    animation: 124, // tween row + 1, or 0 for none
   },
   /** Per-node predicate mask and where that node's style run begins. */
   variants: {
@@ -293,7 +341,7 @@ export const F = {
 /** Field counts, asserted against the engine's descriptor at startup. */
 export const FIELD_COUNTS: Record<TableName, number> = {
   nodes: 10,
-  styles: 82,
+  styles: 125,
   variants: 3,
   variantSlots: 1,
   media: 3,
@@ -308,7 +356,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
 /** Typed-array constructor per field, used to wrap the engine's memory. */
 export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   nodes: [Uint8Array, Uint16Array, Int32Array, Int32Array, Int32Array, Int32Array, Int16Array, Uint8Array, Uint8Array, Int32Array],
-  styles: [Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array],
+  styles: [Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Uint8Array, Uint32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array],
   variants: [Int32Array, Uint32Array, Int32Array],
   variantSlots: [Uint16Array],
   media: [Uint32Array, Uint8Array, Float32Array],
@@ -337,8 +385,14 @@ export type SharedTables = {
   styles: {
     bg: Uint32Array;
     fg: Uint32Array;
-    borderColor: Uint32Array;
-    borderWidth: Float32Array;
+    borderTopColor: Uint32Array;
+    borderRightColor: Uint32Array;
+    borderBottomColor: Uint32Array;
+    borderLeftColor: Uint32Array;
+    borderTopWidth: Float32Array;
+    borderRightWidth: Float32Array;
+    borderBottomWidth: Float32Array;
+    borderLeftWidth: Float32Array;
     radiusTopLeft: Float32Array;
     radiusTopRight: Float32Array;
     radiusBottomRight: Float32Array;
@@ -351,6 +405,14 @@ export type SharedTables = {
     ringInsetColor: Uint32Array;
     selectionBg: Uint32Array;
     selectionFg: Uint32Array;
+    outlineColor: Uint32Array;
+    outlineWidth: Float32Array;
+    outlineOffset: Float32Array;
+    decorationLine: Uint8Array;
+    decorationColor: Uint32Array;
+    decorationStyle: Uint8Array;
+    decorationThickness: Float32Array;
+    underlineOffset: Float32Array;
     padTop: Float32Array;
     padRight: Float32Array;
     padBottom: Float32Array;
@@ -370,6 +432,7 @@ export type SharedTables = {
     flexGrow: Float32Array;
     flexShrink: Float32Array;
     flexBasis: Float32Array;
+    flexBasisPct: Float32Array;
     gapRow: Float32Array;
     gapColumn: Float32Array;
     gridColumns: Uint16Array;
@@ -379,19 +442,46 @@ export type SharedTables = {
     gridRowStart: Int16Array;
     gridRowSpan: Int16Array;
     width: Float32Array;
+    widthPct: Float32Array;
+    widthVp: Float32Array;
     height: Float32Array;
+    heightPct: Float32Array;
+    heightVp: Float32Array;
     minWidth: Float32Array;
+    minWidthPct: Float32Array;
+    minWidthVp: Float32Array;
     minHeight: Float32Array;
+    minHeightPct: Float32Array;
+    minHeightVp: Float32Array;
     maxWidth: Float32Array;
+    maxWidthPct: Float32Array;
+    maxWidthVp: Float32Array;
     maxHeight: Float32Array;
+    maxHeightPct: Float32Array;
+    maxHeightVp: Float32Array;
     aspectRatio: Float32Array;
     position: Uint8Array;
     insetTop: Float32Array;
     insetRight: Float32Array;
     insetBottom: Float32Array;
     insetLeft: Float32Array;
+    insetTopPct: Float32Array;
+    insetRightPct: Float32Array;
+    insetBottomPct: Float32Array;
+    insetLeftPct: Float32Array;
+    borderSpacingH: Float32Array;
+    borderSpacingV: Float32Array;
+    scrollMarginTop: Float32Array;
+    scrollMarginRight: Float32Array;
+    scrollMarginBottom: Float32Array;
+    scrollMarginLeft: Float32Array;
     fontSize: Float32Array;
     fontWeight: Uint16Array;
+    fontStyle: Uint8Array;
+    fontFamily: Uint8Array;
+    lineHeight: Float32Array;
+    lineHeightPx: Float32Array;
+    textIndent: Float32Array;
     lineClamp: Uint16Array;
     overflowX: Uint8Array;
     overflowY: Uint8Array;
@@ -401,6 +491,7 @@ export type SharedTables = {
     accentColor: Uint32Array;
     caretColor: Uint32Array;
     appearance: Uint8Array;
+    cursor: Uint8Array;
     opacity: Float32Array;
     translateX: Float32Array;
     translateY: Float32Array;
@@ -573,6 +664,20 @@ export const Overflow = {
 } as const;
 export type Overflow = (typeof Overflow)[keyof typeof Overflow];
 
+/** `styles.fontStyle`. A slant flag; `oblique <angle>` is a non-goal until measured. */
+export const FontStyle = {
+  NORMAL: 0,
+  ITALIC: 1,
+} as const;
+export type FontStyle = (typeof FontStyle)[keyof typeof FontStyle];
+
+/** `styles.fontFamily`. A *generic* family, never a name: the engine resolves one concrete face per generic at startup, so an author picks a category and the platform picks the font. `DEFAULT` is whatever `Measurer::new` resolved. */
+export const FontFamily = {
+  DEFAULT: 0,
+  MONOSPACE: 1,
+} as const;
+export type FontFamily = (typeof FontFamily)[keyof typeof FontFamily];
+
 /** `styles.scrollbarWidth`. The whole grammar: Chromium 151 rejects `thick` and a `<length>` outright, measured — MDN's scrollbars guide is wrong about both. `NONE` hides the bar without disabling the wheel, which is exactly what the property means. */
 export const ScrollbarWidth = {
   AUTO: 0,
@@ -588,6 +693,16 @@ export const Appearance = {
   BASE_SELECT: 2,
 } as const;
 export type Appearance = (typeof Appearance)[keyof typeof Appearance];
+
+/** `styles.decorationStyle`. `text-decoration-style`'s five keywords, in spec order — SOLID is 0, which is also the initial value. */
+export const DecorationStyle = {
+  SOLID: 0,
+  DOUBLE: 1,
+  DOTTED: 2,
+  DASHED: 3,
+  WAVY: 4,
+} as const;
+export type DecorationStyle = (typeof DecorationStyle)[keyof typeof DecorationStyle];
 
 /** `media.kind`. Which axis a threshold tests, and which side of it counts as true. `MIN_*` holds at the threshold and above, `MAX_*` at it and below — the same inclusive bounds `min-width`/`max-width` have in CSS, which is why a `min-width: 768px` and a `max-width: 768px` query are both true at exactly 768. */
 export const MediaKind = {
@@ -707,8 +822,14 @@ export type Status = (typeof Status)[keyof typeof Status];
 export const STYLE_FIELDS = [
   ["bg", "Uint32Array", false, false],
   ["fg", "Uint32Array", true, false],
-  ["borderColor", "Uint32Array", false, false],
-  ["borderWidth", "Float32Array", false, true],
+  ["borderTopColor", "Uint32Array", false, false],
+  ["borderRightColor", "Uint32Array", false, false],
+  ["borderBottomColor", "Uint32Array", false, false],
+  ["borderLeftColor", "Uint32Array", false, false],
+  ["borderTopWidth", "Float32Array", false, true],
+  ["borderRightWidth", "Float32Array", false, true],
+  ["borderBottomWidth", "Float32Array", false, true],
+  ["borderLeftWidth", "Float32Array", false, true],
   ["radTL", "Float32Array", false, false],
   ["radTR", "Float32Array", false, false],
   ["radBR", "Float32Array", false, false],
@@ -721,6 +842,14 @@ export const STYLE_FIELDS = [
   ["ringInsetColor", "Uint32Array", false, false],
   ["selectionBg", "Uint32Array", true, false],
   ["selectionFg", "Uint32Array", true, false],
+  ["outlineColor", "Uint32Array", false, false],
+  ["outlineWidth", "Float32Array", false, false],
+  ["outlineOffset", "Float32Array", false, false],
+  ["decorationLine", "Uint8Array", true, false],
+  ["decorationColor", "Uint32Array", true, false],
+  ["decorationStyle", "Uint8Array", true, false],
+  ["decorationThickness", "Float32Array", true, false],
+  ["underlineOffset", "Float32Array", true, false],
   ["padT", "Float32Array", false, true],
   ["padR", "Float32Array", false, true],
   ["padB", "Float32Array", false, true],
@@ -740,6 +869,7 @@ export const STYLE_FIELDS = [
   ["grow", "Float32Array", false, true],
   ["shrink", "Float32Array", false, true],
   ["basis", "Float32Array", false, true],
+  ["basisPct", "Float32Array", false, true],
   ["gapRow", "Float32Array", false, true],
   ["gapCol", "Float32Array", false, true],
   ["gridCols", "Uint16Array", false, true],
@@ -749,19 +879,46 @@ export const STYLE_FIELDS = [
   ["gridRowStart", "Int16Array", false, true],
   ["gridRowSpan", "Int16Array", false, true],
   ["width", "Float32Array", false, true],
+  ["widthPct", "Float32Array", false, true],
+  ["widthVp", "Float32Array", false, true],
   ["height", "Float32Array", false, true],
+  ["heightPct", "Float32Array", false, true],
+  ["heightVp", "Float32Array", false, true],
   ["minW", "Float32Array", false, true],
+  ["minWPct", "Float32Array", false, true],
+  ["minWVp", "Float32Array", false, true],
   ["minH", "Float32Array", false, true],
+  ["minHPct", "Float32Array", false, true],
+  ["minHVp", "Float32Array", false, true],
   ["maxW", "Float32Array", false, true],
+  ["maxWPct", "Float32Array", false, true],
+  ["maxWVp", "Float32Array", false, true],
   ["maxH", "Float32Array", false, true],
+  ["maxHPct", "Float32Array", false, true],
+  ["maxHVp", "Float32Array", false, true],
   ["aspectRatio", "Float32Array", false, true],
   ["position", "Uint8Array", false, true],
   ["insetT", "Float32Array", false, true],
   ["insetR", "Float32Array", false, true],
   ["insetB", "Float32Array", false, true],
   ["insetL", "Float32Array", false, true],
+  ["insetTPct", "Float32Array", false, true],
+  ["insetRPct", "Float32Array", false, true],
+  ["insetBPct", "Float32Array", false, true],
+  ["insetLPct", "Float32Array", false, true],
+  ["borderSpacingH", "Float32Array", false, false],
+  ["borderSpacingV", "Float32Array", false, false],
+  ["scrollMarginTop", "Float32Array", false, false],
+  ["scrollMarginRight", "Float32Array", false, false],
+  ["scrollMarginBottom", "Float32Array", false, false],
+  ["scrollMarginLeft", "Float32Array", false, false],
   ["fontSize", "Float32Array", true, true],
   ["fontWeight", "Uint16Array", true, true],
+  ["fontStyle", "Uint8Array", true, true],
+  ["fontFamily", "Uint8Array", true, true],
+  ["lineHeight", "Float32Array", true, true],
+  ["lineHeightPx", "Float32Array", true, true],
+  ["textIndent", "Float32Array", true, true],
   ["overflowX", "Uint8Array", false, true],
   ["overflowY", "Uint8Array", false, true],
   ["scrollbarWidth", "Uint8Array", false, false],
@@ -770,6 +927,7 @@ export const STYLE_FIELDS = [
   ["accentColor", "Uint32Array", true, false],
   ["caretColor", "Uint32Array", true, false],
   ["appearance", "Uint8Array", false, false],
+  ["cursor", "Uint8Array", true, false],
   ["opacity", "Float32Array", false, false],
   ["translateX", "Float32Array", false, false],
   ["translateY", "Float32Array", false, false],
@@ -800,8 +958,14 @@ export const STYLE_FIELDS = [
 export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[number][0]]> = [
   ["bg", "bg"],
   ["fg", "fg"],
-  ["borderColor", "borderColor"],
-  ["borderWidth", "borderWidth"],
+  ["borderTopColor", "borderTopColor"],
+  ["borderRightColor", "borderRightColor"],
+  ["borderBottomColor", "borderBottomColor"],
+  ["borderLeftColor", "borderLeftColor"],
+  ["borderTopWidth", "borderTopWidth"],
+  ["borderRightWidth", "borderRightWidth"],
+  ["borderBottomWidth", "borderBottomWidth"],
+  ["borderLeftWidth", "borderLeftWidth"],
   ["radiusTopLeft", "radTL"],
   ["radiusTopRight", "radTR"],
   ["radiusBottomRight", "radBR"],
@@ -814,6 +978,14 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[
   ["ringInsetColor", "ringInsetColor"],
   ["selectionBg", "selectionBg"],
   ["selectionFg", "selectionFg"],
+  ["outlineColor", "outlineColor"],
+  ["outlineWidth", "outlineWidth"],
+  ["outlineOffset", "outlineOffset"],
+  ["decorationLine", "decorationLine"],
+  ["decorationColor", "decorationColor"],
+  ["decorationStyle", "decorationStyle"],
+  ["decorationThickness", "decorationThickness"],
+  ["underlineOffset", "underlineOffset"],
   ["padTop", "padT"],
   ["padRight", "padR"],
   ["padBottom", "padB"],
@@ -833,6 +1005,7 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[
   ["flexGrow", "grow"],
   ["flexShrink", "shrink"],
   ["flexBasis", "basis"],
+  ["flexBasisPct", "basisPct"],
   ["gapRow", "gapRow"],
   ["gapColumn", "gapCol"],
   ["gridColumns", "gridCols"],
@@ -842,19 +1015,46 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[
   ["gridRowStart", "gridRowStart"],
   ["gridRowSpan", "gridRowSpan"],
   ["width", "width"],
+  ["widthPct", "widthPct"],
+  ["widthVp", "widthVp"],
   ["height", "height"],
+  ["heightPct", "heightPct"],
+  ["heightVp", "heightVp"],
   ["minWidth", "minW"],
+  ["minWidthPct", "minWPct"],
+  ["minWidthVp", "minWVp"],
   ["minHeight", "minH"],
+  ["minHeightPct", "minHPct"],
+  ["minHeightVp", "minHVp"],
   ["maxWidth", "maxW"],
+  ["maxWidthPct", "maxWPct"],
+  ["maxWidthVp", "maxWVp"],
   ["maxHeight", "maxH"],
+  ["maxHeightPct", "maxHPct"],
+  ["maxHeightVp", "maxHVp"],
   ["aspectRatio", "aspectRatio"],
   ["position", "position"],
   ["insetTop", "insetT"],
   ["insetRight", "insetR"],
   ["insetBottom", "insetB"],
   ["insetLeft", "insetL"],
+  ["insetTopPct", "insetTPct"],
+  ["insetRightPct", "insetRPct"],
+  ["insetBottomPct", "insetBPct"],
+  ["insetLeftPct", "insetLPct"],
+  ["borderSpacingH", "borderSpacingH"],
+  ["borderSpacingV", "borderSpacingV"],
+  ["scrollMarginTop", "scrollMarginTop"],
+  ["scrollMarginRight", "scrollMarginRight"],
+  ["scrollMarginBottom", "scrollMarginBottom"],
+  ["scrollMarginLeft", "scrollMarginLeft"],
   ["fontSize", "fontSize"],
   ["fontWeight", "fontWeight"],
+  ["fontStyle", "fontStyle"],
+  ["fontFamily", "fontFamily"],
+  ["lineHeight", "lineHeight"],
+  ["lineHeightPx", "lineHeightPx"],
+  ["textIndent", "textIndent"],
   ["overflowX", "overflowX"],
   ["overflowY", "overflowY"],
   ["scrollbarWidth", "scrollbarWidth"],
@@ -863,6 +1063,7 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[
   ["accentColor", "accentColor"],
   ["caretColor", "caretColor"],
   ["appearance", "appearance"],
+  ["cursor", "cursor"],
   ["opacity", "opacity"],
   ["translateX", "translateX"],
   ["translateY", "translateY"],

@@ -42,3 +42,13 @@ export type { Args, Route, Router } from "./compiler/route.ts";
 // --- state, the part that survives the compiler ------------------------------
 export { $, batch, computed, isSignal, signal } from "./runtime/signal.ts";
 export type { MapOptions, ReadonlySignal, Signal } from "./runtime/signal.ts";
+
+/**
+ * The platform's own modal message box.
+ *
+ * Exported by name because Bun has a *global* `alert()` that reads stdin, and an author who
+ * forgets the import gets that one — it blocks the app thread waiting for Enter on a terminal
+ * nobody is watching.
+ */
+export { alert } from "./runtime/alert.ts";
+export type { AlertLevel } from "./runtime/alert.ts";

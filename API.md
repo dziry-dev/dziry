@@ -99,6 +99,9 @@ Anything that trades robustness for capability stays a proposal.
 | `ref()` | partial — `resolve-refs.ts` | C3 |
 | `bind:value` | partial — append + backspace, and a click now focuses the field | M12 |
 | form controls — `<Checkbox>` `<Switch>` `<Radio>` `<Toggle>` `<Tabs>` `<Input>` | planned — see **Form controls** below | C2 |
+| `<form>` — payload by `name`, `onSubmit`, `validate`, `onInvalid` | **done** — see **Form controls** below | A3 |
+| `alert()` — the platform's modal message box | **done** — `SDL_ShowSimpleMessageBox` behind the FFI, so it is a Win32 task dialog, an `NSAlert` or the GTK box and not something dziri draws. Nothing was vendored: SDL3 is already linked. Shown on the engine thread, because SDL requires the thread that initialised video, so app code posts a message; headless is a no-op so screenshots and goldens are unaffected | — |
+| `confirm()` / `prompt()` | planned — the same call with an answer, which needs a reply message rather than a return value: the thread that would answer is the one the dialog is blocking | — |
 | `effect` `untrack` `peek` cleanup, disposal scopes | planned | M6 |
 | `Show` | planned | M3 |
 | `source` | planned | M8 |
@@ -217,10 +220,149 @@ family reads as one idea instead of four unrelated names:
 | `bind:checked` | `State<boolean>` — one checkbox or switch | planned · A3 |
 | `bind:group` | `State<string>` — the selected `value` in a radio set | planned · A3 |
 
+The two planned ones are now *less* urgent than they read, and it is worth saying why rather than
+leaving the row alone. Inside a `<form>`, a named checkbox or radio already has live state and
+already reaches app code — through the payload, from a cell the compiler declared. What
+`bind:checked` and `bind:group` would add is reading that state *outside* a submit, which is a
+narrower job than "checkboxes do not work yet".
+
 **A bound value is always a string**, including for `number` and `range`. That matches the DOM,
 where an input's value *is* a string and `valueAsNumber` is a separate accessor, and it keeps the
 engine out of the business of deciding what an empty field or a lone `-` parses to. An author who
 wants a number writes `derived(() => Number(volume))`.
+
+### `field` wrappers: nesting by structure, and the one piece of error state
+
+`field` on any element that wraps a control names a **group**, and the wrapper chain is the
+path:
+
+```tsx
+<form validateOn="change" validate={Login} onSubmit={save}>
+  <div field="name" errorClassName="group/error">
+    <input className="error:border-red-500" />
+    <span error className="hidden error:block" />
+  </div>
+  <div field="position" errorClassName="group/error">
+    <input name="x" /><input name="y" />
+    <span error className="hidden error:block" />
+  </div>
+</form>
+```
+
+gives `{ name: string, position: { x: string, y: string } }`. A wrapper holding one bare
+control **is** that field; named controls inside become its properties; wrappers nest; an
+element without `field` is transparent. There is no leaf-or-branch rule to remember, because
+the path *is* the answer — and a path claimed as both (`<div field="a"><input><input name="x">`)
+is a build error rather than an arbitrary winner.
+
+**No browser does any of this**, and that is measured rather than assumed:
+`name="user[email]"` is the literal key `"user[email]"` in `FormData`, at both the API and the
+wire layer, and `enctype="application/json"` — the W3C proposal that standardised the bracket
+syntax — is not even reflected (BROWSER-FACTS.md, "A nested-looking `name` is just a string").
+So nesting belongs to server-side parsers, each with its own dialect. dziri nests by structure
+instead, because a compiler can see structure: no path is parsed, and a conflict is reported.
+`tags[]` needed no equivalent — two controls sharing a name already give an array, which is
+what the brackets were hinting at.
+
+**A radio inside a wrapper is the one exception, and it has to be.** A radio set must share a
+`name` — the engine interns a group on `(form, name)` — so counting that name as a path segment
+turned the obvious markup into `plan.plan`, which is what the demo produced the first time it
+compiled. Inside a wrapper the `name` **groups** and the wrapper **names**, which is the same
+reason a radio set's shape is `one`: many elements, a single answer. Outside a wrapper the name
+is still the key, so a flat form is unchanged. Two *different* radio groups under one wrapper is
+a build warning, because both would claim the wrapper's key.
+
+**`errorClassName` is the only error state, and it is a class.** A wrapper wears it while any
+issue's `path` has the wrapper's path as a *prefix*, so `position` lights up for an issue at
+`position.x` and a nested `field="x"` wrapper lights up for that one alone. It compiles to the
+same style-table patches a conditional class does — measured at 5 writes for a border plus a
+message — so the input's border and the message's visibility both come from a class on the
+wrapper and none of it is JavaScript. Two wrappers sharing the class string stay independent:
+patches are keyed on the driving cell, and style slots intern over the whole variant vector.
+
+With Tailwind, define the variant in its **prefix** form. This is not a preference:
+
+```css
+@custom-variant error (.group\/error &);   /* emits `.group\/error .error\:block` — parses */
+```
+
+Tailwind's default form emits `.error\:block:is(:where(.group\/error) *)`, and the `*` inside
+`:is()` is not a selector dziri parses. Both spellings were generated with the real Tailwind
+CLI and fed to the compiler.
+
+**`<span error />`** marks where the message goes: its text becomes a run bound to a cell the
+compiler declares, the same mechanism as a field's value cell, and its authored children are
+dropped so placeholder prose never ships.
+
+**`validateOn="submit" | "change" | "blur"`**, `submit` by default. Two rules are behaviour
+rather than knobs, because neither is a preference: after a failed submit a form always
+re-validates as its fields change (React Hook Form spells this `reValidateMode: onChange`), and
+before any submit a field may only show an error once its value has *moved* off the one it was
+compiled with. That second gate is what other libraries store as `touched`; here it costs no
+state, because the initial value is a constant the compiler wrote down. Per field the runtime
+stores exactly two things: a boolean and a message.
+
+*Vocabulary checked against the shipped types of React Hook Form 7 (`mode`, `reValidateMode`,
+`criteriaMode`, `delayError`; `formState` with `isDirty`/`dirtyFields`/`touchedFields`),
+TanStack Form (`onMount`/`onChange`/`onBlur`/`onSubmit`/`onDynamic` + async variants; field meta
+`isTouched`/`isBlurred`/`isDirty`/`isDefaultValue`) and Formik 2 (`validateOnChange`/
+`validateOnBlur`/`validateOnMount`). None has an `onDirty` trigger — dirty is state in all
+three — which is why it is internal here.*
+
+### `<form>`: the payload, and who declares a field's state
+
+A form is collected by `name`, the way a browser collects one, and `onSubmit` receives the result:
+
+```tsx
+<form onSubmit={save} validate={Login} onInvalid={showErrors}>
+  <input name="email" />
+  <input name="age" type="number" />
+  <input name="terms" type="checkbox" />
+  <select name="plan"><option>free</option><option>pro</option></select>
+  <button>Save</button>
+</form>
+```
+
+**No state module.** A named field with no `bind:value` gets a cell the *compiler* declares in
+`ui.gen.ts` — `const field_0 = signal("")` — seeded from its `value`/`checked`/`selected`
+attributes, which is what a browser calls the default value. Nothing outside the artifact can name
+one, so a form's fields do not become a second, undocumented state API; the payload is the only
+way to read them. A field that *does* carry `bind:value` keeps the author's signal, because two
+cells for one field could disagree with each other.
+
+**The payload is typed by kind, not stringly.** The compiler knows what each control is, so
+`data.age` is a number and `data.terms` is a boolean. That is the one deliberate divergence from
+`FormData`, and it is a divergence in the value's *type* rather than in which values are there:
+the inclusion rules are the browser's, measured (BROWSER-FACTS.md, "What a form actually
+submits"). Nameless controls are out, disabled ones are out — **including via an enclosing
+`<fieldset disabled>`, which is inherited, with the first `<legend>` escaping it** — an unticked
+box contributes nothing, an option with no `value` submits its trimmed text, and two controls
+sharing a name give an array in document order.
+
+| markup | `data.x` |
+|---|---|
+| `<input name=x>` `<textarea name=x>` | `string` |
+| `<input type=number\|range name=x>` | `number \| undefined` — `undefined` when empty or unparseable, never `NaN` |
+| `<input type=checkbox name=x>` | `boolean` |
+| `<input type=checkbox name=x value=v>` | `string \| undefined` — the `value` keeps the browser's meaning |
+| `<input type=radio name=x>` × n | `string \| undefined` — the checked one's value |
+| `<select name=x>` | `string` — always, since a dropdown falls back to its first option |
+| `<select name=x multiple>`, or two controls sharing `x` | `string[]`, possibly empty |
+
+**Key shapes are fixed at build time**, which is the reason the table above is a table and not a
+runtime decision. A schema — and the type an author reads — needs `tags` to be an array on every
+submit, not an array when two boxes are ticked and a string when one is. A browser never had this
+problem because `FormData` is a multimap with no shape to keep stable.
+
+**`validate={…}` takes a schema, and names no library.** Anything carrying `~standard` — the
+Standard Schema interop spec, which Zod 4, Valibot and ArkType implement natively — is used
+through it. An **Effect** schema does not carry it (measured, effect 3.22), so it is recognised by
+its `ast` and converted with Effect's own `Schema.standardSchemaV1` behind a lazy import: `effect`
+is a dependency of the app that passed one and never of dziri. A plain
+`(data) => issues | null` is the third accepted shape. A schema **narrows what `onSubmit`
+receives** — its output, so `z.coerce.date()` hands over a `Date` — and a rejected payload runs
+`onInvalid(issues)` instead, with issues normalised to `{ path, message }[]` whichever validator
+produced them.
 
 Why this costs almost nothing for everything except `Input`: `:checked`, `:disabled` and
 `:indeterminate` are enumerable booleans, so they pass the compile-time gate at question 3 — a second
@@ -294,9 +436,12 @@ closing always does, and the "two pieces of state" the design called for cost no
 is genuinely new: one integer for which select is open, and one per-node label redirect so the closed
 button can read the chosen option's string without the engine writing into Bun's tables.
 
-Still missing, and named rather than implied: nothing can make a control *become* disabled at run
-time (`disabled` is seeded from the attribute, which is also what a browser does with it),
-`:indeterminate` has no way to be reached, and a control inside a `map()` list gets no controls row.
+Still missing, and named rather than implied: `:indeterminate` has no way to be reached, and a
+named control inside a `map()` list is **not in the payload** — measured, not assumed. A list
+template is compiled once into an arena rather than walked as ordinary children, so the field pass
+never sees it; the control still renders, and the build says it cannot be typed into. What a
+row-shaped payload should even be — one entry, or one per row — is an open question rather than a
+missing line of code.
 For the picker specifically: no collision handling — one near the window's bottom edge hangs off it
 rather than flipping above its select, which is ROADMAP B2's job — no scroll-outside dismissal, no
 `<optgroup>` label rendering, and no type-to-select.
@@ -327,11 +472,24 @@ rather than flipping above its select, which is ROADMAP B2's job — no scroll-o
 | `accent-color` `caret-color` `appearance` | **done** — `STYLE_FIELDS`, checked in `conformance` and `spec-audit` | A1 |
 | `resize`, `field-sizing: content` | **non-goal** — see ROADMAP C2; in `css-coverage`'s `OUT_OF_SCOPE_NAMES` | — |
 | `<Input>` | planned | C2 · Tier 1b (needs A5) |
-| `onSubmit` on `bind:value`; `onChange` vs `onInput` | planned | A3 |
+| `onSubmit` receives the form's payload | **done** — collected by `name` from the form's subtree, typed by control kind, with the browser's inclusion rules (measured, `probes/form-data.html`). `src/compiler/fields.ts` decides the shape, `src/runtime/forms.ts` reads the cells | A3 |
+| a named field with no `bind:value` | **done** — the compiler declares its cell in the artifact, so a browser-shaped form needs no state module. Typing reaches it through the same `editables` table a bound field uses | A3 |
+| `validate={schema}` — Zod, Valibot, ArkType, Effect | **done** — through Standard Schema's `~standard`, plus one lazy-import branch for a raw Effect schema, which carries no `~standard` of its own (measured, effect 3.22). dziri depends on none of them | A3 |
+| `onInvalid` | **done** — issues normalised to `{ path, message }[]` from all three validator shapes | A3 |
+| `field="…"` — nesting by wrapper | **done** — the wrapper chain is the path, so `{ position: { x, y } }` needs no bracket syntax. No browser nests anything (measured); a path claimed as both a value and a group is a build error | A3 |
+| `errorClassName` + `<span error />` | **done** — a class on the wrapper, compiled to style-table patches, so the error story is CSS. Independent per wrapper even when the class string is shared | A3 |
+| `validateOn="submit\|change\|blur"` | **done** — plus two rules that are behaviour rather than knobs: re-validate on change after a failed submit, and no error before a field has moved off its compiled value | A3 |
+| per-field `touched` / `dirty` as styling hooks | **refused by name** — `touched` exists in other libraries to gate error display, which `validateOn` does; per-field `dirty` styling is a need nobody has demonstrated. Reversible: each would be one more class toggle | — |
+| the submitter's own `name`/`value` entry | **not done** — measured (a named `<button type=submit>` contributes only when it is the button that submitted) and deliberately left out: it is the one entry that is not a property of the markup, and a two-button form in dziri would use two `onClick`s | — |
+| `form="id"` association | **not done** — a field is collected by being inside the form. Measured to work in a browser and refused here rather than silently ignored | — |
+| `<input type=file>` in a payload | **refused by name** — there is no file picker, so there is no file to submit; a named one warns rather than contributing an empty entry | — |
+| a **disabled** `<option>` that is selected | **known divergence** — measured to make its whole `<select>` contribute nothing; dziri submits its value | — |
+| `onChange` vs `onInput` | planned | A3 |
 | a click focusing a bound field | **done** — editables are `INTERACTIVE`, so `hit_test` can return one | A3 |
 | an empty field is still one line high | **done** — `NodeFlags.EDITABLE`, protocol v14. Measured: a field's height is its *font*, not its content | A5 |
 | `::placeholder` | **done** — protocol v15. An ordinary generated box, like `::before`, with two differences: its text comes from the attribute rather than `content`, and paint draws it only while the field is empty | C2 |
 | a disabled field refuses focus | **done** — a disabled form control now gets a `controls` row, so the engine can see it. A press on one produces no `mousedown`, `mouseup` or `click` at all, as measured | A3 |
+| `<input type=number\|range>` is typeable | **done** — it was in the payload's kind table before it had an editor, so it compiled to a box with no line height: four pixels of border, which is what the forms demo drew where its age field should have been. A browser routes both to the same text editor and adds chrome dziri has no equivalent for (a spinner, a slider track), so being typeable is the part that transfers. The implicit-submission **blocking** set stays the six text keywords it was measured over — widening it here would have changed a measured rule as a side effect of a layout fix, and whether a `number` blocks is unmeasured | A5 |
 | a field's **width** from `size` | planned — `29 + 7 × size` px is measured (BROWSER-FACTS.md), and unimplemented: `size="20"` does nothing, so an `<input>` with no width class fills its container instead of being 169px | A5 |
 | caret — position, blink, `caret-color` | **done** — a click resolves to the nearest character boundary (measured); the blink is an engine timer, so it survives a busy Bun | A5 |
 | arrow keys, Home/End | **done** — consumed by the engine, never forwarded, so a caret move costs one rect and no round trip | A5 |

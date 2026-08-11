@@ -1,0 +1,888 @@
+bun test v1.3.14 (0d9b296a)
+
+src\route-chain.test.ts:
+(pass) a top-level route is visible alone [0.14ms]
+(pass) a nested route keeps its layout visible, because it renders inside it [0.04ms]
+(pass) a layout on its own does not pull its children in [0.02ms]
+(pass) siblings are never visible together [0.03ms]
+(pass) depth is not a limit — a chain is as long as the nesting [0.04ms]
+(pass) a cycle terminates rather than hanging the build [0.03ms]
+(pass) an out-of-range index yields just itself, not a crash [0.02ms]
+
+src\compiler\cascade.test.ts:
+(pass) specificity decides, not source order [16.98ms]
+(pass) source order breaks a specificity tie [2.10ms]
+(pass) a higher-specificity shorthand beats a lower-specificity longhand [4.46ms]
+(pass) a longhand still beats a shorthand of equal rank declared before it [3.54ms]
+(pass) a shorthand declared after a longhand overwrites it [1.76ms]
+(pass) inline beats every selector, however specific [1.74ms]
+(pass) an inline shorthand beats a longhand from the sheet [3.35ms]
+(pass) inline only overrides what it declares [3.78ms]
+(pass) hover and focus merge per property instead of one winning [3.83ms]
+(pass) :checked and :disabled are predicates like any other [3.29ms]
+(pass) a rule may require two states at once, and holds in neither alone [2.09ms]
+(pass) ::before and ::after emit real nodes, in document order [2.51ms]
+(pass) a pseudo-element with no content renders nothing [3.30ms]
+(pass) a generated box gets its own variant run from the element's state [1.95ms]
+(pass) a generated box is never interactive, however many states it styles [1.75ms]
+(pass) content may not depend on a state, and says so [1.74ms]
+(pass) attribute selectors tell one input type from another [6.61ms]
+(pass) every attribute operator, against the spec's semantics [2.24ms]
+(pass) a select gets its closed button and selected text from the compiler [5.74ms]
+(pass) a select's option still matches `select > option` [3.69ms]
+(pass) the tab-stop set is the measured one, not the interactive one [5.29ms]
+(pass) tabindex overrides the tag rule in both directions [2.57ms]
+(pass) autofocus keeps every focusable claim and refuses the rest [2.69ms]
+(pass) autofocus takes the wider focusable set, not the tab-stop set [1.77ms]
+(pass) Enter's outcome is resolved at build time, per the measured table [30.23ms]
+(pass) the default button is the first in tree order [2.23ms]
+(pass) a nested form's button does not become the outer form's [2.37ms]
+(pass) a textarea is a text area, and Enter there is not a submission [1.67ms]
+(pass) no autofocus is an empty table, not a sentinel [1.36ms]
+(pass) an authored select button is left alone [2.29ms]
+(pass) a pseudo-element rule does not style its originating element [1.67ms]
+(pass) hover and focus still merge when a conditional class is present [6.67ms]
+(pass) a node whose states resolve to its base style is not conditional [2.19ms]
+(pass) an unsupported selector is refused, not silently rewritten [4.11ms]
+(pass) a child combinator does not match a grandchild [1.84ms]
+(pass) :where() matches its argument and contributes no specificity [2.67ms]
+(pass) :first-child, :last-child and :only-child resolve off the tree [3.09ms]
+(pass) a trailing text run does not displace :last-child [1.51ms]
+(pass) align-items defaults to stretch, as CSS's `normal` does [1.33ms]
+(pass) inherited properties pass down, non-inherited do not [2.68ms]
+(pass) currentcolor resolves to the element's own colour, whatever the declaration order [5.62ms]
+(pass) a uniform style column is emitted as a fill, and a varying one is not [2.72ms]
+(pass) the IR for one small document is exactly this [3.19ms]
+(pass) an unset min-size is auto, not zero [5.22ms]
+(pass) inset expands to four sides, and its axis forms to two [20.57ms]
+(pass) the logical sizing properties are aliases of the physical ones [8.82ms]
+  warn: ignoring unsupported property "place-content"
+(pass) place-items and place-self set both axes, and `safe` binds forward [14.23ms]
+
+src\compiler\controls.test.ts:
+(pass) a checkbox and a radio become controls table rows, seeded from their attributes [5.57ms]
+(pass) a radio group is keyed on the form, not on the name alone [6.11ms]
+(pass) a label's press reaches its control, through `for` and through containment [3.24ms]
+(pass) a node that operates a control is interactive, and a button inside a label is not [2.13ms]
+(pass) a page with no controls emits no rows and no activation [1.12ms]
+(pass) a select becomes a LISTBOX on `multiple` or on `size` above one, and not on `size=1` [5.22ms]
+(pass) a list box has its options in flow, with no overlay and no selectedcontent [4.02ms]
+(pass) a dropdown falls back to its first option, a list box selects nothing [10.65ms]
+
+src\compiler\css.test.ts:
+(pass) an unsupported selector is reported at its own line and column [0.41ms]
+(pass) a comment does not shift the position of a later error [0.10ms]
+(pass) a comment on the same line does not shift the column [0.05ms]
+(pass) a declaration without a colon points at the declaration [0.06ms]
+(pass) the second selector in a list is located, not the first [0.05ms]
+(pass) a pseudo-class off the subject is located at its compound [0.09ms]
+(pass) an unclosed rule is located at the brace that was never closed [0.05ms]
+(pass) an error with no recorded position still renders [0.04ms]
+(pass) a valid stylesheet still parses [0.08ms]
+(pass) lengths resolve to px, with the units this subset supports [0.12ms]
+(pass) a length the subset cannot express is a diagnostic, not a guess [0.16ms]
+(pass) colours resolve to ARGB [0.18ms]
+(pass) a colour the subset cannot express is a diagnostic [0.15ms]
+(pass) color-mix() against transparent folds to a scaled alpha [0.52ms]
+(pass) a color-mix() that needs real interpolation is a diagnostic [0.27ms]
+(pass) the 1-to-4-value box shorthand maps as CSS says [0.13ms]
+(pass) Tailwind's ring utilities become concentric bands [1.00ms]
+  warn: ignoring a box-shadow layer with an offset or blur ("0px 4px 6px"). Only ring-style shadows — no offset, no blur, a solid spread — reach the engine.
+  warn: ignoring a box-shadow layer with an offset or blur ("0px 2px 4px"). Only ring-style shadows — no offset, no blur, a solid spread — reach the engine.
+(pass) a blurred or offset shadow is dropped, not approximated [0.17ms]
+(pass) a box-shadow band hidden behind a wider one is dropped [0.09ms]
+(pass) a malformed box-shadow layer is refused [0.28ms]
+(pass) gap takes one value for both axes or row then column [0.06ms]
+(pass) grid tracks are counted, not described [0.38ms]
+(pass) grid placement is start plus span, and line 0 is refused [0.34ms]
+(pass) text-decoration: the line is a bit set and the parts combine [0.37ms]
+(pass) outline is a band outside the border box: width, colour, offset, none [0.18ms]
+(pass) per-side borders: the family maps physical and logical onto four fields [0.19ms]
+(pass) flex keywords expand as CSS says [0.15ms]
+(pass) `flex` with a length basis keeps the basis [0.11ms]
+(pass) `border` resets style to none and honours it, as CSS says [0.08ms]
+(pass) KNOWN WRONG: `border` with no colour paints nothing instead of currentcolor [0.04ms]
+(pass) overflow maps CSS's keywords onto the four the engine has [0.18ms]
+(pass) overflow is per axis, which is the case that matters [0.15ms]
+(pass) scrollbar-width takes exactly auto, thin and none [0.17ms]
+(pass) scrollbar-color takes two colours, thumb then track [0.17ms]
+(pass) accent-color and caret-color take auto or a colour [0.06ms]
+(pass) appearance folds <compat-auto> to auto and keeps base-select distinct [0.34ms]
+(pass) content takes strings, none and normal, and refuses the rest [0.22ms]
+(pass) ::before and ::after parse, and the rest are refused by name [0.35ms]
+(pass) the space-y selector parses into what it means [0.19ms]
+(pass) the child combinator is recorded, and the sibling ones are refused by name [0.26ms]
+(pass) :is() takes its argument's specificity and :where() takes none [0.19ms]
+(pass) a functional pseudo-class does not confuse the splitters [0.46ms]
+(pass) an interaction pseudo-class is refused inside :is(), :where() and :not() [0.26ms]
+(pass) a compound with two pseudo-classes requires both states [0.08ms]
+(pass) a visible axis becomes scrollable when the other axis scrolls [19.58ms]
+(pass) the window root scrolls by default, like a browser page [8.90ms]
+(pass) calc() folds to a number, with CSS's precedence [0.28ms]
+(pass) calc() refuses what it cannot know at compile time [0.18ms]
+(pass) a percentage length keeps the fraction and zeroes the px [0.28ms]
+(pass) a viewport length is a fraction of the window, dvh included [0.12ms]
+(pass) a winning declaration clears the channels the loser set [0.05ms]
+(pass) the channels refuse what they cannot express [0.19ms]
+(pass) the inset shorthand spreads percentages over the four channels [0.04ms]
+(pass) flex: 1 1 0% — how Tailwind spells flex-1 — keeps the basis at zero [0.13ms]
+(pass) custom properties inherit, and var() resolves through the cascade [0.05ms]
+(pass) custom property names keep their case, unlike every other property [0.03ms]
+(pass) substituteVars handles fallbacks, nesting and cycles [0.99ms]
+  warn: ignoring at-rule "@font-face"
+(pass) an at-rule no longer eats the rule that follows it [0.10ms]
+(pass) a media block keeps its rules, each carrying the condition [0.37ms]
+(pass) nested media blocks intersect rather than replace [0.09ms]
+  warn: ignoring media query "@media (min-width: 700px) and (orientation: landscape)"
+(pass) a media query this engine cannot evaluate is skipped whole [0.07ms]
+(pass) media queries accept both the long form and range syntax [0.06ms]
+(pass) @layer is transparent and @theme declares on :root [0.06ms]
+(pass) a box shorthand containing calc() is one value, not three [0.05ms]
+(pass) oklch() converts to the sRGB Chrome paints [0.34ms]
+(pass) `none` is a missing oklch component, not a syntax error [0.18ms]
+(pass) border-radius expands per corner, like padding does [0.22ms]
+(pass) elliptical border-radius is refused, not half-read [0.07ms]
+(pass) logical properties map onto the physical ones [0.13ms]
+(pass) a statement at-rule does not swallow the rule after it [0.07ms]
+(pass) :host parses and matches nothing, so :root, :host still works [0.05ms]
+(pass) a nested block inside a rule body is skipped, not misread [0.08ms]
+(pass) the decomposed fields compose to the matrix Chromium computes [0.86ms]
+(pass) the individual properties compose the same as the equivalent list [0.20ms]
+(pass) the source order of the individual properties does not matter [0.06ms]
+(pass) angles take all four CSS units, and a bare one only at zero [0.09ms]
+(pass) a percentage translate is kept apart from a px one [0.06ms]
+(pass) one argument means different things to translate, skew and scale [0.05ms]
+(pass) repeated functions of the same rank accumulate [0.09ms]
+(pass) a transform list out of canonical order is refused, not reordered [0.23ms]
+(pass) transform functions dziri cannot store are refused by name [0.18ms]
+(pass) transform: none and the individual nones contribute nothing [0.03ms]
+(pass) transform-origin defaults to the centre and resolves keywords [0.30ms]
+(pass) transform-origin refuses what CSS refuses [0.15ms]
+(pass) @property supplies the initial value a var() would otherwise not resolve [0.13ms]
+(pass) an unregistered var with no fallback still drops the declaration [0.04ms]
+(pass) a registered initial value beats a var() fallback [0.07ms]
+(pass) inherits: false stops a child seeing its parent's value [0.08ms]
+(pass) a registration with no initial-value is not recorded [0.05ms]
+(pass) Tailwind's negative and fractional transform utilities fold [0.21ms]
+(pass) opacity clamps rather than refusing, and takes a percentage [0.07ms]
+(pass) a CSS <time> needs a unit, and a bare number is not one [0.08ms]
+(pass) the easing keywords carry the control points the spec gives them [0.29ms]
+(pass) an easing dziri cannot express is refused rather than approximated [0.05ms]
+(pass) the transition longhands are folded in cascade order, not shorthand-first [0.26ms]
+(pass) the transition shorthand is order-free, and the first time is the duration [0.10ms]
+(pass) transition-property becomes a mask, and refuses layout by name [0.22ms]
+(pass) the animation shorthand fills the longhands CSS says it does [0.29ms]
+(pass) keyframe blocks are collected, with multi-offset selectors duplicated [0.19ms]
+  warn: ignoring keyframe "150%" in @keyframes bad
+(pass) an unreadable keyframe selector loses its block, not the sheet [0.09ms]
+(pass) a transition and an animation reach the style rows they describe [2.05ms]
+(pass) a transition on a layout property is refused by name, once [1.26ms]
+(pass) an animation naming no keyframes says so and emits nothing [2.17ms]
+(pass) calc() knows the numeric constants, which is what rounded-full needs [0.17ms]
+
+src\compiler\editable.test.tsx:
+(pass) an editable is interactive, so a click can focus it [2.41ms]
+(pass) a real <input> binds the same way a <div> does [1.56ms]
+(pass) the bound signal reaches the editables table by identity [1.08ms]
+(pass) an editable with no children displays its own value [1.05ms]
+(pass) children win over the bound value, so a placeholder can be authored [1.06ms]
+(pass) a text field with no binding warns, and a disabled one does not [5.47ms]
+(pass) every text-entry box is one line high, bound or not [2.86ms]
+(pass) a placeholder is a generated box whose text comes from the attribute [1.68ms]
+(pass) no placeholder attribute, no box — and never on a non-field [5.24ms]
+(pass) the bind: namespace never becomes an attribute a selector can match [0.12ms]
+
+src\compiler\fields.test.ts:
+(pass) a named control in a form becomes a field; a nameless one does not [1.83ms]
+(pass) a button contributes nothing unless it is a named submit button [0.13ms]
+(pass) each control kind is recognised from its tag and type [0.09ms]
+(pass) a checkbox with no value contributes "on" [2.74ms]
+(pass) an option with no value submits its text, trimmed [0.12ms]
+(pass) a select's options are collected in document order, through optgroups [3.11ms]
+(pass) a field inside a disabled fieldset is disabled, unless it is in the legend [2.09ms]
+(pass) markupDisabled reads the ancestor chain rather than the element [0.16ms]
+(pass) each control kind gives its key the shape an author would write a schema for [4.89ms]
+(pass) two controls sharing a name give an array, in document order [1.84ms]
+(pass) a lone checkbox carrying a value keeps the browser's present-or-absent meaning [3.57ms]
+(pass) a single-selection list box is optional where a dropdown is not [3.55ms]
+(pass) formKeys keeps every key even when two shapes disagree [0.10ms]
+(pass) a named field with no bind:value gets a cell the compiler declares [0.19ms]
+(pass) a dropdown with nothing selected starts on its first option [0.07ms]
+(pass) a list box starts with exactly the options marked selected [0.10ms]
+(pass) a bind:value field keeps the author's signal instead of getting a cell [0.08ms]
+(pass) the innermost form owns a field, and a nested form's fields are its own [1.65ms]
+(pass) a form= field outside the form is in its payload, at its document position [2.91ms]
+(pass) a field inside one form pointing at another belongs only to the other [1.59ms]
+(pass) a form= naming an id that does not exist orphans the field [1.23ms]
+(pass) ownership decides the default button, not descent [4.28ms]
+(pass) an associated field counts towards the one-blocking-field rule [2.89ms]
+(pass) owns holds every control the form owns, sorted, named or not [2.65ms]
+(pass) a named submit button is a field, keyed where it is written [1.67ms]
+(pass) two submit buttons sharing a name stay one value [1.76ms]
+(pass) a named submit button gets no cell [0.11ms]
+(pass) a wrapper holding one bare control is that field; named children are its properties [2.78ms]
+(pass) wrappers nest, and a wrapper without field is transparent [1.67ms]
+(pass) a path claimed as both a value and a group is reported [1.96ms]
+(pass) a wrapper gets two cells, and a submitter-only wrapper still gets them [0.13ms]
+(pass) errorClassName becomes a conditional class keyed on the wrapper's own cell [0.19ms]
+(pass) the element marked error belongs to the innermost wrapper [0.11ms]
+(pass) validateOn is read from the kebab-cased attribute a JSX prop becomes [7.09ms]
+(pass) a validateOn nobody supports is a warning, not a silent submit [1.51ms]
+(pass) a radio's name groups it rather than naming it [4.85ms]
+(pass) two radio groups under one wrapper are reported [2.52ms]
+
+src\compiler\form.test.tsx:
+(pass) a browser-shaped form submits a payload with no state module at all [28.81ms]
+(pass) typing into a named field changes what it submits and what it draws [22.59ms]
+(pass) a checkbox the user ticks is in the next payload [23.10ms]
+(pass) a bind:value field keeps the author's signal, and the payload reads it [32.82ms]
+(pass) validate runs against the payload, and onSubmit sees the schema's output [24.52ms]
+(pass) a named submit button reaches the payload, and only when it is the one pressed [23.69ms]
+(pass) a form= field outside the form is compiled into it, end to end [20.96ms]
+(pass) a field wrapper namespaces the payload, and nests structurally [24.34ms]
+(pass) an issue lights up its wrapper and every wrapper above it [30.85ms]
+(pass) the error class becomes a style patch, so the wrapper's subtree restyles [23.41ms]
+(pass) the ways a repeating section can be written wrong are all reported [8.25ms]
+(pass) a map() inside a field wrapper submits its rows as an array [19.91ms]
+(pass) typing in a row writes into that row, and the others are untouched [22.07ms]
+(pass) a row added past the compiled capacity is still a real control [28.93ms]
+(pass) a row's validation issue lights up the wrapper it is under [23.50ms]
+
+src\compiler\item-path.test.ts:
+(pass) a bare property read records a path [0.11ms]
+(pass) numeric keys record as numbers, so readPath indexes arrays [0.07ms]
+(pass) a template literal produces an un-internable sentinel, not a plausible string [0.07ms]
+(pass) concatenation, ternaries and coercion all trip the same guard [0.05ms]
+(pass) the sentinel names the path that produced it [0.12ms]
+(pass) authored text is never mistaken for a sentinel [0.05ms]
+(pass) spreading an item is still a distinct, earlier error [0.13ms]
+
+src\compiler\list-splice.test.tsx:
+(pass) the rows are children of the container, with no node in between [1.80ms]
+(pass) the anchors name the static siblings the rows sit between [1.25ms]
+(pass) rows are grid items of the container, not of a nested grid [1.21ms]
+(pass) an empty list links its anchors straight together [1.50ms]
+(pass) rows splice between the anchors and reorder without disturbing them [1.49ms]
+  warn: ":last-child" on <span class="before"> sits beside a dynamic list, so its position is a runtime value.
+    Treated as not matching, which for a "space-*" utility means one margin too many after the last row. "gap" has no such problem.
+  warn: ":last-child" on <span class="row"> sits beside a dynamic list, so its position is a runtime value.
+    Treated as not matching, which for a "space-*" utility means one margin too many after the last row. "gap" has no such problem.
+(pass) a structural pseudo-class beside a dynamic list resolves to not-matching [1.48ms]
+(pass) every row of a list gets its template's control rows [2.11ms]
+(pass) every row is a tab stop, not just the first [1.77ms]
+(pass) a row's label activates that row's control, not row zero's [1.97ms]
+(pass) a row's onChange runs, with its item, its index and a converted value [2.32ms]
+(pass) a click does not run the row's change handler [2.22ms]
+(pass) a prop given a signal is refused out loud, not dropped in silence [2.80ms]
+(pass) disabled={signal} resolves to the control rows it writes [1.62ms]
+(pass) a disabled signal on a list row writes every replica's flag [1.63ms]
+(pass) disabled={signal} on something that cannot be disabled says so [1.15ms]
+
+src\compiler\matcher.test.ts:
+(pass) equal specificity is broken by source order, not by selector shape [0.36ms]
+(pass) a class beats a tag, whatever the order [0.10ms]
+(pass) an id beats any number of classes [0.08ms]
+(pass) author CSS beats the UA sheet even at lower specificity [0.13ms]
+(pass) a descendant combinator crosses any depth; a child combinator does not [0.12ms]
+(pass) a child combinator matches its direct parent [0.06ms]
+(pass) :where() contributes zero specificity, so a bare class outranks it [0.13ms]
+(pass) :is() contributes its argument's specificity, so it outranks a bare class [0.08ms]
+(pass) :not() matches when its argument does not [0.14ms]
+(pass) :first-child and :last-child read position among element siblings [0.19ms]
+(pass) an only child is both first and last [0.11ms]
+(pass) a :hover rule contributes nothing unless hover is among the live states [0.08ms]
+(pass) hover does not automatically beat base — it ties at equal specificity and loses on order [0.08ms]
+(pass) a ::before rule does not reach the originating element [0.05ms]
+(pass) collectDecls addresses the pseudo-element cascade by its last argument [0.07ms]
+(pass) hasPseudoElementRule reports whether a generated box is authored at all [0.12ms]
+(pass) a rule inside @media is skipped unless its condition is live [0.32ms]
+(pass) @media does not weight the cascade — a live query still loses to higher specificity [0.13ms]
+(pass) one bit per distinct condition, however many places mention it [0.08ms]
+(pass) hasPseudoRule finds a state worth precompiling, and reports nothing when there is none [0.13ms]
+(pass) matches is subject-relative — the last entry in the path is what is being asked about [0.09ms]
+(pass) a winning shorthand moves to the end, so expansion order matches cascade order [0.10ms]
+
+src\compiler\reactive-runtime.test.ts:
+(pass) the module is rewritten, or every assertion below is vacuous [1.16ms]
+(pass) arithmetic on a bare signal tracks a write [0.18ms]
+(pass) `===` on a bare signal tracks, which is the one no runtime trick reached [0.07ms]
+(pass) a comparison and a ternary both follow the signal [0.17ms]
+(pass) a template literal recomputes, rather than freezing its first answer [0.12ms]
+(pass) `.set` takes a value or a function of the previous one [0.08ms]
+(pass) a component-local signal round-trips through the artifact [30.23ms]
+(pass) a local whose initial value cannot be written down is refused [0.36ms]
+(pass) a derived over an array follows a write to the array [0.11ms]
+
+src\compiler\reactive-transform.test.ts:
+(pass) a bare read in a computed body is unwrapped [0.27ms]
+(pass) every operator that a bare signal used to break is covered [0.44ms]
+(pass) a member read unwraps both the object and the result [0.29ms]
+(pass) a call's callee is not unwrapped, or the method would vanish [0.28ms]
+(pass) a computed member reads both sides [0.13ms]
+(pass) handlers are rewritten too, so a read works anywhere [0.16ms]
+(pass) a shadowing parameter is rewritten and resolves to itself [0.19ms]
+(pass) a declaration is not a read [0.07ms]
+(pass) an assignment target is not a read — `$(x) = 1` does not parse [0.12ms]
+(pass) a call callee is left alone, so module scope stays readable [0.16ms]
+(pass) imports and exports are not reads [0.10ms]
+(pass) object keys are not reads, but computed keys are [0.25ms]
+(pass) parameters are not reads in their own declaration [0.14ms]
+(pass) type positions are erased and must not be touched [0.17ms]
+(pass) a JSX tag name is not a read [0.16ms]
+(pass) an expression in a brace becomes an inline cell carrying its own source [0.31ms]
+(pass) a lone identifier keeps its identity [0.08ms]
+(pass) a call in a brace is untouched, so lists and cells still compile [0.19ms]
+(pass) a member expression in a brace keeps its identity [0.09ms]
+(pass) conditional rendering is not wrapped [0.20ms]
+(pass) a wrapped brace still has its reads rewritten inside [0.20ms]
+(pass) a signal declared in a component is registered under its own name [0.50ms]
+(pass) a signal at module scope is already nameable and left alone [0.19ms]
+(pass) an inline handler is recorded with its source, and its reads unwrap [0.22ms]
+(pass) a named handler is untouched, because identity already resolves it [0.11ms]
+(pass) a handler body is walked, not skipped like an identity brace [0.26ms]
+(pass) the helper import is appended, so no line number moves [0.23ms]
+(pass) a module with nothing to rewrite gets no import [0.12ms]
+(pass) a syntax error defers to the real toolchain rather than guessing [0.21ms]
+(pass) a source map is produced [0.28ms]
+
+src\compiler\route.test.ts:
+(pass) args is typed from the string, and only the string's parameters exist [0.43ms]
+(pass) a page with no parameters has an empty args [0.07ms]
+(pass) the generated href type accepts interpolation and rejects typos [0.04ms]
+(pass) a string that disagrees with the file is an error naming both [0.14ms]
+(pass) a rename the string did not follow fails rather than drifting [0.07ms]
+(pass) useRoute with no page being compiled says so, rather than guessing [0.08ms]
+(pass) useRouter hands back the window's own route signal, by identity [0.08ms]
+(pass) useRouter outside a window says the window has to declare its route [0.07ms]
+(pass) matches() is a live cell, not a comparison the compiler evaluated away [0.11ms]
+(pass) the route passes the brand check, so {router.path} is a binding [0.05ms]
+(pass) matches() is prefix-aware, because a nav entry names a section [0.06ms]
+(pass) matches("/") is exact, or the index would match everything [0.05ms]
+(pass) a matches() cell remembers what it asked, so the emitter can rebuild it [0.05ms]
+(pass) the window scope and the page scope are independent [0.08ms]
+(pass) withPage refuses an async callback instead of scoping nothing [0.10ms]
+(pass) page scope nests and unwinds, including through a throw [0.10ms]
+(pass) a bare read records the parameter name [0.07ms]
+(pass) computing with a parameter produces an un-internable sentinel [0.09ms]
+(pass) a method call on a parameter errors at the call site, not later [0.16ms]
+(pass) the expression error says where the value should come from instead [0.06ms]
+(pass) a parameter survives the brand checks the compiler runs on children [0.10ms]
+
+src\compiler\routes.test.ts:
+(pass) a file path under pages/ is the route path [1.07ms]
+(pass) index names the directory it sits in [0.05ms]
+(pass) the scan produces routes, params and files [11.30ms]
+(pass) multi-parameter and deep routes keep parameter order [8.51ms]
+(pass) static segments sort before parameters, so first match wins is static wins [7.44ms]
+(pass) parent is the longest route whose path is a proper prefix [10.61ms]
+(pass) a non-route file under pages/ is an error, not something ignored [5.86ms]
+(pass) a planned extension says so rather than reading as junk [6.37ms]
+(pass) a colocated test does not quietly become a route [9.39ms]
+(pass) dotfiles are skipped, because a .DS_Store is not the author's mistake [6.24ms]
+(pass) two files claiming one route name both files [8.81ms]
+(pass) two routes of the same shape are ambiguous, whatever the parameters are called [7.50ms]
+(pass) a static route and a parameter route of the same depth are not ambiguous [6.13ms]
+(pass) a parameter has to be usable as a property name [5.00ms]
+(pass) one route cannot bind the same parameter twice [6.75ms]
+(pass) a window folder without index.tsx is not a window [3.14ms]
+(pass) a window without pages/ has nothing to put in its Outlet [2.76ms]
+(pass) no windows/ directory, and an empty one, both say so [3.75ms]
+(pass) windows are scanned independently and sorted by id [9.22ms]
+(pass) the href union is literals for static routes and ${string} for parameters [11.51ms]
+(pass) the generated module round-trips the table it was built from [10.55ms]
+(pass) a second window's parent edges are rebased into the flat table [12.38ms]
+(pass) a window with no routes emits `never` rather than an empty union [0.08ms]
+
+src\compiler\stylesheet.test.ts:
+(pass) Tailwind detection > recognises the umbrella import and the partial imports [0.10ms]
+(pass) Tailwind detection > recognises the at-rules that only Tailwind defines [0.02ms]
+(pass) Tailwind detection > leaves ordinary CSS alone [0.02ms]
+(pass) @import > inlines a relative import in place [5.22ms]
+(pass) @import > follows a chain [5.56ms]
+(pass) @import > a cycle terminates instead of hanging [4.09ms]
+(pass) @import > a media-conditional import is dropped, like the media query it carries [6.16ms]
+(pass) @import > an unresolvable bare specifier names the file that asked for it [3.77ms]
+(pass) SheetMap > keeps the sources in order and separates them [0.14ms]
+(pass) SheetMap > locates an offset in the file it came from [0.08ms]
+(pass) SheetMap > an error is rendered against its own file, not the concatenation [0.13ms]
+(pass) <style> > is taken out of the tree, not left hidden in it [0.28ms]
+(pass) <style> > collects several in document order [0.10ms]
+(pass) <style> > its body is raw text — CSS is not markup [0.04ms]
+(pass) <style> > a document with no <style> is untouched [0.03ms]
+
+src\compiler\variant-compile.test.ts:
+(pass) two disjoint toggles compose for every combination [7.90ms]
+(pass) two toggles writing the same field compose when the cascade agrees [10.29ms]
+(pass) a toggle that introduces a pseudo-state composes under that state too [6.35ms]
+(pass) a deliberately broken patch is caught [7.26ms]
+(pass) compiling with no toggles has nothing to verify [1.63ms]
+
+src\compiler\window-tree.test.tsx:
+(pass) a route's page replaces the shell's outlet, wherever the outlet is nested [1.08ms]
+(pass) sibling routes are spliced in table order, all resident [0.14ms]
+(pass) a page that renders an outlet is a layout, and its children nest inside it [0.17ms]
+(pass) nesting recurses, so a layout inside a layout works with no extra rule [0.12ms]
+(pass) a layout that is only an outlet owns no nodes, so hiding it hides nothing [0.13ms]
+(pass) a page returning a fragment owns each of its top-level nodes [0.11ms]
+(pass) routes nesting inside a page with no outlet is an error naming them [0.25ms]
+(pass) an outlet with no route to fill it is an error, not empty markup [0.12ms]
+(pass) a window with no outlet cannot show any of its routes [0.11ms]
+(pass) two outlets in one page have no non-arbitrary answer, so they are an error [0.14ms]
+(pass) two outlets in the window shell are the same error [0.12ms]
+
+src\engine\smoke.test.ts:
+
+# Unhandled error between tests
+-------------------------------
+294 |   }
+295 | 
+296 |   static open(options: EngineOptions): Engine {
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+                      ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:299:17)
+      at C:\Users\med\workspace\skia-proto\src\engine\smoke.test.ts:39:23
+-------------------------------
+
+
+src\engine\upload.test.ts:
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:200:26)
+(fail) the root receives the window rect [1.49ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:206:26)
+(fail) flex-grow gives a row's leftover width to one child [0.66ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:231:26)
+(fail) a list row stretches to its container [0.41ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:240:26)
+(fail) inline styles beat every selector [0.43ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:273:26)
+(fail) text is measured, not guessed [0.42ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:299:26)
+(fail) hit-testing finds an interactive node and ignores the rest [0.39ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:365:22)
+(fail) clicking a text field focuses the field itself, so a keystroke has a target [0.36ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:384:22)
+(fail) a keystroke aimed at where the pointer landed reaches the bound signal [0.36ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:413:26)
+(fail) a placeholder is drawn exactly where the typed text will be [0.41ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:452:26)
+(fail) an unbound <input> swallows the keystroke, because no signal owns its value [0.37ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:480:22)
+(fail) dragging across a field selects a range, and typing replaces it [0.36ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:518:22)
+(fail) a double click selects a word, and Backspace erases just that word [0.44ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:547:22)
+(fail) a triple click selects everything in the field [0.36ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:650:26)
+(fail) pressing a select opens its picker, before any release [0.47ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:694:26)
+(fail) choosing an option commits it, closes the picker and relabels the button [0.51ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:749:26)
+(fail) a press outside an open picker dismisses it and still reaches what it hit [0.40ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:778:26)
+(fail) pressing an open select again closes it [0.34ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:797:26)
+(fail) a disabled select's picker does not open [0.35ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:810:45)
+(fail) a layout-affecting style patch reaches the engine [0.36ms]
+(pass) typing does not resize the arena on every keystroke [6.26ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:875:18)
+(fail) spare style slots hold the initial style, every field of it [0.73ms]
+294 |   }
+295 | 
+296 |   static open(options: EngineOptions): Engine {
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+                      ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:299:17)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:932:25)
+(fail) an autofocus attribute arrives as a flag bit on the right node [3.23ms]
+(pass) a capacity request is a power of two [0.10ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:998:18)
+(fail) a short viewport overflows rather than squeezing the rows [0.51ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:1037:26)
+(fail) a click on a checkbox reaches its onChange with a boolean [0.41ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:1074:26)
+(fail) committing an option reaches the select's onChange with the chosen index [0.37ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:1127:36)
+(fail) a control disabled by a signal stops taking presses [0.35ms]
+297 |     const version = engine.dziri_protocol_version();
+298 |     if (version !== PROTOCOL_VERSION) {
+299 |       throw new Error(
+300 |         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
+301 |           `the engine binary speaks v${version}. Run \`bun run gen:protocol\` and rebuild.`,
+302 |       );
+            ^
+error: protocol mismatch: this build speaks v35, the engine binary speaks v34. Run `bun run gen:protocol` and rebuild.
+      at open (C:\Users\med\workspace\skia-proto\src\engine\host.ts:302:7)
+      at load (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:104:25)
+      at <anonymous> (C:\Users\med\workspace\skia-proto\src\engine\upload.test.ts:1169:26)
+(fail) applying an unchanged disabled signal writes nothing [0.30ms]
+
+src\runtime\alert.test.ts:
+(pass) a message reaches the sink with the level as the engine's integer [0.16ms]
+(pass) with no sink it prints instead of throwing [0.09ms]
+(pass) a title is included in the printed line [0.05ms]
+(pass) the sink can be removed again [0.05ms]
+
+src\runtime\bindings.test.ts:
+(pass) a keystroke appends to the focused editable [0.17ms]
+(pass) backspace removes the last character [0.05ms]
+(pass) a keystroke for an unfocused node is ignored [0.03ms]
+(pass) text is refused at the cap rather than growing the arena [0.44ms]
+(pass) backspace still works at the cap, so the field is not a trap [0.73ms]
+(pass) text is inserted at the caret, not appended [0.06ms]
+(pass) backspace removes the character before the caret [0.04ms]
+(pass) backspace at the start consumes the key and changes nothing [0.04ms]
+(pass) delete removes the character after the caret [0.03ms]
+(pass) delete at the end consumes the key and changes nothing [0.04ms]
+(pass) delete eats a whole astral character [0.08ms]
+(pass) a caret at the end appends, and so does no caret at all [0.06ms]
+(pass) a caret past the end is clamped rather than trusted [0.04ms]
+(pass) typing over a selection replaces exactly the selected range [0.04ms]
+(pass) Backspace and Delete are identical once a range is live [0.07ms]
+(pass) a backward selection edits the same as a forward one [0.05ms]
+(pass) a collapsed range is a caret, not a zero-length selection [0.04ms]
+(pass) a selection past the end is clamped, not trusted [0.03ms]
+(pass) replacing a selection can free room at the cap [0.23ms]
+(pass) the caret counts characters, not UTF-16 units [0.05ms]
+(pass) a checkbox's onChange receives a boolean, not the wire integer [0.26ms]
+(pass) a select's onChange receives the chosen index [0.06ms]
+(pass) a list box's onChange receives the selected indices, not the row that moved [0.06ms]
+(pass) a list box's handler gets a copy, not the drained event's array [0.05ms]
+(pass) click and change handlers on one node do not answer for each other [0.07ms]
+(pass) a node with no change handler is not a change dispatch [0.05ms]
+(pass) an unknown kind passes the integer through rather than guessing [0.05ms]
+(pass) focus and blur route to their own handlers on the same node [0.09ms]
+(pass) a node with only a blur handler is not focusable by dispatch [0.04ms]
+(pass) Enter in a field submits the form it is inside [0.24ms]
+(pass) Enter outside any form submits nothing [0.04ms]
+(pass) Enter in a textarea types instead of submitting [0.04ms]
+(pass) a form the compiler marked unsubmittable does nothing on Enter [0.05ms]
+(pass) the innermost form wins [0.06ms]
+(pass) a press on the submit button submits, and fires its click exactly once [0.10ms]
+(pass) onSubmit receives the payload, keyed by name [0.15ms]
+(pass) a valid payload reaches onSubmit as the schema's output [0.11ms]
+(pass) an invalid payload runs onInvalid and not onSubmit [0.12ms]
+(pass) a form with a validate and no onInvalid simply does not submit [0.12ms]
+(pass) an async validator submits later, and the button's click still fires now [0.22ms]
+(pass) Enter in a form= field submits that form, though it is not inside it [0.07ms]
+(pass) a node inside a form but not owned still submits, by walking up [0.06ms]
+
+src\runtime\forms.test.ts:
+(pass) a text field contributes its cell's string [0.36ms]
+(pass) a number field parses, and an empty one is undefined rather than NaN [0.14ms]
+(pass) a lone valueless checkbox is a boolean, ticked or not [0.08ms]
+(pass) a checkbox carrying a value contributes that value, or nothing [0.10ms]
+(pass) a radio group contributes the checked member's value [0.08ms]
+(pass) a select contributes the chosen option's value, by index [0.09ms]
+(pass) a multiple select contributes every selected value, in document order [0.08ms]
+(pass) two fields sharing a name give an array [0.06ms]
+(pass) a field the markup disabled contributes nothing [0.07ms]
+(pass) a field a signal disabled contributes nothing either [4.21ms]
+(pass) a checkbox's CHANGE writes its cell [0.18ms]
+(pass) checking a radio clears the rest of its group [0.27ms]
+(pass) a select's CHANGE carries the index, a list box's the set [0.10ms]
+(pass) a plain function validates, and its issues come through [0.13ms]
+(pass) an empty issue list is a pass, not a failure [0.07ms]
+(pass) a Zod schema validates through ~standard, with no import of zod here [4.12ms]
+(pass) a schema narrows what onSubmit receives, rather than passing the payload through [0.67ms]
+(pass) a raw Effect schema validates, unwrapped [6.27ms]
+(pass) an Effect schema wrapped by hand takes the synchronous path [0.28ms]
+(pass) an async validator is awaited rather than mistaken for a pass [0.16ms]
+(pass) something that is not a validator is refused rather than skipped [0.08ms]
+(pass) a named submit button contributes only when it is the button that submitted [0.13ms]
+(pass) a submitter with a name and no value contributes the empty string [0.04ms]
+(pass) an issue lights up the wrapper whose path is a prefix of it [0.13ms]
+(pass) an issue elsewhere leaves a wrapper alone [0.05ms]
+(pass) a valid payload clears the wrapper [0.05ms]
+(pass) before a submit, only a field that has moved may show its error [0.12ms]
+(pass) applyIssues reports whether anything moved [0.04ms]
+(pass) a payload nests by path, and two groups do not collide [0.10ms]
+(pass) the same leaf name under two groups stays two values [0.08ms]
+
+src\runtime\signal.test.ts:
+(pass) a computed recomputes only when a dependency changed [0.13ms]
+(pass) a computed nobody reads costs nothing [0.06ms]
+(pass) subscribing to a never-read computed still fires [0.15ms]
+(pass) the same holds for a chain of computeds [0.16ms]
+(pass) a batch notifies once however many signals it writes [0.11ms]
+(pass) an effect on both a signal and a computed derived from it runs once [0.15ms]
+(pass) unsubscribing stops delivery [0.10ms]
+
+27 tests failed:
+(fail) the root receives the window rect [1.49ms]
+(fail) flex-grow gives a row's leftover width to one child [0.66ms]
+(fail) a list row stretches to its container [0.41ms]
+(fail) inline styles beat every selector [0.43ms]
+(fail) text is measured, not guessed [0.42ms]
+(fail) hit-testing finds an interactive node and ignores the rest [0.39ms]
+(fail) clicking a text field focuses the field itself, so a keystroke has a target [0.36ms]
+(fail) a keystroke aimed at where the pointer landed reaches the bound signal [0.36ms]
+(fail) a placeholder is drawn exactly where the typed text will be [0.41ms]
+(fail) an unbound <input> swallows the keystroke, because no signal owns its value [0.37ms]
+(fail) dragging across a field selects a range, and typing replaces it [0.36ms]
+(fail) a double click selects a word, and Backspace erases just that word [0.44ms]
+(fail) a triple click selects everything in the field [0.36ms]
+(fail) pressing a select opens its picker, before any release [0.47ms]
+(fail) choosing an option commits it, closes the picker and relabels the button [0.51ms]
+(fail) a press outside an open picker dismisses it and still reaches what it hit [0.40ms]
+(fail) pressing an open select again closes it [0.34ms]
+(fail) a disabled select's picker does not open [0.35ms]
+(fail) a layout-affecting style patch reaches the engine [0.36ms]
+(fail) spare style slots hold the initial style, every field of it [0.73ms]
+(fail) an autofocus attribute arrives as a flag bit on the right node [3.23ms]
+(fail) a short viewport overflows rather than squeezing the rows [0.51ms]
+(fail) a click on a checkbox reaches its onChange with a boolean [0.41ms]
+(fail) committing an option reaches the select's onChange with the chosen index [0.37ms]
+(fail) a control disabled by a signal stops taking presses [0.35ms]
+(fail) applying an unchanged disabled signal writes nothing [0.30ms]
+
+ 471 pass
+ 27 fail
+ 1 error
+ 1578 expect() calls
+Ran 498 tests across 23 files. [2.34s]

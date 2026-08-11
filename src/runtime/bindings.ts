@@ -8,8 +8,9 @@
  * signal.
  */
 import { findRow } from "../find-row.ts";
-import type { CompiledUi } from "../ir.ts";
+import type { CompiledUi, FormBinding } from "../ir.ts";
 import { ControlKind } from "../protocol/generated.ts";
+import { applyIssues, formPayload, validatePayload, type Validated } from "./forms.ts";
 import { batch, type Signal } from "./signal.ts";
 
 /**
@@ -122,10 +123,37 @@ export function typeInto(
   const target = editables.find((e) => e.node === focused);
   if (!target) return false;
 
+  const edit = editText(target.signal.value, input);
+  if (typeof edit !== "string") return edit;
+
+  batch(() => {
+    target.signal.value = edit;
+  });
+  return true;
+}
+
+/** What one keystroke does to one string: the new text, or whether it was consumed. */
+export type Edit = string | boolean;
+
+/**
+ * The splice a keystroke makes, with nowhere to put the result.
+ *
+ * Separated from [`typeInto`] when a second kind of target appeared — a `bind:value` inside
+ * a `map()` row, whose text lives in an item of an array rather than in a signal. Both paths
+ * have to agree on *every* rule below (character counting, range ordering, what counts as
+ * consumed, the slot ceiling), and the way to guarantee that is to have one of them.
+ *
+ * `false` means "not a key this owns", `true` means consumed with nothing changed, and a
+ * string is the new value.
+ */
+export function editText(
+  current: string,
+  input: { text: string | null; erase?: Erase; caret?: number; anchor?: number },
+): Edit {
   // Characters rather than UTF-16 units, because that is what the engine counted when it
   // resolved a click to a boundary. They differ for anything outside the BMP, and slicing
   // by the wrong unit would split a surrogate pair into two broken halves.
-  const chars = [...target.signal.value];
+  const chars = [...current];
   const caret = input.caret ?? -1;
   const at = caret < 0 ? chars.length : Math.min(caret, chars.length);
 
@@ -169,18 +197,14 @@ export function typeInto(
   // this refuses.
   if (from + [...inserted].length + (chars.length - to) > MAX_SLOT_CHARS) return false;
 
-  const next = chars.slice(0, from).join("") + inserted + chars.slice(to).join("");
-  batch(() => {
-    target.signal.value = next;
-  });
-  return true;
+  return chars.slice(0, from).join("") + inserted + chars.slice(to).join("");
 }
 
 /** The handler of a kind bound to a node, or null. */
 export function handlerFor(
   ui: CompiledUi,
   node: number,
-  kind: "click" | "change" | "focus" | "blur" | "submit" = "click",
+  kind: "click" | "change" | "focus" | "blur" | "submit" | "invalid" = "click",
 ): ((value?: unknown) => void) | null {
   for (const h of ui.handlers) {
     if (h.node === node && h.kind === kind) return h.fn;
@@ -261,17 +285,27 @@ export function dispatchChange(
 }
 
 /**
- * The innermost `<form>` containing `node`, or -1.
+ * The `<form>` that owns `node`, or -1.
  *
- * A walk up `nodes.parent` rather than a compiled field-to-form table, and the reason is
- * that a table would have to have one row per focusable node while this needs no storage
- * at all. The chain is a handful of steps and this runs once per Enter keypress.
+ * Two questions in one, asked in the order that makes the second a fallback rather than a
+ * competitor:
  *
- * Innermost, because `forms` is scanned as the walk climbs: the first match encountered
- * going up is the nearest ancestor. Nested forms are invalid HTML that parses anyway, and
- * this resolves them the way the DOM would.
+ * 1. **Does a form claim this node?** `owns` is the compiled ownership set, and it is the
+ *    only way to answer for a control a `form="F"` attribute moved: measured, such a control
+ *    is F's for every purpose including implicit submission, and it need not be inside F at
+ *    all — so no walk up the tree can find it.
+ * 2. **Otherwise, walk up.** For everything else in a form — a `<div tabindex=0>`, a
+ *    generated box — ancestry is the answer, and the innermost form wins because the first
+ *    match going up is the nearest one. Nested forms are invalid HTML that parses anyway,
+ *    and this resolves them the way the DOM would.
+ *
+ * The walk stays because the ownership set holds *controls*, not every focusable node, and
+ * making it hold every node would cost a row per node to answer a question a handful of
+ * parent reads already answers.
  */
 function formOf(ui: CompiledUi, node: number): number {
+  for (const form of ui.forms) if (findRow(form.owns, node) >= 0) return form.node;
+
   for (let n = node; n >= 0; n = ui.nodes.parent[n] ?? -1) {
     for (const form of ui.forms) if (form.node === n) return n;
   }
@@ -316,24 +350,129 @@ export function submitFrom(ui: CompiledUi, node: number): boolean {
 }
 
 /**
- * Runs a form's submission: the button's click handler, then the form's `onSubmit`.
+ * Runs a form's submission: the button's click handler, then validation, then `onSubmit`.
  *
  * Shared by Enter and by a real press on the submit button, so that the two paths cannot
  * drift — a click on the button has to submit as surely as Enter does, and that is one
  * call rather than a second copy of the ordering.
+ *
+ * **`onSubmit` receives the payload**, built from the form's fields by the table the
+ * compiler emitted — see `runtime/forms.ts`. When a `validate={…}` is present it runs
+ * first, and decides which of the two handlers is called:
+ *
+ * - valid → `onSubmit(parsed)`, where `parsed` is the *schema's* output rather than the
+ *   raw payload, so a schema that turns a string into a `Date` hands over the `Date`.
+ * - invalid → `onInvalid(issues)`, and `onSubmit` does not run at all. A form with a
+ *   `validate` and no `onInvalid` simply does nothing on a bad payload, which is the same
+ *   shape as a browser refusing to submit an invalid form.
+ *
+ * Synchronous whenever the validator is, which is every ordinary Zod and Effect schema
+ * (measured) — so the usual submit stays inside one batch and costs one repaint.
  */
 export function submitForm(ui: CompiledUi, form: number, button: number): boolean {
+  const binding = ui.forms.find((f) => f.node === form);
   const submit = handlerFor(ui, form, "submit");
+  const invalid = handlerFor(ui, form, "invalid");
   const click = button >= 0 ? handlerFor(ui, button, "click") : null;
   if (!submit && !click) return false;
 
-  // One batch across both, for the same reason `dispatch` batches: submitting is one user
-  // action however many signals the two handlers write between them.
+  // The button's own handler runs whether or not the payload validates, and before the
+  // validation, because in a browser the submission is a *consequence* of that click.
+  if (!submit || !binding) {
+    batch(() => {
+      click?.();
+      submit?.();
+    });
+    return true;
+  }
+
+  // The button is the *submitter*, which is what puts its own `name=value` in the payload
+  // when it has a name. -1 for an Enter that clicked nothing, which is the `direct` case.
+  const data = formPayload(ui, binding, button);
+  if (binding.validate === null || binding.validate === undefined) {
+    batch(() => {
+      click?.();
+      submit(data);
+    });
+    return true;
+  }
+  attempted.add(binding);
+
+  const verdict = validatePayload(binding.validate, data);
+  const finish = (settled: Validated): void => {
+    batch(() => {
+      // Every wrapper may speak from here on: the user has tried, so withholding an error
+      // would be withholding the reason nothing happened. This is also what turns
+      // `validateOn="submit"` into "and re-validate on change afterwards" without a second
+      // attribute — `attempted` is what the change path reads.
+      attempted.add(binding);
+      applyIssues(binding, settled.ok ? [] : settled.issues, true);
+      if (settled.ok) submit(settled.value);
+      else invalid?.(settled.issues);
+    });
+  };
+
+  if (verdict instanceof Promise) {
+    // The click still belongs to *this* action, so it is not made to wait for a validator
+    // that may take a network round trip.
+    batch(() => click?.());
+    void verdict.then(finish);
+    return true;
+  }
+
   batch(() => {
     click?.();
-    submit?.();
+    applyIssues(binding, verdict.ok ? [] : verdict.issues, true);
+    if (verdict.ok) submit(verdict.value);
+    else invalid?.(verdict.issues);
   });
   return true;
+}
+
+/**
+ * Forms whose submit has been attempted, so every wrapper may now show an error.
+ *
+ * A set rather than a field on the binding, because the binding is the *compiled* table and
+ * this is the one thing about a form that is neither compiled nor per-field. It is also the
+ * whole of "re-validate on change after a failed submit" — the behaviour React Hook Form
+ * spells `reValidateMode: onChange` — which is why that is not a second attribute.
+ */
+const attempted = new WeakSet<FormBinding>();
+
+/**
+ * Re-checks a form because one of its fields changed, or lost focus.
+ *
+ * Runs when the form asked for it — `validateOn="change"` or `"blur"` — and always after a
+ * submit has been attempted, because an error the user has already seen must clear itself as
+ * soon as they fix it.
+ *
+ * Nothing is submitted and no handler runs: this only moves the error cells, which move the
+ * style-table entries the wrapper's `errorClassName` compiled to. An async validator is
+ * awaited and applied when it settles.
+ *
+ * Returns whether anything moved.
+ */
+export function revalidate(ui: CompiledUi, node: number, on: "change" | "blur"): boolean {
+  const form = ui.forms.find((f) => f.node === formOf(ui, node));
+  if (!form || form.validate === null || form.validate === undefined) return false;
+  if (form.groups.length === 0) return false;
+
+  const attemptedYet = attempted.has(form);
+  if (!attemptedYet && form.validateOn !== on) return false;
+
+  const verdict = validatePayload(form.validate, formPayload(ui, form));
+  if (verdict instanceof Promise) {
+    void verdict.then((settled) => {
+      batch(() => applyIssues(form, settled.ok ? [] : settled.issues, attemptedYet));
+    });
+    return false;
+  }
+
+  let moved = false;
+  batch(() => {
+    moved = applyIssues(form, verdict.ok ? [] : verdict.issues, attemptedYet);
+  });
+  return moved;
 }
 
 /**

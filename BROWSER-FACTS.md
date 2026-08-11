@@ -1994,3 +1994,319 @@ attribute. Two of the three answers below contradict what the fork assumed.
 
 9. `select[multiple]` matches as a selector, and `option:checked` counts exactly the
    selected ones — so dziri's existing `:checked` styling path needs nothing new.
+
+## The viewport scrolls with nobody's permission — `visible` on it means `auto`
+
+**Measured 2026-08-09 · Chromium 152 (via Edge 152) · `probes/viewport-default-scroll.html`.
+Two runs, identical.**
+
+Asked because dziri decides user-scrollability purely from the `OVERFLOW_X/Y` style fields,
+so a window whose stylesheet never says `overflow` cannot scroll at all — the unstyled demo
+window clips at 940px — while every browser page scrolls with no stylesheet anywhere. The
+question was where that behaviour lives, because a UA-sheet rule was the tempting wrong fix.
+
+| case (tall content) | gutter | scrollTo(0,150) | computed html | computed body |
+|---|---|---|---|---|
+| unstyled | 15 | 150 | `visible` | `visible` |
+| `html { overflow: visible }` explicit | 15 | 150 | `visible` | `visible` |
+| `body { overflow: visible }` explicit | 15 | 150 | `visible` | `visible` |
+| `html { overflow: hidden }` | 0 | 150 | `hidden` | `visible` |
+| `body { overflow: hidden }`, html unset | 0 | 150 | `visible` | `hidden` |
+| body `hidden`, html `auto` | 15 | 150 | `auto` | `hidden` |
+| `html { overflow: clip }` | 0 | 150 | `clip` | `visible` |
+| unstyled, content fits | 0 | 0 | `visible` | `visible` |
+
+`gutter` is `innerWidth - documentElement.clientWidth`: >0 means the viewport reserved a
+classic scrollbar. `scrollingElement` is `html` throughout (standards mode).
+
+1. **An unstyled tall page scrolls, and no computed value says so.** Both `html` and `body`
+   compute `overflow: visible` while the viewport shows a scrollbar. Page scrolling is a
+   *viewport* behaviour — CSS Overflow's "`visible` on the viewport is interpreted as
+   `auto`" — not a UA stylesheet rule. **So dziri's fix is not `body { overflow: auto }` in
+   `ua-sheet.ts`**: that rule would let an author's `overflow: visible` beat it and kill
+   page scrolling, where in Chromium an explicit `visible` (rows 2–3) changes nothing. It
+   would also make dziri's computed value disagree with Chromium's under `conformance`.
+2. **`overflow: hidden` on `body` alone reaches the viewport** when `html`'s is `visible`
+   (row 5: no scrollbar) — the body→viewport propagation is real. Once `html` says anything
+   other than `visible`, `body`'s value stays its own (row 6: scrollbar back). dziri has one
+   root node standing in for both, so only the first half applies: `hidden` on the window
+   root must stop page scrolling.
+3. **`hidden` still scrolls programmatically** — every hidden/clip row moved on `scrollTo`.
+   For `clip` that is *not* the element rule (`clip` forbids all scrolling): on the viewport
+   `clip` is interpreted as `hidden`, per spec and confirmed by row 7. Academic for dziri
+   today since nothing scrolls programmatically, but it means `clip` and `hidden` on the
+   window root are the same thing, which `overflowKeyword`'s comment already almost says.
+4. **`auto` with content that fits shows no scrollbar and does not scroll** (row 8) —
+   dziri's existing "draw a scrollbar only when content overflows" matches.
+
+For dziri: the engine should treat the **window root's** `Overflow::VISIBLE` as
+`SCROLL`-when-overflowing at the point where scrollability is decided — computed values
+untouched. Not `CLIP`: on the viewport `clip` means `hidden` (row 7), and both spell "no
+page scroll", exactly like an author's `hidden` on the root.
+
+## What `:disabled` actually changes, per control — greys, alphas, and one opacity
+
+**Measured 2026-08-10 · Chromium 152 (via Edge 152) · `probes/disabled-control-styles.html`.
+Three runs, identical.**
+
+Asked because dziri's UA sheet gained default control appearance and a disabled button
+looked exactly like an enabled one. Unlike the accent, this whole answer is readable from
+the DOM: the system colours (`GrayText` and friends) resolve to `rgb()` in
+`getComputedStyle`.
+
+| control | disabled `color` | disabled `background` | disabled `border` | `opacity` |
+|---|---|---|---|---|
+| `button` | `rgba(16,16,16,.3)` | `rgba(239,239,239,.3)` | `rgba(118,118,118,.3)` | 1 |
+| `input[type=text]` | `rgb(84,84,84)` | `rgba(239,239,239,.3)` | `rgba(118,118,118,.3)` | 1 |
+| `textarea` | `rgb(84,84,84)` | `rgba(239,239,239,.3)` | `rgba(118,118,118,.3)` | 1 |
+| checkbox / radio | `rgb(84,84,84)` | transparent (as enabled) | `rgb(84,84,84)` | 1 |
+| `select` | `rgb(109,109,109)` | **stays white** | `rgba(118,118,118,.3)` | **0.7** |
+| `option` | unchanged | unchanged | unchanged | 1 |
+
+1. **The greys are alphas, not colours**, for button and the text fields: the disabled
+   background is 30% of `#efefef` over whatever is behind, so a disabled field on a dark
+   card darkens with it. dziri's colour fields carry alpha, so this transfers verbatim.
+2. **A disabled select is the odd one out**: its own colour swaps plus a whole-element
+   `opacity: 0.7`, and its background does not change. dziri has an `opacity` field, so
+   this also transfers verbatim.
+3. **A disabled option computes no change at all** — the greying Chromium shows in a
+   picker is widget painting, not style. Nothing to write in a sheet; dziri's engine
+   already refuses the press.
+4. **Checked-and-disabled fills are not computable**: the greyed fill of a disabled
+   checked checkbox is painted like the tick itself. The sheet extends the measured
+   `rgb(84,84,84)` border grey to that fill and says so where it does.
+5. Also read in passing, correcting two guesses in the appearance block: an **enabled
+   select's background is white**, not transparent; and an enabled button's computed
+   `border-color` is **black** (`currentcolor`) — the grey everyone sees is the *outset
+   shading*, which is not a computed value. With `border-style` missing, the sheet keeps
+   flat `#767676` as the stated convention for both, now knowingly.
+
+---
+
+## What a form actually submits, and as what
+
+**Measured 2026-08-11 · Chromium 152 (via Edge 152) · `probes/form-data.html`.** Forty-odd
+forms, each built from its own fragment, each printed as `new FormData(form).entries()`. Asked
+because dziri was about to collect a payload from `name` attributes, and every rule below is one
+that gets stated from memory — including two the author never wrote and the parser invents.
+
+### What is in, and what is out
+
+| markup | payload |
+|---|---|
+| `<input name=a value=x>` | `a="x"` |
+| `<input value=x>` — no name | **nothing** |
+| `<input name=a value=x disabled>` | **nothing** |
+| `<input name=a value=x readonly>` | `a="x"` — readonly submits |
+| `<input type=hidden name=a value=x>` | `a="x"` |
+| inside `<fieldset disabled>` | **nothing** |
+| inside that fieldset's first `<legend>` | **`leg="x"` — it escapes** |
+| `<input type=button\|reset name=b value=y>` | **nothing** |
+| `<input type=submit name=b value=y>`, not the submitter | **nothing** |
+| `<input type=file name=a>`, empty | `a=File()` — an empty File, not nothing |
+
+**Disabledness is inherited**, which is the one that changes how much a compiler has to do: it
+is a walk up the ancestors, not an attribute read. And the `<legend>` exception is not
+decoration — it is how a disabled section keeps a working "enable this section" control in its
+own heading.
+
+### Two values the author never wrote
+
+| markup | payload |
+|---|---|
+| `<input type=checkbox name=a checked>` | **`a="on"`** |
+| `<input type=checkbox name=a value="" checked>` | `a=""` — so the default is on *absence* |
+| `<input type=radio name=a checked>` | `a="on"` |
+| `<select name=a>` with no `selected` | **`a="1"` — the first option** |
+| `<option>one</option>` with no `value` | **`a="one"` — its text** |
+| `<option>  two  </option>` | **`a="two"` — trimmed** |
+| `<select name=a size=4>` — a list box | nothing selected at rest |
+| `<input type=range name=a min=0 max=10>`, untouched | **`a="5"` — the midpoint** |
+
+The `"on"` and the first-option fallback are the two that matter most, because they are what the
+commonest markup there is submits. The trim is the sneaky one: the label a user reads is the
+padded string, so an implementation that submits the raw text looks right until someone indents
+their HTML.
+
+### Exclusions inside a select, ordering, and the submitter
+
+| markup | payload |
+|---|---|
+| `<option value=1 disabled selected>` | **nothing at all** — the select contributes none |
+| `<optgroup><option value=1>` | `a="1"` — a grouped option is the select's own |
+| `<select multiple>`, two selected | `a="1" a="2"` — one entry each |
+| `<select multiple>`, none selected | nothing |
+| `<input name=b value=1><input name=a value=2>` | `b="1" a="2"` — **source order**, not sorted |
+| `<input name=a value=1><input name=a value=2>` | `a="1" a="2"` — both, in order |
+| `<textarea name=a>one\ntwo</textarea>` | `a="one\ntwo"` — `FormData` keeps `\n` |
+| `<input type=number name=a>` with `12abc` typed in | `a=""` — sanitised, not `NaN` |
+
+A named `<button type=submit>` contributes `name=value` **only when it is the button that
+submitted** — `entries()` with no submitter omits it, with `first` gives `b="first"`, with
+`second` gives `b="second"`, a nameless one gives nothing, and one with a name and no value
+gives `c=""`. `event.submitter` names the same button a `requestSubmit(x)` passed.
+
+### The payload reads live state, not attributes
+
+The three rows the whole design rests on. After writing `input.value`, `input.checked` and
+`select.selectedIndex`:
+
+| | payload |
+|---|---|
+| before any interaction | `t="authored" s="1"` |
+| after the three writes | `t="typed" c="1" s="2"` |
+| what the attributes still say | `value="authored"`, `checked=false`, `selected=false` |
+
+So a payload cannot be compiled from the markup, however much of its *shape* can be. Every field
+needs a live cell, which is what `fields.ts` gives each one — the author's `bind:value` signal
+where there is one, and a cell the compiler declares in the artifact where there is not.
+
+### Bearing on dziri
+
+Everything except the values is compile-time, and that is most of it: which controls are fields,
+which are excluded, what each option submits, which names collapse to arrays. What dziri does
+**not** do, named rather than implied: no `form="id"` association (a field is collected by being
+inside the form), no submitter `name`/`value` entry, no file inputs, and a disabled `<option>`
+that is somehow selected still contributes its value rather than nothing.
+
+One deliberate divergence, and it is the payload's *type* rather than its contents: a lone
+valueless checkbox is `true`/`false` rather than `"on"`-or-absent, and a `type=number` field is a
+number rather than a string. dziri knows each control's kind at build time, so the alternative —
+every value a string, as `FormData` has it — would push a `z.coerce` onto every schema an author
+writes. A checkbox carrying a `value` keeps the browser's present-or-absent meaning, since the
+string is the point of writing one.
+
+---
+
+## Which form owns a control, and where the submitter's entry goes
+
+**Measured 2026-08-11 · Chromium 152 (via Edge 152) · `probes/form-owner.html`.** Two questions
+the payload probe left open, both of which dziri had to answer to finish `<form>`.
+
+### `form="id"` is not a hint — it re-parents the control for every purpose
+
+| markup | result |
+|---|---|
+| field written **after** F with `form=F` | F's payload is `inner="1" outer="2"` |
+| field written **before** F with `form=F` | F's payload is `outer="2" inner="1"` |
+| field inside **G** with `form=F` | F gets it; **G's payload is empty** |
+| field inside F with `form=F` | once, not twice |
+| field inside F with `form=` a **missing id** | **F's payload is empty** — it does not fall back |
+
+The order is the first thing that matters: a field written before the form it names comes
+**first** in that form's payload, so the payload is in document order over the whole document
+and cannot be produced by walking the form's subtree. The missing-id row is the second: an
+absent target **orphans** the control rather than reverting to its ancestor, which is exactly
+the fallback an implementation writes by accident.
+
+### Ownership feeds implicit submission too, which is what costs
+
+| markup | Enter in F's field |
+|---|---|
+| no button, 1 field in F | `submit` |
+| button after F with `form=F` | **`click:outside, submit`** — it is F's default button |
+| button after F with no `form=` | `submit` — not found, so the one-field rule ran |
+| button inside F, then one outside with `form=F` | `click:inner` — the inner one wins |
+| **1 field in F, 1 field with `form=F`, no button** | **nothing** — so the associated field **counts** |
+| button inside F with `form=G` | `submit`, **no click** — it is not F's button |
+
+So all three questions a form asks — what is in the payload, which button Enter clicks, how
+many fields block — are asked of the controls the form *owns*. Two of these rows are the ones
+that make a subtree scan wrong rather than incomplete: it would find a button belonging to
+another form, and it would count one blocking field where the form has two.
+
+The row that does **not** settle anything: with a descendant button and an associated one
+outside, the descendant won — but it is also first in document order, so "document order" and
+"descendants first" predict the same answer and this does not separate them. dziri implements
+document order, which is the spec's tree order over the form's controls.
+
+### The submitter's entry sits where the button is written
+
+The earlier probe measured *that* a named submit button contributes `name=value` when it is
+the submitter, in a form whose button happened to be last — so "at its position" and
+"appended at the end" predicted the same table. With the button first:
+
+| submitter | payload |
+|---|---|
+| the **first** of two buttons named `btn` | **`btn="first" a="x"`** |
+| the **second** | `a="x" btn="second"` |
+| a button outside the form, `form=F` | `a="x" btn="outside"` |
+
+So it is an ordinary entry at its own document position, not an append — which is why dziri
+carries a named submit button as a field in the same ordered list as everything else, with a
+`submitter` kind that contributes only when it is the node that submitted.
+
+### Bearing on dziri
+
+`resolveForms` no longer scans a subtree. `fields.ts::formOwnership` resolves ownership once,
+and the payload, the default button and the blocking count are all derived from it. A `owns`
+set per form is emitted so the runtime can answer "which form does Enter here submit" for a
+control that is not a descendant; the parent walk stays as the fallback for everything in a
+form that is not a control at all.
+
+---
+
+## A nested-looking `name` is just a string — no browser does anything with it
+
+**Measured 2026-08-11 · Chromium 152 (via Edge 152) · `probes/form-nested-names.html`.** Asked
+because dziri is considering `name="user[email]"` collapsing into a nested object, and the
+convention is old enough to feel like part of the platform. It is not part of it at all.
+
+| authored `name` | `FormData` key | urlencoded wire |
+|---|---|---|
+| `user[email]` | `"user[email]"` | `user%5Bemail%5D=x` |
+| `user[address][city]` | `"user[address][city]"` | `user%5Baddress%5D%5Bcity%5D=x` |
+| `tags[]` | `"tags[]"` | `tags%5B%5D=x` |
+| `items[0][qty]` | `"items[0][qty]"` | `items%5B0%5D%5Bqty%5D=x` |
+| `user.email` | `"user.email"` | `user.email=x` |
+| `user[email` (unclosed) | `"user[email"` | `user%5Bemail=x` |
+| `[email]`, `a[][]`, `user[]-[]` | unchanged, all of them | unchanged |
+
+Every dialect survives as a **literal string key**, at both layers. Two fields named
+`user[email]` and `user[name]` produce two keys, and `formData.get("user")` is `null`. The
+brackets are percent-encoded on the wire and nothing else happens to them.
+
+### `tags[]` and `tags` differ only in spelling
+
+| markup | keys | wire |
+|---|---|---|
+| two inputs named `tags[]` | `"tags[]" "tags[]"` | `tags%5B%5D=a&tags%5B%5D=b` |
+| two inputs named `tags` | `"tags" "tags"` | `tags=a&tags=b` |
+
+Structurally identical. The *array* comes from repeating the name, which HTML gives you for
+free — the `[]` is a hint to a server-side parser and contributes nothing itself. So dziri's
+existing rule (two controls sharing a name give an array) already **is** the array half of the
+convention, without the brackets.
+
+### There is no enctype for it, and there was a proposal
+
+| authored `enctype` | `form.enctype` reflects |
+|---|---|
+| `application/json` | **`application/x-www-form-urlencoded`** — not even reflected |
+| `application/x-www-form-urlencoded` | as authored |
+| `multipart/form-data` | as authored |
+| `text/plain` | as authored |
+
+`application/json` was a real W3C proposal for exactly this transform, and it shipped nowhere:
+the value is rejected outright and falls back to the default, so a form authored with it sends
+`a=1`. The vendored MDN prose lists three enctypes and not that one, and this measures the
+same thing rather than trusting prose. `URLSearchParams` does not nest either
+(`new URLSearchParams("user[email]=x").get("user")` is `null`), so no platform parser does.
+
+### Bearing on dziri
+
+Nesting is **entirely a server-side convention** — PHP's `$_POST`, Rack's nested-query parser,
+`qs`, Express's extended body parser — and each of those is its own dialect. So a dziri
+implementation would not be reproducing a browser behaviour; it would be adopting one dialect
+out of several, and it has to be justified on its own terms rather than as fidelity.
+
+Two things follow, and they cut in dziri's favour rather than against:
+
+- **It would be resolved at build time, not parsed at run time.** Every server-side parser
+  reads a flat string map it was handed and guesses at structure. dziri sees every `name` in
+  the form at once, in the compiler, so a path is a compile-time fact — and a conflict
+  (`user` and `user[email]` in one form, or `a[0]` beside `a[b]`) is a build error rather than
+  a silent last-write-wins, which is the failure mode every one of those parsers has.
+- **The payload is already an object, not a multimap.** dziri parts company with `FormData`
+  here anyway — typed values, stable key shapes — so nesting is a change of degree in a
+  direction already chosen, not a new divergence.

@@ -21,7 +21,7 @@ use crate::controls::{Activation, Controls};
 use crate::protocol::{self, control_flags, display, node_kind, predicate};
 use crate::select::{self, Selects};
 use crate::tables::Tables;
-use crate::text::Measurer;
+use crate::text::{FontSpec, Measurer};
 
 const NODES: usize = protocol::Table::Nodes as usize;
 const STYLES: usize = protocol::Table::Styles as usize;
@@ -1198,16 +1198,7 @@ impl Painter {
         // change with `:hover`, and reading the base keeps this out of the variant
         // machinery for a value that would be identical either way.
         let style = tables.u16s(NODES, protocol::nodes::STYLE)[run] as usize;
-        let size = tables
-            .f32s(STYLES, protocol::styles::FONT_SIZE)
-            .get(style)
-            .copied()
-            .unwrap_or(16.0);
-        let weight = tables
-            .u16s(STYLES, protocol::styles::FONT_WEIGHT)
-            .get(style)
-            .copied()
-            .unwrap_or(400);
+        let spec = font_spec_at(tables, style);
 
         // Measured per prefix rather than from an average advance, because the boundaries
         // of proportional text are not evenly spaced — see `boundary_at`. Each call goes
@@ -1218,7 +1209,7 @@ impl Painter {
                 return 0.0;
             }
             let prefix: String = chars[..n].iter().collect();
-            measurer.measure(&prefix, size, weight, f32::INFINITY).0
+            measurer.measure(&prefix, spec, f32::INFINITY).0
         });
 
         Some((run, index, chars))
@@ -1772,7 +1763,7 @@ impl Painter {
 
             if clip_x || clip_y {
                 let [x, y, w, h] = geometry.bounds[node];
-                let inset = self.border_of(tables, node, state);
+                let [bt, br, bb, bl] = self.border_of(tables, node, state);
                 // The unclipped axis keeps whatever bound is already in force, so a
                 // vertical-only clip does not quietly become a horizontal one. Taking
                 // it from the live clip rather than from a large constant means an
@@ -1784,18 +1775,10 @@ impl Painter {
                     f32::MAX / 4.0,
                 ));
 
-                let left = if clip_x { x + inset } else { outer.left };
-                let right = if clip_x {
-                    (x + w - inset).max(x + inset)
-                } else {
-                    outer.right
-                };
-                let top = if clip_y { y + inset } else { outer.top };
-                let bottom = if clip_y {
-                    (y + h - inset).max(y + inset)
-                } else {
-                    outer.bottom
-                };
+                let left = if clip_x { x + bl } else { outer.left };
+                let right = if clip_x { (x + w - br).max(x + bl) } else { outer.right };
+                let top = if clip_y { y + bt } else { outer.top };
+                let bottom = if clip_y { (y + h - bb).max(y + bt) } else { outer.bottom };
 
                 canvas.save();
                 canvas.clip_rect(
@@ -1865,18 +1848,28 @@ impl Painter {
         )
     }
 
-    /// The border width, which the clip has to sit inside.
+    /// The four border widths, `[top, right, bottom, left]` — what the clip has
+    /// to sit inside.
     ///
-    /// Not interpolated even though it is a length: `borderWidth` is layout-affecting,
-    /// so it carries no `interp` and no mask can name it. That is the scope boundary
-    /// rather than an oversight — easing it here while Taffy kept the old box would
-    /// move the clip out of step with the content it clips.
-    fn border_of(&self, tables: &Tables, node: usize, state: &InputState) -> f32 {
+    /// Not interpolated even though they are lengths: border widths are
+    /// layout-affecting, so they carry no `interp` and no mask can name them.
+    /// That is the scope boundary rather than an oversight — easing them here
+    /// while Taffy kept the old box would move the clip out of step with the
+    /// content it clips.
+    fn border_of(&self, tables: &Tables, node: usize, state: &InputState) -> [f32; 4] {
         let blend = self.blend_for(tables, node, state);
-        match blend.f32(tables, protocol::styles::BORDER_WIDTH, 0.0) {
-            width if width.is_finite() && width > 0.0 => width,
-            _ => 0.0,
-        }
+        let side = |field: usize| -> f32 {
+            match blend.f32(tables, field, 0.0) {
+                width if width.is_finite() && width > 0.0 => width,
+                _ => 0.0,
+            }
+        };
+        [
+            side(protocol::styles::BORDER_TOP_WIDTH),
+            side(protocol::styles::BORDER_RIGHT_WIDTH),
+            side(protocol::styles::BORDER_BOTTOM_WIDTH),
+            side(protocol::styles::BORDER_LEFT_WIDTH),
+        ]
     }
 
     /// Draws the overlay scrollbars for a box that scrolls, over its own content.
@@ -1988,9 +1981,9 @@ impl Painter {
 
         // The padding box, because that is what the clip is: the bars sit inside the
         // container's border rather than across it.
-        let inset = self.border_of(tables, node, state);
-        let (vx, vy) = (x + inset, y + inset);
-        let (vw, vh) = (w - inset * 2.0, h - inset * 2.0);
+        let [bt, br, bb, bl] = self.border_of(tables, node, state);
+        let (vx, vy) = (x + bl, y + bt);
+        let (vw, vh) = (w - bl - br, h - bt - bb);
         // A box too small to hold a thumb has no room to say anything. Finiteness is
         // its own clause because NaN fails every comparison, so the size tests alone
         // would let a nonsense rect through — the trap `radius` fell into in `node`.
@@ -2195,12 +2188,24 @@ impl Painter {
         // Non-finite is the sentinel for "unset" everywhere else, and `style_of`
         // already resolves it to no border for layout; paint must agree or the
         // ring and the box disagree about where the content starts.
-        let border_width = match g(f::BORDER_WIDTH) {
-            t if t.is_finite() && t > 0.0 => t,
-            _ => 0.0,
+        let sane = |v: f32| -> f32 {
+            if v.is_finite() && v > 0.0 { v } else { 0.0 }
         };
-        let border_color = c(f::BORDER_COLOR);
-        if border_width > 0.0 && border_color >> 24 != 0 && w > 0.0 && h > 0.0 {
+        // [top, right, bottom, left] — the sides are independent: `border-t-2
+        // border-b-red-500` is a top width and a bottom colour and nothing else.
+        let bw = [
+            sane(g(f::BORDER_TOP_WIDTH)),
+            sane(g(f::BORDER_RIGHT_WIDTH)),
+            sane(g(f::BORDER_BOTTOM_WIDTH)),
+            sane(g(f::BORDER_LEFT_WIDTH)),
+        ];
+        let bc = [
+            c(f::BORDER_TOP_COLOR),
+            c(f::BORDER_RIGHT_COLOR),
+            c(f::BORDER_BOTTOM_COLOR),
+            c(f::BORDER_LEFT_COLOR),
+        ];
+        if bw.iter().any(|&s| s > 0.0) && bc.iter().any(|&col| col >> 24 != 0) && w > 0.0 && h > 0.0 {
             // A ring between the border box and the padding box, not a stroke
             // inset by half its width. The stroke was wrong at the corners: its
             // outer edge is an arc of radius `radius + width/2`, so the fill
@@ -2211,26 +2216,124 @@ impl Painter {
             // takes four corner radii the day the schema grows per-corner and
             // per-side utilities, which a single stroked path cannot express.
             let outer = RRect::new_rect_radii(Rect::from_xywh(x, y, w, h), &points(radii));
-            self.fill.set_color(Color::from(border_color));
 
-            let inner_w = w - border_width * 2.0;
-            let inner_h = h - border_width * 2.0;
-            if inner_w <= 0.0 || inner_h <= 0.0 {
-                // The border swallows the box. Skia's `draw_drrect` takes the
-                // difference of two rects and an empty or inverted inner one is
-                // not a shape it is defined on, so fill the outer instead.
-                canvas.draw_rrect(outer, &self.fill);
+            // The padding box. `max(0, radius - width)` per corner axis, which is
+            // what CSS says the inner edge of a border is — per axis because the
+            // widths are per side: a box with only a left border insets its
+            // corners horizontally and not vertically.
+            let inner_w = w - bw[3] - bw[1];
+            let inner_h = h - bw[0] - bw[2];
+            let inner_radii = [
+                Point::new((radii[0] - bw[3]).max(0.0), (radii[0] - bw[0]).max(0.0)),
+                Point::new((radii[1] - bw[1]).max(0.0), (radii[1] - bw[0]).max(0.0)),
+                Point::new((radii[2] - bw[1]).max(0.0), (radii[2] - bw[2]).max(0.0)),
+                Point::new((radii[3] - bw[3]).max(0.0), (radii[3] - bw[2]).max(0.0)),
+            ];
+            let inner = RRect::new_rect_radii(
+                Rect::from_xywh(
+                    x + bw[3],
+                    y + bw[0],
+                    inner_w.max(0.0),
+                    inner_h.max(0.0),
+                ),
+                &inner_radii,
+            );
+
+            let ring = |fill: &mut Paint| {
+                // The border swallows the box: Skia's `draw_drrect` is undefined on
+                // an empty or inverted inner rect, so fill the outer instead.
+                if inner_w <= 0.0 || inner_h <= 0.0 {
+                    canvas.draw_rrect(outer, fill);
+                } else {
+                    canvas.draw_drrect(outer, inner, fill);
+                }
+            };
+
+            if bw == [bw[0]; 4] && bc == [bc[0]; 4] {
+                // The uniform case — one ring, no clips.
+                if bc[0] >> 24 != 0 {
+                    self.fill.set_color(Color::from(bc[0]));
+                    if inner_w <= 0.0 || inner_h <= 0.0 {
+                        canvas.draw_rrect(outer, &self.fill);
+                    } else {
+                        canvas.draw_drrect(outer, inner, &self.fill);
+                    }
+                }
             } else {
-                // `max(0, radius - width)` per corner, which is what CSS says the
-                // inner edge of a border is. Per corner rather than once, or a box
-                // rounded on one side only would get that side's inset everywhere.
-                let inner_radii = radii.map(|r| (r - border_width).max(0.0));
-                let inner = RRect::new_rect_radii(
-                    Rect::from_xywh(x + border_width, y + border_width, inner_w, inner_h),
-                    &points(inner_radii),
-                );
-                canvas.draw_drrect(outer, inner, &self.fill);
+                // Per side: the ring, clipped to the side's trapezoid. The diagonal
+                // corner joins are CSS's classic mitre — each corner is split
+                // between its two sides, so adjacent colours meet on the diagonal
+                // rather than one painting over the other.
+                //
+                // The clip supplies the side's shape; the drrect supplies the
+                // rounded corners, so a rounded box with a coloured top edge arcs
+                // the colour exactly as a browser does.
+                let trapezoids = [
+                    // top: outer TL, outer TR, inner TR, inner TL
+                    [
+                        Point::new(x, y),
+                        Point::new(x + w, y),
+                        Point::new(x + w - bw[1], y + bw[0]),
+                        Point::new(x + bw[3], y + bw[0]),
+                    ],
+                    // right
+                    [
+                        Point::new(x + w, y),
+                        Point::new(x + w, y + h),
+                        Point::new(x + w - bw[1], y + h - bw[2]),
+                        Point::new(x + w - bw[1], y + bw[0]),
+                    ],
+                    // bottom
+                    [
+                        Point::new(x, y + h),
+                        Point::new(x + w, y + h),
+                        Point::new(x + w - bw[1], y + h - bw[2]),
+                        Point::new(x + bw[3], y + h - bw[2]),
+                    ],
+                    // left
+                    [
+                        Point::new(x, y),
+                        Point::new(x, y + h),
+                        Point::new(x + bw[3], y + h - bw[2]),
+                        Point::new(x + bw[3], y + bw[0]),
+                    ],
+                ];
+                for side in 0..4 {
+                    if bw[side] <= 0.0 || bc[side] >> 24 == 0 {
+                        continue;
+                    }
+                    let mut path = skia_safe::Path::new();
+                    let t = &trapezoids[side];
+                    path.move_to(t[0]);
+                    for p in &t[1..] {
+                        path.line_to(*p);
+                    }
+                    path.close();
+                    self.fill.set_color(Color::from(bc[side]));
+                    canvas.save();
+                    canvas.clip_path(&path, None, true);
+                    ring(&mut self.fill);
+                    canvas.restore();
+                }
             }
+        }
+
+        // The outline, after the border: a band *outside* the border box, from
+        // the offset out to offset + width. `band`'s spread grows the corner
+        // radii exactly as the ring bands do, and its guards cover a negative
+        // offset (ring inside the box) and a transparent colour. A later sibling
+        // can still paint over it — CSS gives outlines their own pass on top of
+        // everything, and that phase split is not worth it yet.
+        let outline_width = sane(g(f::OUTLINE_WIDTH));
+        let outline_offset = g(f::OUTLINE_OFFSET);
+        let outline_color = c(f::OUTLINE_COLOR);
+        if outline_width > 0.0 {
+            band(
+                &mut self.fill,
+                outline_offset + outline_width,
+                outline_offset,
+                outline_color,
+            );
         }
 
         // Through the select layer's redirect, so a `<selectedcontent>` reads the
@@ -2243,12 +2346,20 @@ impl Painter {
 
         let text = tables.string(text_slot);
 
-        let size = g(f::FONT_SIZE);
-        let weight = blend.u16(tables, f::FONT_WEIGHT, 400);
+        let spec = FontSpec::new(
+            g(f::FONT_SIZE),
+            blend.u16(tables, f::FONT_WEIGHT, 400),
+            blend.u8(tables, f::FONT_STYLE, 0),
+            blend.u8(tables, f::FONT_FAMILY, 0),
+        )
+        .with_leading({
+            let lh = blend.f32(tables, f::LINE_HEIGHT, 0.0);
+            if lh > 0.0 { lh } else { 0.0 }
+        });
 
         // The selection band goes **behind** the text and behind the caret, which is the order
         // a highlight has to be drawn in: over the background, under the glyphs.
-        let band = self.selection_band(node, text, size, weight, measurer, x, y, h);
+        let band = self.selection_band(node, text, spec, measurer, x, y, h);
         if let Some(rect) = band {
             self.fill.set_color(Color::from(c(f::SELECTION_BG)));
             canvas.draw_rect(rect, &self.fill);
@@ -2267,8 +2378,7 @@ impl Painter {
             canvas,
             node,
             text,
-            size,
-            weight,
+            spec,
             measurer,
             x,
             y,
@@ -2300,21 +2410,28 @@ impl Painter {
             // than arithmetic on an advance. That is what makes a label that *does*
             // wrap centre line by line, which is what the previous version could
             // only anticipate.
-            let borders = border_width * 2.0;
-            let box_w = w - borders - g(f::PAD_LEFT) - g(f::PAD_RIGHT);
-            let box_h = h - borders - g(f::PAD_TOP) - g(f::PAD_BOTTOM);
+            let bw = [
+                g(f::BORDER_TOP_WIDTH),
+                g(f::BORDER_RIGHT_WIDTH),
+                g(f::BORDER_BOTTOM_WIDTH),
+                g(f::BORDER_LEFT_WIDTH),
+            ];
+            let box_w = w - bw[3] - bw[1] - g(f::PAD_LEFT) - g(f::PAD_RIGHT);
+            let box_h = h - bw[0] - bw[2] - g(f::PAD_TOP) - g(f::PAD_BOTTOM);
 
-            let mut paragraph = measurer.paragraph(text, size, weight, box_w, TextAlign::Center);
-            let tx = x + border_width + g(f::PAD_LEFT);
-            let ty = y + border_width + g(f::PAD_TOP) + (box_h - paragraph.height()) / 2.0;
+            let mut paragraph = measurer.paragraph(text, spec, box_w, TextAlign::Center);
+            let tx = x + bw[3] + g(f::PAD_LEFT);
+            let ty = y + bw[0] + g(f::PAD_TOP) + (box_h - paragraph.height()) / 2.0;
             crate::text::paint_paragraph(&mut paragraph, canvas, (tx, ty).into(), &self.fill);
+            self.decorate(tables, &blend, measurer, canvas, &mut paragraph, (tx, ty).into(), spec);
         } else {
             // A text run is its own node, so its bounds *are* the text block and
             // the wrap width is the box width. Laying out to anything else here
             // would wrap at a width the layout pass did not predict, and the box
             // would be the wrong height for what is drawn in it.
-            let mut paragraph = measurer.paragraph(text, size, weight, w, TextAlign::Left);
+            let mut paragraph = measurer.paragraph(text, spec, w, TextAlign::Left);
             crate::text::paint_paragraph(&mut paragraph, canvas, (x, y).into(), &self.fill);
+            self.decorate(tables, &blend, measurer, canvas, &mut paragraph, (x, y).into(), spec);
 
             // Selected characters in `::selection`'s colour, by drawing the same paragraph a
             // second time clipped to the band. Not a styled range on the paragraph: the
@@ -2332,12 +2449,61 @@ impl Painter {
                     canvas.save();
                     canvas.clip_rect(rect, None, None);
                     self.fill.set_color(Color::from(fg));
-                    let mut over = measurer.paragraph(text, size, weight, w, TextAlign::Left);
+                    let mut over = measurer.paragraph(text, spec, w, TextAlign::Left);
                     crate::text::paint_paragraph(&mut over, canvas, (x, y).into(), &self.fill);
                     canvas.restore();
                 }
             }
         }
+    }
+
+    /// The node's `text-decoration`, if it has one, over the paragraph just painted.
+    ///
+    /// Drawn after the glyphs — a decoration crosses the text it decorates, and
+    /// painting it first would let the glyphs eat it. The colour falls back to
+    /// the run's own `fg`: alpha-0 on `decorationColor` *is* `currentcolor` here,
+    /// because the cascade cannot substitute a keyword that names the field being
+    /// computed — it would need the answer to produce the answer.
+    #[allow(clippy::too_many_arguments)]
+    fn decorate(
+        &mut self,
+        tables: &Tables,
+        blend: &crate::anim::Blend,
+        measurer: &mut Measurer,
+        canvas: &Canvas,
+        paragraph: &mut skia_safe::textlayout::Paragraph,
+        at: Point,
+        spec: FontSpec,
+    ) {
+        use protocol::styles as f;
+        let line = blend.u8(tables, f::DECORATION_LINE, 0);
+        if line == 0 {
+            return;
+        }
+        let metrics = measurer.decoration_metrics(spec);
+        let thick = match blend.f32(tables, f::DECORATION_THICKNESS, 0.0) {
+            t if t.is_finite() && t > 0.0 => t,
+            // Auto: the font's own underline metric, and the strikeout and
+            // overline follow it, as CSS's "suitable" thickness does.
+            _ => metrics.underline_thick,
+        };
+        let colour = match blend.u32(tables, f::DECORATION_COLOR) {
+            col if col >> 24 != 0 => col,
+            _ => blend.u32(tables, f::FG),
+        };
+        crate::text::paint_decorations(
+            paragraph,
+            canvas,
+            at,
+            &crate::text::Decoration {
+                line,
+                colour,
+                style: blend.u8(tables, f::DECORATION_STYLE, 0),
+                thickness: thick,
+                offset: blend.f32(tables, f::UNDERLINE_OFFSET, f32::NAN),
+                metrics: &metrics,
+            },
+        );
     }
 
     /// The rectangle a live selection covers in `node`, or `None` when there is none.
@@ -2350,8 +2516,7 @@ impl Painter {
         &mut self,
         node: usize,
         text: &str,
-        size: f32,
-        weight: u16,
+        spec: FontSpec,
         measurer: &mut Measurer,
         x: f32,
         y: f32,
@@ -2365,7 +2530,7 @@ impl Painter {
                 return 0.0;
             }
             let prefix: String = chars[..n].iter().collect();
-            measurer.measure(&prefix, size, weight, f32::INFINITY).0
+            measurer.measure(&prefix, spec, f32::INFINITY).0
         };
         let (left, right) = (advance(start), advance(end));
         if right <= left {
@@ -2386,8 +2551,7 @@ impl Painter {
         canvas: &Canvas,
         node: usize,
         text: &str,
-        size: f32,
-        weight: u16,
+        spec: FontSpec,
         measurer: &mut Measurer,
         x: f32,
         y: f32,
@@ -2414,7 +2578,7 @@ impl Painter {
         let dx = if prefix.is_empty() {
             0.0
         } else {
-            measurer.measure(&prefix, size, weight, f32::INFINITY).0
+            measurer.measure(&prefix, spec, f32::INFINITY).0
         };
 
         // One CSS pixel wide, the full line height. Chrome's caret is browser chrome with
@@ -2438,6 +2602,35 @@ fn ring_width(raw: f32) -> f32 {
     } else {
         0.0
     }
+}
+
+/// The font a style slot names, from the *base* table — for callers outside the
+/// variant machinery (hit-testing a caret click, sizing rows). A font does not
+/// change with `:hover` in any stylesheet this has met; if one ever does, the
+/// caller that cares reads through its blend instead, as `Painter::text` does.
+fn font_spec_at(tables: &Tables, slot: usize) -> FontSpec {
+    let read_u8 = |field: usize| tables.u8s(STYLES, field).get(slot).copied().unwrap_or(0);
+    FontSpec::new(
+        tables
+            .f32s(STYLES, protocol::styles::FONT_SIZE)
+            .get(slot)
+            .copied()
+            .unwrap_or(16.0),
+        tables
+            .u16s(STYLES, protocol::styles::FONT_WEIGHT)
+            .get(slot)
+            .copied()
+            .unwrap_or(400),
+        read_u8(protocol::styles::FONT_STYLE),
+        read_u8(protocol::styles::FONT_FAMILY),
+    )
+    .with_leading(
+        tables
+            .f32s(STYLES, protocol::styles::LINE_HEIGHT)
+            .get(slot)
+            .map(|v| if *v > 0.0 { *v } else { 0.0 })
+            .unwrap_or(0.0),
+    )
 }
 
 /// Which axes the user may scroll, from the node's base style.

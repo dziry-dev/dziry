@@ -1,8 +1,14 @@
 # dziri — the data layer
 
-**Status:** imagined API, not implemented. Written against `framework-design.md` §3–4 (screens,
-`Reactive<T>`, boundaries, planes) and ROADMAP A4 (`dataOffset`). Nothing here needs new engine
-symbols; it lands on M7/M8 machinery that is already specified.
+**Status:** imagined API, not implemented. Written against the pre-A0 research doc
+`framework-design.md` §3–4 (screens, `Reactive<T>`, boundaries, planes) and ROADMAP A4
+(`dataOffset`). Nothing here needs new engine symbols; it lands on M7/M8 machinery that is
+already specified.
+
+> `framework-design.md` was deleted on 2026-08-02 — it was research, and enough had changed
+> that it read as current design when it was not. Its section numbers are still cited below;
+> the file is at `12b3903^` in git. Treat those citations as provenance, not as something to
+> go and check.
 
 The brief was "a component renders JSX, does data fetching, uses React Query and Drizzle." The
 answer below keeps every semantic TanStack Query has and deletes almost all of its runtime,
@@ -109,7 +115,7 @@ read, which is what `+screen.ts` types `data` from.
 
 ## 4. A screen
 
-The primary path is unchanged from `framework-design.md` §3.3 — `load` takes the args tuple and
+The primary path is unchanged from the research doc's §3.3 — `load` takes the args tuple and
 nothing else, because the args tuple *is* the cache key.
 
 ```tsx

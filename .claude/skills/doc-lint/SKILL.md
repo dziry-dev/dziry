@@ -1,12 +1,12 @@
 ---
 name: doc-lint
-description: Verify that `file.ext:LINE` citations in the Markdown docs still resolve. Use after deleting, renaming or moving any source file; after a refactor that shifts line numbers; before committing changes to ARCHITECTURE-REVIEW.md, ROADMAP.md, NOTES.md, API.md or framework-design.md; and whenever a doc's claim about code is being relied on for a decision. Runs `bun run doc-lint`.
+description: Verify that `file.ext:LINE` citations in the Markdown docs still resolve. Use after deleting, renaming or moving any source file; after a refactor that shifts line numbers; before committing changes to ARCHITECTURE-REVIEW.md, ROADMAP.md, NOTES.md or API.md; and whenever a doc's claim about code is being relied on for a decision. Runs `bun run doc-lint`.
 ---
 
 # doc-lint
 
 This repo's docs are unusually citation-dense — 1,800+ references like `engine.rs:402`,
-`signal.ts:86,159`, `window-host.ts:90-93`. They rot silently, and a stale citation is worse than no
+`signal.ts:86,159`, `host/worker.ts:158`. They rot silently, and a stale citation is worse than no
 citation: on 2026-07-31 a cited comment turned out to state the *opposite* of what the doc
 claimed, and an API design was built on it before anyone read the code.
 

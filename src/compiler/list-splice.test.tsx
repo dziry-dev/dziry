@@ -132,6 +132,7 @@ test("an empty list links its anchors straight together", () => {
       parts: [{ path: ["title"] }],
     })),
     itemHandlers: [],
+    itemEditables: [],
   } as ListBindingRef);
 
   expect(chainOf(ui, list.container)).toEqual([list.anchorPrev, list.anchorNext]);
@@ -159,6 +160,7 @@ test("rows splice between the anchors and reorder without disturbing them", () =
       parts: [{ path: ["title"] }],
     })),
     itemHandlers: [],
+    itemEditables: [],
   } as ListBindingRef;
 
   updateList(ui, ref);

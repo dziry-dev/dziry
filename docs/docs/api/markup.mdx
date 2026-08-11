@@ -128,6 +128,178 @@ renders as a styled box with no widget appearance of its own, and clicking a `<l
 does not yet focus the field it names.
 :::
 
+## form
+
+<Status of="onSubmit" />
+```tsx
+export function save(data: { email: string; age: number | undefined; terms: boolean }) {
+  console.log(data.email, data.age, data.terms);
+}
+
+export const SignUp = () => (
+  <form onSubmit={save}>
+    <input name="email" />
+    <input name="age" type="number" />
+    <input name="terms" type="checkbox" />
+    <button>Sign up</button>
+  </form>
+);
+```
+
+A `<form>` collects the controls in its subtree by `name` — the way a browser does — and hands
+`onSubmit` the result. Enter in a field submits it, and so does a click on its submit button.
+
+**You do not declare state for the fields.** A named field with no `bind:value` gets a cell the
+compiler declares inside the generated artifact, seeded from its `value`, `checked` or `selected`
+attribute. Nothing outside the artifact can name that cell; the payload is how you read it. A field
+that *does* carry `bind:value` keeps your signal, so what is rendered and what is submitted cannot
+drift apart.
+
+**The payload is typed by what each control is**, because the compiler knows:
+
+| markup | what you get |
+|---|---|
+| `<input name="x">`, `<textarea name="x">` | `string` |
+| `<input name="x" type="number">` | `number \| undefined` — never `NaN` |
+| `<input name="x" type="checkbox">` | `boolean` |
+| `<input name="x" type="radio">` × n | `string \| undefined` — the checked one's `value` |
+| `<select name="x">` | `string` |
+| `<select name="x" multiple>`, or two controls sharing a name | `string[]` |
+
+Which controls are *in* the payload is the browser's rule, measured rather than recalled: a control
+with no `name` is left out, so is a disabled one — including one disabled by an enclosing
+`<fieldset disabled>` — an unticked checkbox contributes nothing, and an `<option>` with no `value`
+submits its trimmed text.
+
+### field
+
+<Status of="field" />
+```tsx no-check
+<form onSubmit={save}>
+  <div field="name">
+    <input />
+  </div>
+  <div field="position">
+    <input name="x" />
+    <input name="y" />
+  </div>
+  <div field="address">
+    <div field="city"><input /></div>
+  </div>
+</form>;
+```
+
+gives `{ name: string, position: { x, y }, address: { city } }`.
+
+`field` on anything that wraps a control names a **group**, and the wrapper chain is the path.
+A wrapper holding one bare control *is* that field; named controls inside it become its
+properties; wrappers nest; an element without `field` is transparent, so a layout div nests
+nothing. A path claimed as both a value and a group — a wrapper holding a bare control *and* a
+named one — is a build error, because either answer would silently drop a field.
+
+No browser does this. `name="user[email]"` is the literal string key `"user[email]"` in
+`FormData`, and the bracket convention belongs to server-side parsers, each with its own
+dialect. dziri nests by structure because a compiler can see structure: nothing is parsed at
+run time, and there is no dialect to pick.
+
+**Radios are the exception.** A radio set has to share a `name` — that is what makes it a set —
+so inside a wrapper the `name` *groups* it and the wrapper *names* it:
+
+```tsx no-check
+<div field="plan">
+  <input type="radio" name="plan" value="free" />
+  <input type="radio" name="plan" value="pro" />
+</div>;
+```
+
+gives one key, `plan`, and not `plan.plan`. Same reason its shape is a single value: many
+elements, one answer. Use one radio group per wrapper — two groups under one wrapper would both
+claim its key, and the build says so.
+
+See the [Forms guide](../guide/forms.md) for the whole feature end to end.
+
+### errorClassName
+
+<Status of="errorClassName" />
+```tsx no-check
+<div field="email" errorClassName="group/error">
+  <input className="error:border-red-500" />
+  <span error className="hidden error:block" />
+</div>;
+```
+
+```css
+@custom-variant error (.group\/error &);
+```
+
+The wrapper wears those classes while its field has a validation error — where "its" means any
+issue whose path starts with the wrapper's, so a `position` wrapper lights up for an issue at
+`position.x`. It compiles to the same style-table writes a conditional class does, so the
+input's border and the message's visibility both come from a class on the wrapper and none of it
+is JavaScript. Twenty fields can share the class string and stay independent.
+
+Write the Tailwind variant in the **prefix** form shown above. Tailwind's default form emits
+`:is(:where(.group\/error) *)`, and the `*` inside `:is()` is not a selector dziri parses.
+
+`<span error />` marks where the message goes; its text becomes a binding to a cell the compiler
+declares, and anything you write inside it is placeholder prose that never ships.
+
+### validateOn
+
+<Status of="validateOn" />
+```tsx no-check
+<form validateOn="change" validate={Login} onSubmit={save}>;
+```
+
+`"submit"` (the default), `"change"`, or `"blur"`. Two things are behaviour rather than options,
+because neither is a preference:
+
+- after a failed submit, the form re-validates as its fields change, so an error clears the
+  moment you fix it;
+- before any submit, a field shows an error only once its value has *moved* off the one it was
+  compiled with — so a pristine form does not turn red as you tab through it.
+
+There is no `touched` or `dirty` to manage. The first is what `validateOn` is for, and the
+second costs nothing to derive: the initial value is a constant the compiler wrote down.
+
+### validate
+
+<Status of="validate" />
+```tsx no-check
+import * as z from "zod";
+import { Schema } from "effect";
+
+export const Login = z.object({ email: z.email(), age: z.number().min(18) });
+export const Same = Schema.Struct({ email: Schema.String });
+
+export const showErrors = (issues: { path: (string | number)[]; message: string }[]) =>
+  console.log(issues);
+
+<form onSubmit={save} validate={Login} onInvalid={showErrors}>
+  <input name="email" />
+  <input name="age" type="number" />
+  <button>Sign up</button>
+</form>;
+```
+
+`validate` checks the payload before `onSubmit` sees it. It accepts any **Standard Schema** —
+which Zod 4, Valibot and ArkType are — any **Effect** schema, or a plain function returning issues.
+dziri depends on none of them: the standard ones are used through their `~standard` property, and
+an Effect schema is converted with Effect's own `Schema.standardSchemaV1` behind an import that
+only happens if you actually pass one.
+
+A schema also **narrows what `onSubmit` receives** — it gets the schema's output, so a
+`z.coerce.date()` field arrives as a `Date` rather than as the string that was typed. When
+validation fails, `onSubmit` does not run and `onInvalid` gets the issues, normalised to
+`{ path, message }[]` whichever library produced them.
+
+:::warning Partial
+
+Fields inside a `map()` list are not collected — a list template is compiled into an arena rather
+than walked, so a `name` inside one is not in the payload. There is also no `form="id"` association,
+no file inputs, and a named submit button does not add its own entry.
+:::
+
 ## bind
 
 ```ts

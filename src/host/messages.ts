@@ -40,6 +40,14 @@ export type ToMain =
   | { t: "grow"; capacities: Capacities }
   /** Headless overrides and Escape, which reach the engine through its handle. */
   | { t: "input"; hovered: number; pressed: number; focused: number }
+  /**
+   * `alert()` — show the platform's modal box.
+   *
+   * A message rather than a call, because SDL will only show one from the thread that
+   * initialised video. Fire and forget: the app thread does not wait, and could not — the
+   * thread that would have to answer is the one blocked by the dialog.
+   */
+  | { t: "alert"; message: string; title: string; level: 0 | 1 | 2 }
   /** An unhandled failure on the app thread. The window should say so, not vanish. */
   | { t: "error"; message: string };
 

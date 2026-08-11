@@ -92,6 +92,7 @@ const SYMBOLS = {
   dziri_engine_encode_png: { args: [u32, PTR], returns: i32 },
   dziri_engine_take_png: { args: [u32, PTR, u32], returns: i32 },
   dziri_engine_font_family: { args: [u32, PTR, u32, PTR], returns: i32 },
+  dziri_engine_alert: { args: [u32, u32, PTR, u32, PTR, u32], returns: i32 },
   dziri_engine_last_frame_ms: { args: [u32, PTR], returns: i32 },
   dziri_engine_panic_for_testing: { args: [u32], returns: i32 },
 } as const;
@@ -600,6 +601,43 @@ export class Engine {
     this.mouseDown(x + w * from, mid);
     this.mouseMove(x + w * to, mid);
     this.mouseUp(x + w * to, mid);
+  }
+
+  /**
+   * Shows the platform's own modal message box, and **blocks until it is dismissed**.
+   *
+   * `SDL_ShowSimpleMessageBox` behind the FFI, so it is a Win32 task dialog, an `NSAlert`, or
+   * the GTK/portal box — nothing dziri draws. There was no need to vendor anyone's
+   * implementation of this: SDL3 is already linked, and a dialog drawn by dziri would be the
+   * one part of an app that does not look like the system it is running on.
+   *
+   * **Must be called on the engine thread**, which the handle guard enforces anyway: SDL
+   * requires a message box to be shown from the thread that initialised video. That is why
+   * `alert()` in app code posts a message rather than calling this — see `runtime/alert.ts`.
+   *
+   * Headless is a no-op, so a handler ending in `alert("saved")` does not break a screenshot
+   * or a golden scenario.
+   *
+   * The strings go across as pointer + byte length, UTF-8, no terminator — the first text to
+   * cross this boundary *inbound*, and the convention chosen because a length is what this
+   * side already has.
+   */
+  alert(message: string, title = "", level: 0 | 1 | 2 = 0): void {
+    const titleBytes = new TextEncoder().encode(title);
+    const messageBytes = new TextEncoder().encode(message);
+    check(
+      engine.dziri_engine_alert(
+        this.#handle,
+        level,
+        // A zero-length `Uint8Array` has no address to take, so an empty title is passed as a
+        // null pointer with a length of 0 — which the Rust side reads as an empty string.
+        titleBytes.length === 0 ? null : (ptr(titleBytes) as Pointer),
+        titleBytes.length,
+        messageBytes.length === 0 ? null : (ptr(messageBytes) as Pointer),
+        messageBytes.length,
+      ),
+      "dziri_engine_alert",
+    );
   }
 
   /**

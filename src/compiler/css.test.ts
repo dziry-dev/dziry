@@ -331,42 +331,113 @@ test("grid placement is start plus span, and line 0 is refused", () => {
   expect(() => expand("grid-column", "first")).toThrow(CssError);
 });
 
+test("text-decoration: the line is a bit set and the parts combine", () => {
+  expect(expand("text-decoration-line", "underline")).toEqual({ decorationLine: 1 });
+  expect(expand("text-decoration-line", "underline overline")).toEqual({ decorationLine: 3 });
+  expect(expand("text-decoration-line", "none")).toEqual({ decorationLine: 0 });
+  expect(expand("text-decoration", "underline dotted #ff0000 2px")).toEqual({
+    decorationLine: 1,
+    decorationStyle: 2,
+    decorationColor: 0xffff0000,
+    decorationThickness: 2,
+  });
+  expect(expand("text-decoration", "none")).toEqual({ decorationLine: 0 });
+  expect(expand("text-underline-offset", "4px")).toEqual({ underlineOffset: 4 });
+  expect(expand("text-underline-offset", "auto")).toEqual({ underlineOffset: NaN });
+  expect(() => expand("text-decoration-style", "curly")).toThrow(/text-decoration-style/);
+});
+
+test("outline is a band outside the border box: width, colour, offset, none", () => {
+  expect(expand("outline", "2px solid #ff0000")).toEqual({
+    outlineWidth: 2,
+    outlineColor: 0xffff0000,
+  });
+  // `outline: none` is the style talking, and style none is width 0.
+  expect(expand("outline", "none")).toMatchObject({ outlineWidth: 0 });
+  expect(expand("outline-style", "none")).toEqual({ outlineWidth: 0 });
+  expect(expand("outline-offset", "-2px")).toEqual({ outlineOffset: -2 });
+  expect(expand("outline-width", "thick")).toEqual({ outlineWidth: 5 });
+});
+
+test("per-side borders: the family maps physical and logical onto four fields", () => {
+  expect(expand("border-top-color", "#ff0000")).toEqual({ borderTopColor: 0xffff0000 });
+  expect(expand("border-inline-color", "#00ff00")).toEqual({
+    borderLeftColor: 0xff00ff00,
+    borderRightColor: 0xff00ff00,
+  });
+  expect(expand("border-block-start-width", "2px")).toEqual({ borderTopWidth: 2 });
+  expect(expand("border-width", "1px 2px")).toEqual({
+    borderTopWidth: 1,
+    borderRightWidth: 2,
+    borderBottomWidth: 1,
+    borderLeftWidth: 2,
+  });
+  // `border-style: solid none` zeroes right *and* left — the two-value form is
+  // [top/bottom, left/right], and the side is the style.
+  expect(expand("border-style", "solid none")).toEqual({
+    borderRightWidth: 0,
+    borderLeftWidth: 0,
+  });
+  expect(expand("border-top-width", "thick")).toEqual({ borderTopWidth: 5 });
+});
+
 test("flex keywords expand as CSS says", () => {
-  expect(expand("flex", "none")).toEqual({ grow: 0, shrink: 0, basis: NaN });
-  expect(expand("flex", "auto")).toEqual({ grow: 1, shrink: 1, basis: NaN });
+  expect(expand("flex", "none")).toEqual({ grow: 0, shrink: 0, basis: NaN, basisPct: 0 });
+  expect(expand("flex", "auto")).toEqual({ grow: 1, shrink: 1, basis: NaN, basisPct: 0 });
   // `flex: 1` is `1 1 0`, not `1 1 auto`: whether an item sizes from its content
   // before growing is visible, and this is the form Tailwind's `flex-1` emits.
-  expect(expand("flex", "1")).toEqual({ grow: 1, shrink: 1, basis: 0 });
-  expect(expand("flex", "2 3")).toEqual({ grow: 2, shrink: 3, basis: 0 });
+  expect(expand("flex", "1")).toEqual({ grow: 1, shrink: 1, basis: 0, basisPct: 0 });
+  expect(expand("flex", "2 3")).toEqual({ grow: 2, shrink: 3, basis: 0, basisPct: 0 });
+});
+
+test("`flex` with a length basis keeps the basis", () => {
+  // A non-numeric second value is the basis, not the shrink: the grammar is
+  // `<grow> <shrink>? <basis>?` and the basis is the only length among them.
+  expect(expand("flex", "1 100px")).toEqual({ grow: 1, shrink: 1, basis: 100, basisPct: 0 });
+  expect(expand("flex", "0 0 auto")).toEqual({ grow: 0, shrink: 0, basis: NaN, basisPct: 0 });
+  // Both were once recorded as KNOWN WRONG — the scan compared tokens by value,
+  // so a length that *was* parts[1] could never be the basis. The fix came with
+  // the percentage channels: telling basis from shrink by *kind* (length vs
+  // number) rather than by position is what both needed.
 });
 
 // --- recorded defects --------------------------------------------------------
 //
-// The next two lock in values that are *wrong*, from the review's
-// `compiler-css/shorthand-expansion-vs-spec` (MEDIUM). They are here so the
+// The next one locks in values that are *wrong*, from the review's
+// `compiler-css/shorthand-expansion-vs-spec` (MEDIUM). It is here so the
 // wrongness is executable rather than filed: nothing in `app.css` reaches these
-// forms today, and when the shorthands are rewritten against the spec these tests
-// fail and say what the new answer should be.
+// forms today, and when the shorthand is rewritten against the spec this test
+// fails and says what the new answer should be.
 
-test("KNOWN WRONG: `flex` with a length basis loses the basis", () => {
-  // Spec: grow 1, shrink 1, basis 100px. The basis scan excludes any token that
-  // *is* parts[1], and here the length is parts[1].
-  expect(expand("flex", "1 100px")).toEqual({ grow: 1, shrink: 1, basis: 0 });
-  // Spec: basis auto. Only the `flex: auto` keyword form gets that right.
-  expect(expand("flex", "0 0 auto")).toEqual({ grow: 0, shrink: 0, basis: 0 });
+test("`border` resets style to none and honours it, as CSS says", () => {
+  // A shorthand with no style keyword resets style to its `none` initial, so a
+  // browser paints nothing here — and now neither does dziri.
+  expect(expand("border", "#ff0000")).toEqual({
+    borderTopWidth: 0,
+    borderRightWidth: 0,
+    borderBottomWidth: 0,
+    borderLeftWidth: 0,
+    borderTopColor: 0xffff0000,
+    borderRightColor: 0xffff0000,
+    borderBottomColor: 0xffff0000,
+    borderLeftColor: 0xffff0000,
+  });
+  // `none` wins over the width, in either order.
+  expect(expand("border", "1px none red")).toMatchObject({ borderTopWidth: 0 });
+  expect(expand("border", "none")).toMatchObject({ borderLeftWidth: 0 });
 });
 
-test("KNOWN WRONG: `border` neither resets nor honours `none`", () => {
-  // Spec: the shorthand resets style to `none`, so a browser paints nothing here.
-  expect(expand("border", "#ff0000")).toEqual({ borderColor: 0xffff0000 });
-  // Spec: `none` wins and nothing is painted. The reset guard tests the whole
-  // value string, so a `none` among other tokens is skipped instead.
-  expect(expand("border", "1px none red")).toEqual({ borderWidth: 1, borderColor: 0xffff0000 });
-  // Spec: an omitted colour is `currentColor`. This leaves it at the initial
-  // transparent, so `border: 2px solid` paints nothing at all.
-  expect(expand("border", "2px solid")).toEqual({ borderWidth: 2 });
-  // `border: none` alone is handled, which is what makes the above surprising.
-  expect(expand("border", "none")).toEqual({ borderWidth: 0 });
+test("KNOWN WRONG: `border` with no colour paints nothing instead of currentcolor", () => {
+  // Spec: an omitted colour is `currentColor`. The shorthand has no colour token
+  // to substitute, so the fields keep their alpha-0 initial and a
+  // `border: 2px solid` paints nothing at all. BROWSER-FACTS.md records what
+  // implementing the fallback would have to do.
+  expect(expand("border", "2px solid")).toEqual({
+    borderTopWidth: 2,
+    borderRightWidth: 2,
+    borderBottomWidth: 2,
+    borderLeftWidth: 2,
+  });
 });
 
 test("overflow maps CSS's keywords onto the four the engine has", () => {
@@ -521,7 +592,7 @@ test("content takes strings, none and normal, and refuses the rest", () => {
 test("::before and ::after parse, and the rest are refused by name", () => {
   const one = parseSelector("div.btn:hover::before");
   expect(one.element).toBe("before");
-  expect(one.pseudo).toBe("hover");
+  expect(one.pseudos).toEqual(["hover"]);
   // A pseudo-element counts in the type column, a pseudo-class in the class one.
   expect(one.specificity).toEqual([0, 2, 2]);
 
@@ -654,7 +725,24 @@ test("an interaction pseudo-class is refused inside :is(), :where() and :not()",
   expect(() => parseSelector(":where(.a::before)")).toThrow(/cannot be used inside :is\(\)/);
 
   // On the rule itself it is still fine, including alongside a `:where()`.
-  expect(parseSelector(":where(.a).b:hover").pseudo).toBe("hover");
+  expect(parseSelector(":where(.a).b:hover").pseudos).toEqual(["hover"]);
+});
+
+/**
+ * A compound may name several interaction states, and the rule then holds only
+ * while every one does. This parsed for as long as pseudo-classes have existed
+ * here — and was silently wrong: a single `pseudo` slot kept whichever was
+ * written last, so `:checked:disabled` meant `:disabled`. Found by the UA
+ * sheet's disabled-control rules drawing a dot on a disabled unchecked radio.
+ */
+test("a compound with two pseudo-classes requires both states", () => {
+  expect(parseSelector("input:checked:disabled").pseudos).toEqual(["checked", "disabled"]);
+  // Both count in specificity, even the duplicate spelling — per the spec.
+  expect(parseSelector("input:hover:hover").specificity).toEqual([0, 2, 1]);
+  expect(parseSelector("input:hover:hover").pseudos).toEqual(["hover"]);
+  // The variant-level consequence is asserted in cascade.test.ts, where the
+  // run-reading helpers live: the rule contributes to the checked∧disabled
+  // combination and to no other.
 });
 
 /**
@@ -703,6 +791,49 @@ test("a visible axis becomes scrollable when the other axis scrolls", () => {
   expect(declared("width: 10px")).toEqual({ x: VISIBLE, y: VISIBLE });
 });
 
+/**
+ * The viewport rule: `visible` on the window root means `auto`.
+ *
+ * Every case corresponds to a row of the table in BROWSER-FACTS.md
+ * (`probes/viewport-default-scroll.html`, Chromium 152): an unstyled page scrolls while
+ * `html` and `body` both compute `overflow: visible`, an *explicit* `visible` changes
+ * nothing, and `hidden` or `clip` on the root is how page scrolling is turned off.
+ * This is why the rule is a root coercion and not a `body { overflow: auto }` UA rule —
+ * a UA rule would lose to the author's explicit `visible`.
+ */
+test("the window root scrolls by default, like a browser page", () => {
+  const rootDeclared = (css: string): { x: number; y: number } => {
+    const ui = toCompiledUi(compile(`<body><div class="a"></div></body>`, css));
+    const styles = ui.styles as unknown as Record<string, ArrayLike<number>>;
+    // node 0 is the body, whose box is the viewport.
+    const slot = ui.nodes.style[0]!;
+    return { x: styles.overflowX![slot]!, y: styles.overflowY![slot]! };
+  };
+
+  const HIDDEN = 1;
+  const SCROLL = 3;
+  const CLIP = 4;
+
+  // Unstyled: an unstyled window scrolls, with no stylesheet anywhere.
+  expect(rootDeclared("")).toEqual({ x: SCROLL, y: SCROLL });
+
+  // Explicit `visible` changes nothing — measured, and the reason this is not a UA rule.
+  expect(rootDeclared("body { overflow: visible }")).toEqual({ x: SCROLL, y: SCROLL });
+
+  // The author still turns page scrolling off the way a browser author does.
+  expect(rootDeclared("body { overflow: hidden }")).toEqual({ x: HIDDEN, y: HIDDEN });
+
+  // `clip` stays `clip`: on the viewport it behaves as `hidden`, and both spell
+  // "no page scroll", so there is nothing to coerce it to.
+  expect(rootDeclared("body { overflow: clip }")).toEqual({ x: CLIP, y: CLIP });
+
+  // One axis authored: the other is still the viewport's default, not `visible`.
+  expect(rootDeclared("body { overflow-y: hidden }")).toEqual({ x: SCROLL, y: HIDDEN });
+
+  // An authored `auto` on the root is untouched — the rule only rewrites `visible`.
+  expect(rootDeclared("body { overflow-y: auto }")).toEqual({ x: SCROLL, y: SCROLL });
+});
+
 // ---------------------------------------------------------------------------
 // calc(), folded at compile time
 // ---------------------------------------------------------------------------
@@ -730,6 +861,70 @@ test("calc() refuses what it cannot know at compile time", () => {
   expect(() => parseLength("calc(4px + )")).toThrow();
   expect(() => parseLength("calc(4px / 0)")).toThrow(/division by zero/);
   expect(() => parseLength("calc((4px)")).toThrow(/unclosed/);
+});
+
+// ---------------------------------------------------------------------------
+// Lengths layout finishes: percentages and viewport units
+//
+// Sizing, inset and flex-basis carry three channels — px now, a fraction of the
+// containing block, a fraction of the window — and these pin the split.
+// ---------------------------------------------------------------------------
+
+test("a percentage length keeps the fraction and zeroes the px", () => {
+  expect(expand("width", "50%")).toEqual({ width: 0, widthPct: 0.5, widthVp: 0 });
+  expect(expand("width", "calc(1 / 2 * 100%)")).toEqual({ width: 0, widthPct: 0.5, widthVp: 0 });
+  // Tailwind's negative fractions nest a calc inside the negation.
+  expect(expand("top", "calc(calc(1 / 2 * 100%) * -1)")).toEqual({ insetT: 0, insetTPct: -0.5 });
+  expect(expand("flex-basis", "calc(1 / 3 * 100%)")).toEqual({ basis: 0, basisPct: 1 / 3 });
+});
+
+test("a viewport length is a fraction of the window, dvh included", () => {
+  expect(expand("height", "100vh")).toEqual({ height: 0, heightPct: 0, heightVp: 1 });
+  // No browser chrome in a dziri window, so the small/large/dynamic sizes are one.
+  expect(expand("height", "100dvh")).toEqual({ height: 0, heightPct: 0, heightVp: 1 });
+  // The header-offset pattern: viewport and absolute parts sum.
+  expect(expand("height", "calc(100vh - 4rem)")).toEqual({ height: -64, heightPct: 0, heightVp: 1 });
+  expect(expand("width", "calc(100vw - 2rem)")).toEqual({ width: -32, widthPct: 0, widthVp: 1 });
+});
+
+test("a winning declaration clears the channels the loser set", () => {
+  // `width: 50%` then `width: 100px` in one cascade is 100px with *no* fraction —
+  // the second declaration writes all three channels, or the sum would be both.
+  const patch = { ...expand("width", "50%"), ...expand("width", "100px") };
+  expect(patch).toEqual({ width: 100, widthPct: 0, widthVp: 0 });
+});
+
+test("the channels refuse what they cannot express", () => {
+  // Taffy takes a percent or a length and has no calc to sum them, so a
+  // percentage beside an absolute or viewport part is refused, not approximated.
+  expect(() => expand("width", "calc(100% - 2rem)")).toThrow(/mixes a percentage/);
+  // A width cannot be a function of the window's height — the channel is per-axis.
+  expect(() => expand("width", "50vh")).toThrow(/viewport's height/);
+  // vmin/vmax pick an axis at run time; no field can.
+  expect(() => expand("width", "50vmin")).toThrow(/vmin/);
+  // Inset has no viewport channel at all.
+  expect(() => expand("top", "10vh")).toThrow(/viewport/);
+});
+
+test("the inset shorthand spreads percentages over the four channels", () => {
+  expect(expand("inset", "25% 10px")).toEqual({
+    insetT: 0,
+    insetTPct: 0.25,
+    insetR: 10,
+    insetRPct: 0,
+    insetB: 0,
+    insetBPct: 0.25,
+    insetL: 10,
+    insetLPct: 0,
+  });
+});
+
+test("flex: 1 1 0% — how Tailwind spells flex-1 — keeps the basis at zero", () => {
+  expect(expand("flex", "1 1 0%")).toEqual({ grow: 1, shrink: 1, basis: 0, basisPct: 0 });
+  expect(expand("flex", "1 1 50%")).toEqual({ grow: 1, shrink: 1, basis: 0, basisPct: 0.5 });
+  // `flex: 1` after `flex: 1 1 50%` means basis 0 — the fraction goes with it.
+  const patch = { ...expand("flex", "1 1 50%"), ...expand("flex", "1") };
+  expect(patch).toEqual({ grow: 1, shrink: 1, basis: 0, basisPct: 0 });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,100 @@
+# Declared architecture: what this system is *meant* to look like.
+# `tsarch drift` compares this against what the code actually does.
+#
+# Scope note: this models the TypeScript side only. The native engine under
+# native-src/dziri-engine/ (Rust: SDL3 + skia-safe + Taffy) is invisible to
+# ts-arch, so the shared-memory/FFI boundary between `engine` and the Rust
+# crate is a seam the tool cannot check — protocol-guard covers that instead.
+
+system: dziri
+description: "Compile-time UI framework: a Bun-side compiler turns JSX+CSS into static IR tables that a native Rust engine renders. Nothing stays dynamic unless proven it must (see compile-time-gate); src/runtime is being deleted."
+
+# Allowlist: the application is src/ plus the windows authored against it.
+# Excluded by omission: scripts/ (measurement/build tooling — user's call,
+# 2026-08-06), docs/ (Docusaurus site), packages/create-dziri/ (scaffolding;
+# its template/ is a {{name}}-placeholder copy of windows/), characterize/
+# (generated golden fixtures), probes/ (browser-oracle probes), .claude/.
+include:
+  - "src/**"
+  - "windows/**"
+
+components:
+  - id: core
+    responsibility: "The authoring surface and the IR. src/index.ts is the public API windows import; src/ir.ts defines CompiledUi, STYLE_FIELDS and the table shapes every other component speaks; compile.ts / compile-window.ts are the compilation entry points."
+    paths: ["src/**"]
+  - id: compiler
+    responsibility: "Everything decided at compile time: JSX evaluation, CSS parsing and cascade, variants, style interning, list arenas, and emission of the static IR tables. Runs once per build, never per frame."
+    paths: ["src/compiler/**"]
+  - id: runtime
+    responsibility: "The remaining dynamic surface: signals, text/style/list bindings, patches. Held to a ratchet (runtime-surface) and shrinking toward deletion — additions here need the compile-time gate."
+    paths: ["src/runtime/**"]
+  - id: engine
+    responsibility: "The FFI boundary to the native Rust engine: symbol binding, shared-memory table upload, capacity planning. The only component allowed to know how bytes are laid out on the wire."
+    paths: ["src/engine/**"]
+  - id: host
+    responsibility: "The Bun-side process that owns windows: builds per-window state from CompiledUi, runs the frame/event loop against the engine, and wires runtime bindings to engine events."
+    paths: ["src/host/**"]
+  - id: protocol
+    responsibility: "The shared-memory contract between Bun and Rust: schema.ts is the source of truth, generated.ts the emitted constants both sides must agree on (protocol-guard proves they do)."
+    paths: ["src/protocol/**"]
+  - id: cli
+    responsibility: "Developer entry points: compile a project, run dev, package a distributable app with the engine library and worker bundle embedded."
+    paths: ["src/cli/**"]
+  - id: windows
+    responsibility: "The application windows authored against the public API — the framework's own dogfood app. Should only ever import what src/index.ts exports."
+    paths: ["windows/**"]
+
+# Dependencies we intend to exist. A real import with no relation here is
+# drift — either justify it below or fix the code.
+relations:
+  - from: core
+    to: compiler
+    why: "The entry points (compile.ts, compile-window.ts) hand authored sources to the compiler, and index.ts re-exports its user-facing pieces (jsx-runtime, window)."
+  - from: core
+    to: runtime
+    why: "index.ts re-exports the signal primitives that remain part of the authoring API; ir.ts references ReadonlySignal (type-only)."
+  - from: core
+    to: protocol
+    why: "ir.ts defines the IR in terms of the generated protocol constants so table shapes cannot drift from the schema."
+  - from: windows
+    to: core
+    why: "Windows are authored against the public API in src/index.ts — never against compiler or runtime internals directly."
+  - from: compiler
+    to: core
+    why: "The compiler's output type is the IR defined in src/ir.ts."
+  - from: compiler
+    to: runtime
+    why: "Compilation executes authored components once, recording reactive reads through the signal graph (setCompiling / collectReads)."
+  - from: compiler
+    to: protocol
+    why: "values.ts reads the generated animatable-field flags (ANIM_ALL / ANIM_BIT) when compiling style values."
+  - from: runtime
+    to: core
+    why: "Bindings operate on CompiledUi and locate rows via findRow."
+  - from: runtime
+    to: compiler
+    why: "Type-only: list-runtime.ts names the ItemPath shape the compiler emits for list bindings. Erased at compile time, so the compiler<->runtime cycle is not a build cycle. If a value import ever appears here, that is a real inversion — question it."
+  - from: engine
+    to: protocol
+    why: "The FFI layer addresses shared memory exclusively through the generated offsets and enums — never hand-written constants."
+  - from: engine
+    to: core
+    why: "upload.ts serializes the compiled IR (STYLE_FIELDS, INITIAL_STYLE) into the shared tables."
+  - from: host
+    to: engine
+    why: "The host owns the frame loop: it uploads tables and drives the native engine over FFI."
+  - from: host
+    to: runtime
+    why: "The worker wires reactive bindings (text, style patches, lists) to window state. Expected to shrink as the runtime is deleted."
+  - from: host
+    to: core
+    why: "Per-window state is built from and stores CompiledUi."
+  - from: host
+    to: protocol
+    why: "Engine events are decoded via the generated EventKind constants."
+  - from: cli
+    to: compiler
+    why: "Build and dev commands invoke project compilation (compileProject)."
+  - from: cli
+    to: engine
+    why: "Packaging embeds the native library; build.ts asks the engine module for the platform library name."

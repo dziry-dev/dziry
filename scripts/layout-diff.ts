@@ -331,6 +331,47 @@ const CORPUS: Scenario[] = [
 .direct, .deep { height: 20px }
 .sp > div { margin-block-start: 24px }`,
   },
+
+  /**
+   * Percentage lengths, which are the containing block's fraction and not the
+   * window's. The two nest so the answers differ from anything a viewport
+   * reading would give: 50% of 300 is 150, and 50% of *that* is 75.
+   */
+  {
+    name: "percentage-widths-nest",
+    asks: "width: 50% resolves against the parent, twice",
+    width: 600,
+    height: 300,
+    html:
+      `<body><div class="half"><div class="half"></div></div></body>`,
+    css: `.half { width: 50%; height: 40px }`,
+  },
+
+  // The viewport units, which are the window's fraction regardless of the
+  // parent — the parent here is 100px wide, so 100vw can only be 600.
+  {
+    name: "viewport-lengths-ignore-the-parent",
+    asks: "100vw is the window's width, however narrow the parent",
+    width: 600,
+    height: 400,
+    html:
+      `<body><div class="narrow"><div class="screen"></div></div></body>`,
+    css: `.narrow { width: 100px }
+.screen { width: 100vw; height: calc(100vh - 64px); flex-shrink: 0 }`,
+  },
+
+  // A percentage inset, resolved against the containing block — `top: 25%` of a
+  // 160px parent is 40px, and the mixed shorthand exercises the channel split.
+  {
+    name: "percentage-inset-places-the-box",
+    asks: "inset percentages resolve against the containing block",
+    width: 400,
+    height: 300,
+    html:
+      `<body><div class="rel"><div class="box"></div></div></body>`,
+    css: `.rel { position: relative; width: 200px; height: 160px }
+.box { position: absolute; inset: 25% 10px; width: 40px; height: 20px }`,
+  },
 ];
 
 // ── the walk both sides produce ──────────────────────────────────────────────

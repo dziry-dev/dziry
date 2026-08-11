@@ -28,6 +28,7 @@
  * the thread", this handles "the app took the thread".
  */
 import { Engine } from "../engine/host.ts";
+import { EventKind } from "../protocol/generated.ts";
 import { alive, createChannel, DIRTY, stop, takeDirty, tryAcquire, release } from "./channel.ts";
 import type { ToMain, ToWorker, WindowRequest } from "./messages.ts";
 import { applyMinSize, sizeFrom } from "./registry.ts";
@@ -169,6 +170,14 @@ export async function runMain(options: MainOptions): Promise<void> {
 
       case "input":
         engine.setInputState(message.hovered, message.pressed, message.focused);
+        break;
+
+      /* The dialog runs *here*, on the thread that initialised video, because SDL will not
+         show one anywhere else. It blocks this loop until the user dismisses it, so the
+         window stops repainting — which is what a modal is, and what a browser's `alert()`
+         does to a page. The app thread carried on the moment it posted. */
+      case "alert":
+        engine.alert(message.message, message.title, message.level);
         break;
 
       case "error":
@@ -482,7 +491,7 @@ export async function runMain(options: MainOptions): Promise<void> {
 
     const events = engine.drainEvents();
     if (events.length > 0) {
-      const quit = events.some((e) => e.kind === 0 /* EventKind.QUIT */);
+      const quit = events.some((e) => e.kind === EventKind.QUIT);
       /* Forwarded whole, including the quit, so a handler on the far side still
          sees the events that arrived alongside it. */
       send({ t: "events", events });
