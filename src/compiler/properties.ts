@@ -1405,6 +1405,12 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   "flex-shrink": { field: "shrink", parse: finite("flex-shrink") },
   "flex-basis": basisLen,
 
+  order: { field: "order", parse: (v) => {
+    const n = Number(v);
+    if (!Number.isFinite(n) || !Number.isInteger(n)) throw new CssError(`bad order "${v}"`);
+    return n;
+  } },
+
   gap: gapShorthand,
   // The pre-`gap` spelling, which Tailwind still emits for `gap-*` in some configs.
   "grid-gap": gapShorthand,

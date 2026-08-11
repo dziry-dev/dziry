@@ -244,6 +244,14 @@ input[type="text"] {
     width: 260px;
 }
 
+/* A repeating row's cell: three of these share a line, so they cannot each be 260px.
+   Written as a rule rather than as a `w-*` utility on the element, and the reason is
+   specificity: `input[type="text"]` above is (0,1,1) — a type selector plus an attribute one
+   — which out-specifies a lone utility class at (0,1,0). So `className="w-28"` loses to the
+   sheet and the field stays wide, which is exactly what it did until this rule existed. This
+   ties at (0,1,1) and wins by order. */
+input.cell { width: 96px; }
+
 input[type="text"]:hover { border-color: #52525b; }
 input[type="text"]:disabled { color: #52525b; }
 

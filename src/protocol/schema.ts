@@ -367,6 +367,8 @@ const STYLES: Table = {
     { name: "flexBasis", type: "f32", affects: "layout", ir: "basis" },
     // Fraction of the containing block, resolved by Taffy — see `widthPct`.
     { name: "flexBasisPct", type: "f32", affects: "layout", ir: "basisPct" },
+    // `order` — flexbox item order. Initial value is 0. Affects layout.
+    { name: "order", type: "i32", affects: "layout" },
     { name: "gapRow", type: "f32", affects: "layout" },
     { name: "gapColumn", type: "f32", affects: "layout", ir: "gapCol" },
     { name: "gridColumns", type: "u16", affects: "layout", doc: "repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N", ir: "gridCols" },
@@ -1490,7 +1492,7 @@ export const ENUMS: EnumDef[] = [
  * measure callback like `fontSize`. `fontFamily` is a generic-family enum, not
  * a name — the engine resolves one concrete face per generic at startup.
  */
-export const PROTOCOL_VERSION = 36;
+export const PROTOCOL_VERSION = 37;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

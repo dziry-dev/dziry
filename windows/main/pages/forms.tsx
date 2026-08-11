@@ -49,8 +49,15 @@ const FIELD =
     'field w-64 rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100';
 const NOTE = 'note text-xs font-semibold text-rose-400';
 const WRAP = 'flex flex-col gap-1';
-/** Narrower than `FIELD`, because three of these share a row. */
-const CELL = 'field w-28 rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100';
+/**
+ * A row's cell. Narrower than `FIELD`, because three of these share a line.
+ *
+ * `cell` rather than a `w-*` utility: `input[type="text"]` in the sheet is a type selector plus
+ * an attribute one, which out-specifies a lone utility class — so a `w-28` here would lose to
+ * the sheet's 260px and the row would overflow. The width is in `app.css` beside the rule it
+ * has to beat.
+ */
+const CELL = 'field cell rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100';
 const SMALL =
     'self-start rounded-lg bg-zinc-700 px-2 py-1 text-xs font-semibold text-zinc-100';
 
@@ -74,10 +81,11 @@ type Job = { id: number; title: string; start: string; end: string };
  */
 export const jobs = signal<Job[]>([
     { id: 1, title: 'line cook', start: '2019', end: '2021' },
+    { id: 2, title: 'dishwasher', start: '2018', end: '2019' },
 ]);
 
 /** Ids rather than indices, so removing a row cannot renumber the ones after it. */
-let nextJobId = 2;
+let nextJobId = 3;
 
 /**
  * Appends a row.
@@ -325,19 +333,19 @@ export default function Forms() {
                                     <div className="flex flex-row items-center gap-2">
                                         <input
                                             type="text"
-                                            placeholder="title"
+                                            
                                             className={CELL}
                                             bind:value={job.title}
                                         />
                                         <input
                                             type="text"
-                                            placeholder="from"
+                                            
                                             className={CELL}
                                             bind:value={job.start}
                                         />
                                         <input
                                             type="text"
-                                            placeholder="to"
+                                            
                                             className={CELL}
                                             bind:value={job.end}
                                         />

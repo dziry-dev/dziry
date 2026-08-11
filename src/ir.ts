@@ -222,6 +222,8 @@ export const INITIAL_STYLE: ComputedStyle = {
   shrink: 1,
   basis: AUTO,
   basisPct: 0,
+  // `order` for flexbox items. Initial is 0. Integer values determine layout order.
+  order: 0,
   gapRow: 0,
   gapCol: 0,
   gridCols: 0,
