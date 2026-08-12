@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 42;
+export const PROTOCOL_VERSION = 43;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 42;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x374c3f28;
+export const SCHEMA_HASH = 0xd3379ef3;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -34,6 +34,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
   controls: [4, 1, 4, 1, 4, 4],
   layout: [4, 4, 4, 4],
   strings: [4, 4],
+  images: [4, 4],
 };
 
 /** Field names per table, in descriptor order — used to name a mismatch. */
@@ -49,6 +50,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
   controls: ["node", "kind", "group", "flags", "label", "rows"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
+  images: ["node", "src"],
 };
 
 /**
@@ -121,7 +123,7 @@ export type AnimatableField = keyof typeof ANIM_BIT;
 /** Every animatable field's mask bit at once — what `transition-property: all` means here. */
 export const ANIM_ALL = 0xffffffff;
 
-export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "tweens", "keyframes", "controls", "layout", "strings"] as const;
+export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "tweens", "keyframes", "controls", "layout", "strings", "images"] as const;
 export type TableName = (typeof TABLE_NAMES)[number];
 
 /** Field index per table, in descriptor order. */
@@ -362,6 +364,11 @@ export const F = {
     offset: 0,
     length: 1,
   },
+  /** Image references per node. Sparse; the engine owns the decoded bitmaps. */
+  images: {
+    node: 0, // Sorted ascending, for binary search
+    src: 1, // String slot of the URL or file path
+  },
 } as const;
 
 /** Field counts, asserted against the engine's descriptor at startup. */
@@ -377,6 +384,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
   controls: 6,
   layout: 4,
   strings: 2,
+  images: 2,
 };
 
 /** Typed-array constructor per field, used to wrap the engine's memory. */
@@ -392,6 +400,7 @@ export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   controls: [Int32Array, Uint8Array, Int32Array, Uint8Array, Int32Array, Int32Array],
   layout: [Float32Array, Float32Array, Float32Array, Float32Array],
   strings: [Uint32Array, Uint32Array],
+  images: [Int32Array, Int32Array],
 };
 
 /** Shape of the wrapped tables once the descriptor has been read. */
@@ -620,6 +629,10 @@ export type SharedTables = {
   strings: {
     offset: Uint32Array;
     length: Uint32Array;
+  };
+  images: {
+    node: Int32Array;
+    src: Int32Array;
   };
 };
 
@@ -853,6 +866,8 @@ export const ControlKind = {
   BUTTON: 5,
   LINK: 6,
   LISTBOX: 7,
+  RANGE: 8,
+  FILE: 9,
 } as const;
 export type ControlKind = (typeof ControlKind)[keyof typeof ControlKind];
 

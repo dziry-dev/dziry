@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 42;
+pub const PROTOCOL_VERSION: u32 = 43;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,9 +15,9 @@ pub const PROTOCOL_VERSION: u32 = 42;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0x374c3f28;
+pub const SCHEMA_HASH: u32 = 0xd3379ef3;
 
-pub const TABLE_COUNT: usize = 11;
+pub const TABLE_COUNT: usize = 12;
 
 /// Field count of the widest table. The (table, field) lookup index uses this as
 /// its stride, so it cannot be out-grown by adding fields to a table.
@@ -34,6 +34,7 @@ pub const TABLE_NAMES: [&str; TABLE_COUNT] = [
     "controls",
     "layout",
     "strings",
+    "images",
 ];
 
 #[repr(u32)]
@@ -50,6 +51,7 @@ pub enum Table {
     Controls = 8,
     Layout = 9,
     Strings = 10,
+    Images = 11,
 }
 
 impl Table {
@@ -70,12 +72,13 @@ pub const FIELD_COUNTS: [usize; TABLE_COUNT] = [
     controls::FIELD_COUNT,
     layout::FIELD_COUNT,
     strings::FIELD_COUNT,
+    images::FIELD_COUNT,
 ];
 
 /// How each table is sized, so the engine can turn a capacity request into byte
 /// spans without a hand-written mapping that could drift from the schema.
 pub const SIZED_BY: [&str; TABLE_COUNT] = [
-    "nodes", "styles", "own", "own", "own", "own", "own", "own", "own", "nodes", "strings",
+    "nodes", "styles", "own", "own", "own", "own", "own", "own", "own", "nodes", "strings", "own",
 ];
 
 /// Element size per field, indexed by table. Empty for an unknown table.
@@ -92,6 +95,7 @@ pub fn elem_sizes(table: usize) -> &'static [usize] {
         8 => &controls::ELEM_SIZES,
         9 => &layout::ELEM_SIZES,
         10 => &strings::ELEM_SIZES,
+        11 => &images::ELEM_SIZES,
         _ => &[],
     }
 }
@@ -110,6 +114,7 @@ pub fn field_names(table: usize) -> &'static [&'static str] {
         8 => &controls::FIELD_NAMES,
         9 => &layout::FIELD_NAMES,
         10 => &strings::FIELD_NAMES,
+        11 => &images::FIELD_NAMES,
         _ => &[],
     }
 }
@@ -665,6 +670,17 @@ pub mod strings {
     pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["offset", "length"];
 }
 
+/// Image references per node. Sparse; the engine owns the decoded bitmaps.
+pub mod images {
+    /// Field indices, in descriptor order.
+    pub const NODE: usize = 0;
+    pub const SRC: usize = 1;
+
+    pub const FIELD_COUNT: usize = 2;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 4];
+    pub const FIELD_NAMES: [&str; FIELD_COUNT] = ["node", "src"];
+}
+
 pub mod flags {
     pub const INTERACTIVE: u8 = 1 << 0;
     pub const MEASURABLE: u8 = 1 << 1;
@@ -875,6 +891,8 @@ pub mod control_kind {
     pub const BUTTON: u8 = 5;
     pub const LINK: u8 = 6;
     pub const LISTBOX: u8 = 7;
+    pub const RANGE: u8 = 8;
+    pub const FILE: u8 = 9;
 }
 
 /// Return code of every FFI entry point. Negative is failure, and the detail is in `dziri_last_error`.

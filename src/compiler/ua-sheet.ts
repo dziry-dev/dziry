@@ -264,9 +264,13 @@ button, input[type="submit"], input[type="reset"], input[type="button"] {
    column's stretch makes them page-wide bars. dziri has no fit-content width, so
    align-self:flex-start is the spelling that stops the stretch — in a row parent
    it top-aligns instead, which is roughly where a baseline would put them. An
-   author's own align-self or width wins on origin, like everything here. */
+   author's own align-self or width wins on origin, like everything here.
+
+   img joins them as a replaced element: a browser never stretches one to the
+   line — its width is its content's, which here means the bitmap's — and without
+   this a pending image was a page-wide empty bar before its bytes arrived. */
 label { flex-direction: row; align-items: center }
-button, select { align-self: flex-start }
+button, select, img { align-self: flex-start }
 
 /* 13x13 with a 3px margin, measured; the radio's missing margin-bottom is
    Chrome's own quirk, kept because matching it is cheaper than remembering why

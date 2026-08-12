@@ -454,6 +454,18 @@ export type BuiltControl = {
 };
 
 /**
+ * One row of the images table: this node renders the bitmap `src` resolves to.
+ *
+ * `src` is a string slot, not a string: the wire format is the slot table. The
+ * bytes themselves never enter the tables — see `images.rs`.
+ */
+export type BuiltImage = {
+  node: number;
+  /** String slot of the URL or file path. */
+  src: number;
+};
+
+/**
  * `ControlKind` by tag and `type` attribute.
  *
  * Only the kinds whose activation *does* something are here. The other twenty input
@@ -504,6 +516,33 @@ function controlKindOf(el: Element, path: Element[] = []): number {
 /** `type`, lowercased; `""` when absent, which for an `<input>` means `text`. */
 function typeOf(el: Element): string {
   return (el.attrs.get("type") ?? "").toLowerCase();
+}
+
+/**
+ * HTML's *presentational hints*: attributes that style the element at the very
+ * bottom of the cascade, losing to every rule and to inline `style=`.
+ *
+ * Only `<img>`'s `width` and `height` are honoured — the pair a replaced element
+ * cannot be sized without while its bytes are still fetching. They arrive as
+ * `defaults` in `resolveVariants`, which fills only properties no rule set, so
+ * `img { width: 100% }` and `style="width: 40px"` both win, exactly as in a
+ * browser.
+ *
+ * The value grammar is HTML's *dimension* rule: a non-negative integer, read as
+ * pixels. `width="50%"` is valid HTML with a percentage meaning, which the style
+ * table's plain-pixel `width` cannot express for an image that has not loaded —
+ * so it is not a hint here, and the attribute is ignored rather than misread.
+ */
+function presentationalHints(el: Element): Map<string, string> | undefined {
+  if (el.tag !== "img") return undefined;
+  const hints = new Map<string, string>();
+  for (const attr of ["width", "height"] as const) {
+    const raw = el.attrs.get(attr);
+    if (raw !== undefined && /^\d+$/.test(raw.trim())) {
+      hints.set(attr, `${raw.trim()}px`);
+    }
+  }
+  return hints.size > 0 ? hints : undefined;
 }
 
 /** The elements `disabled` means something on — the ones a press can reach. */
@@ -725,6 +764,8 @@ export type CompileResult = {
   keyframes: BuiltKeyframe[];
   /** Form controls, ascending by node. */
   controls: BuiltControl[];
+  /** Image references, ascending by node. */
+  images: BuiltImage[];
   /** Every `<form>`, with Enter's outcome already resolved. */
   forms: BuiltForm[];
   /**
@@ -945,6 +986,8 @@ export function compileTree(
    */
   const nodeOfEl = new Map<Element, number>();
   const controls: BuiltControl[] = [];
+  /** Image references, ascending by node — the walk is document order. */
+  const images: BuiltImage[] = [];
   /** Labels in document order, with their node, for the pass below. */
   const labelEls: Array<{ el: Element; node: number }> = [];
   /**
@@ -1176,12 +1219,15 @@ export function compileTree(
     decls: Map<string, string>;
   } {
     const inline = (decls: Map<string, string>) => {
-      if (element === null) return withInline(decls, el);
       if (defaults !== undefined) {
         for (const [property, value] of defaults) {
           if (!decls.has(property)) decls.set(property, value);
         }
       }
+      // Presentational hints (`width`/`height` on an `<img>`) ride this hook too:
+      // they lose to every rule the cascade found, because they are filled in only
+      // where nothing was declared — which is exactly what HTML says they are.
+      if (element === null) return withInline(decls, el);
       return decls;
     };
 
@@ -1682,7 +1728,7 @@ export function compileTree(
       parentVars,
       where,
       null,
-      undefined,
+      presentationalHints(el),
       selectionColors(path, inherited, parentVars, where),
       // The node with no parent is the window root, and its box is the viewport.
       parent === -1,
@@ -1818,6 +1864,16 @@ export function compileTree(
     }
 
     if (el.tag === "label") labelEls.push({ el, node: self });
+
+    // An `<img>` is a reference, not content: the row says where the bytes come
+    // from, and the host + engine do the rest. `srcset` and sizes-selection are
+    // deliberately absent — one URL per image, until a measured need says
+    // otherwise. A missing or empty `src` is a broken image by HTML's own rules,
+    // and earns no row: there is nothing to fetch.
+    if (el.tag === "img") {
+      const src = el.attrs.get("src")?.trim();
+      if (src) images.push({ node: self, src: internString(src) });
+    }
     const controlKind = controlKindOf(el, path);
     if (needsControlRow(el, path)) {
       // Set by `walkPicker` before this option was walked, so it is here for every
@@ -2232,6 +2288,7 @@ export function compileTree(
   // After both resolve passes, because `activates` and a control's `label` are node ids
   // those passes fill in — replicating before them would copy two -1s.
   replicateListControls(nodes, controls, lists);
+  replicateListImages(images, lists);
   // After `replicateListControls` for the same reason `resolveDisabled` is: a field's
   // control row is an index into a table that pass appends to and re-sorts.
   const forms = resolveForms(rootEl, nodeOfEl, fieldSpecs, controls, ownership, fieldGroups, fieldArrays, (m) => warnings.push(m));
@@ -2263,6 +2320,7 @@ export function compileTree(
     tweens: tweens.tweens,
     keyframes: tweens.keyframes,
     controls,
+    images,
     forms,
     fieldCells,
     disabled,
@@ -2851,6 +2909,38 @@ function replicateListControls(
 }
 
 /**
+ * The images table's half of arena replication — see `replicateListControls`,
+ * which this shadows. An `<img>` inside a `map()` row is one template row and
+ * `capacity` rendered copies, and without this every row past the first drew an
+ * empty box: same bug shape as the checkbox that only row 0 could toggle.
+ *
+ * `src` copies unchanged rather than shifting, and that is the difference from
+ * `label` above that matters: a string slot is shared, so every replica pointing
+ * at the same slot is correct *and* is what makes the engine's per-`src` decode
+ * cache fire — one fetch for forty rows of the same avatar.
+ */
+function replicateListImages(images: BuiltImage[], lists: BuiltList[]): void {
+  let added = false;
+
+  for (const list of lists) {
+    const { arenaStart, stride, capacity } = list;
+    const end = arenaStart + stride;
+    const template = images.filter((i) => i.node >= arenaStart && i.node < end);
+
+    for (let item = 1; item < capacity; item++) {
+      const shift = item * stride;
+      for (const img of template) {
+        images.push({ node: img.node + shift, src: img.src });
+        added = true;
+      }
+    }
+  }
+
+  // Sorted for the engine's binary search, same as the controls table.
+  if (added) images.sort((a, b) => a.node - b.node);
+}
+
+/**
  * Turns each `disabled={signal}` into the set of control rows it writes.
  *
  * Rows rather than a node id, because that is what the runtime needs and resolving it here
@@ -3068,6 +3158,7 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     tweens: tweenTable(result.tweens),
     keyframes: keyframeTable(result.keyframes),
     controls: controlTable(result.controls),
+    images: imageTable(result.images),
     root: result.root,
   };
 }
@@ -3086,6 +3177,14 @@ function controlTable(controls: BuiltControl[]): CompiledUi["controls"] {
     flags: Uint8Array.from(controls, (c) => c.flags),
     label: Int32Array.from(controls, (c) => c.label),
     rows: Int32Array.from(controls, (c) => c.rows),
+  };
+}
+
+function imageTable(images: BuiltImage[]): CompiledUi["images"] {
+  return {
+    count: images.length,
+    node: Int32Array.from(images, (i) => i.node),
+    src: Int32Array.from(images, (i) => i.src),
   };
 }
 
@@ -3601,7 +3700,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -3812,6 +3911,17 @@ export const controls = {
   label: ${typedArray("Int32Array", controlRows.map((c) => c.label))},
   rows: ${typedArray("Int32Array", controlRows.map((c) => c.rows))},
 } satisfies ControlTable;
+
+/**
+ * Image references, sparse and sorted by node. Only the *reference* crosses:
+ * the host resolves each src — a file read or a fetch — and hands the bytes to
+ * the engine over FFI. See images.rs.
+ */
+export const images = {
+  count: ${result.images.length},
+  node: ${typedArray("Int32Array", result.images.map((i) => i.node))},
+  src: ${typedArray("Int32Array", result.images.map((i) => i.src))},
+} satisfies ImageTable;
 
 export const root: number = ${root};
 ${routing ? routingSource(routing) : ""}`;

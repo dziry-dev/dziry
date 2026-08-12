@@ -52,6 +52,7 @@ fn config(nodes: u32, styles: u32) -> EngineConfig {
         control_capacity: 4,
         string_capacity: 1,
         string_bytes: 32,
+        image_capacity: 1,
         root: 0,
         windowed: 0,
         decorated: 1,

@@ -13,11 +13,13 @@
 //! resolve here beyond picking an index.
 
 use skia_safe::textlayout::TextAlign;
-use skia_safe::{Canvas, Color, Matrix, Paint, PaintStyle, Point, RRect, Rect};
+use skia_safe::{Canvas, Color, FilterMode, Matrix, MipmapMode, Paint, PaintStyle, Point, RRect, Rect, SamplingOptions};
 
 use crate::anim::{Anims, Blend};
 use crate::caret::{boundary_at, Carets, Motion};
 use crate::controls::{Activation, Controls};
+use crate::error::EngineError;
+use crate::images::Images;
 use crate::protocol::{self, control_flags, display, node_kind, predicate};
 use crate::select::{self, Selects};
 use crate::tables::Tables;
@@ -855,6 +857,14 @@ pub struct Painter {
     /// label redirect is consulted while drawing a run — so both of its jobs are
     /// questions this type already asks per node. See `select.rs`.
     selects: Selects,
+    /// Decoded bitmaps, and which node each belongs to.
+    ///
+    /// The fifth of the same kind, and for the paint half of the same reason:
+    /// "does this node have an image ready" is a per-node drawing question. The
+    /// other half is layout's — an `<img>`'s intrinsic size — which is why
+    /// `LayoutTree::compute` takes this as a parameter rather than reaching
+    /// through the painter. See `images.rs`.
+    images: Images,
 }
 
 impl Default for Painter {
@@ -895,6 +905,7 @@ impl Painter {
             controls: Controls::new(),
             carets: Carets::new(),
             selects: Selects::new(),
+            images: Images::new(),
         }
     }
 
@@ -904,6 +915,22 @@ impl Painter {
         self.anims.rescan(tables, node_count);
         self.controls.rescan(tables, node_count);
         self.selects.rescan(node_count);
+        self.images.rescan(tables, node_count);
+    }
+
+    /// The decoded images, for layout's intrinsic sizing and the FFI boundary.
+    ///
+    /// Exposed whole rather than question-by-question: layout wants the size and
+    /// the engine's `provide_image` wants the mutation, and one accessor each
+    /// way would re-state `images.rs`'s surface here.
+    pub fn images(&self) -> &Images {
+        &self.images
+    }
+
+    /// Decodes and stores an image's bytes; returns the nodes whose size changed.
+    /// See [`Images::provide`].
+    pub fn provide_image(&mut self, src: &str, bytes: &[u8]) -> Result<Vec<i32>, EngineError> {
+        self.images.provide(src, bytes)
     }
 
     /// Runs the activation behaviour for a press on `node`. See `Controls::activate`.
@@ -2343,6 +2370,33 @@ impl Painter {
             );
         }
 
+        // Replaced content: an `<img>`'s bitmap fills the *content* box — inside
+        // the border and the padding, exactly where CSS puts a replaced element's
+        // pixels. Over the background, and nothing of its own paints over it.
+        // object-fit is `fill`: the default, and the only value until a rule can
+        // name another.
+        if let Some(image) = self.images.for_node(node) {
+            let content = Rect::from_xywh(
+                x + bw[3] + g(f::PAD_LEFT),
+                y + bw[0] + g(f::PAD_TOP),
+                (w - bw[3] - bw[1] - g(f::PAD_LEFT) - g(f::PAD_RIGHT)).max(0.0),
+                (h - bw[0] - bw[2] - g(f::PAD_TOP) - g(f::PAD_BOTTOM)).max(0.0),
+            );
+            if content.width() > 0.0 && content.height() > 0.0 {
+                // Linear-with-mipmaps, which is what "the browser scaled it"
+                // looks like; the default nearest-neighbour read as a bug on
+                // every downscaled photo.
+                let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
+                canvas.draw_image_rect_with_sampling_options(
+                    image,
+                    None,
+                    content,
+                    sampling,
+                    &self.fill,
+                );
+            }
+        }
+
         // Through the select layer's redirect, so a `<selectedcontent>` reads the
         // committed option's string rather than the one the compiler baked. Free for
         // every other node — the redirect table is empty until something commits.
@@ -3043,6 +3097,7 @@ mod tests {
             controls: 4,
             strings: 2,
             string_bytes: 16,
+            images: 1,
         });
 
         let nodes = Table::Nodes as usize;
@@ -3136,6 +3191,7 @@ mod tests {
             controls: 4,
             strings: 1,
             string_bytes: 16,
+            images: 1,
         });
 
         let nodes = Table::Nodes as usize;
@@ -3285,6 +3341,7 @@ mod tests {
             controls: 4,
             strings: 1,
             string_bytes: 16,
+            images: 1,
         });
         tables.set_i32(NODES, protocol::nodes::PARENT, 0, 1);
         tables.set_i32(NODES, protocol::nodes::PARENT, 1, 0);
@@ -3318,6 +3375,7 @@ mod tests {
             controls: 4,
             strings: 2,
             string_bytes: 16,
+            images: 1,
         });
         let s = Table::Styles as usize;
         // The identities, which are 1 rather than 0 for the scales — the whole
@@ -3533,6 +3591,7 @@ mod tests {
             controls: 1,
             strings: 2,
             string_bytes: 32,
+            images: 1,
         });
 
         let nodes = Table::Nodes as usize;

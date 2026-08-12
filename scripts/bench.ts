@@ -142,6 +142,7 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     tweens: m.tweens,
     keyframes: m.keyframes,
     controls: m.controls,
+    images: m.images,
     root: m.root,
   };
 }

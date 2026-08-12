@@ -192,6 +192,7 @@ export function bindSpans(spans: readonly Span[]): Bound {
     tweens: capacity["tweens"] ?? 0,
     keyframes: capacity["keyframes"] ?? 0,
     controls: capacity["controls"] ?? 0,
+    images: capacity["images"] ?? 0,
     strings: capacity["strings"] ?? 0,
     stringBytes: capacity["stringBytes"] ?? 0,
   };

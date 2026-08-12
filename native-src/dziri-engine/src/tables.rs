@@ -76,6 +76,7 @@ pub struct Capacities {
     pub controls: u32,
     pub strings: u32,
     pub string_bytes: u32,
+    pub images: u32,
 }
 
 impl Capacities {
@@ -96,6 +97,7 @@ impl Capacities {
                 "tweens" => self.tweens,
                 "keyframes" => self.keyframes,
                 "controls" => self.controls,
+                "images" => self.images,
                 other => unreachable!("table {other} has no capacity rule"),
             },
         }
@@ -794,6 +796,7 @@ impl Tables {
             controls: self.caps.controls.max(want.controls),
             strings: self.caps.strings.max(want.strings),
             string_bytes: self.caps.string_bytes.max(want.string_bytes),
+            images: self.caps.images.max(want.images),
         };
         if caps == self.caps {
             return false;
@@ -846,6 +849,7 @@ mod tests {
             controls: 4,
             strings: 4,
             string_bytes: 64,
+            images: 1,
         }
     }
 

@@ -37,6 +37,7 @@ fn config(nodes: u32, styles: u32) -> EngineConfig {
         control_capacity: 4,
         string_capacity: 8,
         string_bytes: 256,
+        image_capacity: 1,
         root: 0,
         // Headless: no SDL, no window, no display needed. The same pipeline runs.
         windowed: 0,

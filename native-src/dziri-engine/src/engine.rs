@@ -191,6 +191,8 @@ pub struct EngineConfig {
     pub control_capacity: u32,
     pub string_capacity: u32,
     pub string_bytes: u32,
+    /// Rows in the images table — one per `<img>`, not per node.
+    pub image_capacity: u32,
     pub root: u32,
     /// Non-zero opens a window. Zero renders offscreen, for tests and
     /// screenshots.
@@ -343,6 +345,7 @@ impl Engine {
             controls: config.control_capacity.max(1),
             strings: config.string_capacity.max(1),
             string_bytes: config.string_bytes.max(1),
+            images: config.image_capacity.max(1),
         };
 
         let surface = raster_surface(width, height)?;
@@ -622,6 +625,28 @@ impl Engine {
         };
     }
 
+    /// Decodes and stores the bytes of an image `src`, then invalidates what
+    /// that changed.
+    ///
+    /// A ready image is a *layout* change, not a paint one: an `<img>` with no
+    /// CSS size measured zero while pending and measures its natural size now,
+    /// which is the flag-flip relayout `relayout_pending` exists for — the
+    /// engine caused it, so no diff will ever show it. Each affected node is
+    /// marked dirty individually rather than the whole tree, the same surgery
+    /// a select commit gets.
+    pub fn provide_image(&mut self, src: &str, bytes: &[u8]) -> Result<(), EngineError> {
+        let grown = self.painter.provide_image(src, bytes)?;
+        if grown.is_empty() {
+            return Ok(());
+        }
+        for node in grown {
+            self.tree.mark_dirty(node as usize);
+        }
+        self.relayout_pending = true;
+        self.needs_paint = true;
+        Ok(())
+    }
+
     /// Moves every transition and animation `dt` seconds forward.
     ///
     /// Returns whether anything moved, which is what decides the repaint — the same
@@ -709,6 +734,7 @@ impl Engine {
             &self.tables,
             &mut self.measurer,
             self.painter.label_redirects(),
+            self.painter.images(),
             self.width as f32,
             self.height as f32,
         )?;

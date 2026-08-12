@@ -477,6 +477,26 @@ export function emptyControlTable(): ControlTable {
 }
 
 /**
+ * Which nodes are images, and where their bytes come from. Sparse and sorted by
+ * `node`, for the reason `controls` is — and deliberately *only* a reference:
+ * the bytes never cross the shared arena. The host resolves `src` (a file read
+ * or a fetch, both Bun's) and hands the bytes to `dziri_engine_provide_image`,
+ * which decodes once per distinct `src` and keeps the bitmap engine-side. See
+ * `images.rs` and `schema.ts`'s `IMAGES`.
+ */
+export type ImageTable = {
+  count: number;
+  /** Sorted ascending, for binary search. */
+  node: Int32Array;
+  /** String slot of the URL or file path. */
+  src: Int32Array;
+};
+
+export function emptyImageTable(): ImageTable {
+  return { count: 0, node: new Int32Array(0), src: new Int32Array(0) };
+}
+
+/**
  * Conditional styling as a predicate mask, stored sparsely.
  *
  * Dense per-node arrays were nearly all `-1`: on a 300-item todo page only 3 of
@@ -1033,6 +1053,7 @@ export type CompiledUi = {
   tweens: TweenTable;
   keyframes: KeyframeTable;
   controls: ControlTable;
+  images: ImageTable;
   root: number;
 };
 

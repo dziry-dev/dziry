@@ -21,6 +21,7 @@ use taffy::style::{
 use taffy::{Point, Rect, Size, TaffyTree};
 
 use crate::error::EngineError;
+use crate::images::Images;
 use crate::protocol::{
     self, align, control_kind, display as display_enum, flex_direction, flex_wrap, justify,
 };
@@ -590,11 +591,15 @@ impl LayoutTree {
     /// would be drawn inside a box measured for the old one, which is at its worst when
     /// the two labels differ most. Empty for a document that has never committed a
     /// selection, so the common case is a length check per measured node.
+    ///
+    /// `images` is the other half of the same signature point: an `<img>`'s intrinsic
+    /// size lives engine-side, and the measure callback is the only place Taffy asks.
     pub fn compute(
         &mut self,
         tables: &Tables,
         measurer: &mut Measurer,
         labels: &[i32],
+        images: &Images,
         width: f32,
         height: f32,
     ) -> Result<(), EngineError> {
@@ -684,6 +689,33 @@ impl LayoutTree {
 
                 let node_flags = flags.get(node).copied().unwrap_or(0);
                 let editable = node_flags & protocol::flags::EDITABLE != 0;
+
+                // A replaced element with a decoded image: the intrinsic size is
+                // the natural size, and CSS's aspect rule applies — one known
+                // dimension derives the other from the bitmap's ratio rather than
+                // from any default. Before the text paths, because an image node
+                // carries no text at all. A pending or failed image asks nothing
+                // here and keeps its CSS box, which is the zero case below.
+                if let Some((nw, nh)) = images.natural_size(node) {
+                    return match (known.width, known.height) {
+                        (Some(w), Some(h)) => Size {
+                            width: w,
+                            height: h,
+                        },
+                        (Some(w), None) => Size {
+                            width: w,
+                            height: w * nh / nw,
+                        },
+                        (None, Some(h)) => Size {
+                            width: h * nw / nh,
+                            height: h,
+                        },
+                        (None, None) => Size {
+                            width: nw,
+                            height: nh,
+                        },
+                    };
+                }
 
                 let style = style_of_node.get(node).copied().unwrap_or(0) as usize;
                 let spec = FontSpec::new(

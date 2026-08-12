@@ -28,16 +28,16 @@ const { i32, u32, f32, ptr: PTR } = FFIType;
 /**
  * Matches `EngineConfig` in `engine.rs`, including the pointer's alignment padding.
  *
- * 14 `u32` (56) + two `u8` and two reserved (60) + 4 bytes of padding so the title
- * pointer lands 8-aligned at 64 (72) + a `u32` length (76) + 4 to a multiple of 8.
+ * 16 `u32` (64) + two `u8` and two reserved (68) + 4 bytes of padding so the title
+ * pointer lands 8-aligned at 72 (80) + a `u32` length (84) + 4 to a multiple of 8.
  *
  * The two extra `u32` over v11 are `tween_capacity` and `keyframe_capacity`, and
  * they moved every byte after them — which is one of the reasons v12 is a version
- * bump and not only a hash change. `dziri_protocol_version` takes no arguments, so
- * it is still answerable by a binary of any vintage and the refusal happens before
- * anything reads this struct.
+ * bump and not only a hash change. v43's `image_capacity` did the same again.
+ * `dziri_protocol_version` takes no arguments, so it is still answerable by a
+ * binary of any vintage and the refusal happens before anything reads this struct.
  */
-const CONFIG_SIZE = 80;
+const CONFIG_SIZE = 88;
 /**
  * Matches `Event` in `engine.rs`: seven 4-byte fields plus 32 inline text bytes.
  *
@@ -93,6 +93,7 @@ const SYMBOLS = {
   dziri_engine_take_png: { args: [u32, PTR, u32], returns: i32 },
   dziri_engine_font_family: { args: [u32, PTR, u32, PTR], returns: i32 },
   dziri_engine_alert: { args: [u32, u32, PTR, u32, PTR, u32], returns: i32 },
+  dziri_engine_provide_image: { args: [u32, PTR, u32, PTR, u32], returns: i32 },
   dziri_engine_last_frame_ms: { args: [u32, PTR], returns: i32 },
   dziri_engine_panic_for_testing: { args: [u32], returns: i32 },
 } as const;
@@ -242,6 +243,7 @@ export type EngineOptions = {
   tweens: number;
   keyframes: number;
   controls: number;
+  images: number;
   strings: number;
   stringBytes: number;
   root?: number;
@@ -359,14 +361,15 @@ export class Engine {
     u32v[11] = options.controls;
     u32v[12] = options.strings;
     u32v[13] = options.stringBytes;
-    u32v[14] = options.root ?? 0;
-    u8v[60] = options.windowed === false ? 0 : 1;
-    u8v[61] = options.decorated === false ? 0 : 1;
-    /* The title pointer sits at byte 64, not 64-adjacent by accident: `#[repr(C)]`
-       aligns it to 8, and with `controls` added the two flag bytes plus their two
-       reserved bytes now fill 60..64 exactly rather than leaving a 4-byte hole. */
-    u64v[8] = BigInt(ptr(title));
-    u32v[18] = title.length;
+    u32v[14] = options.images;
+    u32v[15] = options.root ?? 0;
+    u8v[64] = options.windowed === false ? 0 : 1;
+    u8v[65] = options.decorated === false ? 0 : 1;
+    /* The title pointer sits at byte 72, not 72-adjacent by accident: `#[repr(C)]`
+       aligns it to 8, and with `images` added the two flag bytes plus their two
+       reserved bytes fill 64..68 and the pad closes 68..72. */
+    u64v[9] = BigInt(ptr(title));
+    u32v[20] = title.length;
 
     // One `u32`, not a pointer-sized slot: the handle is a table token.
     const out = new Uint32Array(1);
@@ -749,6 +752,29 @@ export class Engine {
   }
 
   /**
+   * Hands the engine the bytes an image's `src` resolved to.
+   *
+   * The engine decodes once per distinct `src` and schedules the relayout itself —
+   * an `<img>` with no CSS size grows from nothing to its natural size when this
+   * lands, which is a layout fact no table write could have announced. A decode
+   * failure is remembered, not thrown: the box stays and paints nothing, like a
+   * browser's broken image.
+   */
+  provideImage(src: string, bytes: Uint8Array): void {
+    const srcBytes = new TextEncoder().encode(src);
+    check(
+      engine.dziri_engine_provide_image(
+        this.#handle,
+        ptr(srcBytes) as Pointer,
+        srcBytes.length,
+        ptr(bytes) as Pointer,
+        bytes.length,
+      ),
+      "dziri_engine_provide_image",
+    );
+  }
+
+  /**
    * Grows the tables to hold at least these capacities.
    *
    * Returns whether they moved. When they did, every view handed out before is
@@ -756,8 +782,8 @@ export class Engine {
    * re-upload everything.
    */
   grow(caps: Capacities): boolean {
-    /* Matches `Capacities` in `tables.rs`: eleven `u32`, no padding, same order. */
-    const buf = new Uint32Array(11);
+    /* Matches `Capacities` in `tables.rs`: twelve `u32`, no padding, same order. */
+    const buf = new Uint32Array(12);
     buf[0] = caps.nodes;
     buf[1] = caps.styles;
     buf[2] = caps.variants;
@@ -769,6 +795,7 @@ export class Engine {
     buf[8] = caps.controls;
     buf[9] = caps.strings;
     buf[10] = caps.stringBytes;
+    buf[11] = caps.images;
 
     check(engine.dziri_engine_grow(this.#handle, ptr(buf) as Pointer), "dziri_engine_grow");
 

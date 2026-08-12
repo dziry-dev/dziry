@@ -148,6 +148,7 @@ fn main() {
         control_capacity: 4,
         string_capacity: 4,
         string_bytes: 256,
+        image_capacity: 1,
         root: 0,
         windowed: u8::from(screenshot.is_none()),
         decorated: 1,

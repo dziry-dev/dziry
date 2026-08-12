@@ -840,6 +840,28 @@ const STRINGS: Table = {
   ],
 };
 
+/**
+ * Images an `<img>` (or an SVG `<image>`) refers to. Sparse and sorted by node,
+ * for the reason `controls` is: images are rare, and the engine builds its own
+ * dense per-node index on rescan.
+ *
+ * The table holds only the *reference*. The bytes never cross the shared arena:
+ * the host resolves `src` — a file read or a fetch, both of which are Bun's and
+ * not the engine's, which stays off the network — and hands them over with
+ * `dziri_engine_provide_image`, which decodes once and keeps the Skia image
+ * engine-side. What the table would otherwise need a status column for, the
+ * loader already knows: it made the request.
+ */
+const IMAGES: Table = {
+  name: "images",
+  doc: "Image references per node. Sparse; the engine owns the decoded bitmaps.",
+  sizedBy: "own",
+  fields: [
+    { name: "node", type: "i32", doc: "Sorted ascending, for binary search" },
+    { name: "src", type: "i32", doc: "String slot of the URL or file path" },
+  ],
+};
+
 export const TABLES: Table[] = [
   NODES,
   STYLES,
@@ -852,6 +874,7 @@ export const TABLES: Table[] = [
   CONTROLS,
   LAYOUT,
   STRINGS,
+  IMAGES,
 ];
 
 /**
@@ -1346,6 +1369,33 @@ export const ENUMS: EnumDef[] = [
        * does — the box, the hit path and the row height are identical either way.
        */
       LISTBOX: 7,
+      /**
+       * An `<input type=range>` — a slider. The press *positions* the thumb and
+       * the drag that follows keeps repositioning it, which no other kind does:
+       * a checkbox's state flips once, at the release, wherever the pointer is.
+       *
+       * The engine owns the fraction — it is the one holding the pointer — and
+       * reports it as `CHANGE` with `a` = per-mille of the track, so the wire
+       * stays integer. Mapping the fraction onto `min`/`max`/`step` is the
+       * binding's job: those are author values the engine never needed, and the
+       * signal the value lives in is Bun's.
+       *
+       * Appearance is *not* the stylesheet's job here, the one exception to the
+       * table's doc: the thumb's position is geometry, and a style row cannot
+       * say "40% along". `paint.rs` draws track and thumb from the fraction,
+       * the way it draws a caret from the cursor.
+       */
+      RANGE: 8,
+      /**
+       * An `<input type=file>`. A press opens the platform's open-file dialog —
+       * SDL's, since SDL owns the window and the dialog has to be its child.
+       *
+       * The chosen path comes back on `CHANGE`'s text payload, the same channel
+       * `TEXT_INPUT` uses, because a path is a string and the event's `a` is an
+       * integer. The value is the *path*, not the file: reading the bytes is a
+       * host call away and no engine should block a frame on disk.
+       */
+      FILE: 9,
     },
   },
   {
@@ -1607,7 +1657,16 @@ export const ENUMS: EnumDef[] = [
  * An old engine ignores the bit: `:invalid` rules never apply and every field wears its
  * base style. A wrong picture only in the sense that a validation failure is invisible.
  */
-export const PROTOCOL_VERSION = 42;
+/*
+ * v43 — the `images` table and two control kinds. `<img>` stops being an empty
+ * box: the table carries (node, src) pairs, the host resolves the bytes, and
+ * the engine decodes, measures and paints them — a replaced element, which the
+ * layout side expresses through the same measure callback text uses.
+ * `ControlKind.RANGE` is the slider (the engine owns the thumb fraction) and
+ * `ControlKind.FILE` the file dialog (SDL's, since SDL owns the window). Enum
+ * additions move no bytes; the table does, and the hash sees it.
+ */
+export const PROTOCOL_VERSION = 43;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

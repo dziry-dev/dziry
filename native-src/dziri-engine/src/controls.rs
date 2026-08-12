@@ -546,6 +546,7 @@ mod tests {
             controls: 4,
             strings: 1,
             string_bytes: 64,
+            images: 1,
         });
 
         // Every node operates nothing until a row below says otherwise.

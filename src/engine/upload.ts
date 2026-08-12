@@ -63,6 +63,7 @@ export type Capacities = {
   tweens: number;
   keyframes: number;
   controls: number;
+  images: number;
   strings: number;
   stringBytes: number;
 };
@@ -109,6 +110,9 @@ export function capacitiesFor(ui: CompiledUi): Capacities {
     // Fixed too: which nodes are controls is markup, and no run-time state can add
     // one. The *checkedness* is what varies, and that is not a row.
     controls: Math.max(ui.controls.count, 1),
+    // Fixed like the controls: which nodes are images is markup, and the decode
+    // cache survives republishing, so nothing at run time needs a spare row.
+    images: Math.max(ui.images.count, 1),
     strings: Math.ceil(ui.strings.length * STRING_HEADROOM) + 16,
     stringBytes: arenaBytes(bytes),
   };
@@ -194,6 +198,7 @@ export class Uploader {
     this.uploadMedia();
     this.uploadTweens();
     this.uploadControls();
+    this.uploadImages();
     this.uploadLists();
     this.uploadNodes();
     this.uploadStrings(true);
@@ -418,6 +423,28 @@ export class Uploader {
     // 0 is "not a list box", which is what every non-LISTBOX row carries anyway — so
     // unlike the two above, this fill needs no sentinel of its own.
     t.rows.fill(0, n);
+  }
+
+  /**
+   * The images table.
+   *
+   * Same shape and same sentinel as {@link uploadControls}: binary-searched by
+   * node, so spare rows pad with `NO_CONTROL_NODE` — "larger than every real
+   * node" — and a `-1` src, which points at no string. Images are also
+   * *uploaded wholesale on republish*: the table is small, and the engine's
+   * decode cache being keyed by `src` is what makes re-uploading it cheap — the
+   * rows are rewritten, the bitmaps stay.
+   */
+  uploadImages(): void {
+    const { images } = this.#ui;
+    const t = this.#tables.images;
+    const n = Math.min(images.count, t.node.length);
+
+    t.node.set(images.node.subarray(0, n));
+    t.src.set(images.src.subarray(0, n));
+
+    t.node.fill(NO_CONTROL_NODE, n);
+    t.src.fill(-1, n);
   }
 
   uploadLists(): void {

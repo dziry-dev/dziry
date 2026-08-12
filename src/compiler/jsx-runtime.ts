@@ -926,7 +926,19 @@ type Tag =
   | "hr"
   | "ul"
   | "ol"
-  | "li";
+  | "li"
+  /**
+   * A replaced element: the bytes behind `src` render into the content box, at
+   * the natural size when CSS says nothing — a real graphic, not a styled box.
+   * The compiler emits the reference (`images` table), the host resolves the
+   * bytes (file or fetch), the engine decodes and paints. See `images.rs`.
+   */
+  | "img"
+  /**
+   * A vector graphic, parsed and drawn by the engine — paths, shapes and groups,
+   * sized by `viewBox`. The supported subset is documented in `svg.rs`.
+   */
+  | "svg";
 
 /**
  * What a **tag** accepts, as opposed to what a component does.
@@ -1063,6 +1075,27 @@ type ElementProps = Props & {
    * The trigger is named, not the handler: `"change"`, not `"onChange"`.
    */
   validateOn?: "submit" | "change" | "blur";
+  /**
+   * `<img src>` — where the bytes come from: an `https?://` URL the host fetches,
+   * or a file path it reads. A string, always, like every attribute: to change an
+   * image at run time, render a different element — there is no `bind:src`.
+   */
+  src?: string;
+  /**
+   * `<img alt>` — the text that stands for the image. Carried into the IR and
+   * selector-visible, like every attribute; not yet *painted* when the image
+   * fails — the box keeps its size and draws nothing, which is the broken-image
+   * behaviour minus the alt text.
+   */
+  alt?: string;
+  /**
+   * `<img width>` / `<img height>` — presentational hints, parsed as HTML
+   * dimensions: a non-negative integer in pixels. They lose to every CSS rule
+   * and to inline `style=`, which is what "presentational" means. Strings
+   * because attributes are text: `width="100"`.
+   */
+  width?: string;
+  height?: string;
 };
 
 export declare namespace JSX {

@@ -583,6 +583,7 @@ mod tests {
             controls: 8,
             strings: 8,
             string_bytes: 128,
+            images: 1,
         });
 
         for n in 0..NODE_COUNT {

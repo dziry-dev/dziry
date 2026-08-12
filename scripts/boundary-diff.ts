@@ -175,6 +175,7 @@ if (LIVE) {
       tweens: ui.tweens,
       keyframes: ui.keyframes,
       controls: ui.controls,
+      images: ui.images,
       root: ui.root,
     };
 

@@ -974,6 +974,7 @@ test("a capacity request is a power of two", () => {
     tweens: generated.tweens,
     keyframes: generated.keyframes,
     controls: generated.controls,
+    images: generated.images,
     root: 0,
   };
   const bytes = capacitiesFor(ui).stringBytes;

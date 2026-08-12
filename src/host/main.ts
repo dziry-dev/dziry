@@ -28,6 +28,7 @@
  * the thread", this handles "the app took the thread".
  */
 import { Engine } from "../engine/host.ts";
+import { loadImages, pollImages } from "../engine/images.ts";
 import { EventKind } from "../protocol/generated.ts";
 import { alive, createChannel, DIRTY, stop, takeDirty, tryAcquire, release } from "./channel.ts";
 import type { ToMain, ToWorker, WindowRequest } from "./messages.ts";
@@ -255,6 +256,13 @@ export async function runMain(options: MainOptions): Promise<void> {
         release(flags);
       }
     };
+
+    /* Images before the first painted frame: a screenshot taken while a fetch is
+       in flight is a picture of empty boxes. This is the page's `load` event,
+       headlessly — and it runs before even the priming frame, so an <img> with
+       no CSS size is already its natural size in every shot. */
+    frame();
+    await loadImages(engine);
 
     if (advance !== null) {
       engine.setTimeStep(0);
@@ -489,6 +497,11 @@ export async function runMain(options: MainOptions): Promise<void> {
       } finally {
         release(flags);
       }
+      /* Images load outside the lock: the read is a scan of the *live* table,
+         and the write-back is one FFI call that touches no staged memory. An
+         image landing sets the engine's own repaint flag, so the next tick
+         picks it up without the app thread hearing about any of it. */
+      pollImages(engine);
     } else {
       /* The app thread is mid-batch. Service the window; leave its memory alone. */
       engine.pump();

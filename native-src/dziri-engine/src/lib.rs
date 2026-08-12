@@ -25,6 +25,7 @@ pub mod controls;
 pub mod engine;
 pub mod error;
 pub mod focus;
+pub mod images;
 pub mod layout;
 pub mod paint;
 pub mod protocol;
@@ -583,6 +584,41 @@ pub extern "C" fn dziri_engine_set_time_step(handle: Handle, dt: f32) -> i32 {
     with(handle, |engine| {
         engine.set_time_step(dt);
         status::OK
+    })
+}
+
+/// Hands the engine the bytes `src` refers to, decoded once and kept.
+///
+/// The tables say *that* a node is an image and where its bytes come from;
+/// getting them is the host's — a file read or a `fetch`, both of which are
+/// Bun's job, with the engine deliberately off the network. `src` is the cache
+/// key rather than a table row, because the table is republished on every
+/// commit and row identity means nothing across one. See `images.rs`.
+///
+/// A decode failure is *not* an error return: a 404 is content, and the node
+/// keeps its CSS box while painting nothing, like a browser's broken image.
+///
+/// # Safety
+/// `src` must be readable for `src_len` bytes and `bytes` for `bytes_len`.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_provide_image(
+    handle: Handle,
+    src: *const u8,
+    src_len: u32,
+    bytes: *const u8,
+    bytes_len: u32,
+) -> i32 {
+    if src.is_null() || (bytes.is_null() && bytes_len > 0) {
+        return status::INVALID_ARGUMENT;
+    }
+    // SAFETY: both pointers were just checked, and the caller promises the
+    // lengths. The slices do not outlive this call — the decode copies.
+    let src = unsafe { std::slice::from_raw_parts(src, src_len as usize) };
+    let src = std::str::from_utf8(src).unwrap_or("");
+    let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len as usize) };
+    with(handle, |engine| match engine.provide_image(src, bytes) {
+        Ok(()) => status::OK,
+        Err(e) => fail(e.status, e.detail),
     })
 }
 
