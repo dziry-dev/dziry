@@ -11,19 +11,16 @@
  * `<strong>` distinguishable from `<span>`.
  *
  * So this measures, and the output is a difference table rather than pass/fail.
- * That is deliberate: dziri ships no default stylesheet yet, so nearly every
- * element differs and a pass/fail run would be uniformly red and useless.
- *
- * **The difference table IS the default stylesheet's specification.** Write the
- * rules, re-run, watch rows disappear. When a row says `no field`, the property
- * does not exist in STYLE_FIELDS yet and must be added before any rule can set
- * it — those are the ~10 missing properties HTML-ELEMENT-COVERAGE-RESEARCH.md
- * names, surfaced per element instead of as a list.
+ * The difference table IS the default stylesheet's specification. Write the
+ * rules (in `src/compiler/ua-sheet.ts`), re-run, watch rows disappear. When a
+ * row says `no field`, the property does not exist in STYLE_FIELDS yet and must
+ * be added before any rule can set it — `list-style-type` is the last one.
  */
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromeSession } from "./cdp.ts";
 import { Display } from "../src/ir.ts";
+import { FontStyle, FontFamily } from "../src/protocol/generated.ts";
 import { compileSnippet } from "../src/compiler/single.ts";
 import { toCompiledUi } from "../src/compiler/compile.ts";
 
@@ -40,19 +37,54 @@ const ONLY = onlyIdx > -1 ? argv[onlyIdx + 1]!.split(",") : null;
  * widen this and every row lights up with differences that no UA rule would fix.
  *
  * `field` is the STYLE_FIELDS key, or null when dziri has no way to express the
- * property at all — which is itself the finding.
+ * property at all — which is itself the finding. `match` decodes the enum or
+ * bit set the field stores and compares it against Chrome's computed keyword;
+ * without one, a keyword row would compare a number to a string and differ
+ * forever.
  */
-const PROPS: { css: string; field: string | null; kind: "keyword" | "px" | "int" }[] = [
+const PROPS: {
+  css: string;
+  field: string | null;
+  kind: "keyword" | "px" | "int";
+  match?: (chrome: string, dziri: number) => boolean;
+}[] = [
   { css: "display", field: "display", kind: "keyword" },
   { css: "font-weight", field: "fontWeight", kind: "int" },
   { css: "font-size", field: "fontSize", kind: "px" },
   { css: "margin-block-start", field: "marT", kind: "px" },
   { css: "margin-block-end", field: "marB", kind: "px" },
   { css: "padding-inline-start", field: "padL", kind: "px" },
-  { css: "font-style", field: null, kind: "keyword" },
-  { css: "font-family", field: null, kind: "keyword" },
+  {
+    css: "font-style",
+    field: "fontStyle",
+    kind: "keyword",
+    match: (chrome, dz) =>
+      (dz === FontStyle.ITALIC) === (chrome === "italic" || chrome.startsWith("oblique")),
+  },
+  {
+    css: "font-family",
+    field: "fontFamily",
+    kind: "keyword",
+    // dziri stores a generic family, not a name: match on the category. Chrome
+    // computes its UA monospace to the literal keyword "monospace", and every
+    // other default here (Times New Roman, Arial on controls) is non-monospace.
+    match: (chrome, dz) => (dz === FontFamily.MONOSPACE) === /mono/i.test(chrome),
+  },
   { css: "list-style-type", field: null, kind: "keyword" },
-  { css: "text-decoration-line", field: null, kind: "keyword" },
+  {
+    css: "text-decoration-line",
+    field: "decorationLine",
+    kind: "keyword",
+    // The field is a bit set (1 underline, 2 overline, 4 line-through); Chrome's
+    // computed value is a space-separated keyword list, "none" when empty.
+    match: (chrome, dz) => {
+      const bits =
+        (chrome.includes("underline") ? 1 : 0) |
+        (chrome.includes("overline") ? 2 : 0) |
+        (chrome.includes("line-through") ? 4 : 0);
+      return dz === bits;
+    },
+  },
 ];
 
 /** Committed non-goals — listed as features, not gaps. */
@@ -273,7 +305,7 @@ try {
     const chromeDisplay = (await session.computedIn(html, el, "display")).trim();
     if (chromeDisplay === "inline" || chromeDisplay === "inline-block") inlineElements.push(el);
 
-    for (const { css, field, kind } of PROPS) {
+    for (const { css, field, kind, match } of PROPS) {
       const chrome = (await session.computedIn(html, el, css)).trim();
 
       if (css === "display") {
@@ -294,10 +326,7 @@ try {
         // is `disc` on every element by initial value and renders a marker only
         // where display is list-item, so reporting it everywhere was noise.
         const boring =
-          (css === "font-style" && chrome === "normal") ||
-          (css === "text-decoration-line" && chrome === "none") ||
-          (css === "list-style-type" && chromeDisplay !== "list-item") ||
-          (css === "font-family" && !/mono|serif|cursive|fantasy/i.test(chrome));
+          (css === "list-style-type" && chromeDisplay !== "list-item");
         if (!boring) {
           const why = knownReason(el, css, chrome, null);
           if (why) known.push(`no field · ${css}=${chrome}  — ${why}`);
@@ -306,7 +335,8 @@ try {
         continue;
       }
 
-      if (differs(kind, chrome, dz[field]!)) {
+      const different = match ? !match(chrome, dz[field]!) : differs(kind, chrome, dz[field]!);
+      if (different) {
         const why = knownReason(el, css, chrome, String(dz[field]));
         if (why) known.push(`${css}: chrome ${chrome} · dziri ${dz[field]}  — ${why}`);
         else diffs.push(`${css}: chrome ${chrome} · dziri ${dz[field]}`);

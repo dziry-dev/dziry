@@ -29,9 +29,9 @@
  * as stated conventions where they sit.
  *
  * Properties dziri has no field for yet cannot be set here at all. As of
- * 2026-08-01 that blocks 17 findings across four properties — `font-style`,
- * `text-decoration-line`, `font-family` and `list-style-type` — and those are a
- * `STYLE_FIELDS` job, not a stylesheet one.
+ * 2026-08-12 that is down to one: `list-style-type` for `li`, which is a marker
+ * paint feature rather than a plain field. `font-style`, `font-family` and
+ * `text-decoration-line` landed with protocol v26 and are set below.
  */
 export const UA_SHEET = `
 /* Tier 0a — never rendered. Chrome's sheet hides these; dziri drew empty boxes
@@ -61,15 +61,23 @@ h5 { font-weight: 700; font-size: 13.28px; margin-block-start: 22.1776px; margin
 h6 { font-weight: 700; font-size: 10.72px; margin-block-start: 24.9776px; margin-block-end: 24.9776px }
 
 /* Text-level semantics and block spacing — every value below is html-coverage's
-   Chrome column, 2026-08-10. What is still blocked on STYLE_FIELDS: a/u/ins/del/s
-   want text-decoration-line and li wants list-style-type. Those stay in the
+   Chrome column, 2026-08-10. What is still blocked on STYLE_FIELDS: li wants
+   list-style-type (a marker is a paint feature, not a field). That stays in the
    differ table rather than being half-written here.
+
+   The decoration rules joined the italic and monospace ones when the
+   decorationLine field landed: underline for a/u/ins, line-through for del/s,
+   which is what Chrome's own sheet sets. a is keyed on the tag rather than
+   -webkit-any-link, which dziri has no equivalent of — a bare anchor gets an
+   underline a browser would not draw, the one deliberate overreach here.
 
    16px margins written as px, not 1em, for the reason the headings' are: em
    resolves against the root in css.ts, which happens to be right at the default
    font size and wrong the moment a root size becomes settable. */
 b, strong { font-weight: 700 }
 small, sub, sup { font-size: 13.3333px }
+a, u, ins { text-decoration-line: underline }
+del, s { text-decoration-line: line-through }
 
 /* The two fields protocol v26 added, at their Chrome defaults. monospace is a
    generic the engine resolves to one platform face at startup; italic is a slant
@@ -92,6 +100,9 @@ ul, ol, menu {
 
 fieldset { padding-inline-start: 12px }
 dialog { padding-inline-start: 16px }
+/* Chrome's UA sheet pads the geolocation element the same way; measured by
+   html-coverage, 2026-08-12. */
+geolocation { padding-inline-start: 16px }
 
 /* Form controls — structure, not appearance.
 
@@ -184,9 +195,11 @@ select button::after { content: "\\25BE"; padding-left: 4px }
    - border-style does not exist, so Chrome's "2px inset" and "2px outset" become
      solid at the same width. The colour of an inset edge is not a computed value
      anywhere, so #767676 — Chromium's control grey — is a stated convention.
-   - font-family does not exist, so controls keep the page font where Chrome
-     switches them to Arial. The 13.3333px size is real and kept: it is most of
-     why an unstyled form reads smaller than the text around it.
+   - font-family exists only as a generic-family enum, so controls keep the page
+     font where Chrome switches them to Arial. The 13.3333px size is real and
+     kept: it is most of why an unstyled form reads smaller than the text around
+     it. (textarea is the exception: Chrome puts it in monospace, which the enum
+     can say, so the rule above does.)
    - The tick and the dot have no DOM ("read off pixels", same entry): the tick is
      a glyph on a generated box, the dot an empty circle at 6px of 13 — inside the
      measured 45-50% — both centred by the flex rules, exactly as a theme would.
@@ -218,6 +231,9 @@ textarea {
   padding: 2px;
   background-color: #ffffff;
   font-size: 13.3333px;
+  /* Chrome's sheet puts a textarea in monospace where the other controls go to
+     Arial; monospace is a generic dziri can express, so this one is set. */
+  font-family: monospace;
 }
 
 select {

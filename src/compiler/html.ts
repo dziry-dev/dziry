@@ -199,7 +199,13 @@ export type Node = Element | Text | DynText | DynList;
 
 export class HtmlError extends Error {}
 
-const VOID_TAGS = new Set(["br", "hr", "img", "input", "meta", "link"]);
+// The HTML void-element set, complete per the spec: these take no closing tag
+// and no children. Was six tags, which made `<body><embed></body>` a parse
+// error ("</body> closes <embed>") for every void element outside the six.
+const VOID_TAGS = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input",
+  "link", "meta", "param", "source", "track", "wbr",
+]);
 
 /**
  * Unwrapped into their children. `body` is deliberately *not* here — the
