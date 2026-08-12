@@ -25,9 +25,9 @@ export const COVERAGE = {
    *
    * The tool deliberately prints no percentage of its own, because it is a
    * difference table rather than a pass/fail run. This ratio has a stated
-   * denominator — in-scope elements actually compared — and it is low for one
-   * reason: the UA stylesheet is young. That is the largest single coverage lever
-   * left, per HTML-ELEMENT-COVERAGE-RESEARCH.md.
+   * denominator — in-scope elements actually compared. The one element still
+   * differing is li, blocked on the list-marker feature (a paint feature,
+   * not a stylesheet rule), per HTML-ELEMENT-COVERAGE-RESEARCH.md.
    */
-  html: { pct: "64.7%", have: 33, total: 51 },
+  html: { pct: "98.0%", have: 49, total: 50 },
 } as const;
