@@ -28,7 +28,8 @@ export type Pseudo =
   | "focus-visible"
   | "checked"
   | "disabled"
-  | "open";
+  | "open"
+  | "invalid";
 
 /**
  * Pseudo-classes compiled into precomputed style variants.
@@ -63,6 +64,17 @@ const SUPPORTED_PSEUDO = new Set<string>([
   "checked",
   "disabled",
   "open",
+  /**
+   * `:invalid` — the first predicate whose answer comes from *app code* rather than from
+   * the engine's own input state. A schema runs, `applyIssues` writes a control flag, and
+   * the engine reads it back on the next rescan exactly as it reads `disabled`.
+   *
+   * `:user-invalid` is deliberately not a second spelling. It differs from `:invalid` only
+   * in *when* a browser lets it match, and that timing is already decided here by
+   * `validateOn` plus the pristine-field gate — so two names would put one rule in two
+   * places.
+   */
+  "invalid",
 ]);
 
 /**

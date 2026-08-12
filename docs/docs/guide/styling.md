@@ -103,6 +103,20 @@ plus an offset into a run of precompiled style ids. Hovering costs one `u16`.
 The cascade is resolved *per pseudo-state from scratch* rather than as a patch over the
 base, which is what makes correct per-property `hover ∧ focus` merging cheap.
 
+The set is `:hover`, `:active`, `:focus`, `:focus-visible`, `:checked`, `:disabled`,
+`:open` and `:invalid`. Most are the engine's own answers about the pointer and focus;
+`:invalid` is the one that comes from **your** code — a `validate={…}` runs, and the field
+it rejected wears the bit until the next validation says otherwise.
+
+:::note A predicate is per node; a conditional class is per style row
+
+They look interchangeable until a list. Rows are compiled once and replicated, so every
+replica shares one style row: a conditional class on a row's input is the same class on all
+of them. A predicate is resolved per node against the controls table, which each replica has
+its own row in — so `:invalid` can be true for row 3 and false for row 4, and
+`cn("x", { on: sig })` cannot.
+:::
+
 ## Coverage
 
 dziri supports a subset of CSS, and the subset is defined by what Tailwind emits.

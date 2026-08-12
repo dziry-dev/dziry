@@ -22,7 +22,14 @@
  *   per row and a key for each, so the array *is* the state. `bind:value={job.title}` writes
  *   back into it, and the payload's `experience` is that array.
  *
- * - **`errorClassName` is the only error state**, and it is a class. The wrapper wears it while
+ * - **A row's own message and a row's own `:invalid`** are the two halves of error display that
+ *   can be per row, and they get there differently. The message is a *string*, and every replica
+ *   owns its text slots. The colour is a *style*, and replicas share a style row — so the border
+ *   comes from a predicate the engine resolves per node against the controls table, which each
+ *   replica does have its own row in. That is the whole reason `:invalid` is a protocol bit and
+ *   not a class.
+ *
+ * - **`errorClassName` dresses what is around a field**, and it is a class. The wrapper wears it while
  *   any issue's path starts with the wrapper's own, so `address` lights up for an issue at
  *   `address.city` and `experience` lights up for one at `experience.0.title`. It compiles to
  *   style-table writes, which is why the input's border and the message's visibility both come
@@ -39,14 +46,14 @@
  *   the engine thread. Submitting a valid form opens it with the payload as JSON, which is the
  *   point of the page: the object in that box is what a handler receives.
  */
-import { alert, signal } from 'dziri';
+import { alert, computed, signal } from 'dziri';
 
 const CARD = 'flex flex-col gap-3 rounded-xl bg-zinc-900 p-6';
 const H = 'text-lg font-semibold text-zinc-50';
 const SUB = 'muted text-xs text-zinc-400';
 const LABEL = 'text-xs text-zinc-300';
 const FIELD =
-    'field w-64 rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100';
+    'field w-64 rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100 error:border-rose-500';
 const NOTE = 'note text-xs font-semibold text-rose-400';
 const WRAP = 'flex flex-col gap-1';
 /**
@@ -57,7 +64,7 @@ const WRAP = 'flex flex-col gap-1';
  * the sheet's 260px and the row would overflow. The width is in `app.css` beside the rule it
  * has to beat.
  */
-const CELL = 'field cell rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100';
+const CELL = 'cell rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100';
 const SMALL =
     'self-start rounded-lg bg-zinc-700 px-2 py-1 text-xs font-semibold text-zinc-100';
 
@@ -106,6 +113,35 @@ export const addJob = () => {
 export const removeJob = (job: Job) => {
     jobs.set((rows) => rows.filter((row) => row.id !== job.id));
 };
+
+/**
+ * Whether the terms box is ticked, as state the *app* owns.
+ *
+ * A second copy of something the artifact already has, and the duplication is the honest cost
+ * of the current API rather than an oversight. Every named field gets a cell the compiler
+ * declares, and that cell is deliberately unnameable from out here — the payload is how you
+ * read it. So a field whose value has to drive something *else* on the page needs the app to
+ * hold it too, and the checkbox's `onChange` is what keeps the two in step.
+ *
+ * `bind:checked` is what removes the copy: the author's signal would *be* the cell, the way
+ * `bind:value` already is for text. It is not built.
+ */
+export const termsAccepted = signal(false);
+
+/** The engine hands a checkbox's `onChange` a boolean, so this is the whole binding. */
+export const onTermsChange = (on: boolean) => {
+    termsAccepted.set(on === true);
+};
+
+/**
+ * `disabled` takes a signal, so "enabled only once the terms are ticked" is one derived cell.
+ *
+ * Not a conditional class: `disabled` is a *control flag* Bun writes into the controls table,
+ * and the engine both re-reads it for `:disabled` styling and refuses presses on it. So one
+ * signal buys the greyed-out look and the refusal, and it also blocks Enter — a form whose
+ * button is switched off is not submittable by any route.
+ */
+export const cannotSubmit = computed(() => !termsAccepted);
 
 /** How many times the form has been submitted successfully — proof the handler ran. */
 export const accepted = signal(0);
@@ -156,8 +192,23 @@ export const checkSignUp = (data: SignUp) => {
     if (data.plan === undefined) {
         issues.push({ path: ['plan'], message: 'pick a plan' });
     }
+    // Three depths under one wrapper, so the three `error` markers each have something to say
+    // and the split between them is visible: a leaf's complaint goes beside that leaf, and the
+    // group-level one goes in the bare marker at the bottom.
+    if (data.address.street.trim() === '') {
+        issues.push({ path: ['address', 'street'], message: 'street is required' });
+    }
     if (data.address.city.trim() === '') {
         issues.push({ path: ['address', 'city'], message: 'city is required' });
+    }
+    if (
+        data.address.street.trim() !== '' &&
+        data.address.street.trim() === data.address.city.trim()
+    ) {
+        issues.push({
+            path: ['address'],
+            message: 'street and city cannot be the same',
+        });
     }
     issues.push(...checkExperience(data.experience));
 
@@ -179,17 +230,19 @@ const checkExperience = (rows: readonly Job[]) => {
         issues.push({ path: ['experience'], message: 'add at least one job' });
     }
 
+    // No "row N:" prefix any more, because the message is shown *in* the row — the numbering
+    // was standing in for a position the markup can now express.
     for (const [i, row] of rows.entries()) {
         if (row.title.trim() === '') {
             issues.push({
                 path: ['experience', i, 'title'],
-                message: `row ${i + 1}: what was the job?`,
+                message: 'what was the job?',
             });
         }
         if (row.start.trim() === '') {
             issues.push({
                 path: ['experience', i, 'start'],
-                message: `row ${i + 1}: needs a start year`,
+                message: 'needs a start year',
             });
         }
         // Deliberately not "end is required": an open-ended row is the current job, which a
@@ -197,7 +250,7 @@ const checkExperience = (rows: readonly Job[]) => {
         if (row.end.trim() !== '' && row.end.trim() < row.start.trim()) {
             issues.push({
                 path: ['experience', i, 'end'],
-                message: `row ${i + 1}: ends before it starts`,
+                message: 'ends before it starts',
             });
         }
     }
@@ -254,7 +307,13 @@ export default function Forms() {
                     submit it valid and the platform's own message box opens with the payload as
                     JSON — that box is `SDL_ShowSimpleMessageBox`, so it is a Win32 task dialog
                     here and an `NSAlert` on a Mac · submit it broken and the wrappers light up
-                    from a class, with no JavaScript involved in the styling
+                    from a class while the offending field wears `:invalid`, with no JavaScript
+                    involved in either
+                </div>
+                <div className={SUB}>
+                    the rows are why `:invalid` exists · replicas of one template share a style
+                    row, so a class would redden every row at once — a predicate is resolved per
+                    node against the controls table, so one row can be wrong on its own
                 </div>
                 <div className={SUB}>
                     `validateOn="change"` · it checks as you type, but a field stays quiet until
@@ -282,23 +341,34 @@ export default function Forms() {
                     </div>
 
                     {/* Two named controls under one wrapper, so they become its properties and
-                        the payload gains an object. The wrapper is what lights up, so one
-                        message covers the pair. */}
+                        the payload gains an object.
+
+                        Three `error` markers, and the names are what divide the group's
+                        complaints up: `error="city"` shows the issue at `address.city`, and the
+                        bare one keeps whatever is only the group's own — so nothing is said
+                        twice. The name is relative to this wrapper, exactly as `name` is, which
+                        is what makes the group movable. */}
                     <div field="address" errorClassName="group/error" className={WRAP}>
                         <span className={LABEL}>address — two named inputs, one group</span>
                         <div className="flex flex-row gap-2">
-                            <input
-                                type="text"
-                                name="street"
-                                placeholder="street"
-                                className={FIELD}
-                            />
-                            <input
-                                type="text"
-                                name="city"
-                                placeholder="city"
-                                className={FIELD}
-                            />
+                            <div className="flex flex-col gap-1">
+                                <input
+                                    type="text"
+                                    name="street"
+                                    placeholder="street"
+                                    className={FIELD}
+                                />
+                                <span error="street" className={NOTE} />
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <input
+                                    type="text"
+                                    name="city"
+                                    placeholder="city"
+                                    className={FIELD}
+                                />
+                                <span error="city" className={NOTE} />
+                            </div>
                         </div>
                         <span error className={NOTE} />
                     </div>
@@ -333,19 +403,19 @@ export default function Forms() {
                                     <div className="flex flex-row items-center gap-2">
                                         <input
                                             type="text"
-                                            
+                                            placeholder="title"
                                             className={CELL}
                                             bind:value={job.title}
                                         />
                                         <input
                                             type="text"
-                                            
+                                            placeholder="from"
                                             className={CELL}
                                             bind:value={job.start}
                                         />
                                         <input
                                             type="text"
-                                            
+                                            placeholder="to"
                                             className={CELL}
                                             bind:value={job.end}
                                         />
@@ -356,9 +426,14 @@ export default function Forms() {
                                         >
                                             remove
                                         </button>
+                                        {/* The row's own message. Every replica owns its
+                                            text slots, so this string differs row by row —
+                                            which is why the complaint lands beside the row
+                                            that caused it rather than under the section. */}
+                                        <span error className={NOTE} />
                                     </div>
                                 ),
-                                { key: (job) => job.id },
+                                { key: (job: Job) => job.id },
                             )}
                         </div>
                         {/* `type="button"`, so it adds a row rather than submitting. A bare
@@ -370,16 +445,29 @@ export default function Forms() {
                         <span error className={NOTE} />
                     </div>
 
+                    {/* The checkbox keeps its compiler-declared cell, so `terms` is still in
+                        the payload; the `onChange` is a *second* reader, for the button below.
+                        Both see the same click — `applyFieldChange` writes the cell before any
+                        handler runs, so the payload and the page cannot disagree. */}
                     <div field="terms" errorClassName="group/error" className={WRAP}>
                         <label className="flex flex-row items-center gap-2 text-xs text-zinc-300">
-                            <input type="checkbox" className="check" />
+                            <input
+                                type="checkbox"
+                                className="check"
+                                onChange={onTermsChange}
+                            />
                             I accept the terms
                         </label>
                         <span error className={NOTE} />
                     </div>
 
+                    {/* Switched off until the terms are ticked. `disabled` takes a signal, so
+                        this is the derived cell above and nothing else: the engine greys the
+                        button through `:disabled`, refuses presses on it, and Enter refuses
+                        too — a form whose button is off has no route in. */}
                     <button
                         type="submit"
+                        disabled={cannotSubmit}
                         className="self-start rounded-lg bg-sky-700 px-4 py-1.5 text-xs font-semibold text-zinc-50"
                     >
                         sign up

@@ -587,6 +587,14 @@ written down in the first place:
   one of their dialects — it sees the structure. A path claimed as both a value and a group is a
   build error rather than a silent last-write-wins.
 
+  **A marker may name a field**, and that is what turns a group from one message into several:
+  `<span error="city" />` inside `field="address"` shows the issue at `address.city`, named
+  relative to the wrapper exactly as `name` is so the group stays movable. The rule that makes
+  them cooperate rather than echo is specificity — each marker shows the first issue under its
+  own path that no *deeper* marker would show — and it subsumes the row case, where a row's own
+  message claims anything with a row index in it. The bare marker is not a special case in the
+  model: it is the entry whose path is the wrapper's own.
+
   Error state is **one class**. `errorClassName` puts it on the wrapper while any issue's path
   starts with the wrapper's own, and it compiles to the style-table patches a conditional class
   already uses — so the input's border and the message's visibility both come from a class on the
@@ -600,6 +608,65 @@ written down in the first place:
   compile-time constant. Per field the runtime keeps exactly two things — a boolean and a
   message. Vocabulary checked against the shipped types of all three libraries rather than
   recalled: none of them has an `onDirty` trigger.
+- **Repeating rows** — done, and the question the earlier note left open ("one entry, or one per
+  row?") turned out to have a structural answer rather than a preferred one. A `field` wrapper
+  holding a `map()` is an **array field**, and its value is the array the rows came from.
+
+  A row cannot have a compiler-declared cell: the arena is `capacity` interchangeable replicas of
+  one template, so there is nothing stable to declare one against — a slot is not a row, it is
+  whichever row it currently renders. The array already has a keyed entry per row, and the author
+  already owns it, because *adding a row is writing to it*. So the array is the state, and the
+  new mechanism is the write half: `bind:value={job.title}` inside a template records an item
+  **path** the way `{job.title}` already does for reading, and typing replaces the item and the
+  array so an ordinary `signal.set` publishes. Nothing is mutated in place, which is what makes
+  the list re-render through the binding it already had.
+
+  What falls out for free is the part that would have been hard the other way: reordering rows
+  reorders the payload, a removed row is gone rather than blank, and the payload's row type is the
+  author's own — including the `key` property, since dropping it would mean the compiler deciding
+  which properties are "really" fields.
+
+  **Error display split along a line the arena draws**, and the line is worth recording because
+  it is not where anyone would guess. A `<span error />` *inside* the template shows that row's
+  own message: every replica owns its text slots, so a string can differ row by row, and the
+  match is by data position rather than by slot so a reorder cannot carry a message to the wrong
+  row.
+
+  Colour could not follow it, because replicas share a **style row** — reddening one row's
+  border reddened all of them, which is exactly what the first version of the demo did. That is
+  what `:invalid` is for (protocol v39): a control flag Bun writes after validation and the
+  engine re-reads on rescan, resolved *per node*, which is the one thing in the engine that
+  already distinguishes replicas. Cost: two bit constants, one branch in `paint.rs`, one mask in
+  `Controls::rescan`, and a control row for every text-entry `<input>` so the flag has somewhere
+  to live.
+
+  It paid for itself twice over. `:invalid` is not a list feature — it is per-field validity
+  styling in the spelling CSS already has, for every form — and giving text fields a control row
+  found a latent bug on the way: `activates` propagates into an element's own text run, so a
+  click on a field's *text* hits the run, and the caret was being resolved against a node with
+  no editable child. Focus had been mapping through `activates` since buttons got rows; the
+  caret had not, and three selection tests said so the moment text fields joined them.
+
+  The section and the row then divide the work: the wrapper still wears `errorClassName` for
+  anything under it — a broken row is the section's problem — while its *message* narrows to
+  issues at its own path, so "add at least one job" is the section's to say and "needs a start
+  year" belongs beside the row that needs one.
+- **Two ordering bugs the demo found, both worth recording because neither is where you would
+  look.** An `alert()` raised from `onInvalid` went up over the *pre-submit* frame — every
+  complaint listed in the dialog and none of them visible behind it. The cause is not the
+  dialog: `alert()` is called inside the `batch()` that `submitForm` wraps validation in, so at
+  that instant the error cells are written and *nothing has reacted to them*, because a batch
+  defers its subscribers to the end. Fixed on both sides of the thread boundary — the app thread
+  queues the request until after its commit, and the engine thread paints once more before it
+  blocks. The rule is now "a modal shows the frame that caused it".
+
+  And a submit button switched off by `disabled={signal}` still submitted on **Enter**. The
+  compile-time half was right — a literal `disabled` attribute makes the compiler emit
+  `button: -1`, which measured to block outright rather than fall through to the one-field rule
+  — but a signal is invisible at build time, and `submitFrom` was consulting only the compiled
+  answer. It reads the live control flag now, which is the same byte the engine obeys when it
+  swallows a press. A press never reached the check at all, which is exactly why the gap
+  survived: the only route to it is a key.
 - **`alert()`** — done, and it needed no protocol change and nothing vendored. SDL3 is already
   linked and ships `SDL_ShowSimpleMessageBox`, so an OS dialog was one import away: a Win32 task
   dialog, an `NSAlert`, the GTK box. It runs on the engine thread because SDL will only show one
@@ -645,11 +712,22 @@ written down in the first place:
     flag and matches either spelling; the attribute selector matches only the literal, because an
     attribute is text the compiler wrote down and a signal never becomes text.
 
-Still missing, and smaller: runtime arena *growth* past the compiled capacity appends rows that
-are not controls and not tab stops — `ui.controls` and `ui.tabStops` are not extended by
-`growArena`, and the engine's `control_capacity` would have to grow with them. A `disabled`
-binding on a list row inherits that ceiling: it writes every *compiled* replica and knows nothing
-about rows added later.
+Runtime arena *growth* past the compiled capacity now carries the side tables with it —
+`growArena` extends `ui.controls` and `ui.tabStops` the way it already extended the variant and
+interactive sets, so the row after the capacity is a real control rather than a box that draws
+and refuses focus. Appending keeps both sorted for free, because growth allocates past
+`nodes.count` and every new id is larger than every old one; the engine's `control_capacity`
+follows through the ordinary `needsGrowth` path, since `capacitiesFor` reads `controls.count`.
+It was closed because repeating **form** rows walk straight into it: an author adding a ninth job
+has no way to know where the eighth boundary fell. A `disabled` binding on a list row still
+inherits the old ceiling — it writes every *compiled* replica and knows nothing about rows added
+later.
+
+The same replication gap had one more flag in it. A replica's `::placeholder` box was copied as
+`generated` but not as a **placeholder**, so the engine never applied "paint it only while the
+field is empty" and drew the hint over the row's value. Only a repeating row could show it: row 0
+is the template and was always right, and before per-row `bind:value` a row's input could not
+hold text at all.
 
 Also unimplemented and now named: a keyboard activation has no press/release pairing, so holding
 Space and tabbing away activates whatever is focused at release — a browser cancels.

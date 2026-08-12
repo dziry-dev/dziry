@@ -175,8 +175,24 @@ export async function runMain(options: MainOptions): Promise<void> {
       /* The dialog runs *here*, on the thread that initialised video, because SDL will not
          show one anywhere else. It blocks this loop until the user dismisses it, so the
          window stops repainting — which is what a modal is, and what a browser's `alert()`
-         does to a page. The app thread carried on the moment it posted. */
+         does to a page. The app thread carried on the moment it posted.
+
+         **One frame first, and it is the point rather than a nicety.** The app thread has
+         already published the state that caused this — it queues an alert until after its
+         commit for exactly this reason — but published is not painted, and the next line
+         stops this loop dead. Without the tick the box went up over the previous picture:
+         a form's every complaint listed inside the dialog and none of them visible behind
+         it. `tryAcquire` rather than `acquire`, because a mid-batch app thread is not
+         something to wait on here; the box is worth showing a frame late, not deadlocked. */
       case "alert":
+        if (tryAcquire(flags)) {
+          takeDirty(flags);
+          try {
+            engine.tick();
+          } finally {
+            release(flags);
+          }
+        }
         engine.alert(message.message, message.title, message.level);
         break;
 

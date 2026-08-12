@@ -780,6 +780,17 @@ export type FormKey = {
  * needs no storage, and `touched` exists in those libraries to gate error display, which
  * `validateOn` does instead.
  */
+/**
+ * Where one validation message is shown, and which path it speaks for.
+ *
+ * The path is absolute — the wrapper's chain plus whatever the marker named — so the runtime
+ * matches it against an issue without knowing which wrapper it came from.
+ */
+export type FormMessage = {
+  path: string[];
+  cell: Signal<string>;
+};
+
 export type FormGroup = {
   /** The wrapper's node. */
   node: number;
@@ -787,8 +798,17 @@ export type FormGroup = {
   path: string[];
   /** True while this wrapper has an error; drives its `errorClassName` patch. */
   error: Signal<boolean>;
-  /** The first matching issue's message, or `""`. Drives the element marked `error`. */
-  message: Signal<string>;
+  /**
+   * One entry per element marked `error` under this wrapper, and the path each speaks for.
+   *
+   * `<span error />` is the wrapper's own path; `<span error="street" />` is a leaf under it. The
+   * class above stays singular on purpose — "something here is wrong" is one fact however many
+   * messages describe it — and only the text divides up.
+   *
+   * A target shows the first issue under **its** path that no more specific target would show,
+   * so a leaf's complaint appears beside the leaf and the wrapper keeps whatever is only its own.
+   */
+  messages: FormMessage[];
   /**
    * Indices into [`FormBinding.fields`] of the controls under this wrapper.
    *
@@ -817,6 +837,32 @@ export type FormArray = {
   path: string[];
   /** The rows. */
   signal: ReadonlySignal<unknown[]>;
+  /**
+   * Per-row validation messages, indexed by data position — or null when the rows have no
+   * `<span error />` of their own.
+   *
+   * The one piece of error display that can be per-row, and the reason is worth stating: every
+   * replica owns its **text slots**, so a string can differ row by row, while replicas share a
+   * **style row**, so a colour cannot. A per-row border therefore needs a predicate the engine
+   * resolves per node — the same machinery `:disabled` uses — and that is not built.
+   *
+   * A plain box rather than a signal because nothing subscribes: validation writes it, and the
+   * commit that validation already causes is what refreshes the slots.
+   */
+  rowErrors: {
+    /** The message shown in each row, by data position. */
+    messages: string[];
+    /**
+     * Which fields are at fault in each row, as the item paths their `bind:value` recorded —
+     * `["title"]` against row 0 for an issue at `experience.0.title`, and `[""]` when the row
+     * itself was rejected.
+     *
+     * Kept as paths rather than resolved to nodes because the node depends on which *slot*
+     * renders that row, which is runtime state the form binding never sees. `applyRowValidity`
+     * finishes the join.
+     */
+    invalid: string[][];
+  } | null;
 };
 
 /** When a form checks itself. See `Props.validateOn`. */

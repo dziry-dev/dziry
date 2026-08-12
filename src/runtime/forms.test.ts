@@ -57,7 +57,6 @@ function ui(form: Partial<FormBinding> & Pick<FormBinding, "fields" | "keys">): 
     owns: new Int32Array(),
     groups: [],
     arrays: [],
-    arrays: [],
     validateOn: "submit",
     ...form,
   } as FormBinding;
@@ -398,30 +397,37 @@ function wrapped(path: string[], initial = "") {
     validateOn: "submit",
     fields: [field({ kind: "text", node: 2, signal: cell, initial })],
     keys: [{ path, shape: "text", fields: Int32Array.from([0]) }],
-    groups: [{ node: 3, path, error, message, fields: Int32Array.from([0]) }],
+    groups: [{ node: 3, path, error, messages: [{ path, cell: message }], fields: Int32Array.from([0]) }],
     arrays: [],
   } as unknown as FormBinding;
-  return { form: binding, cell, error, message };
+  // A controls table for `applyIssues` to write `:invalid` into. The field's `row` is -1 in
+  // these fixtures, so nothing is written — which is the point: the wrapper's own behaviour
+  // must not depend on whether a control row exists.
+  const ui = {
+    forms: [binding],
+    controls: { count: 0, flags: new Uint8Array(8) },
+  } as unknown as CompiledUi;
+  return { ui, form: binding, cell, error, message };
 }
 
 test("an issue lights up the wrapper whose path is a prefix of it", () => {
-  const { form, error, message } = wrapped(["position"]);
-  applyIssues(form, [{ path: ["position", "x"], message: "x is required" }], true);
+  const { ui, form, error, message } = wrapped(["position"]);
+  applyIssues(ui, form, [{ path: ["position", "x"], message: "x is required" }], true);
   expect(error.value).toBe(true);
   expect(message.value).toBe("x is required");
 });
 
 test("an issue elsewhere leaves a wrapper alone", () => {
-  const { form, error } = wrapped(["position"]);
-  applyIssues(form, [{ path: ["email"], message: "nope" }], true);
+  const { ui, form, error } = wrapped(["position"]);
+  applyIssues(ui, form, [{ path: ["email"], message: "nope" }], true);
   expect(error.value).toBe(false);
 });
 
 test("a valid payload clears the wrapper", () => {
-  const { form, error, message } = wrapped(["email"]);
-  applyIssues(form, [{ path: ["email"], message: "bad" }], true);
+  const { ui, form, error, message } = wrapped(["email"]);
+  applyIssues(ui, form, [{ path: ["email"], message: "bad" }], true);
   expect(error.value).toBe(true);
-  applyIssues(form, [], true);
+  applyIssues(ui, form, [], true);
   expect(error.value).toBe(false);
   expect(message.value).toBe("");
 });
@@ -429,33 +435,33 @@ test("a valid payload clears the wrapper", () => {
 test("before a submit, only a field that has moved may show its error", () => {
   // The gate other libraries store as `touched`, done with no state at all: the initial is a
   // constant the compiler baked in, so this is a comparison.
-  const { form, cell, error } = wrapped(["email"], "start");
+  const { ui, form, cell, error } = wrapped(["email"], "start");
   const issues = [{ path: ["email"], message: "bad" }];
 
-  applyIssues(form, issues, false);
+  applyIssues(ui, form, issues, false);
   expect(error.value).toBe(false);
 
   cell.value = "typed";
-  applyIssues(form, issues, false);
+  applyIssues(ui, form, issues, false);
   expect(error.value).toBe(true);
 
   // Back to the value it was compiled with, so it is clean again — this is deliberately
   // *not* the sticky "has been modified" flag TanStack calls `isDirty`.
   cell.value = "start";
-  applyIssues(form, issues, false);
+  applyIssues(ui, form, issues, false);
   expect(error.value).toBe(false);
 
   // And after a submit has been attempted, the gate is gone: the user has asked.
-  applyIssues(form, issues, true);
+  applyIssues(ui, form, issues, true);
   expect(error.value).toBe(true);
 });
 
 test("applyIssues reports whether anything moved", () => {
-  const { form } = wrapped(["email"]);
+  const { ui, form } = wrapped(["email"]);
   const issues = [{ path: ["email"], message: "bad" }];
-  expect(applyIssues(form, issues, true)).toBe(true);
+  expect(applyIssues(ui, form, issues, true)).toBe(true);
   // Same issues again: nothing to write, so nothing to commit.
-  expect(applyIssues(form, issues, true)).toBe(false);
+  expect(applyIssues(ui, form, issues, true)).toBe(false);
 });
 
 // ---------------------------------------------------------------------------

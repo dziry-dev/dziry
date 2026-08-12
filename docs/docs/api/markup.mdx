@@ -121,6 +121,13 @@ A bound value is always a **string**, including for `number` and `range` — the
 rule the DOM follows, where `value` is a string and `valueAsNumber` is separate. Write
 `derived(() => Number(volume))` if you want a number.
 
+**Inside a `map()` row it takes the row's own property** — `bind:value={job.title}` — because a
+row has no signal to name: its state is the item, in the one array the author holds. The list
+callback runs against a recording proxy, so that is a path at build time, the same way
+`{job.title}` already renders one. Typing replaces the item and the array, so an ordinary
+`signal.set` publishes it. That is what makes a repeating form row work — see
+[field](#field).
+
 :::warning Partial
 
 Append and backspace only. No caret, no selection, no IME, no clipboard. `<input>`
@@ -216,6 +223,21 @@ gives one key, `plan`, and not `plan.plan`. Same reason its shape is a single va
 elements, one answer. Use one radio group per wrapper — two groups under one wrapper would both
 claim its key, and the build says so.
 
+A wrapper holding a **`map()`** is an array field, and its value is the array the rows came
+from:
+
+```tsx no-check
+<div field="experience">
+  {jobs.map((job) => <input bind:value={job.title} />, { key: (job) => job.id })}
+</div>;
+```
+
+gives `{ experience: Job[] }`. It is the one field whose state the compiler does not declare:
+a row's controls are `capacity` interchangeable replicas of one template, so there is nothing
+stable to hang a per-row cell on, while the array has an entry and a key per row already. So
+the array is the state — `bind:value={job.title}` writes back into it, and adding a row is an
+ordinary `signal.set`. The entry is the item as authored, `key` property included.
+
 See the [Forms guide](../guide/forms.md) for the whole feature end to end.
 
 ### errorClassName
@@ -243,6 +265,18 @@ Write the Tailwind variant in the **prefix** form shown above. Tailwind's defaul
 
 `<span error />` marks where the message goes; its text becomes a binding to a cell the compiler
 declares, and anything you write inside it is placeholder prose that never ships.
+
+**A marker can name a field** — `<span error="city" />` inside `field="address"` shows the issue
+at `address.city`, relative to the wrapper exactly as `name` is. Each marker shows the first
+issue under its own path that no more specific marker would show, so a group's complaints divide
+between them and nothing appears twice. A name matching no field is a build warning.
+
+**Inside a `map()` row it is that row's message**, matched by data position, and the wrapper's own
+message narrows to issues at its own path so the two do not say the same thing twice.
+
+The *control* is styled with **`:invalid`** rather than with this class — a predicate, resolved
+per node, which is what lets one list row be red and the next one not: replicas share a style
+row but not a control row. See the [Forms guide](../guide/forms.md#styling-the-field-itself-invalid).
 
 ### validateOn
 
@@ -295,9 +329,9 @@ validation fails, `onSubmit` does not run and `onInvalid` gets the issues, norma
 
 :::warning Partial
 
-Fields inside a `map()` list are not collected — a list template is compiled into an arena rather
-than walked, so a `name` inside one is not in the payload. There is also no `form="id"` association,
-no file inputs, and a named submit button does not add its own entry.
+A *named* control inside a `map()` row is not collected — a `name` in a template would be the
+same string in every row, so rows reach the payload as an array field instead. There are also no
+file inputs, and a named submit button does not add its own entry.
 :::
 
 ## bind

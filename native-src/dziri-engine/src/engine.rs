@@ -2085,6 +2085,23 @@ impl Engine {
         false
     }
 
+    /// The control a press on `node` operates, or `node` itself.
+    ///
+    /// The rule focus has always followed, named because the caret follows it too. A control
+    /// row propagates `activates` into the element's own text run, so the node a pointer hits
+    /// inside a field is the **run**, and every gesture that resolves a character offset has
+    /// to climb back to the field first — the run has no editable child of its own, so asking
+    /// it produces "not a field" and the gesture silently does nothing.
+    ///
+    /// It cost three failing selection tests the day text-entry inputs gained a control row,
+    /// which they did so that `:invalid` has somewhere to live.
+    fn field_of(&self, node: i32) -> i32 {
+        match self.activates_of(node) {
+            control if control >= 0 => control,
+            _ => node,
+        }
+    }
+
     /// Drags the selection's focus to `x` inside `field`. Returns whether it is a field.
     ///
     /// Destructured for the reason `mouse_down` is: `geometry()` borrows all of `self`, and
@@ -2175,7 +2192,7 @@ impl Engine {
         // on what the pointer is over now, which is what lets a drag continue past the end of
         // the field. Chased the other way, dragging one pixel too far right would stop
         // extending, and the selection would freeze mid-gesture.
-        if self.state.pressed != -1 && self.extend_selection(self.state.pressed, x) {
+        if self.state.pressed != -1 && self.extend_selection(self.field_of(self.state.pressed), x) {
             return;
         }
 
@@ -2340,6 +2357,19 @@ impl Engine {
         //
         // A press on anything that is not a field clears the caret, which is the same
         // call: `place_caret` returns false and has already cleared.
+        // **The caret goes on the control the press operates, not on the node it landed on**
+        // — the same rule `set_focus` follows above, and it became load-bearing for the same
+        // reason focus did: a control row propagates `activates` into the element's own text
+        // run, so a click on a field's *text* hits the run.
+        //
+        // Text-entry inputs gained a control row when `:invalid` did (the flag needs somewhere
+        // to live), and the symptom was exact — focus still landed on the field, because that
+        // line was already written this way, while the caret was resolved against a run that
+        // has no editable child of its own. Clicking into text then selected nothing at all.
+        // A `<button>`'s run is unaffected: neither it nor the button is a field, so both
+        // spellings clear the caret.
+        let field = self.field_of(hit);
+
         // Destructured so the borrow checker sees disjoint *fields* rather than one
         // `&mut self`: `geometry()` borrows all of `self` immutably, and the painter and
         // the measurer both need to be mutable. `advance_animations` does the same, and
@@ -2363,19 +2393,19 @@ impl Engine {
             // what a "select the line" gesture means, and measured: a triple click and
             // Ctrl+A both report `0..19` on a 19-character field.
             n if n >= 3 => {
-                painter.select_all(tables, nodes, hit);
+                painter.select_all(tables, nodes, field);
             }
             2 => {
-                painter.select_word(tables, geometry, measurer, hit, x);
+                painter.select_word(tables, geometry, measurer, field, x);
             }
             // Shift+click extends from the anchor the last press left, which is measured to
             // flip direction through it: from a caret at 4, Shift+click at 9 gives
             // `4..9 forward` and a further Shift+click at 1 gives `1..4 backward`.
             _ if shift => {
-                painter.extend_caret(tables, geometry, measurer, hit, x);
+                painter.extend_caret(tables, geometry, measurer, field, x);
             }
             _ => {
-                painter.place_caret(tables, geometry, measurer, hit, x);
+                painter.place_caret(tables, geometry, measurer, field, x);
             }
         }
 

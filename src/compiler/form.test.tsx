@@ -27,8 +27,13 @@ import { setCompiling, signal } from "../runtime/signal.ts";
 import { submitForm } from "../runtime/bindings.ts";
 import { applyFieldChange } from "../runtime/forms.ts";
 import { typeInto } from "../runtime/bindings.ts";
-import { typeIntoRow, updateList, type ListBindingRef } from "../runtime/list-runtime.ts";
-import type { CompiledUi } from "../ir.ts";
+import {
+  applyRowValidity,
+  typeIntoRow,
+  updateList,
+  type ListBindingRef,
+} from "../runtime/list-runtime.ts";
+import { ControlFlags, type CompiledUi } from "../ir.ts";
 import type { EditableRef } from "../runtime/bindings.ts";
 import type { StylePatchRef } from "../runtime/patches.ts";
 
@@ -433,9 +438,11 @@ test("an issue lights up its wrapper and every wrapper above it", async () => {
   // The unrelated wrapper stays quiet, which is the whole point of the prefix rule.
   expect(byPath.get("name")!.error.value).toBe(false);
 
-  // The message reaches the cell the `<span error />` run is bound to.
-  expect(byPath.get("position.x")!.message.value).toBe("x is required");
-  expect(byPath.get("name")!.message.value).toBe("");
+  // The message reaches the cell the `<span error />` run is bound to. `messages[0]` because a
+  // wrapper can carry several markers now — a bare one plus a named one per leaf — and a bare
+  // marker is simply the entry whose path is the wrapper''s own.
+  expect(byPath.get("position.x")!.messages[0]!.cell.value).toBe("x is required");
+  expect(byPath.get("name")!.messages[0]!.cell.value).toBe("");
 
   await rm(dir, { recursive: true, force: true });
 });
@@ -472,6 +479,79 @@ test("the error class becomes a style patch, so the wrapper's subtree restyles",
   await rm(dir, { recursive: true, force: true });
 });
 
+/**
+ * Several `error` markers under one wrapper, dividing that wrapper's complaints by name.
+ *
+ * The end-to-end half of the feature, and worth having here rather than only in `fields.test.ts`:
+ * a marker's cell is declared by the emitted module and its run is created bound to it, so a
+ * name that resolved correctly at compile time can still reach the wrong span on disk.
+ */
+test("named error markers divide a group's messages, and nothing is said twice", async () => {
+  const save = () => {};
+  type Address = { street: string; city: string };
+  const check = (data: { address: Address }) => {
+    const issues: { path: (string | number)[]; message: string }[] = [];
+    if (data.address.street === "") issues.push({ path: ["address", "street"], message: "street?" });
+    if (data.address.city === "") issues.push({ path: ["address", "city"], message: "city?" });
+    if (data.address.street !== "" && data.address.street === data.address.city) {
+      issues.push({ path: ["address"], message: "not the same" });
+    }
+    return issues.length === 0 ? null : issues;
+  };
+
+  const { ui, dir } = await artifact(
+    () => (
+      <form onSubmit={save} validate={check}>
+        <div field="address">
+          <input name="street" />
+          <span error="street" />
+          <input name="city" />
+          <span error="city" />
+          <span error />
+        </div>
+        <button type="submit">Save</button>
+      </form>
+    ),
+    { save, check },
+  );
+
+  const group = ui.forms[0]!.groups[0]!;
+  const said = () =>
+    Object.fromEntries(group.messages.map((m) => [m.path.join("."), m.cell.value]));
+
+  // Relative to the wrapper, so the markers name `street` and the paths come out absolute.
+  expect(group.messages.map((m) => m.path.join("."))).toEqual([
+    "address.street",
+    "address.city",
+    "address",
+  ]);
+
+  submitForm(ui, ui.forms[0]!.node, ui.forms[0]!.button);
+  // Each leaf's complaint beside that leaf — and the bare marker silent, because both issues
+  // belong to something more specific than the wrapper.
+  expect(said()).toEqual({
+    "address.street": "street?",
+    "address.city": "city?",
+    address: "",
+  });
+
+  const cellOf = (path: string) =>
+    ui.forms[0]!.fields[ui.forms[0]!.keys.find((k) => k.path.join(".") === path)!.fields[0]!]!
+      .signal as { value: string };
+  cellOf("address.street").value = "Same";
+  cellOf("address.city").value = "Same";
+  submitForm(ui, ui.forms[0]!.node, ui.forms[0]!.button);
+
+  // Now the leaves are clean and the group has something only it can say.
+  expect(said()).toEqual({
+    "address.street": "",
+    "address.city": "",
+    address: "not the same",
+  });
+
+  await rm(dir, { recursive: true, force: true });
+});
+
 /** A tree compiled with recording on, for the cases that are about *diagnostics*. */
 function build(tree: () => unknown, css = ``): CompileResult {
   setCompiling(true);
@@ -484,16 +564,21 @@ function build(tree: () => unknown, css = ``): CompileResult {
 
 test("the ways a repeating section can be written wrong are all reported", () => {
   const save = () => {};
-  const jobs = signal([{ id: 1, title: "" }]);
-  const other = signal([{ id: 1, name: "" }]);
+  // Annotated at every `map` below, and that is the API rather than these tests: `map`'s
+  // `Item` is a free generic, so it is inferred from the callback rather than from the
+  // signal's element type. Every list in `windows/` annotates for the same reason.
+  type Titled = { id: number; title: string };
+  type Named = { id: number; name: string };
+  const jobs = signal<Titled[]>([{ id: 1, title: "" }]);
+  const other = signal<Named[]>([{ id: 1, name: "" }]);
 
   // Two lists under one wrapper: one key, two arrays. Reported rather than resolved, because
   // taking the first silently drops every row of the second.
   const twoLists = build(() => (
     <form onSubmit={save}>
       <div field="experience">
-        {jobs.map((job) => <div>{job.title}</div>, { key: (job) => job.id })}
-        {other.map((row) => <div>{row.name}</div>, { key: (row) => row.id })}
+        {jobs.map((job: Titled) => <div>{job.title}</div>, { key: (job: Titled) => job.id })}
+        {other.map((row: Named) => <div>{row.name}</div>, { key: (row: Named) => row.id })}
       </div>
     </form>
   ));
@@ -503,7 +588,7 @@ test("the ways a repeating section can be written wrong are all reported", () =>
   const alsoAField = build(() => (
     <form onSubmit={save}>
       <div field="experience">
-        {jobs.map((job) => <div>{job.title}</div>, { key: (job) => job.id })}
+        {jobs.map((job: Titled) => <div>{job.title}</div>, { key: (job: Titled) => job.id })}
         <input name="note" />
       </div>
     </form>
@@ -523,8 +608,8 @@ test("the ways a repeating section can be written wrong are all reported", () =>
   const clean = build(() => (
     <form onSubmit={save}>
       <div field="experience">
-        {jobs.map((job) => <div><input bind:value={job.title} /></div>, {
-          key: (job) => job.id,
+        {jobs.map((job: Titled) => <div><input bind:value={job.title} /></div>, {
+          key: (job: Titled) => job.id,
         })}
       </div>
     </form>
@@ -543,7 +628,8 @@ test("the ways a repeating section can be written wrong are all reported", () =>
 test("a map() inside a field wrapper submits its rows as an array", async () => {
   let seen: unknown = null;
   const save = (data: unknown) => (seen = data);
-  const jobs = signal([
+  type Job = { id: number; title: string; start: string; end: string };
+  const jobs = signal<Job[]>([
     { id: 1, title: "cook", start: "2019", end: "2021" },
     { id: 2, title: "clerk", start: "2021", end: "" },
   ]);
@@ -559,7 +645,7 @@ test("a map() inside a field wrapper submits its rows as an array", async () => 
                 <input bind:value={job.start} />
               </div>
             ),
-            { key: (job) => job.id },
+            { key: (job: Job) => job.id },
           )}
         </div>
         <button type="submit">Save</button>
@@ -598,7 +684,8 @@ test("a map() inside a field wrapper submits its rows as an array", async () => 
 test("typing in a row writes into that row, and the others are untouched", async () => {
   let seen: unknown = null;
   const save = (data: unknown) => (seen = data);
-  const jobs = signal([
+  type Job = { id: number; title: string };
+  const jobs = signal<Job[]>([
     { id: 1, title: "cook" },
     { id: 2, title: "clerk" },
   ]);
@@ -608,7 +695,7 @@ test("typing in a row writes into that row, and the others are untouched", async
       <form onSubmit={save}>
         <div field="experience">
           {jobs.map((job) => <div><input bind:value={job.title} /></div>, {
-            key: (job) => job.id,
+            key: (job: Job) => job.id,
           })}
         </div>
         <button type="submit">Save</button>
@@ -659,7 +746,8 @@ test("typing in a row writes into that row, and the others are untouched", async
  */
 test("a row added past the compiled capacity is still a real control", async () => {
   const save = () => {};
-  const jobs = signal([{ id: 1, title: "cook", done: false }]);
+  type Job = { id: number; title: string; done: boolean };
+  const jobs = signal<Job[]>([{ id: 1, title: "cook", done: false }]);
 
   const { ui, dir } = await artifact(
     () => (
@@ -674,7 +762,7 @@ test("a row added past the compiled capacity is still a real control", async () 
             ),
             // One slot, so the second row has to grow the arena. The default is
             // `max(8, items * 2)`, which would hide this behind eight passing rows.
-            { key: (job) => job.id, capacity: 1 },
+            { key: (job: Job) => job.id, capacity: 1 },
           )}
         </div>
         <button type="submit">Save</button>
@@ -732,13 +820,204 @@ test("a row added past the compiled capacity is still a real control", async () 
   await rm(dir, { recursive: true, force: true });
 });
 
+/**
+ * Every replica gets the *flags* its template has, not just its nodes.
+ *
+ * `::placeholder` was the one still missing. A replica's placeholder box was copied as a
+ * generated box but not marked a placeholder, so the engine never applied the "paint it only
+ * while the field is empty" test and drew the hint straight over the row's value.
+ *
+ * It could only ever show up here. Row 0 *is* the template and was always right, so the bug
+ * needed a second row that had both text and a placeholder — which is a repeating form row and
+ * nothing else, since before per-row binding a row's input could not hold text at all.
+ */
+test("a row's placeholder is a placeholder in every replica, not just the first", () => {
+  type Job = { id: number; title: string };
+  const jobs = signal<Job[]>([{ id: 1, title: "cook" }, { id: 2, title: "clerk" }]);
+  const result = build(() => (
+    <div>
+      {jobs.map((job) => <div><input placeholder="title" bind:value={job.title} /></div>, {
+        key: (job: Job) => job.id,
+      })}
+    </div>
+  ));
+
+  const list = result.lists[0]!;
+  const offsets = (slot: number) =>
+    result.nodes
+      .map((node, i) => ({ node, i }))
+      .filter(
+        ({ node, i }) =>
+          node.placeholder &&
+          i >= list.arenaStart + slot * list.stride &&
+          i < list.arenaStart + (slot + 1) * list.stride,
+      )
+      .map(({ i }) => i - list.arenaStart - slot * list.stride);
+
+  expect(offsets(0).length).toBe(1);
+  // Every replica, not just the second — a capacity-8 arena has eight rows to get right.
+  for (let slot = 1; slot < list.capacity; slot++) expect(offsets(slot)).toEqual(offsets(0));
+});
+
+/**
+ * The complaint belongs beside the row that caused it.
+ *
+ * A `<span error />` in a template is `capacity` spans on screen, so binding it to the
+ * section's cell would print one row's problem on every row — which is what a shared cell
+ * means. Every replica owns its text slots, so the message is per row; they share a style
+ * row, so the *colour* cannot be, and that asymmetry is the whole shape of this feature.
+ */
+test("a row's message goes in that row, and the section does not repeat it", async () => {
+  const save = () => {};
+  type Job = { id: number; title: string; start: string };
+  const jobs = signal<Job[]>([
+    { id: 1, title: "cook", start: "2019" },
+    { id: 2, title: "clerk", start: "" },
+  ]);
+  const check = (data: { experience: Job[] }) => {
+    const issues = data.experience.flatMap((row, i) =>
+      row.start === "" ? [{ path: ["experience", i, "start"], message: "needs a start" }] : [],
+    );
+    return data.experience.length === 0
+      ? [{ path: ["experience"], message: "add at least one job" }]
+      : issues;
+  };
+
+  const { ui, dir } = await artifact(
+    () => (
+      <form onSubmit={save} validate={check}>
+        <div field="experience" errorClassName="bad">
+          {jobs.map(
+            (job: Job) => (
+              <div>
+                <input bind:value={job.title} />
+                <span error />
+              </div>
+            ),
+            { key: (job: Job) => job.id },
+          )}
+          <span error />
+        </div>
+        <button type="submit">Save</button>
+      </form>
+    ),
+    { save, jobs, check },
+    `.bad input { color: red }`,
+  );
+
+  const list = ui.listBindings[0]!;
+  const array = ui.forms[0]!.arrays[0]!;
+  const section = ui.forms[0]!.groups[0]!;
+  updateList(ui, list);
+
+  submitForm(ui, ui.forms[0]!.node, ui.forms[0]!.button);
+  updateList(ui, list);
+
+  // Row 1 is the broken one, and row 0 says nothing — the message is indexed by *data*
+  // position, not by slot, so a reorder cannot carry it to the wrong row.
+  expect(array.rowErrors?.messages).toEqual(["", "needs a start"]);
+
+  const rowText = (slot: number) =>
+    list.bindings
+      .map((b) => ui.strings[list.slotStart + slot * list.slotsPerItem + b.slotOffset])
+      .join("|");
+  expect(rowText(0)).toBe("cook|");
+  expect(rowText(1)).toBe("clerk|needs a start");
+
+  // The section wears its class — a broken row is still the section's problem — while its own
+  // message stays empty, so the complaint is not printed twice.
+  expect(section.error.value).toBe(true);
+  expect(section.messages[0]!.cell.value).toBe("");
+
+  // An issue at the section's *own* path is the section's to say, and the rows fall silent.
+  jobs.set([]);
+  submitForm(ui, ui.forms[0]!.node, ui.forms[0]!.button);
+  expect(section.messages[0]!.cell.value).toBe("add at least one job");
+  expect(array.rowErrors?.messages).toEqual([]);
+
+  await rm(dir, { recursive: true, force: true });
+});
+
+/**
+ * `:invalid` on one row's field and not its neighbour's — the thing a class cannot do.
+ *
+ * Replicas share a **style row**, so a conditional class on a row's input is the same style
+ * row every other row reads; they do not share a **control row**, and a predicate is resolved
+ * per node against that table. So this is the one mechanism in the engine that can tell two
+ * rows apart, which is why validity is a control flag rather than a patch.
+ */
+test("a row's own field wears :invalid, and its neighbours do not", async () => {
+  const save = () => {};
+  type Job = { id: number; title: string; start: string };
+  const jobs = signal<Job[]>([
+    { id: 1, title: "cook", start: "2019" },
+    { id: 2, title: "clerk", start: "" },
+  ]);
+  const check = (data: { experience: Job[] }) =>
+    data.experience.flatMap((row, i) =>
+      row.start === "" ? [{ path: ["experience", i, "start"], message: "needs a start" }] : [],
+    );
+
+  const { ui, dir } = await artifact(
+    () => (
+      <form onSubmit={save} validate={check}>
+        <div field="experience">
+          {jobs.map(
+            (job: Job) => (
+              <div>
+                <input bind:value={job.title} />
+                <input bind:value={job.start} />
+                <span error />
+              </div>
+            ),
+            { key: (job: Job) => job.id },
+          )}
+        </div>
+        <button type="submit">Save</button>
+      </form>
+    ),
+    { save, jobs, check },
+  );
+
+  const list = ui.listBindings[0]!;
+  updateList(ui, list);
+  submitForm(ui, ui.forms[0]!.node, ui.forms[0]!.button);
+  applyRowValidity(ui, ui.listBindings, ui.forms[0]!.arrays);
+
+  const start = ui.lists.arenaStart[list.list]!;
+  const stride = ui.lists.stride[list.list]!;
+  const flagged = (slot: number, path: string) => {
+    const editable = list.itemEditables.find((e) => e.path.join(".") === path)!;
+    const node = start + slot * stride + editable.offset;
+    const row = [...ui.controls.node.subarray(0, ui.controls.count)].indexOf(node);
+    // Every text input has a control row now — without one there is nowhere for the bit.
+    expect(row).toBeGreaterThanOrEqual(0);
+    return (ui.controls.flags[row]! & ControlFlags.INVALID) !== 0;
+  };
+
+  expect(flagged(1, "start")).toBe(true);
+  expect(flagged(0, "start")).toBe(false);
+  // The *field*, not the row: the title beside the offending start is fine.
+  expect(flagged(1, "title")).toBe(false);
+
+  // Fixed, and the bit comes back off — a field that could not recover would be a form
+  // nobody can satisfy.
+  jobs.set(jobs.value.map((j) => (j.id === 2 ? { ...j, start: "2020" } : j)));
+  submitForm(ui, ui.forms[0]!.node, ui.forms[0]!.button);
+  applyRowValidity(ui, ui.listBindings, ui.forms[0]!.arrays);
+  expect(flagged(1, "start")).toBe(false);
+
+  await rm(dir, { recursive: true, force: true });
+});
+
 test("a row's validation issue lights up the wrapper it is under", async () => {
   const save = () => {};
   let rejected: { path: (string | number)[]; message: string }[] = [];
   const onInvalid = (issues: { path: (string | number)[]; message: string }[]) => {
     rejected = issues;
   };
-  const jobs = signal([{ id: 1, title: "" }]);
+  type Job = { id: number; title: string };
+  const jobs = signal<Job[]>([{ id: 1, title: "" }]);
   // An issue *inside* a row — the wrapper's path is a prefix of it, which is the whole rule.
   const check = (data: { experience: { title: string }[] }) =>
     data.experience[0]!.title === ""
@@ -750,7 +1029,7 @@ test("a row's validation issue lights up the wrapper it is under", async () => {
       <form onSubmit={save} validate={check} onInvalid={onInvalid}>
         <div field="experience" errorClassName="bad">
           {jobs.map((job) => <div><input bind:value={job.title} /></div>, {
-            key: (job) => job.id,
+            key: (job: Job) => job.id,
           })}
           <span error />
         </div>
@@ -769,7 +1048,7 @@ test("a row's validation issue lights up the wrapper it is under", async () => {
   // The wrapper wears its class for an issue three segments deep, because ownership is a
   // prefix test and a numeric segment is just a segment.
   expect(group.error.value).toBe(true);
-  expect(group.message.value).toBe("what was the job?");
+  expect(group.messages[0]!.cell.value).toBe("what was the job?");
 
   await rm(dir, { recursive: true, force: true });
 });

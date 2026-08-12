@@ -116,6 +116,118 @@ a radio set's shape is a single value: many elements, one answer.
 Put **one radio group per wrapper**. Two groups under one wrapper would both claim the wrapper's
 key, and the build says so rather than letting one overwrite the other.
 
+## Repeating rows
+
+A `field` wrapper holding a `map()` is an **array field**, and its value is the array the rows
+came from:
+
+```tsx no-check
+type Job = { id: number; title: string; start: string; end: string };
+
+export const jobs = signal<Job[]>([{ id: 1, title: "", start: "", end: "" }]);
+let nextId = 2;
+
+export const addJob = () =>
+  jobs.set((rows) => [...rows, { id: nextId++, title: "", start: "", end: "" }]);
+export const removeJob = (job: Job) =>
+  jobs.set((rows) => rows.filter((row) => row.id !== job.id));
+
+<div field="experience">
+  {jobs.map(
+    (job) => (
+      <div>
+        <input bind:value={job.title} />
+        <input bind:value={job.start} />
+        <input bind:value={job.end} />
+        <button type="button" onClick={removeJob}>remove</button>
+      </div>
+    ),
+    { key: (job) => job.id },
+  )}
+</div>
+<button type="button" onClick={addJob}>add a row</button>;
+```
+
+gives `{ experience: Job[] }`, one entry per live row.
+
+**This is the one field whose state you own**, and the reason is worth a sentence. Every other
+field gets a cell the compiler declares — but a row's controls live in a list arena, which is
+`capacity` interchangeable replicas of one template, so there is nothing stable to hang a
+per-row cell on. The array already has one entry per row and a key for each. So the array *is*
+the state, `bind:value={job.title}` writes back into it, and adding a row is an ordinary
+`signal.set` rather than a call into a form API.
+
+Everything else follows from that: reordering rows reorders the payload, a removed row is gone
+rather than blank, and the row type in your payload is the type you declared.
+
+:::note `bind:value` on a row's property
+
+Inside a `map()`, `bind:value` takes the row's own property rather than a signal. The callback
+runs once against a recording proxy, so `job.title` is a *path* at build time — which is the
+same mechanism `{job.title}` already uses to render. Typing replaces the item and the array, so
+an ordinary `signal.set` publishes it; nothing is mutated in place.
+:::
+
+Two things to know:
+
+- **The entry is the item as authored**, `id` and all. Dropping the key from the payload would
+  mean the compiler deciding which properties are "really" fields, and every rule for that is a
+  guess. Drop it in your schema if you mind.
+- **A row's errors appear on submit**, not while typing. The pristine-field gate is a comparison
+  against a compiled constant, and an array has none. After the first failed submit they update
+  live like everything else.
+
+### The message goes in the row
+
+Put a `<span error />` **inside the template** and each row shows its own complaint:
+
+```tsx no-check
+<div field="experience" errorClassName="group/error">
+  {jobs.map(
+    (job: Job) => (
+      <div>
+        <input bind:value={job.title} />
+        <span error />
+      </div>
+    ),
+    { key: (job: Job) => job.id },
+  )}
+  <span error />
+</div>;
+```
+
+An issue at `experience.0.title` lands in row 0 and nowhere else, matched by **data position**
+rather than by slot — so a reorder cannot carry a message to the wrong row.
+
+The section's own `<span error />` then shows only what is the *section's*: "add at least one
+job" for an issue at `experience` itself, and nothing when a row is already saying it. Its
+`errorClassName` still goes on, because a broken row is the section's problem too — the class
+and the message part company only here.
+
+### Styling the field itself: `:invalid`
+
+The wrapper's class dresses everything *around* a field. The field itself uses a pseudo-class:
+
+```css
+input:invalid { border-color: #f43f5e }
+```
+
+`:invalid` is live on any control a `validate={…}` rejected, and it clears the moment the next
+validation passes. **It is the only way to style one list row and not another**, and the
+reason is worth knowing: replicas share a style row, so a conditional class on a row's input
+is the same class on every row's, while each replica has its own row in the controls table —
+which is where this bit lives and what the engine resolves it against.
+
+There is no `:user-invalid`. It differs from `:invalid` only in *when* a browser lets it
+match, and that timing is already decided by `validateOn` plus the pristine-field gate.
+
+:::warning Watch the specificity
+
+`input:invalid` and `input[type="text"]` are both `(0,1,1)`, so they tie and source order
+decides. A rule written above the field's resting colour compiles into the variant slot and is
+then overwritten by it — which looks exactly like the predicate never going live.
+:::
+
 ## Validation
 
 ```tsx no-check
@@ -178,6 +290,40 @@ is JavaScript**. It compiles to a handful of style-table writes.
 declares; anything you write inside it is placeholder prose for your own benefit and never
 ships.
 
+### One message per field, in a group
+
+A marker can **name** a field, and then a group's complaints divide up instead of collapsing
+into one line:
+
+```tsx no-check
+<div field="address" errorClassName="group/error">
+  <div>
+    <input name="street" />
+    <span error="street" />
+  </div>
+  <div>
+    <input name="city" />
+    <span error="city" />
+  </div>
+  <span error />
+</div>;
+```
+
+The name is **relative to the wrapper**, exactly as a control's `name` is — `error="street"`
+inside `field="address"` means `address.street`, and dots go deeper. Relative rather than
+absolute for the same reason: renaming the wrapper, or nesting it, must not mean editing every
+marker inside it.
+
+Each marker shows the first issue under **its own** path that no more specific marker would
+show. So with both fields empty, each leaf says its own thing and the bare marker stays silent;
+with an issue at `address` itself — "street and city cannot be the same" — the leaves are clean
+and the bare marker speaks. Nothing is ever said twice.
+
+**The class stays one per wrapper.** `errorClassName` means "something under here is wrong",
+which is a single fact however many messages describe it; only the text divides. A name that
+matches no field is a build warning, because a marker that can never fill is indistinguishable
+from a field that is never wrong.
+
 :::warning Use the prefix form of the Tailwind variant
 
 `@custom-variant error (.group\/error &)` emits `.group\/error .error\:block`, a plain
@@ -187,6 +333,38 @@ inside `:is()` is not a selector dziri parses.
 
 Many fields can share the class name and stay independent — patches are keyed on the field's own
 state, not on the string.
+
+## Reacting to one field
+
+A submit button that is off until a box is ticked needs the *app* to know about that box, and
+this is the one place the payload-only rule costs you something:
+
+```tsx no-check
+export const termsAccepted = signal(false);
+export const onTermsChange = (on: boolean) => termsAccepted.set(on === true);
+export const cannotSubmit = computed(() => !termsAccepted);
+
+<div field="terms">
+  <input type="checkbox" onChange={onTermsChange} />
+</div>
+<button type="submit" disabled={cannotSubmit}>sign up</button>;
+```
+
+`disabled` takes a signal, and it buys three things at once because it is a *control flag*
+rather than a class: the button greys out through `:disabled`, presses on it are refused by the
+engine, and **Enter is refused too** — a form whose submit button is off has no route in.
+
+The checkbox keeps its compiler-declared cell, so `terms` is still in the payload. The
+`onChange` is a second reader, and both see the same click: the cell is written before any
+handler runs, so the two cannot disagree.
+
+:::note This is a duplicate, and it is the API's fault
+
+A named field's cell is deliberately unnameable from outside the artifact — the payload is how
+you read it — so a field that has to drive something *else* on the page needs the app to hold
+its value as well. `bind:checked` is what removes the copy, making the author's signal *be* the
+cell the way `bind:value` already does for text. It is not built.
+:::
 
 ## Telling the user
 
@@ -203,9 +381,11 @@ has a global `alert()` that reads stdin.
 
 ## What is not built
 
-- **Fields inside a `map()` list are not collected.** A list template is compiled once into an
-  arena, so a `value` inside it is the same string in every row and per-row entries would be
-  indistinguishable. The control still renders; the build says it is not in the payload.
+- **A *named* control inside a `map()` row is still not collected.** Rows reach the payload as
+  an array field, through `bind:value` on the row's own properties — a `name` inside a template
+  would be the same string in every row, so it stays out. The build says so.
+- **`errorClassName` on a wrapper *inside* a row does nothing.** A class is a style row, and
+  replicas share one. Style the row's controls with `:invalid` instead, which is per node.
 - **No `<input type="file">`.** There is no file picker, so there would be nothing to submit.
 - **A named submit button adds no entry of its own** — a browser includes `name=value` for the
   button that submitted, and dziri does not. In a two-button form, use two `onClick`s.

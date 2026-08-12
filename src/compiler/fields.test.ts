@@ -500,17 +500,20 @@ test("a path claimed as both a value and a group is reported", () => {
   expect(built.warnings.some((w) => w.includes("claimed as both a value and a group"))).toBe(true);
 });
 
-test("a wrapper gets two cells, and a submitter-only wrapper still gets them", () => {
+test("a wrapper gets an error cell, and a marker gets a message cell", () => {
   const { groups } = collectFields(
     doc(`<body><form>
-      <div field="email"><input type="text"></div>
+      <div field="email"><span error></span><input type="text"></div>
       <div field="age"><input type="text"></div>
     </form></body>`),
   );
 
-  expect(groups.map((g) => [g.path, g.errorCell, g.messageCell])).toEqual([
-    [["email"], "fieldError_0", "fieldMessage_0"],
-    [["age"], "fieldError_1", "fieldMessage_1"],
+  // Every wrapper declares the error cell, marker or not — `errorClassName` may
+  // still key on it. A *message* cell exists only where a marker does: with no
+  // `<span error />` there is nowhere to show one.
+  expect(groups.map((g) => [g.path, g.errorCell, g.messages[0]?.cell])).toEqual([
+    [["email"], "fieldError_0", "fieldMessage_0_0"],
+    [["age"], "fieldError_1", undefined],
   ]);
 });
 
@@ -540,10 +543,68 @@ test("the element marked error belongs to the innermost wrapper", () => {
     </form></body>`),
   );
 
-  expect(groups.map((g) => [g.path.join("."), g.messageEl?.id])).toEqual([
-    ["outer", "for-outer"],
-    ["outer.inner", "for-inner"],
+  expect(groups.map((g) => [g.path.join("."), g.messages.map((m) => m.el.id)])).toEqual([
+    ["outer", ["for-outer"]],
+    ["outer.inner", ["for-inner"]],
   ]);
+});
+
+test("a named error marker speaks for a leaf, relative to its wrapper", () => {
+  const { groups } = collectFields(
+    doc(`<body><form>
+      <div field="address">
+        <input type="text" name="street">
+        <input type="text" name="city">
+        <span error="street" id="s"></span>
+        <span error="city" id="c"></span>
+        <span error id="whole"></span>
+      </div>
+    </form></body>`),
+  );
+
+  // Relative, like a control's `name`: the wrapper's chain plus what the marker said. So the
+  // group is movable — renaming the wrapper does not touch the markers inside it.
+  expect(groups[0]!.messages.map((m) => [m.el.id, m.path.join(".")])).toEqual([
+    ["s", "address.street"],
+    ["c", "address.city"],
+    ["whole", "address"],
+  ]);
+
+  // A cell each, because they show different text at the same time.
+  expect(new Set(groups[0]!.messages.map((m) => m.cell)).size).toBe(3);
+});
+
+test("a named error marker that names nothing is reported", () => {
+  const warnings: string[] = [];
+  collectFields(
+    doc(`<body><form>
+      <div field="address">
+        <input type="text" name="city">
+        <span error="cty"></span>
+      </div>
+    </form></body>`),
+    (m) => warnings.push(m),
+  );
+
+  // The cost of a name: a typo compiles, renders an empty span, and stays empty forever —
+  // which is indistinguishable from a field that is never wrong.
+  expect(warnings.some((w) => w.includes(`names "address.cty"`))).toBe(true);
+});
+
+test("a name at or above a real field is reachable, because a validator may complain there", () => {
+  const warnings: string[] = [];
+  collectFields(
+    doc(`<body><form>
+      <div field="address">
+        <div field="line"><input type="text" name="one"></div>
+        <span error="line"></span>
+        <span error="line.one"></span>
+      </div>
+    </form></body>`),
+    (m) => warnings.push(m),
+  );
+
+  expect(warnings.filter((w) => w.includes("which no field produces"))).toEqual([]);
 });
 
 test("validateOn is read from the kebab-cased attribute a JSX prop becomes", () => {

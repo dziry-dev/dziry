@@ -680,6 +680,7 @@ pub mod control_flags {
     pub const CHECKED: u8 = 1 << 0;
     pub const DISABLED: u8 = 1 << 1;
     pub const MULTIPLE: u8 = 1 << 2;
+    pub const INVALID: u8 = 1 << 3;
 }
 
 /// What a node is. `nodes.kind`.
@@ -820,6 +821,7 @@ pub mod predicate {
     pub const DISABLED: u32 = 16;
     pub const OPEN: u32 = 32;
     pub const FOCUS_VISIBLE: u32 = 64;
+    pub const INVALID: u32 = 128;
     pub const FIRST_GLOBAL: u32 = 256;
 }
 

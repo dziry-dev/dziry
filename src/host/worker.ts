@@ -43,7 +43,7 @@ import {
   submitFrom,
   typeInto,
 } from "../runtime/bindings.ts";
-import { setAlertSink } from "../runtime/alert.ts";
+import { setAlertSink, type AlertRequest } from "../runtime/alert.ts";
 import { applyFieldChange } from "../runtime/forms.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
 import { applyDisabled, subscribeDisabled } from "../runtime/controls.ts";
@@ -54,6 +54,7 @@ import {
   dispatchItem,
   dispatchItemChange,
   typeIntoRow,
+  applyRowValidity,
 } from "../runtime/list-runtime.ts";
 import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
@@ -190,9 +191,26 @@ function start(
    * labelled the way the rest of the app is — the alternative is SDL's empty title bar, which
    * looks like a bug rather than a default.
    */
-  setAlertSink(({ message, title, level }) =>
-    post({ t: "alert", message, title: title || windowConfig.title, level }),
-  );
+  /**
+   * Queued, not posted — and that queue is the whole of a fix worth explaining.
+   *
+   * `alert()` is called from inside app code, which for a form means inside the `batch()` that
+   * `submitForm` wraps its validation in. At that instant the error cells have been *written*
+   * and nothing has reacted to them: a batch defers its subscribers to the end, so no text
+   * binding has been recomputed, no style patch applied, and nothing staged. Posting from here
+   * therefore raced the frame it was about — and the engine thread, which is where the dialog
+   * has to run, blocks the moment it arrives. The box went up over the *pre-submit* picture:
+   * every complaint listed inside it, and not one of them visible behind it.
+   *
+   * So the request waits for the commit that the same interaction is already going to cause.
+   * `flush` posts it afterwards, and the engine thread paints once more before it blocks —
+   * which makes the rule "a modal shows the frame that caused it".
+   */
+  const pendingAlerts: AlertRequest[] = [];
+  setAlertSink((request) => {
+    pendingAlerts.push(request);
+    schedule();
+  });
 
   /** `--route routing`, for starting somewhere other than the initial route. */
   const requested = (() => {
@@ -312,6 +330,30 @@ function start(
   }
 
   /**
+   * What a validation may have moved, beyond the cells that publish themselves.
+   *
+   * A wrapper's error and message are signals, so writing them wakes the ordinary binding
+   * subscription. A **row's** message is not: it lives in a plain box the list's slot refresh
+   * reads, because there is one message per row and signals are per binding. So the refresh has
+   * to be asked for, and this is the one place that knows both halves — `runtime/forms.ts`
+   * writes the box and has no access to the list table, which is the host's.
+   */
+  const validated = (moved: boolean): void => {
+    if (!moved) return;
+    updateLists(ui, listBindings);
+    // `:invalid` on a row's own input, which needs both halves of the join: the form knows
+    // *which field of row 3* was rejected, and only the list knows which replica is rendering
+    // row 3. Marking the controls table means the engine has to re-read it, hence
+    // `controlsDirty` — the same path `disabled={signal}` takes.
+    for (const form of ui.forms) applyRowValidity(ui, listBindings, form.arrays);
+    // Unconditional rather than conditional on the two calls above: `applyIssues` has already
+    // written `INVALID` for the ordinary fields by the time this runs, and its return value
+    // says "something moved" without saying which table.
+    controlsDirty = true;
+    dirty = true;
+  };
+
+  /**
    * Stages the IR's current state, under the lock.
    *
    * Coalescing is deliberate: a click that writes four signals fires four
@@ -326,9 +368,33 @@ function start(
     queueMicrotask(flush);
   }
 
+  /**
+   * Posts whatever `alert()` asked for, after the tables have been published.
+   *
+   * Deliberately *not* inside the `dirty` guard: an alert from a handler that changed nothing
+   * still has to reach the engine thread, or a plain `alert("hello")` would hang in the queue
+   * until something unrelated moved.
+   */
+  function drainAlerts(): void {
+    for (const request of pendingAlerts.splice(0)) {
+      post({
+        t: "alert",
+        message: request.message,
+        // The window's own title, so a box with nothing said about it is still labelled the way
+        // the rest of the app is — SDL's empty title bar looks like a bug rather than a default.
+        title: request.title || windowConfig.title,
+        level: request.level,
+      });
+    }
+  }
+
   function flush(): void {
     scheduled = false;
-    if (!dirty || uploader === null || flags === null || growing) return;
+    if (!dirty || uploader === null || flags === null || growing) {
+      // Nothing to commit, so there is nothing for an alert to wait behind.
+      if (!growing) drainAlerts();
+      return;
+    }
 
     // Asked before the lock, because the answer cannot be acted on here at all:
     // growing takes the engine handle. The batch is abandoned and replayed once
@@ -361,6 +427,8 @@ function start(
 
     dirty = false;
     post({ t: "published" });
+    // After the publish, so the engine has the frame the box is about before it blocks on it.
+    drainAlerts();
   }
 
   /** A full re-upload under the lock, for the first frame and after every grow. */
@@ -414,7 +482,7 @@ function start(
                 // click handler as part of it, so this must not also `dispatch`, or a
                 // button with an `onClick` would fire it twice.
                 const form = formSubmittedByPress(ui, e.node);
-                if (form >= 0) submitForm(ui, form, e.node);
+                if (form >= 0) validated(submitForm(ui, form, e.node));
                 else dispatch(ui, e.node);
               }
               break;
@@ -433,7 +501,7 @@ function start(
               if (!dispatchItem(ui, listBindings, e.node, "blur")) dispatch(ui, e.node, "blur");
               // `validateOn="blur"` — the trigger a browser has no equivalent of, and the one
               // that suits a field whose rule is expensive to check on every keystroke.
-              if (revalidate(ui, e.node, "blur")) dirty = true;
+              validated(revalidate(ui, e.node, "blur"));
               break;
 
             case EventKind.CHANGE:
@@ -457,7 +525,7 @@ function start(
               // After the cell is written and the handler has run, so a validator sees the
               // value the user just chose. Does nothing unless the form asked for it or a
               // submit has already failed.
-              if (revalidate(ui, e.node, "change")) dirty = true;
+              validated(revalidate(ui, e.node, "change"));
               break;
 
             case EventKind.TEXT_INPUT:
@@ -470,14 +538,14 @@ function start(
               // anything that is not one of its rows, so the fall-through is exact.
               if (typeIntoRow(ui, listBindings, e.node, { text: e.text, caret: e.b, anchor: e.c })) {
                 dirty = true;
-                revalidate(ui, e.node, "change");
+                validated(revalidate(ui, e.node, "change"));
               } else if (typeInto(editables, e.node, { text: e.text, caret: e.b, anchor: e.c })) {
                 dirty = true;
                 // A keystroke *is* a change for a text field — the engine sends `CHANGE` for
                 // controls whose state it owns, and a field's value is Bun's. So the trigger
                 // has to be fired from here as well or `validateOn="change"` would work for a
                 // checkbox and not for the field it is next to.
-                revalidate(ui, e.node, "change");
+                validated(revalidate(ui, e.node, "change"));
               }
               break;
 
@@ -494,13 +562,13 @@ function start(
                 const key = { text: null, erase, caret: e.b, anchor: e.c } as const;
                 if (typeIntoRow(ui, listBindings, e.node, key)) {
                   dirty = true;
-                  revalidate(ui, e.node, "change");
+                  validated(revalidate(ui, e.node, "change"));
                 } else if (typeInto(editables, e.node, key)) {
                   dirty = true;
                   // Erasing is a change too, and it is the one that matters most for a
                   // `required` rule: clearing a field is exactly when its error should
                   // come back.
-                  revalidate(ui, e.node, "change");
+                  validated(revalidate(ui, e.node, "change"));
                 }
               } else if (e.a === KEY_RETURN) {
                 // Implicit submission. The engine has already activated the focused node
@@ -511,7 +579,7 @@ function start(
                 // compiler resolved the button, the disabled test and the field count, and
                 // `submitFrom` is left with the two questions that depend on where focus
                 // is. See BROWSER-FACTS, "Implicit submission".
-                submitFrom(ui, e.node);
+                validated(submitFrom(ui, e.node));
               } else if (e.a === KEY_ESCAPE) {
                 post({ t: "input", hovered: -1, pressed: -1, focused: -1 });
               }

@@ -1425,6 +1425,13 @@ fn resolve_slot(
     if control & control_flags::DISABLED != 0 {
         live |= predicate::DISABLED;
     }
+    // `:invalid`, and the only per-node predicate whose answer came from the app thread.
+    // Read against `subject` like the rest, so `.cell:invalid` on a list row resolves against
+    // that row's own input — which is the whole reason this is a predicate and not a class:
+    // replicas share a style row, and they do not share a control row.
+    if control & control_flags::INVALID != 0 {
+        live |= predicate::INVALID;
+    }
 
     // `:open`, and it is the cheapest of the lot: one integer for the whole document,
     // because only one picker can be open at a time (measured). Against `subject` like

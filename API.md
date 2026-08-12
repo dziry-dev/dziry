@@ -272,6 +272,19 @@ reason a radio set's shape is `one`: many elements, a single answer. Outside a w
 is still the key, so a flat form is unchanged. Two *different* radio groups under one wrapper is
 a build warning, because both would claim the wrapper's key.
 
+**A wrapper holding a `map()` is an array field**, and its value is the array the rows came
+from — `<div field="experience">` around a keyed list gives `{ experience: Job[] }`, one entry
+per live row. It is the only field whose state the compiler does not declare, and the reason is
+structural rather than a shortcut: a row's controls are `capacity` interchangeable replicas of
+one template, so there is nothing stable to hang a per-row cell on, while the array already has
+a keyed entry per row. So the array *is* the state — `bind:value={job.title}` inside the
+template writes back into it (the item is replaced, not mutated, so an ordinary `signal.set`
+publishes), and adding a row is `signal.set` rather than a call into a form API. Reordering
+reorders the payload, a removed row is gone rather than blank, and the entry is the item **as
+authored**, `key` property included: dropping it would mean the compiler deciding which
+properties are "really" fields, and every rule for that is a guess. Two lists under one wrapper,
+or a named control beside one, is a build warning — one key cannot be an array and an object.
+
 **`errorClassName` is the only error state, and it is a class.** A wrapper wears it while any
 issue's `path` has the wrapper's path as a *prefix*, so `position` lights up for an issue at
 `position.x` and a nested `field="x"` wrapper lights up for that one alone. It compiles to the
@@ -437,11 +450,13 @@ is genuinely new: one integer for which select is open, and one per-node label r
 button can read the chosen option's string without the engine writing into Bun's tables.
 
 Still missing, and named rather than implied: `:indeterminate` has no way to be reached, and a
-named control inside a `map()` list is **not in the payload** — measured, not assumed. A list
-template is compiled once into an arena rather than walked as ordinary children, so the field pass
-never sees it; the control still renders, and the build says it cannot be typed into. What a
-row-shaped payload should even be — one entry, or one per row — is an open question rather than a
-missing line of code.
+control inside a `map()` row is still not collected **by `name`** — a name in a template is the
+same string in every row, so there is nothing to tell two rows' entries apart. Rows reach the
+payload the other way instead: a `field` wrapper holding a `map()` is an **array field** whose
+value is the array the rows came from, and a row's inputs edit that array through
+`bind:value={row.title}`. That is what the "one entry or one per row" question resolved to — the
+array is the state, because an arena of interchangeable replicas has nothing stable to hang a
+per-row cell on and the array has a keyed entry per row already.
 For the picker specifically: no collision handling — one near the window's bottom edge hangs off it
 rather than flipping above its select, which is ROADMAP B2's job — no scroll-outside dismissal, no
 `<optgroup>` label rendering, and no type-to-select.
@@ -478,10 +493,18 @@ rather than flipping above its select, which is ROADMAP B2's job — no scroll-o
 | `onInvalid` | **done** — issues normalised to `{ path, message }[]` from all three validator shapes | A3 |
 | `field="…"` — nesting by wrapper | **done** — the wrapper chain is the path, so `{ position: { x, y } }` needs no bracket syntax. No browser nests anything (measured); a path claimed as both a value and a group is a build error | A3 |
 | `errorClassName` + `<span error />` | **done** — a class on the wrapper, compiled to style-table patches, so the error story is CSS. Independent per wrapper even when the class string is shared | A3 |
+| `<span error="city" />` — a named message inside a group | **done** — the name is relative to the wrapper, as `name` is, so a group stays movable. Each marker shows the first issue under its own path that no *more specific* marker would show, which divides a group's complaints between its leaves and its own line with nothing said twice. The class stays singular: "something here is wrong" is one fact however many messages describe it. A name no field produces is a build warning, because a marker that can never fill looks exactly like a field that is never wrong | A3 |
 | `validateOn="submit\|change\|blur"` | **done** — plus two rules that are behaviour rather than knobs: re-validate on change after a failed submit, and no error before a field has moved off its compiled value | A3 |
 | per-field `touched` / `dirty` as styling hooks | **refused by name** — `touched` exists in other libraries to gate error display, which `validateOn` does; per-field `dirty` styling is a need nobody has demonstrated. Reversible: each would be one more class toggle | — |
 | the submitter's own `name`/`value` entry | **not done** — measured (a named `<button type=submit>` contributes only when it is the button that submitted) and deliberately left out: it is the one entry that is not a property of the markup, and a two-button form in dziri would use two `onClick`s | — |
-| `form="id"` association | **not done** — a field is collected by being inside the form. Measured to work in a browser and refused here rather than silently ignored | — |
+| `form="id"` association | **done** — ownership rather than ancestry, resolved once and read by all three questions a form asks: its payload, its default button, and its blocking-field count. Measured (`probes/form-owner.html`), including that a `form=` naming no form **orphans** the control rather than falling back to its ancestor | A3 |
+| a `field` wrapper holding a `map()` — repeating rows | **done** — the wrapper's value is the list's array, so the payload gains `Job[]` with one entry per live row. The only field whose state the compiler does not declare: an arena of interchangeable replicas has nothing stable to hang a per-row cell on, and the array has a keyed entry per row already. `bind:value={job.title}` writes back into it | A3 |
+| a *named* control inside a `map()` row | **refused by name** — a `name` in a template is the same string in every row, so two rows' entries would be indistinguishable. The array field above is the way rows reach a payload | — |
+| a row's own error message — `<span error />` in the template | **done** — matched by *data position*, so a reorder cannot carry a message to the wrong row. The section's own message then shows only issues at its own path, while its `errorClassName` still goes on for anything under it: the class and the message part company exactly here | A3 |
+| a row's own error **styling** — `:invalid` | **done** — protocol v39. A predicate rather than a class, because a class *is* a style row and replicas share one: `:invalid` is a control flag Bun writes after validation and the engine re-reads on rescan, resolved per node, so one row can be red and its neighbour not. Every text-entry `<input>` now carries a control row so the flag has somewhere to live | A3 |
+| a submit button switched off by `disabled={signal}` | **done** — and the Enter path had to be told: a *literal* `disabled` makes the compiler emit `button: -1`, which blocks outright (measured), but a signal cannot be seen at build time. `submitForm` now reads the live flag, so a greyed-out button is unsubmittable by press *and* by Enter. `bind:checked` would remove the duplicate signal a gated button needs today | A3 |
+| an `alert()` raised from a handler shows the frame that caused it | **done** — the request is queued until the app thread's next commit and the engine paints once more before blocking. It is raised inside the submit `batch()`, so nothing had reacted to the error cells yet: the box went up over the pre-submit picture, listing complaints that were invisible behind it | A3 |
+| `:user-invalid` | **refused by name** — it differs from `:invalid` only in when a browser lets it match, and that timing is already `validateOn` plus the pristine-field gate. Two spellings would put one rule in two places | — |
 | `<input type=file>` in a payload | **refused by name** — there is no file picker, so there is no file to submit; a named one warns rather than contributing an empty entry | — |
 | a **disabled** `<option>` that is selected | **known divergence** — measured to make its whole `<select>` contribute nothing; dziri submits its value | — |
 | `onChange` vs `onInput` | planned | A3 |

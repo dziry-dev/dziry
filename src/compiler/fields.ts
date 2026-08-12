@@ -120,10 +120,34 @@ export type FieldGroup = {
    * other nameless references use, each recognised by shape rather than by a flag.
    */
   errorSource: { cell: string };
-  /** The declared string cell holding the message. */
-  messageCell: string;
-  /** The element marked `error`, whose text run the message is written into, or null. */
-  messageEl: Element | null;
+  /**
+   * Every element marked `error` under this wrapper, and the path each speaks for.
+   *
+   * A list rather than one cell, because a group can have more than one thing to say.
+   * `<span error />` is the wrapper's own message; `<span error="street" />` is the message for
+   * the field at `street` inside it. Both are the same mechanism — a path, a declared cell, a
+   * text run — so the bare form is not a special case but the entry whose path *is* the
+   * wrapper's.
+   *
+   * The **class stays one per wrapper**. `errorClassName` says "something under here is wrong",
+   * which is a single fact however many messages describe it; only the text divides up.
+   */
+  messages: FieldMessage[];
+};
+
+/**
+ * One `error` marker, and the path whose message it shows.
+ *
+ * The name is **relative to the wrapper**, exactly as a control's `name` is: inside
+ * `<div field="address">`, `error="street"` means `address.street`. Dots go deeper, so
+ * `error="line.one"` reaches into a nested group without needing a marker of its own there.
+ */
+export type FieldMessage = {
+  el: Element;
+  /** The wrapper's own path, or that plus the segments the marker named. */
+  path: string[];
+  /** The declared string cell this element's run reads. */
+  cell: string;
 };
 
 /**
@@ -150,6 +174,24 @@ export type FieldArray = {
   path: string[];
   /** The array signal the `map()` was called on. Named by the resolve pass. */
   source: unknown;
+  /**
+   * A `<span error />` *inside the row template*, or null.
+   *
+   * The row's own message, which is the one part of error display that can be per-row: every
+   * replica owns its text slots, so the string can differ row by row. Colour cannot — replicas
+   * share a style row — so a per-row border needs a predicate the engine owns, and that is not
+   * built.
+   */
+  messageEl: Element | null;
+  /**
+   * The box those messages live in, `{ messages: string[] }` indexed by data position.
+   *
+   * Declared by the artifact and shared by two tables that never meet: validation writes it
+   * through the form binding, and the list's slot refresh reads it through a text part. A cell
+   * name rather than a signal because nothing subscribes — the refresh is driven by the same
+   * commit the validation already causes.
+   */
+  rowErrors: { cell: string } | null;
 };
 
 /**
@@ -470,7 +512,18 @@ export function collectFields(
         // prefix rule every other wrapper uses.
         const lists = enclosedLists(el);
         if (lists.length > 0) {
-          arrays.push({ el, form: owner, path: here, source: lists[0]!.source });
+          // The row's own message element, found in the *template* — which `findMarked` above
+          // cannot reach, because a `dynlist` is not an element child and the section's own
+          // scan deliberately stops at one. So the two never claim the same span.
+          const rowMessage = markedIn(lists[0]!.template);
+          arrays.push({
+            el,
+            form: owner,
+            path: here,
+            source: lists[0]!.source,
+            messageEl: rowMessage,
+            rowErrors: rowMessage === null ? null : { cell: `rowErrors_${arrays.length}` },
+          });
         }
         if (lists.length > 1) {
           warn(
@@ -492,8 +545,11 @@ export function collectFields(
           // the artifact and no writes: nothing subscribes to it.
           errorCell,
           errorSource,
-          messageCell: `fieldMessage_${groups.length}`,
-          messageEl: findMarked(el),
+          messages: markedUnder(el, here).map((found, i) => ({
+            el: found.el,
+            path: found.path,
+            cell: `fieldMessage_${groups.length}_${i}`,
+          })),
         });
       }
     }
@@ -586,6 +642,7 @@ export function collectFields(
 
   visit(root, [root], []);
   reportPathConflicts(specs, warn, arrays);
+  reportUnreachableMessages(specs, groups, warn);
   return { specs, cells, groups, arrays };
 }
 
@@ -693,6 +750,48 @@ function reportPathConflicts(
   }
 }
 
+/**
+ * A `<span error="…">` that names a path no field can ever produce.
+ *
+ * The cost of letting a marker carry a name: `error="stret"` compiles, renders an empty span,
+ * and stays empty forever — a message that never appears is indistinguishable from a field that
+ * is never wrong. So the name is checked against the paths that exist, which the same pass has
+ * just finished collecting.
+ *
+ * A path **at or above** a real field counts, because a validator may complain about a group as
+ * well as a leaf: `error="address"` is legitimate beside `error="address.city"`.
+ */
+function reportUnreachableMessages(
+  specs: Map<Element, FieldSpec>,
+  groups: readonly FieldGroup[],
+  warn: (message: string) => void,
+): void {
+  const reachable = new Set<string>();
+  for (const spec of specs.values()) {
+    for (let cut = 1; cut <= spec.path.length; cut++) {
+      reachable.add(spec.path.slice(0, cut).join("."));
+    }
+  }
+  // A wrapper's own path is reachable even with no control under it yet — an array field's is
+  // the case, since its rows are not walked.
+  for (const group of groups) reachable.add(group.path.join("."));
+
+  for (const group of groups) {
+    for (const message of group.messages) {
+      const dotted = message.path.join(".");
+      if (reachable.has(dotted)) continue;
+      warn(
+        `<${message.el.tag} error="${message.path.slice(group.path.length).join(".")}"> names ` +
+          `"${dotted}", which no field produces.\n` +
+          `    The name is relative to the <${group.el.tag} field="${group.path[group.path.length - 1]}">` +
+          ` around it, so it should be one of\n` +
+          `    that wrapper's own controls. As written the message can never appear, which looks\n` +
+          `    exactly like a field that is never wrong.`,
+      );
+    }
+  }
+}
+
 /** The innermost `<form>` among these ancestors, or null. */
 function enclosingForm(ancestors: readonly Element[]): Element | null {
   let found: Element | null = null;
@@ -701,23 +800,67 @@ function enclosingForm(ancestors: readonly Element[]): Element | null {
 }
 
 /**
- * The descendant marked `error`, which is where this wrapper's message is written.
+ * Every descendant marked `error`, with the path each one speaks for.
  *
- * The search stops at a nested `field` wrapper, so an inner group's message element belongs
- * to the inner group — the same containment rule the paths follow.
+ * The scan stops at a nested `field` wrapper, so an inner group's markers belong to the inner
+ * group — the same containment rule the paths follow, which is what keeps two wrappers from
+ * both claiming one span.
+ *
+ * A marker's value is a name **relative to this wrapper**: bare is the wrapper's own message,
+ * `error="street"` is the field at `street` inside it, and dots go deeper. Relative rather than
+ * absolute for the reason `name` is: a group should be movable — renaming the wrapper or nesting
+ * it deeper must not require editing the markers inside it.
  */
-function findMarked(wrapper: Element): Element | null {
-  const scan = (el: Element): Element | null => {
+function markedUnder(wrapper: Element, here: string[]): { el: Element; path: string[] }[] {
+  const found: { el: Element; path: string[] }[] = [];
+
+  const scan = (el: Element): void => {
     for (const child of el.children) {
       if (child.type !== "element") continue;
-      if (child.attrs.has("error")) return child;
+      const marker = child.attrs.get("error");
+      if (marker !== undefined) {
+        // `""` is the bare marker: JSX lowers a valueless attribute to the empty string, which
+        // is also what HTML says `<span error>` means.
+        const name = marker.trim();
+        found.push({
+          el: child,
+          path: name === "" ? here : [...here, ...name.split(".").filter((s) => s !== "")],
+        });
+        // Not `continue`-d past: a marker is a leaf as far as this scan cares, and nesting one
+        // inside another is markup nobody writes on purpose.
+        continue;
+      }
       if (child.attrs.has("field")) continue;
-      const found = scan(child);
-      if (found !== null) return found;
+      scan(child);
     }
-    return null;
   };
-  return scan(wrapper);
+
+  scan(wrapper);
+  return found;
+}
+
+/**
+ * The first bare `error` marker under `wrapper`, for the callers that want exactly one.
+ *
+ * A row template is the case: its message is per row, written into a slot rather than a cell,
+ * so a *named* marker there would mean something this does not implement — see `FieldArray`.
+ */
+function findMarked(wrapper: Element): Element | null {
+  const bare = markedUnder(wrapper, []).find((m) => m.path.length === 0);
+  return bare?.el ?? null;
+}
+
+/**
+ * The element marked `error` in a row template, including the template's own root.
+ *
+ * The root is checked as well as the descendants because a one-element row is a real template
+ * — `{rows.map(r => <span error />)}` is odd but not wrong — and `findMarked` only ever looks
+ * downward from a wrapper it knows is not itself the target.
+ */
+function markedIn(template: Node): Element | null {
+  if (template.type !== "element") return null;
+  if (template.attrs.has("error")) return template;
+  return findMarked(template);
 }
 
 /** `input[type=email][name=…]`, for a warning that has to be findable in a page. */

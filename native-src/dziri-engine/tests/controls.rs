@@ -277,6 +277,54 @@ fn a_disabled_checkbox_takes_no_press_and_does_not_tick() {
     assert_eq!(centre(&mut engine), GREY, "and it never ticks");
 }
 
+/// `:invalid` paints, and — unlike `:checked` — it follows the table back down again.
+///
+/// The bit is the first per-node predicate whose answer is **Bun's**: a schema ran on the
+/// app thread and wrote `ControlFlags::INVALID`, and this side only reads it. So the two
+/// halves worth asserting are the ones that differ from every other control state.
+///
+/// The *recovery* half is the sharper one. `CHECKED` is deliberately seeded once and then
+/// owned by the user, so a rescan must not undo it; if `INVALID` were treated the same way,
+/// a field would go red on a failed submit and stay red after it was fixed — a form that can
+/// never be satisfied. It is re-read on every rescan for exactly that reason, and the second
+/// assertion here is what would catch the mistake.
+#[test]
+fn an_invalid_field_paints_and_recovers_when_the_flag_clears() {
+    let mut engine = Engine::new(&config(1, 2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        t.set_u32(STYLES, styles::BG, 0, WHITE);
+        t.set_u32(STYLES, styles::BG, 1, GREY);
+
+        node(t, 0, 0, -1);
+        variant(t, 0, 0, predicate::INVALID, 0, 0, 1);
+        // `NONE`, which is what a text field's row carries — the kind a press declines. The
+        // row exists *only* to hold this flag, which is why text inputs now get one.
+        control(t, 0, 0, control_kind::NONE, -1, control_flags::INVALID);
+        pad_controls(t, 1);
+        pad_variants(t, 1);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(centre(&mut engine), GREY, "`:invalid` is live because the table says so");
+
+    // Bun clears it, the way `applyIssues` does when the next validation passes.
+    {
+        let t = engine.tables_mut();
+        t.set_u8(CONTROLS, controls::FLAGS, 0, 0);
+    }
+    engine.tick().expect("tick");
+
+    assert_eq!(
+        centre(&mut engine),
+        WHITE,
+        "and it clears on the next rescan — seeding it once, as `CHECKED` is, would make a \
+         field red forever once it had been wrong"
+    );
+}
+
 /// A press on a label ticks the box it labels, with the box never being what was hit.
 ///
 /// The exact shape of `<label><input type="checkbox"><span>text</span></label>`, which

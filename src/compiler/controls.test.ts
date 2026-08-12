@@ -38,16 +38,23 @@ test("a checkbox and a radio become controls table rows, seeded from their attri
   const ui = toCompiledUi(compile(html, ``));
   const { controls } = ui;
 
-  // Five rows, not seven: `type=text` and a bare `<input>` are real elements with
-  // real UA styling and nothing a press does to them, so a row would say "nothing
-  // happens".
-  expect(controls.count).toBe(5);
+  // **Seven rows, and the last two are `NONE`.** This used to be five, on the argument that
+  // a press does nothing to a text field so a row would say "nothing happens" — which was
+  // right about presses and wrong about the table. A control row is also where a control's
+  // *flags* live, and `:invalid` is a flag Bun writes after a schema runs. A text field with
+  // no row has nowhere to put it, and text fields are what schemas complain about.
+  //
+  // The kind stays `NONE`, so nothing a press does has changed: `Controls::activate` still
+  // declines these two exactly as it did when they had no row at all.
+  expect(controls.count).toBe(7);
   expect([...controls.kind]).toEqual([
     ControlKind.CHECKBOX,
     ControlKind.CHECKBOX,
     ControlKind.CHECKBOX,
     ControlKind.RADIO,
     ControlKind.RADIO,
+    ControlKind.NONE,
+    ControlKind.NONE,
   ]);
 
   // Presence, not value: `<input checked>` has no value at all.
@@ -57,10 +64,12 @@ test("a checkbox and a radio become controls table rows, seeded from their attri
     ControlFlags.CHECKED | ControlFlags.DISABLED,
     0,
     ControlFlags.CHECKED,
+    0,
+    0,
   ]);
 
-  // Checkboxes are in no group; the two radios share one.
-  expect([...controls.group]).toEqual([-1, -1, -1, 0, 0]);
+  // Checkboxes are in no group; the two radios share one; a text field is in none.
+  expect([...controls.group]).toEqual([-1, -1, -1, 0, 0, -1, -1]);
 
   // Ascending, because the engine binary-searches this column.
   const nodes = [...controls.node];

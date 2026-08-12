@@ -1031,8 +1031,18 @@ type ElementProps = Props & {
    * the same mechanism as a field's value cell, and the same idea as `::placeholder`, whose
    * text also comes from somewhere other than `content`. Its own children are replaced, so
    * placeholder text inside it is only ever seen at build time.
+   *
+   * **A string names a field inside the wrapper**, relative to it exactly as a control's `name`
+   * is — `error="city"` inside `field="address"` shows the issue at `address.city`, and dots go
+   * deeper. That is what lets one group have a message per leaf: each marker shows the first
+   * issue under its own path that no more specific marker would show, so the bare form keeps
+   * whatever is only the group's own and nothing is said twice.
+   *
+   * Relative rather than absolute so a group stays movable: renaming the wrapper, or nesting it,
+   * must not mean editing every marker inside it. A name no field produces is a build warning —
+   * a marker that can never fill looks exactly like a field that is never wrong.
    */
-  error?: boolean;
+  error?: boolean | string;
   /**
    * When this `<form>` checks itself. `"submit"` unless you say otherwise.
    *

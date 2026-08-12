@@ -9,7 +9,7 @@
  */
 import { findRow } from "../find-row.ts";
 import type { CompiledUi, FormBinding } from "../ir.ts";
-import { ControlKind } from "../protocol/generated.ts";
+import { ControlFlags, ControlKind } from "../protocol/generated.ts";
 import { applyIssues, formPayload, validatePayload, type Validated } from "./forms.ts";
 import { batch, type Signal } from "./signal.ts";
 
@@ -313,6 +313,18 @@ function formOf(ui: CompiledUi, node: number): number {
 }
 
 /**
+ * Whether `node`'s control is disabled *right now*.
+ *
+ * Reads the same byte the engine obeys. Author-owned disabledness is the one control flag Bun
+ * writes rather than the engine, so this is a lookup rather than a question for the far side —
+ * and `ui.controls.node` is sorted, which is what `findRow` needs.
+ */
+function isDisabledNow(ui: CompiledUi, node: number): boolean {
+  const row = findRow(ui.controls.node.subarray(0, ui.controls.count), node);
+  return row >= 0 && (ui.controls.flags[row]! & ControlFlags.DISABLED) !== 0;
+}
+
+/**
  * Runs implicit submission for an Enter pressed with `node` focused. Returns whether it
  * submitted.
  *
@@ -370,6 +382,17 @@ export function submitFrom(ui: CompiledUi, node: number): boolean {
  * (measured) — so the usual submit stays inside one batch and costs one repaint.
  */
 export function submitForm(ui: CompiledUi, form: number, button: number): boolean {
+  // **A submit button disabled by a *signal* blocks submission**, and this is the one path
+  // that has to say so out loud. A press on a disabled control never arrives — the engine
+  // swallows it before recording anything, measured — so this only ever fires for Enter,
+  // which reaches `submitFrom` and finds a `button` the compiler resolved from the markup.
+  //
+  // The compile-time half already worked: a literal `disabled` attribute makes the compiler
+  // emit `button: -1`, and measured, that blocks outright rather than falling through to the
+  // one-field rule. A `disabled={signal}` cannot be seen at build time, so without this a
+  // form whose button was visibly greyed out still submitted on Enter.
+  if (button >= 0 && isDisabledNow(ui, button)) return false;
+
   const binding = ui.forms.find((f) => f.node === form);
   const submit = handlerFor(ui, form, "submit");
   const invalid = handlerFor(ui, form, "invalid");
@@ -406,7 +429,7 @@ export function submitForm(ui: CompiledUi, form: number, button: number): boolea
       // `validateOn="submit"` into "and re-validate on change afterwards" without a second
       // attribute — `attempted` is what the change path reads.
       attempted.add(binding);
-      applyIssues(binding, settled.ok ? [] : settled.issues, true);
+      applyIssues(ui, binding, settled.ok ? [] : settled.issues, true);
       if (settled.ok) submit(settled.value);
       else invalid?.(settled.issues);
     });
@@ -422,7 +445,7 @@ export function submitForm(ui: CompiledUi, form: number, button: number): boolea
 
   batch(() => {
     click?.();
-    applyIssues(binding, verdict.ok ? [] : verdict.issues, true);
+    applyIssues(ui, binding, verdict.ok ? [] : verdict.issues, true);
     if (verdict.ok) submit(verdict.value);
     else invalid?.(verdict.issues);
   });
@@ -463,14 +486,14 @@ export function revalidate(ui: CompiledUi, node: number, on: "change" | "blur"):
   const verdict = validatePayload(form.validate, formPayload(ui, form));
   if (verdict instanceof Promise) {
     void verdict.then((settled) => {
-      batch(() => applyIssues(form, settled.ok ? [] : settled.issues, attemptedYet));
+      batch(() => applyIssues(ui, form, settled.ok ? [] : settled.issues, attemptedYet));
     });
     return false;
   }
 
   let moved = false;
   batch(() => {
-    moved = applyIssues(form, verdict.ok ? [] : verdict.issues, attemptedYet);
+    moved = applyIssues(ui, form, verdict.ok ? [] : verdict.issues, attemptedYet);
   });
   return moved;
 }

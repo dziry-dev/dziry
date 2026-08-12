@@ -178,6 +178,7 @@ export const PREDICATE_PSEUDO: Array<[number, Pseudo]> = [
   [Predicate.CHECKED, "checked"],
   [Predicate.DISABLED, "disabled"],
   [Predicate.OPEN, "open"],
+  [Predicate.INVALID, "invalid"],
 ];
 
 /**
@@ -320,7 +321,8 @@ export type BuiltForm = {
     node: number;
     path: string[];
     errorCell: string;
-    messageCell: string;
+    /** One per `error` marker: the path it speaks for and the cell its run reads. */
+    messages: { path: string[]; cell: string }[];
     fields: number[];
   }[];
   /**
@@ -330,7 +332,13 @@ export type BuiltForm = {
    * it is held under — the same one the list binding itself is named by, since it is the
    * same object.
    */
-  arrays: { path: string[]; source: unknown; name: string }[];
+  arrays: {
+    path: string[];
+    source: unknown;
+    name: string;
+    /** The `{ messages }` box a row's `<span error />` reads, or "" when the rows have none. */
+    rowErrors: string;
+  }[];
   /** `submit` unless the author said otherwise. */
   validateOn: string;
   /** Every control this form owns, sorted. See [`FormBinding.owns`]. */
@@ -518,10 +526,22 @@ const DISABLEABLE = new Set(["input", "select", "textarea", "button"]);
  * `click`, and it never took focus.
  *
  * The row's `kind` stays `NONE`, so `Controls::activate` still declines it and no
- * behaviour is invented for a text field. Only the `DISABLED` flag is load-bearing.
+ * behaviour is invented for a text field. Only the flags are load-bearing.
+ *
+ * **A text-entry field now earns one whether or not it is disabled**, and `:invalid` is
+ * why. Validity is written by Bun into this table and read back as a predicate, so a field
+ * with no row has nowhere for the bit to live — and text fields are the ones a schema
+ * complains about most. The row costs six integers and says nothing a press can act on.
+ *
+ * That it is *per node* rather than per element is the point in a list: replicas share a
+ * style row, so a conditional class cannot redden one row's input alone, while each replica
+ * has its own control row and therefore its own predicate.
  */
 function needsControlRow(el: Element, path: Element[] = []): boolean {
   if (controlKindOf(el, path) !== ControlKind.NONE) return true;
+  // The *tag* question rather than the typeable one: a readonly field is still a field a
+  // schema can reject, and the row is structural rather than a statement about input.
+  if (isTextEntryTag(el)) return true;
   return DISABLEABLE.has(el.tag) && el.attrs.has("disabled");
 }
 
@@ -898,7 +918,21 @@ export function compileTree(
    */
   const messageCellOf = new Map<Element, string>();
   for (const group of fieldGroups) {
-    if (group.messageEl !== null) messageCellOf.set(group.messageEl, group.messageCell);
+    for (const message of group.messages) messageCellOf.set(message.el, message.cell);
+  }
+
+  /**
+   * The same, for a `<span error />` **inside a row template**.
+   *
+   * A separate map rather than a second entry in the one above, because the two produce
+   * different bindings: a wrapper's message is a cell every reader shares, and a row's is a
+   * slot per replica read out of a box indexed by row.
+   */
+  const rowErrorOf = new Map<Element, { cell: string }>();
+  for (const array of fieldArrays) {
+    if (array.messageEl !== null && array.rowErrors !== null) {
+      rowErrorOf.set(array.messageEl, array.rowErrors);
+    }
   }
 
   /**
@@ -1907,8 +1941,13 @@ export function compileTree(
     // that cell and the authored children are dropped. Dropped rather than kept: whatever is
     // written inside is placeholder prose for the author's benefit, and rendering it as well
     // would show "error goes here" in a shipped app until the first failure.
+    // The same element inside a **row** takes a per-row part instead of a cell: one span in a
+    // template is `capacity` spans on screen, and a shared cell would put one row's complaint
+    // on every one of them. Every replica owns its text slots, so the string is the one part
+    // of error display that can differ row by row.
     const messageCell = messageCellOf.get(el);
-    if (messageCell !== undefined) {
+    const rowError = rowErrorOf.get(el);
+    if (messageCell !== undefined || rowError !== undefined) {
       const runStyle = styles.intern(textStyle(style));
       const slot = reserveSlot("");
       const run = nodes.push({
@@ -1921,10 +1960,14 @@ export function compileTree(
         children: [],
       }) - 1;
       nodes[self]!.children.push(run);
-      textBindings.push({ node: run, slot, parts: [{ export: messageCell }] });
+      textBindings.push({
+        node: run,
+        slot,
+        parts: [rowError !== undefined ? { rowError } : { export: messageCell! }],
+      });
     }
 
-    for (const child of ownsRun || messageCell !== undefined ? [] : kids) {
+    for (const child of ownsRun || messageCell !== undefined || rowError !== undefined ? [] : kids) {
       const childIndex = walkChild(child, path, style, self, vars);
       if (childIndex !== -1) nodes[self]!.children.push(childIndex);
     }
@@ -2059,6 +2102,13 @@ export function compileTree(
           ...(src.tabStop ? { tabStop: true as const } : {}),
           ...(src.editable ? { editable: true as const } : {}),
           ...(src.textArea ? { textArea: true as const } : {}),
+          // The same omission as the four above, one flag further along, and it stayed
+          // invisible for the same reason: a replica's `::placeholder` box was `generated`
+          // but not a **placeholder**, so the engine never applied the "only while the field
+          // is empty" test to it and painted the hint straight over the row's value. Row 0
+          // was always right — it is the template — so this needed a second row that had
+          // text *and* a placeholder, which is exactly what a repeating form row is.
+          ...(src.placeholder ? { placeholder: true as const } : {}),
           // `autofocus` is deliberately **not** replicated. One claim per row is eight
           // claims for a capacity-8 arena, all of them the same element repeated, and
           // "which row gets the caret" is a question the markup has not answered. The
@@ -2685,7 +2735,7 @@ function resolveForms(
             node: nodeOf.get(g.el)!,
             path: g.path,
             errorCell: g.errorCell,
-            messageCell: g.messageCell,
+            messages: g.messages.map((m) => ({ path: m.path, cell: m.cell })),
             // Which controls are *under* this wrapper, by path prefix. Used for the dirty
             // test, and resolved here because a path comparison is a build-time question.
             fields: specs.flatMap((spec, i) => (startsWith(spec.path, g.path) ? [i] : [])),
@@ -2699,7 +2749,12 @@ function resolveForms(
           groups,
           arrays: fieldArrays
             .filter((a) => a.form === el)
-            .map((a) => ({ path: a.path, source: a.source, name: "" })),
+            .map((a) => ({
+              path: a.path,
+              source: a.source,
+              name: "",
+              rowErrors: a.rowErrors?.cell ?? "",
+            })),
           validateOn: validateOnOf(el),
           keys: formKeys(specs.map((spec) => ({ path: spec.path, kind: spec.kind, el: spec.el }))),
           // Sorted, because the runtime binary-searches it the way it searches `textAreas`.
@@ -3311,6 +3366,11 @@ export function emit(
       return `{ signal: ${resolved(part.export, "a text binding")} }`;
     }
     if ("item" in part) return `{ path: ${JSON.stringify(part.item)} }`;
+    // Declared by this module rather than imported, like a field cell — so it needs no
+    // resolution pass and `identifier` guards the name the compiler itself chose.
+    if ("rowError" in part) {
+      return `{ rowError: ${identifier(part.rowError.cell, "a row's error message")} }`;
+    }
     throw new Error("unresolved text binding — resolveRefs was not run");
   };
 
@@ -3369,8 +3429,11 @@ export function emit(
    */
   const groupCells = result.forms.flatMap((f) => f.groups);
 
+  /** The `{ messages }` boxes a row's `<span error />` reads, one per array field that has one. */
+  const rowErrorBoxes = result.forms.flatMap((f) => f.arrays).filter((a) => a.rowErrors !== "");
+
   const fieldCellsSource =
-    result.fieldCells.length === 0 && groupCells.length === 0
+    result.fieldCells.length === 0 && groupCells.length === 0 && rowErrorBoxes.length === 0
       ? ""
       : `/** Form state. Declared here: nobody wrote an export for a field the compiler named. */\n` +
         [
@@ -3379,8 +3442,18 @@ export function emit(
           ),
           ...groupCells.flatMap((g) => [
             `const ${g.errorCell} = signal(false);   // ${g.path.join(".")} has an error`,
-            `const ${g.messageCell} = signal("");   // ${g.path.join(".")}'s message`,
+            ...g.messages.map(
+              (m) => `const ${m.cell} = signal("");   // the message for ${m.path.join(".")}`,
+            ),
           ]),
+          // A plain box rather than a signal, because nothing subscribes to it: the rows'
+          // slots are refreshed by the same commit the validation already causes, and a
+          // signal here would be a second mechanism for one update.
+          ...rowErrorBoxes.map(
+            (r) =>
+              `const ${r.rowErrors} = { messages: [] as string[], invalid: [] as string[][] };` +
+              `   // ${r.path.join(".")}: message and guilty fields, by row`,
+          ),
         ].join("\n") +
         `\n\n`;
 
@@ -3411,14 +3484,24 @@ export function emit(
         .map(
           (a) =>
             `      { path: ${JSON.stringify(a.path)}, ` +
-            `signal: ${resolved(a.name, `the map() behind field="${a.path.join(".")}"`)} },`,
+            `signal: ${resolved(a.name, `the map() behind field="${a.path.join(".")}"`)}, ` +
+            // The same box the row's text part holds, so validation writes exactly what the
+            // slot refresh reads. Two names for it would be two sources of truth.
+            `rowErrors: ${a.rowErrors === "" ? "null" : identifier(a.rowErrors, "a row's error box")} },`,
         )
         .join("\n");
       const groups = f.groups
         .map(
           (g) =>
             `      { node: ${g.node}, path: ${JSON.stringify(g.path)}, ` +
-            `error: ${g.errorCell}, message: ${g.messageCell}, ` +
+            `error: ${g.errorCell}, messages: [` +
+            g.messages
+              .map(
+                (m) =>
+                  `{ path: ${JSON.stringify(m.path)}, cell: ${identifier(m.cell, `a message for ${m.path.join(".")}`)} }`,
+              )
+              .join(", ") +
+            `], ` +
             `fields: ${typedArray("Int32Array", g.fields)} },`,
         )
         .join("\n");

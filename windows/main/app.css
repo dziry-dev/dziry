@@ -91,10 +91,10 @@ body.light .muted {
     border-color: #3f3f46;
 }
 
-.group\/error .field {
-    border-color: #f43f5e;
-}
-
+/* The wrapper, for the parts of a field that are not the control: its message, its label, a
+   group's frame. This is still the *class*, and it is still right for these — they are static
+   nodes, one per wrapper, so there is nothing to tell apart. The control itself is styled by
+   `:invalid` further down, beside the rules it has to out-order. */
 .group\/error .note {
     color: #fb7185;
 }
@@ -269,6 +269,28 @@ input[type="text"]:disabled { color: #52525b; }
    has gone with it. Two focus indicators on one field is one too many. */
 input[type="text"]:focus {
     background: #1e1e21;
+}
+
+/* A **row's** field that failed validation.
+ *
+ * Scoped to `.cell` on purpose, so each element has exactly one error-styling route and the
+ * page demonstrates both without them overlapping:
+ *
+ *   - Everywhere else, the author's `error:` variant — a class on the wrapper, activated by
+ *     `errorClassName`, reaching nested elements as an ordinary descendant selector. That is
+ *     the mechanism to reach for, and it compiles to style-table writes.
+ *   - Here, `:invalid` — because a class *is* a style row and list replicas share one, so the
+ *     class route reddens every row at once. A predicate is resolved per node against the
+ *     controls table, which each replica has its own row in.
+ *
+ * Nothing about the appearance is dziri's: `:invalid` is a state the engine resolves, and
+ * every declaration below is this page's. The UA sheet has no error styling at all.
+ *
+ * `input.cell` is (0,2,1), so it beats `input[type="text"]` outright rather than by source
+ * order — worth spelling out, because the plain `input:invalid` ties with it at (0,1,1) and a
+ * tie is decided by which rule comes last. */
+input.cell:invalid {
+    border-color: #f43f5e;
 }
 
 /* A select. The structure is MDN's customizable-select model: ordinary children,

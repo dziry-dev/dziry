@@ -301,25 +301,63 @@ function clearGroup(ui: CompiledUi, form: FormBinding, chosen: FormField): void 
  *
  * Returns whether anything moved, so a caller can skip a commit.
  */
+/**
+ * What joins a path into a set key.
+ *
+ * A NUL, because it cannot occur in an authored `field` name — so `["a.b"]` and `["a", "b"]`
+ * stay different keys, which a dot would quietly merge. The same choice `fields.ts` makes for
+ * the same reason.
+ */
+const SEGMENT = String.fromCharCode(0);
+
 export function applyIssues(
+  ui: CompiledUi,
   form: FormBinding,
   issues: readonly FormIssue[],
   showAll: boolean,
 ): boolean {
   let moved = false;
 
+  // Rows first, because the section's own message depends on whether they spoke: a wrapper
+  // whose rows carry their own `<span error />` must not repeat what a row is already saying.
+  const spokenFor = new Set<string>();
+  for (const array of form.arrays) {
+    if (array.rowErrors === null) continue;
+    spokenFor.add(array.path.join(SEGMENT));
+    if (rowMessages(array, issues, showAll)) moved = true;
+  }
+
+  if (markInvalid(ui, form, issues, showAll)) moved = true;
+
   for (const group of form.groups) {
+    // **The class and the messages part company here, and only here.** A wrapper is in error
+    // whenever anything under it is — a broken leaf, a broken row, all of it is the group's
+    // problem — and that is the prefix rule every wrapper follows.
     const found = issues.find((issue) => isUnder(issue.path, group.path));
     const show = found !== undefined && (showAll || isDirty(form, group));
 
-    const error = show;
-    const message = show ? found!.message : "";
-    if (group.error.value !== error) {
-      group.error.value = error;
+    if (group.error.value !== show) {
+      group.error.value = show;
       moved = true;
     }
-    if (group.message.value !== message) {
-      group.message.value = message;
+
+    // The messages divide those same issues up by **specificity**: each target shows the first
+    // issue under its own path that no *more specific* target would show. That is what puts
+    // "city is required" beside the city box while the wrapper keeps whatever is only its own,
+    // and what stops the two saying the same thing twice.
+    const rowsSpeak = spokenFor.has(group.path.join(SEGMENT));
+    for (const target of group.messages) {
+      const mine = show
+        ? issues.find(
+            (issue) =>
+              isUnder(issue.path, target.path) &&
+              !claimedByDeeper(issue, target, group, rowsSpeak),
+          )
+        : undefined;
+
+      const text = mine?.message ?? "";
+      if (target.cell.value === text) continue;
+      target.cell.value = text;
       moved = true;
     }
   }
@@ -327,7 +365,167 @@ export function applyIssues(
   return moved;
 }
 
-/** Whether an issue at `path` belongs to a wrapper at `prefix`. */
+/**
+ * Whether something more specific than `target` is already showing this issue.
+ *
+ * The rule that makes several markers under one wrapper divide the work instead of echoing each
+ * other, and it is deliberately about *paths* rather than about which marker was written first:
+ * a `<span error="city">` claims `address.city` from the bare `<span error />` beside it, and
+ * would claim it from an `error="city.line"` too if that were the deeper one.
+ *
+ * `rowsSpeak` folds the array case into the same rule. A row's own message element is not a
+ * target here — it is a slot per row rather than a cell — so it cannot be compared by path;
+ * what it claims is *any* issue with a row index in it, which is what this tests for.
+ */
+function claimedByDeeper(
+  issue: FormIssue,
+  target: FormBinding["groups"][number]["messages"][number],
+  group: FormBinding["groups"][number],
+  rowsSpeak: boolean,
+): boolean {
+  if (
+    rowsSpeak &&
+    target.path.length === group.path.length &&
+    typeof issue.path[group.path.length] === "number"
+  ) {
+    return true;
+  }
+
+  for (const other of group.messages) {
+    if (other.path.length <= target.path.length) continue;
+    if (isUnder(issue.path, other.path)) return true;
+  }
+  return false;
+}
+
+/**
+ * Writes `:invalid` onto the control row of every field an issue names.
+ *
+ * The bit the engine reads back as a predicate, so a field's own border can turn red without
+ * a class and without a patch — which is what lets **one list row** differ from the next,
+ * since replicas share a style row and do not share a control row.
+ *
+ * A field is invalid when an issue's path is its key's path or sits under it: `email` for an
+ * issue at `email`, and both `position.x` and `position.y` for one at `position`, because a
+ * complaint about the group is a complaint about the controls that make it up.
+ *
+ * Rows are **not** handled here. Which replica renders which item is runtime state the form
+ * binding cannot see, so the paths are recorded per row and `applyRowValidity` — which has
+ * the list — does the writing.
+ */
+function markInvalid(
+  ui: CompiledUi,
+  form: FormBinding,
+  issues: readonly FormIssue[],
+  showAll: boolean,
+): boolean {
+  let moved = false;
+
+  const write = (row: number, invalid: boolean): void => {
+    if (row < 0 || row >= ui.controls.count) return;
+    const before = ui.controls.flags[row]!;
+    const after = invalid
+      ? before | ControlFlags.INVALID
+      : before & ~ControlFlags.INVALID;
+    if (before === after) return;
+    ui.controls.flags[row] = after;
+    moved = true;
+  };
+
+  for (const key of form.keys) {
+    // The same gate the wrappers use, and it has to be the same one: a field that turns red
+    // before its group would be a second, louder answer to "has the user had a go yet".
+    const group = form.groups.find((g) => sameStart(key.path, g.path));
+    const gated = showAll || (group !== undefined && isDirty(form, group));
+    // Either direction: an issue *at* the field (`email`), and an issue about the group it
+    // belongs to (`position` naming both `position.x` and `position.y`), because a complaint
+    // about a group is a complaint about the controls that make it up.
+    const invalid = gated && issues.some((issue) => overlaps(issue.path, key.path));
+
+    for (const index of key.fields) write(form.fields[index]!.row, invalid);
+  }
+
+  return moved;
+}
+
+/** Whether `path` starts with `prefix`, both being authored names. */
+function sameStart(path: readonly string[], prefix: readonly string[]): boolean {
+  if (path.length < prefix.length) return false;
+  for (let i = 0; i < prefix.length; i++) if (path[i] !== prefix[i]) return false;
+  return true;
+}
+
+/** Whether either path is a prefix of the other — segments compared as text. */
+function overlaps(a: readonly (string | number)[], b: readonly (string | number)[]): boolean {
+  const shared = Math.min(a.length, b.length);
+  for (let i = 0; i < shared; i++) if (String(a[i]) !== String(b[i])) return false;
+  return true;
+}
+
+/**
+ * Fills one array field's per-row messages from the issues, and says whether anything moved.
+ *
+ * An issue belongs to a row when its path is the array's plus a **number** — `experience.0.title`
+ * is row 0's, and `experience` alone is the section's. The first one per row wins, matching what
+ * a wrapper does with several issues: one place to show a message means one message.
+ *
+ * `showAll` gates it exactly as it gates a wrapper. There is nothing to compare a row against —
+ * the dirty test is a comparison with a compiled constant, and an array has none — so before a
+ * first submit the rows stay quiet, and afterwards they update live like everything else.
+ */
+function rowMessages(
+  array: FormBinding["arrays"][number],
+  issues: readonly FormIssue[],
+  showAll: boolean,
+): boolean {
+  const next: string[] = [];
+  // Which *field* of each row is at fault, as the item path a `bind:value` recorded — so
+  // `experience.0.title` becomes `title` against row 0. `applyRowValidity` turns that into a
+  // control row, because only the list knows which replica is currently rendering row 0.
+  const guilty: string[][] = [];
+
+  if (showAll) {
+    for (const issue of issues) {
+      if (!isUnder(issue.path, array.path)) continue;
+      const row = issue.path[array.path.length];
+      if (typeof row !== "number") continue;
+      if (next[row] === undefined) next[row] = issue.message;
+      // "" means the row itself is at fault rather than one field in it — an issue at
+      // `experience.0` with nothing after it.
+      const field = issue.path.slice(array.path.length + 1).join(".");
+      (guilty[row] ??= []).push(field);
+    }
+  }
+
+  // Replaced wholesale rather than compared field by field: the guilty set is small, and a
+  // stale entry here would leave a row wearing `:invalid` after its problem was fixed.
+  const box = array.rowErrors!;
+  let moved = box.invalid.length !== guilty.length;
+  if (!moved) {
+    for (let i = 0; i < guilty.length; i++) {
+      if ((box.invalid[i] ?? []).join("|") === (guilty[i] ?? []).join("|")) continue;
+      moved = true;
+      break;
+    }
+  }
+  box.invalid = guilty;
+
+  const messages = box.messages;
+  // Compared rather than replaced, so an unchanged validation costs no commit — and the box is
+  // mutated in place because the list's text parts hold *this* object.
+  const length = Math.max(messages.length, next.length);
+  for (let i = 0; i < length; i++) {
+    if ((messages[i] ?? "") === (next[i] ?? "")) continue;
+    moved = true;
+    messages.length = 0;
+    for (let k = 0; k < next.length; k++) messages[k] = next[k] ?? "";
+    break;
+  }
+  return moved;
+}
+
+/**
+ * Whether an issue at `path` belongs to a wrapper at `prefix`. */
 function isUnder(path: readonly (string | number)[], prefix: readonly string[]): boolean {
   if (path.length < prefix.length) return false;
   for (let i = 0; i < prefix.length; i++) if (String(path[i]) !== prefix[i]) return false;

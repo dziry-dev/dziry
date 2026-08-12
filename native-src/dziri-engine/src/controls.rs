@@ -25,6 +25,11 @@
 //! table is the compiler's sparse statement, `state` is the dense array this builds
 //! from it on rescan. The same split `Anims` makes, for the same reason.
 //!
+//! Two of the three bits are re-read on rescan rather than seeded, and they get there by
+//! different routes: `DISABLED` because it is genuinely compile-time, and `INVALID`
+//! because it is genuinely *Bun's* — a schema decided it, and the side that publishes the
+//! table is the side that knows.
+//!
 //! # Why rescan does not re-read `checked`
 //!
 //! Bun republishes the tables whenever *any* signal changes. A rescan that re-seeded
@@ -101,7 +106,12 @@ impl Controls {
                 self.seen[n] = true;
                 self.state[n] |= authored & control_flags::CHECKED;
             }
-            self.state[n] |= authored & control_flags::DISABLED;
+            // `INVALID` joins `DISABLED` on the re-read side, and for a sharper reason than
+            // "it is also compile-time" — it is not compile-time at all. It is *Bun's*: a
+            // schema ran on the app thread and said this field is wrong. Whoever publishes
+            // the table is the authority for it, so re-reading is exactly right, and seeding
+            // it once like `CHECKED` would freeze the first verdict forever.
+            self.state[n] |= authored & (control_flags::DISABLED | control_flags::INVALID);
         }
     }
 

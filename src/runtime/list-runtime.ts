@@ -44,7 +44,17 @@ export function readPath(item: unknown, path: ItemPath): unknown {
   return current;
 }
 
-export type ItemPart = { literal: string } | { path: ItemPath };
+export type ItemPart =
+  | { literal: string }
+  | { path: ItemPath }
+  /**
+   * This row's validation message, read out of a box indexed by data position.
+   *
+   * Neither the author's state nor the item's, which is why it is a third shape rather than a
+   * path into the item: the message belongs to the *validation*, and the row is only where it
+   * is shown. See `FormArray.rowErrors`.
+   */
+  | { rowError: { messages: string[]; invalid: string[][] } };
 
 export type ItemBindingRef = {
   offset: number;
@@ -421,7 +431,15 @@ export function updateList(ui: CompiledUi, ref: ListBindingRef, array?: unknown[
     for (const binding of ref.bindings) {
       let next = "";
       for (const part of binding.parts) {
-        next += "literal" in part ? part.literal : String(readPath(items[i], part.path) ?? "");
+        next +=
+          "literal" in part
+            ? part.literal
+            : "rowError" in part
+              // By **data** position rather than by slot, which is the whole point of doing it
+              // here: slots are reassigned to keep keys, so a message keyed on the slot would
+              // follow the box rather than the row after a reorder.
+              ? (part.rowError.messages[i] ?? "")
+              : String(readPath(items[i], part.path) ?? "");
       }
 
       const stringSlot = slotBase + binding.slotOffset;
@@ -586,6 +604,64 @@ export function dispatchItemChange(
 
   batch(() => handler.fn(row.item as never, row.index, value));
   return true;
+}
+
+/**
+ * Writes `:invalid` onto the control rows of the fields a validation named, per row.
+ *
+ * The other half of `markInvalid`, and it lives here because of what it needs to know: which
+ * *replica* is currently rendering row 3. That is `slotData`, which only the list has — a
+ * form binding sees an array and an index, never a node.
+ *
+ * The mapping is exact rather than positional. `itemEditables` already pairs a template
+ * offset with the item path it edits, so an issue at `experience.0.start` finds the input
+ * bound to `start` in whichever slot renders row 0. An empty path means the row itself was
+ * rejected, and then every bound field in it wears the bit.
+ *
+ * **This is the thing a conditional class could not do.** Replicas share a style row, so a
+ * class on one row's input is a class on all of them; each replica has its own control row,
+ * so a predicate can tell them apart.
+ */
+export function applyRowValidity(
+  ui: CompiledUi,
+  refs: readonly ListBindingRef[],
+  arrays: readonly { signal: unknown; rowErrors: { invalid: string[][] } | null }[],
+): boolean {
+  let moved = false;
+
+  for (const array of arrays) {
+    if (array.rowErrors === null) continue;
+    // Paired by the signal, which is the same object in both tables — the artifact emits one
+    // reference into the list binding and another into the form's array row.
+    const ref = refs.find((r) => (r.signal as unknown) === array.signal);
+    if (ref === undefined) continue;
+
+    const start = ui.lists.arenaStart[ref.list]!;
+    const stride = ui.lists.stride[ref.list]!;
+    const capacity = ui.lists.capacity[ref.list]!;
+
+    for (let slot = 0; slot < capacity; slot++) {
+      const index = ref.slotData?.[slot] ?? -1;
+      const guilty = index < 0 ? [] : (array.rowErrors.invalid[index] ?? []);
+
+      for (const editable of ref.itemEditables) {
+        const wanted = guilty.includes("") || guilty.includes(editable.path.join("."));
+        const node = start + slot * stride + editable.offset;
+        const row = findRow(ui.controls.node.subarray(0, ui.controls.count), node);
+        if (row < 0) continue;
+
+        const before = ui.controls.flags[row]!;
+        const after = wanted
+          ? before | ControlFlags.INVALID
+          : before & ~ControlFlags.INVALID;
+        if (before === after) continue;
+        ui.controls.flags[row] = after;
+        moved = true;
+      }
+    }
+  }
+
+  return moved;
 }
 
 /**

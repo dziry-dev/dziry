@@ -21,7 +21,7 @@ import {
   type EditableRef,
 } from "./bindings.ts";
 import { signal, type Signal } from "./signal.ts";
-import { ControlKind, type CompiledUi } from "../ir.ts";
+import { ControlFlags, ControlKind, type CompiledUi } from "../ir.ts";
 
 function editable(initial: string) {
   const value = signal(initial);
@@ -411,6 +411,10 @@ function formUi(opts: {
     })),
     textAreas: Int32Array.from(opts.textAreas ?? []),
     nodes: { parent: Int32Array.from(opts.parents) },
+    // Empty, but present: `submitForm` asks whether the submit button is disabled *right now*,
+    // which is a lookup in this table. A missing one is not "nothing is disabled", it is a
+    // throw — and these fixtures are about when a form submits, not about disabling.
+    controls: { count: 0, node: new Int32Array(), flags: new Uint8Array() },
   } as unknown as CompiledUi;
 }
 
@@ -470,6 +474,37 @@ test("a form the compiler marked unsubmittable does nothing on Enter", () => {
 
   expect(submitFrom(ui, 2)).toBe(false);
   expect(seen).toEqual([]);
+});
+
+test("a button disabled by a signal blocks Enter too, not just the press", () => {
+  const seen: string[] = [];
+  // 0 root, 1 form, 2 field, 3 button — and the button carries a live `DISABLED`, which is
+  // what `disabled={someSignal}` writes into Bun's copy of the controls table.
+  const ui = formUi({
+    parents: [-1, 0, 1, 1],
+    forms: [{ node: 1, button: 3, direct: false }],
+    handlers: [{ node: 1, kind: "submit", fn: () => seen.push("submit") }],
+  });
+  const controls = ui.controls as unknown as {
+    count: number;
+    node: Int32Array;
+    flags: Uint8Array;
+  };
+  controls.count = 1;
+  controls.node = Int32Array.from([3]);
+  controls.flags = Uint8Array.from([ControlFlags.DISABLED]);
+
+  // The *press* path never gets here — the engine swallows a press on a disabled control
+  // before recording it, measured — so Enter is the only route this can be reached by, and
+  // it was the route that still worked. A greyed-out button that submits on Enter is worse
+  // than one that never greyed out at all.
+  expect(submitFrom(ui, 2)).toBe(false);
+  expect(seen).toEqual([]);
+
+  // Enabled again, and the same Enter submits: the flag is read live rather than latched.
+  controls.flags = Uint8Array.from([0]);
+  expect(submitFrom(ui, 2)).toBe(true);
+  expect(seen).toEqual(["submit"]);
 });
 
 test("the innermost form wins", () => {
@@ -561,7 +596,9 @@ function payloadUi(opts: {
       },
     ],
     textAreas: Int32Array.from([]),
-    controls: { count: 0, flags: new Uint8Array(4) },
+    // `node` as well as `flags`, because `submitForm` searches this column for the button's
+    // row before it does anything else — an empty table means "no control is disabled".
+    controls: { count: 0, node: new Int32Array(), flags: new Uint8Array(4) },
     nodes: { parent: Int32Array.from([-1, 0, 1, 1]) },
   } as unknown as CompiledUi;
 }

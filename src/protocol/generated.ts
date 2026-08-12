@@ -638,6 +638,7 @@ export const ControlFlags = {
   CHECKED: 1 << 0,
   DISABLED: 1 << 1,
   MULTIPLE: 1 << 2,
+  INVALID: 1 << 3,
 } as const;
 
 /** What a node is. `nodes.kind`. */
@@ -793,6 +794,7 @@ export const Predicate = {
   DISABLED: 16,
   OPEN: 32,
   FOCUS_VISIBLE: 64,
+  INVALID: 128,
   FIRST_GLOBAL: 256,
 } as const;
 export type Predicate = (typeof Predicate)[keyof typeof Predicate];

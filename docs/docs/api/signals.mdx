@@ -140,6 +140,13 @@ drawn by the framework would be the one part of your app that does not look like
 `level` is an `AlertLevel` — `"info"` (the default), `"warning"` or `"error"` — and `title` defaults to your
 window's own title. The window stops repainting while the box is up, which is what a modal is.
 
+**The box shows the frame that caused it.** The call is queued until the app thread's next
+commit and the engine paints once more before it blocks, so an alert raised from a handler that
+also changed the page shows the *changed* page behind it. Without that it did the opposite, in
+the case that matters most: a form listing every complaint inside the dialog with none of them
+visible behind it, because the alert is raised inside the same `batch()` that wrote them and a
+batch defers its subscribers to the end.
+
 **Import it.** Bun defines a *global* `alert()` that writes to stdout and waits for Enter on
 stdin, so forgetting the import hangs your app thread on a terminal nobody is watching.
 

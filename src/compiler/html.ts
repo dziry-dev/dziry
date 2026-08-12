@@ -151,7 +151,18 @@ export type TextPart =
   | { source: unknown }
   | { export: string }
   /** A path recorded from a list item callback, e.g. `t.text` -> `["text"]`. */
-  | { item: (string | number)[] };
+  | { item: (string | number)[] }
+  /**
+   * The validation message for *this row*, in a `<span error />` inside a list template.
+   *
+   * Not a signal and not a path: it is neither the author's state nor the item's. It names a
+   * box the artifact declares — `{ messages: string[] }`, indexed by data position — which
+   * validation writes and the list's slot refresh reads. That indirection is what makes a
+   * per-row message possible at all: every replica owns its text slots, so a *string* can
+   * differ per row even though replicas share a style row and therefore cannot differ in
+   * colour.
+   */
+  | { rowError: { cell: string } };
 
 /**
  * A text run with at least one dynamic part.

@@ -1108,6 +1108,29 @@ export const ENUMS: EnumDef[] = [
       FOCUS_VISIBLE: 1 << 6,
 
       /**
+       * This field failed validation — `:invalid`.
+       *
+       * The only per-node predicate whose answer is **Bun's**, and that is what decides
+       * where it lives. `HOVER`, `ACTIVE`, `FOCUS`, `FOCUS_VISIBLE` and `OPEN` are the
+       * engine's own answers about the pointer and focus; `CHECKED` is the engine's too,
+       * because a press is what changes it. Validity is neither: a schema ran in the app
+       * thread and produced issues with paths, and no part of that is knowable here. So it
+       * arrives the way `DISABLED` does — a bit in the `controls` table that Bun writes and
+       * `Controls::rescan` re-reads on every commit — and this reads it back out.
+       *
+       * It is `:invalid` rather than `:user-invalid`, which is the pseudo-class a browser
+       * would use for the same *timing*: dziri already gates error display on `validateOn`
+       * plus "has this field moved off its compiled value", so the "only after the user has
+       * had a go" part is decided before the bit is ever set. Two spellings for one state
+       * would mean the gate lived in two places.
+       *
+       * What it buys that a conditional class cannot: **a list row**. Replicas share a style
+       * row, so a class on one row's input is a class on every row's; a predicate is resolved
+       * per node against the control table, so one row can be red and its neighbour not.
+       */
+      INVALID: 1 << 7,
+
+      /**
        * The first bit the *engine* owns rather than the input state.
        *
        * Everything from here up is a global condition — a media query, a colour
@@ -1567,6 +1590,23 @@ export const ENUMS: EnumDef[] = [
  * measure callback like `fontSize`. `fontFamily` is a generic-family enum, not
  * a name — the engine resolves one concrete face per generic at startup.
  */
+/*
+ * v39 — `:invalid`. `Predicate.INVALID` (bit 7, the last free one under `FIRST_GLOBAL`)
+ * and `ControlFlags.INVALID`, plus a control row for every text-entry `<input>` so the
+ * flag has somewhere to live on the fields that need it.
+ *
+ * Neither bit moves a byte, so `SCHEMA_HASH` cannot see this and the bump is by hand —
+ * the sixth time, and the reason is the same as every other flag bit. The extra control
+ * rows *are* visible to the hash, since the table grows.
+ *
+ * The feature it exists for is a **list row**. Error styling was a conditional class, and
+ * a class cannot be per row: replicas share a style row, so reddening one row's input
+ * reddened all of them. A predicate is resolved per node against the control table, which
+ * is the one mechanism in the engine that already distinguishes replicas.
+ *
+ * An old engine ignores the bit: `:invalid` rules never apply and every field wears its
+ * base style. A wrong picture only in the sense that a validation failure is invisible.
+ */
 export const PROTOCOL_VERSION = 42;
 
 /** Node flag bits, shared by both sides. */
@@ -1770,4 +1810,20 @@ export const ControlFlags = {
    * listbox — with or without `multiple` — selects **nothing**. Same measurement.
    */
   MULTIPLE: 1 << 2,
+  /**
+   * This field failed validation, so `:invalid` is live on it.
+   *
+   * The **third** kind of bit in this table, and worth naming as such. `CHECKED` is seeded
+   * once and then owned by the user; `DISABLED` and `MULTIPLE` are compile-time facts
+   * re-read on every rescan; this one is neither — it is written by *Bun*, after a schema
+   * ran, and re-read on every rescan for exactly the same reason `DISABLED` is: whoever
+   * publishes the table is the authority, and here that is the app thread.
+   *
+   * It rides in this table rather than in a table of its own because a control row is
+   * already the per-node place the engine looks, and because validity is a property of a
+   * form control specifically — which is also why a text-entry `<input>` now gets a row
+   * even though its `ControlKind` is `NONE`. Without one there would be nowhere to put
+   * this bit for the fields that need it most.
+   */
+  INVALID: 1 << 3,
 } as const;
