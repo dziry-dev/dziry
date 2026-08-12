@@ -2370,12 +2370,15 @@ impl Painter {
             );
         }
 
-        // Replaced content: an `<img>`'s bitmap fills the *content* box — inside
+        // Replaced content: an `<img>`'s pixels fill the *content* box — inside
         // the border and the padding, exactly where CSS puts a replaced element's
-        // pixels. Over the background, and nothing of its own paints over it.
-        // object-fit is `fill`: the default, and the only value until a rule can
-        // name another.
-        if let Some(image) = self.images.for_node(node) {
+        // content. Over the background, and nothing of its own paints over it.
+        //
+        // Raster fills the box (object-fit is `fill`: the default, and the only
+        // value until a rule can name another); vector meet-fits and centres,
+        // which is SVG's own `preserveAspectRatio` default — see `svg.rs` for why
+        // the two genuinely differ.
+        if let Some(decoded) = self.images.for_node(node) {
             let content = Rect::from_xywh(
                 x + bw[3] + g(f::PAD_LEFT),
                 y + bw[0] + g(f::PAD_TOP),
@@ -2383,17 +2386,24 @@ impl Painter {
                 (h - bw[0] - bw[2] - g(f::PAD_TOP) - g(f::PAD_BOTTOM)).max(0.0),
             );
             if content.width() > 0.0 && content.height() > 0.0 {
-                // Linear-with-mipmaps, which is what "the browser scaled it"
-                // looks like; the default nearest-neighbour read as a bug on
-                // every downscaled photo.
-                let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
-                canvas.draw_image_rect_with_sampling_options(
-                    image,
-                    None,
-                    content,
-                    sampling,
-                    &self.fill,
-                );
+                match decoded {
+                    crate::images::Decoded::Raster(image) => {
+                        // Linear-with-mipmaps, which is what "the browser scaled it"
+                        // looks like; the default nearest-neighbour read as a bug on
+                        // every downscaled photo.
+                        let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
+                        canvas.draw_image_rect_with_sampling_options(
+                            image,
+                            None,
+                            content,
+                            sampling,
+                            &self.fill,
+                        );
+                    }
+                    crate::images::Decoded::Vector(svg) => {
+                        svg.render(canvas, content, c(f::FG));
+                    }
+                }
             }
         }
 

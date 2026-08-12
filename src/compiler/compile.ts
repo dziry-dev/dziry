@@ -532,8 +532,7 @@ function typeOf(el: Element): string {
  * pixels. `width="50%"` is valid HTML with a percentage meaning, which the style
  * table's plain-pixel `width` cannot express for an image that has not loaded —
  * so it is not a hint here, and the attribute is ignored rather than misread.
- */
-function presentationalHints(el: Element): Map<string, string> | undefined {
+ */function presentationalHints(el: Element): Map<string, string> | undefined {
   if (el.tag !== "img") return undefined;
   const hints = new Map<string, string>();
   for (const attr of ["width", "height"] as const) {
@@ -543,6 +542,31 @@ function presentationalHints(el: Element): Map<string, string> | undefined {
     }
   }
   return hints.size > 0 ? hints : undefined;
+}
+
+/**
+ * An `<svg>` subtree back into source text, for the data: URL the images
+ * pipeline carries.
+ *
+ * The parser (html.ts) keeps attribute *values* verbatim and lowercases the
+ * names, so `viewBox` arrives as `viewbox` — the engine's SVG parser accepts
+ * both spellings for exactly this reason, and what is lost elsewhere
+ * (`linearGradient`) is an element the renderer declines anyway.
+ *
+ * Escaped as XML: the attribute map holds raw text, and a `d` with a quote in
+ * it is a broken document without this. Text children are dropped — SVG text
+ * is not in the supported subset, and serializing it would draw nothing while
+ * costing the parser an element to skip.
+ */
+function serializeSvg(el: Element): string {
+  const attrs = [...el.attrs]
+    .map(([name, value]) => ` ${name}="${value.replaceAll("&", "&amp;").replaceAll('"', "&quot;")}"`)
+    .join("");
+  const kids = el.children
+    .filter((c): c is Element => c.type === "element")
+    .map(serializeSvg)
+    .join("");
+  return `<${el.tag}${attrs}>${kids}</${el.tag}>`;
 }
 
 /** The elements `disabled` means something on — the ones a press can reach. */
@@ -1934,6 +1958,19 @@ export function compileTree(
     // button while `::before` was a child node, and the two have no way to sit
     // beside each other. Rare enough to be worth the extra node rather than a
     // second layout path.
+    // An inline `<svg>` is a replaced element wearing markup: its subtree is
+    // serialized back to source and handed to the engine as a data: URL, which
+    // the images pipeline already knows how to carry — the loader resolves the
+    // bytes (here: out of the URL itself) and the engine's SVG renderer parses
+    // them. The children are deliberately NOT walked: a `<path>` is not a CSS
+    // box, and letting it become one would draw the graphic and a pile of empty
+    // boxes on top of each other.
+    if (el.tag === "svg") {
+      const src = `data:image/svg+xml,${encodeURIComponent(serializeSvg(el))}`;
+      images.push({ node: self, src: internString(src) });
+      return self;
+    }
+
     const parts = uaParts(el);
     const kids = parts.children;
 

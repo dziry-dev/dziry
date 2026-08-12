@@ -75,6 +75,67 @@ test("a decode failure keeps the CSS box and breaks nothing else", () => {
   }
 });
 
+/** A 10x10 SVG: red left half, green right half. */
+const SVG_HALVES = `<svg viewBox="0 0 10 10"><rect width="5" height="10" fill="#ff0000"/><rect x="5" width="5" height="10" fill="#00ff00"/></svg>`;
+
+test("an svg sizes from its viewBox and paints its shapes", () => {
+  const { engine } = open(`<img src="icon.svg">`);
+  try {
+    engine.provideImage("icon.svg", new TextEncoder().encode(SVG_HALVES));
+    engine.tick();
+    // The viewBox is the intrinsic size.
+    expect(engine.bounds(1)).toEqual([0, 0, 10, 10]);
+
+    const [, , rowBytes] = engine.surfaceInfo();
+    const px = engine.readPixels();
+    const at = (x: number, y: number) => {
+      const i = y * rowBytes + x * 4;
+      return [px[i]!, px[i + 1]!, px[i + 2]!];
+    };
+    // BGRA: left red, right green.
+    expect(at(2, 5)[2]! > 128).toBe(true);
+    expect(at(2, 5)[1]! < 128).toBe(true);
+    expect(at(7, 5)[1]! > 128).toBe(true);
+    expect(at(7, 5)[2]! < 128).toBe(true);
+  } finally {
+    engine.close();
+  }
+});
+
+test("currentColor comes from the node's own color", () => {
+  const { engine } = open(
+    `<img src="i.svg">`,
+    "img { width: 10px; height: 10px; color: #0000ff }",
+  );
+  try {
+    const svg = `<svg viewBox="0 0 10 10"><rect width="10" height="10" fill="currentColor"/></svg>`;
+    engine.provideImage("i.svg", new TextEncoder().encode(svg));
+    engine.tick();
+    const [, , rowBytes] = engine.surfaceInfo();
+    const px = engine.readPixels();
+    // BGRA: blue is channel 0.
+    expect(px[5 * rowBytes + 5 * 4]! > 128).toBe(true);
+    expect(px[5 * rowBytes + 5 * 4 + 2]! < 128).toBe(true);
+  } finally {
+    engine.close();
+  }
+});
+
+test("an svg with no size anywhere falls back to 300x150", () => {
+  const { engine } = open(`<img src="plain.svg">`);
+  try {
+    engine.provideImage(
+      "plain.svg",
+      new TextEncoder().encode(`<svg><rect width="100%" height="100%"/></svg>`),
+    );
+    engine.tick();
+    // The CSS replaced-element default, which is what a browser shows too.
+    expect(engine.bounds(1)).toEqual([0, 0, 300, 150]);
+  } finally {
+    engine.close();
+  }
+});
+
 test("the painted pixels are the bitmap's", () => {
   const { engine } = open(`<img src="a.png">`, "img { width: 8px; height: 4px }");
   try {

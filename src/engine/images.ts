@@ -38,6 +38,16 @@ function readString(tables: SharedTables, arena: Uint8Array, slot: number): stri
 
 /** The bytes behind `src`: the network for a URL, the disk for anything else. */
 async function resolve(src: string): Promise<Uint8Array> {
+  // An inline `<svg>`'s bytes ride inside the URL itself — the compiler
+  // serialized the subtree, and there is nothing to fetch or read.
+  if (src.startsWith("data:")) {
+    const comma = src.indexOf(",");
+    if (comma === -1) throw new Error("malformed data: URL");
+    const meta = src.slice(5, comma);
+    const body = src.slice(comma + 1);
+    if (meta.endsWith(";base64")) return new Uint8Array(Buffer.from(body, "base64"));
+    return new TextEncoder().encode(decodeURIComponent(body));
+  }
   if (/^https?:\/\//i.test(src)) {
     const res = await fetch(src);
     if (!res.ok) throw new Error(`${res.status}`);

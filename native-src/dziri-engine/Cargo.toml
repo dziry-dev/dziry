@@ -33,6 +33,11 @@ all = { level = "deny", priority = -1 }
 # manager, and SkParagraph via `textlayout`.
 skia-safe = { version = "0.87", features = ["textlayout"] }
 taffy = "0.9"
+# XML parsing for the SVG subset renderer. Pure Rust, no dependencies of its
+# own — skia-safe's `svg` feature was the alternative and it forces a
+# from-source Skia build (no prebuilt binary for textlayout+svg), which is a
+# distribution cost no icon justifies. See `svg.rs`.
+roxmltree = "0.20"
 # SDL3 rather than winit: winit's IME is documented as unstable for CJK, and an
 # input abstraction cannot fix events that never arrive. Built from source and
 # linked statically so distribution stays one artifact.

@@ -55,3 +55,13 @@ test("a non-numeric width attribute is ignored the same way", () => {
   const ui = build(`<img src="a.png" width="wide">`);
   expect(Number.isNaN(ui.styles.width[ui.nodes.style[1]!]!)).toBe(true);
 });
+
+test("an inline svg compiles to a data: URL image row, and its children are not nodes", () => {
+  const ui = build(`<svg viewBox="0 0 24 24"><path d="M0 0 L24 24"/></svg>`);
+  expect(ui.images.count).toBe(1);
+  const src = ui.strings[ui.images.src[0]!]!;
+  expect(src.startsWith("data:image/svg+xml,")).toBe(true);
+  expect(decodeURIComponent(src.slice("data:image/svg+xml,".length))).toContain(`d="M0 0 L24 24"`);
+  // body + the svg node, and nothing else: no per-child boxes.
+  expect(ui.nodes.count).toBe(2);
+});

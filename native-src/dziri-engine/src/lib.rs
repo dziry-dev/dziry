@@ -30,6 +30,7 @@ pub mod layout;
 pub mod paint;
 pub mod protocol;
 pub mod select;
+pub mod svg;
 pub mod tables;
 pub mod text;
 pub mod window;

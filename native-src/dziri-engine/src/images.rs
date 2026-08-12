@@ -34,12 +34,27 @@ use skia_safe::{Data, Image};
 
 use crate::error::EngineError;
 use crate::protocol;
+use crate::svg::Svg;
 use crate::tables::Tables;
 
 const IMAGES: usize = protocol::Table::Images as usize;
 
+/// What the bytes turned out to be. Sniffed, not derived from the `src` name:
+/// a URL has no trustworthy extension (an endpoint can serve SVG from `/icon`)
+/// and the bytes are right there. SVG is the text formats' case — leading
+/// markup — and everything else goes to Skia's codecs.
+pub enum Decoded {
+    Raster(Image),
+    Vector(Svg),
+}
+
+/// The replaced-element default, per CSS: an image whose document says nothing
+/// about its size is 300x150. Applies to an SVG with no width/height/viewBox —
+/// a raster image always knows its own.
+pub const DEFAULT_SIZE: (f32, f32) = (300.0, 150.0);
+
 enum State {
-    Ready(Image),
+    Ready(Decoded),
     Failed,
 }
 
@@ -94,9 +109,9 @@ impl Images {
         }
     }
 
-    /// The bitmap for `node`, when its image has decoded. The paint path.
+    /// The decoded content for `node`, when ready. The paint path.
     #[inline]
-    pub fn for_node(&self, node: usize) -> Option<&Image> {
+    pub fn for_node(&self, node: usize) -> Option<&Decoded> {
         if !self.any {
             return None;
         }
@@ -105,18 +120,21 @@ impl Images {
             return None;
         }
         match self.cache.get(&self.srcs[row as usize]) {
-            Some(State::Ready(image)) => Some(image),
+            Some(State::Ready(decoded)) => Some(decoded),
             _ => None,
         }
     }
 
-    /// The decoded pixel size for `node`'s image, when known. The layout path:
-    /// a replaced element's intrinsic size, which is what an `<img>` with no
-    /// CSS size measures to.
+    /// The content's intrinsic size, when known. The layout path: a replaced
+    /// element with no CSS size measures to this. An SVG whose document says
+    /// nothing about size reports the CSS replaced-element default, matching a
+    /// browser; a raster image always knows its own size.
     #[inline]
     pub fn natural_size(&self, node: usize) -> Option<(f32, f32)> {
-        let image = self.for_node(node)?;
-        let (w, h) = (image.width() as f32, image.height() as f32);
+        let (w, h) = match self.for_node(node)? {
+            Decoded::Raster(image) => (image.width() as f32, image.height() as f32),
+            Decoded::Vector(svg) => svg.intrinsic_size().unwrap_or(DEFAULT_SIZE),
+        };
         // A zero dimension is a decode artefact, not a size: dividing by it is
         // how the aspect math would turn a corrupt file into a NaN box.
         if w > 0.0 && h > 0.0 {
@@ -147,12 +165,8 @@ impl Images {
         if self.resolved(src) {
             return Ok(Vec::new());
         }
-        let decoded = Image::from_encoded(Data::new_copy(bytes));
-        let state = match decoded {
-            Some(image) if image.width() > 0 && image.height() > 0 => State::Ready(image),
-            _ => State::Failed,
-        };
-        self.cache.insert(src.to_string(), state);
+        let decoded = decode(bytes);
+        self.cache.insert(src.to_string(), decoded);
 
         Ok(self
             .nodes
@@ -161,6 +175,25 @@ impl Images {
             .filter(|(_, s)| s.as_str() == src)
             .map(|(&n, _)| n)
             .collect())
+    }
+}
+
+/// What these bytes are. SVG first for text that leads with markup — a raster
+/// codec would reject it anyway, and sniffing on content rather than the `src`
+/// name is what lets an extension-less endpoint serve either.
+fn decode(bytes: &[u8]) -> State {
+    let text = std::str::from_utf8(bytes).unwrap_or("");
+    let looks_like_markup = text.trim_start().starts_with('<');
+    if looks_like_markup {
+        if let Some(svg) = Svg::parse(text) {
+            return State::Ready(Decoded::Vector(svg));
+        }
+    }
+    match Image::from_encoded(Data::new_copy(bytes)) {
+        Some(image) if image.width() > 0 && image.height() > 0 => {
+            State::Ready(Decoded::Raster(image))
+        }
+        _ => State::Failed,
     }
 }
 
