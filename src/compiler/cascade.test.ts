@@ -17,6 +17,7 @@ import {
   Align,
   compactBits,
   ControlFlags,
+  Justify,
   NodeKind,
   Display,
   INITIAL_STYLE,
@@ -188,6 +189,35 @@ test(":checked and :disabled are predicates like any other", () => {
   const both = variants.slots[at(Predicate.CHECKED | Predicate.DISABLED)]!;
   expect(styles.accentColor[both]!).toBe(0xff16a34a);
   expect(styles.bg[both]!).toBe(0xffcccccc);
+});
+
+test(":invalid is a predicate too, and the compiler needs to know nothing about forms", () => {
+  // The claim the entry in `PREDICATE_PSEUDO` makes: a state whose *answer* comes from
+  // somewhere entirely new — a schema, on the app thread — costs the compiler nothing beyond
+  // being named. No form is involved here at all; this is a `<div>`.
+  //
+  // What it buys is the case a conditional class cannot serve: a list row. Replicas share a
+  // style row, so a class reddens every row at once, while a predicate is resolved per node
+  // against the controls table — which each replica has its own row in.
+  const html = `<body><input class="box" type="text"></body>`;
+  const css = `
+    .box { border-color: #3f3f46 }
+    .box:invalid { border-color: #f43f5e }
+  `;
+
+  const ui = toCompiledUi(compile(html, css));
+  const styles = ui.styles as unknown as Record<StyleField, ArrayLike<number>>;
+  const { variants } = ui;
+
+  const row = [...variants.mask].findIndex((m) => (m & Predicate.INVALID) !== 0);
+  expect(row).toBeGreaterThanOrEqual(0);
+
+  const mask = variants.mask[row]!;
+  const start = variants.runStart[row]!;
+  const at = (live: number) => start + compactBits(live, mask);
+
+  expect(styles.borderTopColor[variants.slots[at(0)]!]!).toBe(0xff3f3f46);
+  expect(styles.borderTopColor[variants.slots[at(Predicate.INVALID)]!]!).toBe(0xfff43f5e);
 });
 
 test("a rule may require two states at once, and holds in neither alone", () => {
@@ -1235,11 +1265,12 @@ test("place-items and place-self set both axes, and `safe` binds forward", () =>
     /more than two values/,
   );
 
-  // `place-content` is left out of the switch entirely rather than written as
-  // "justify-content and drop the other half", because it needs `align-content`,
-  // which dziri does not have. So it takes the ordinary unsupported-property path —
-  // a warning, and no field touched. This asserts the *not half-applied* part: a
-  // `place-content-center` must not silently centre one axis and leave the other.
-  expect(styleOf(box, `.a { place-content: center }`, "justify")).toBe(INITIAL_STYLE.justify);
-  expect(styleOf(box, `.a { place-content: center }`, "align")).toBe(INITIAL_STYLE.align);
+  // `place-content` sets both `align-content` and `justify-content`, one value
+  // meaning both axes — now that `align-content` exists there is no half to drop.
+  expect(styleOf(box, `.a { place-content: center }`, "justify")).toBe(Justify.CENTER);
+  expect(styleOf(box, `.a { place-content: center }`, "alignContent")).toBe(Justify.CENTER);
+  expect(styleOf(box, `.a { place-content: space-between start }`, "justify")).toBe(Justify.START);
+  expect(styleOf(box, `.a { place-content: space-between start }`, "alignContent")).toBe(
+    Justify.SPACE_BETWEEN,
+  );
 });

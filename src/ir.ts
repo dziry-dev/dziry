@@ -330,6 +330,39 @@ export const INITIAL_STYLE: ComputedStyle = {
   originPctY: 0.5,
   originPxX: 0,
   originPxY: 0,
+  // `mask-composite: add` (default, value 0) — how mask layers interact
+  maskComposite: 0,
+  // `mask-image: none` (default, value 0)
+  maskImage: 0,
+  // SVG paint — unset: alpha-0 colours, NaN width.
+  fill: 0x00000000,
+  stroke: 0x00000000,
+  strokeWidth: NaN,
+  // `filter: none` / `backdrop-filter: none` (defaults, value 0)
+  filter: 0,
+  backdropFilter: 0,
+  // `z-index: auto` — the i32::MIN sentinel, per the schema row.
+  zIndex: -2147483648,
+  // `letter-spacing: normal` is 0px of extra spacing.
+  letterSpacing: 0,
+  // `mix-blend-mode: normal` / `background-blend-mode: normal`.
+  mixBlendMode: 0,
+  backgroundBlendMode: 0,
+  // `columns: auto auto` — no count, no width.
+  columnCount: 0,
+  columnWidth: NaN,
+  // `zoom: normal` — unset.
+  zoom: NaN,
+  // `touch-action: auto` — every gesture permitted.
+  touchAction: 7,
+  // `white-space: normal`.
+  whiteSpace: 0,
+  // `font-stretch: normal` — 100%.
+  fontStretch: 100,
+  // `mask-position: 0% 0%` — the initial value; 1 marks "an author set this".
+  maskPosition: 0,
+  // `align-content: normal` — UNSET, so Taffy's own default answers.
+  alignContent: UNSET,
   // `transition-property: all` is CSS's initial value, but with a
   // `transition-duration` of `0s` it animates nothing — so "no tween row" is the
   // faithful encoding of the initial state, not an approximation of it. Same for

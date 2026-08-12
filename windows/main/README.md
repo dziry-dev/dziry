@@ -45,8 +45,8 @@ agree, and if they ever disagree the exhibit is wrong.
 
 ## Known gaps visible from here
 
-`line-height` is unsupported, so `text-sm`/`text-lg` set their font size and warn
-about the line height that comes with them. `@media (hover: hover)`, `@property` and
-`@supports` are skipped at-rules. The largest blockers by class count are
-`mask-image` and `mask-composite`, then `calc()` over percentages and viewport
-units — see `bun run tailwind-coverage`.
+`@media (hover: hover)`, `@property` and `@supports` are skipped at-rules. Masks,
+filters and SVG paint (`fill`, `stroke`) compile but are not rendered yet — the
+engine stores them and paints as if they were absent. What remains blocked is
+mostly 3D transforms (`rotate-x-*`, dziri is 2D) and the intrinsic sizing
+keywords (`w-fit`, `w-max`, `w-min`) — see `bun run tailwind-coverage`.

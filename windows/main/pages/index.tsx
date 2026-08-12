@@ -65,9 +65,11 @@ export default function Overview() {
       <div className="flex flex-col gap-3 rounded-xl bg-zinc-900 p-6">
         <div className="text-base font-semibold text-zinc-100">What is not here yet</div>
         <div className="text-sm text-zinc-400">
-          The largest blockers by class count are mask-image and mask-composite, then calc() over
-          percentages and viewport units. They are absent from these pages rather than shown
-          broken: a demo that renders a utility wrongly is worse than one that omits it.
+          Masks, filters and SVG paint now compile — the engine stores them but does not render
+          them yet. What is left is mostly 3D transforms (dziri is 2D), intrinsic sizing keywords
+          like fit-content, and a long tail of small properties. They are absent from these pages
+          rather than shown broken: a demo that renders a utility wrongly is worse than one that
+          omits it.
         </div>
       </div>
     </div>

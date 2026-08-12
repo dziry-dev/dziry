@@ -8,7 +8,7 @@
  * time, because they depend on capacity and a list arena can regrow.
  */
 
-export const PROTOCOL_VERSION = 37;
+export const PROTOCOL_VERSION = 42;
 
 /**
  * Structural fingerprint of every table, field name and element type, in order.
@@ -19,12 +19,12 @@ export const PROTOCOL_VERSION = 37;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0x5fcd78ea;
+export const SCHEMA_HASH = 0x374c3f28;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
   nodes: [1, 2, 4, 4, 4, 4, 2, 1, 1, 4],
-  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 1, 1, 4, 4, 4, 2, 1, 1, 1, 4, 4, 4, 4, 1, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 2],
+  styles: [4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 1, 1, 1, 1, 1, 4, 4, 4, 4, 4, 4, 4, 2, 2, 2, 2, 2, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 2, 1, 1, 4, 4, 4, 2, 1, 1, 1, 4, 4, 4, 4, 1, 1, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 1, 1, 1, 4, 4, 1, 1, 2, 4, 4, 1, 1, 4, 1, 4, 4, 4, 2, 2],
   variants: [4, 4, 4],
   variantSlots: [2],
   media: [4, 1, 4],
@@ -39,7 +39,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
 /** Field names per table, in descriptor order — used to name a mismatch. */
 export const FIELD_NAMES: Record<TableName, string[]> = {
   nodes: ["kind", "style", "text", "parent", "firstChild", "nextSibling", "list", "hidden", "flags", "activates"],
-  styles: ["bg", "fg", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "ringOuterWidth", "ringOuterColor", "ringInnerWidth", "ringInnerColor", "ringInsetWidth", "ringInsetColor", "selectionBg", "selectionFg", "outlineColor", "outlineWidth", "outlineOffset", "decorationLine", "decorationColor", "decorationStyle", "decorationThickness", "underlineOffset", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "flexBasisPct", "order", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "widthPct", "widthVp", "height", "heightPct", "heightVp", "minWidth", "minWidthPct", "minWidthVp", "minHeight", "minHeightPct", "minHeightVp", "maxWidth", "maxWidthPct", "maxWidthVp", "maxHeight", "maxHeightPct", "maxHeightVp", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "insetTopPct", "insetRightPct", "insetBottomPct", "insetLeftPct", "borderSpacingH", "borderSpacingV", "scrollMarginTop", "scrollMarginRight", "scrollMarginBottom", "scrollMarginLeft", "scrollPaddingTop", "scrollPaddingRight", "scrollPaddingBottom", "scrollPaddingLeft", "fontSize", "fontWeight", "fontStyle", "fontFamily", "lineHeight", "lineHeightPx", "textIndent", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance", "cursor", "opacity", "translateX", "translateY", "translatePercentX", "translatePercentY", "rotate", "scaleX", "scaleY", "skewX", "skewY", "transformOriginPercentX", "transformOriginPercentY", "transformOriginX", "transformOriginY", "transition", "animation"],
+  styles: ["bg", "fg", "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor", "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "radiusTopLeft", "radiusTopRight", "radiusBottomRight", "radiusBottomLeft", "ringOuterWidth", "ringOuterColor", "ringInnerWidth", "ringInnerColor", "ringInsetWidth", "ringInsetColor", "selectionBg", "selectionFg", "outlineColor", "outlineWidth", "outlineOffset", "decorationLine", "decorationColor", "decorationStyle", "decorationThickness", "underlineOffset", "padTop", "padRight", "padBottom", "padLeft", "marginTop", "marginRight", "marginBottom", "marginLeft", "display", "flexDirection", "flexWrap", "justifyContent", "alignContent", "alignItems", "alignSelf", "justifyItems", "justifySelf", "flexGrow", "flexShrink", "flexBasis", "flexBasisPct", "order", "gapRow", "gapColumn", "gridColumns", "gridRows", "gridColumnStart", "gridColumnSpan", "gridRowStart", "gridRowSpan", "width", "widthPct", "widthVp", "height", "heightPct", "heightVp", "minWidth", "minWidthPct", "minWidthVp", "minHeight", "minHeightPct", "minHeightVp", "maxWidth", "maxWidthPct", "maxWidthVp", "maxHeight", "maxHeightPct", "maxHeightVp", "aspectRatio", "position", "insetTop", "insetRight", "insetBottom", "insetLeft", "insetTopPct", "insetRightPct", "insetBottomPct", "insetLeftPct", "borderSpacingH", "borderSpacingV", "scrollMarginTop", "scrollMarginRight", "scrollMarginBottom", "scrollMarginLeft", "scrollPaddingTop", "scrollPaddingRight", "scrollPaddingBottom", "scrollPaddingLeft", "fontSize", "fontWeight", "fontStyle", "fontFamily", "lineHeight", "lineHeightPx", "textIndent", "lineClamp", "overflowX", "overflowY", "scrollbarWidth", "scrollbarThumb", "scrollbarTrack", "accentColor", "caretColor", "appearance", "cursor", "opacity", "translateX", "translateY", "translatePercentX", "translatePercentY", "rotate", "scaleX", "scaleY", "skewX", "skewY", "transformOriginPercentX", "transformOriginPercentY", "transformOriginX", "transformOriginY", "maskComposite", "maskImage", "filter", "backdropFilter", "zIndex", "letterSpacing", "mixBlendMode", "backgroundBlendMode", "columnCount", "columnWidth", "zoom", "touchAction", "whiteSpace", "fontStretch", "maskPosition", "fill", "stroke", "strokeWidth", "transition", "animation"],
   variants: ["node", "mask", "runStart"],
   variantSlots: ["style"],
   media: ["bit", "kind", "value"],
@@ -59,7 +59,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
  * can be checked against it rather than trusted to agree.
  */
 export const LAYOUT_AFFECTING: { [K in TableName]?: boolean[] } = {
-  styles: [false, false, false, false, false, false, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false],
+  styles: [false, false, false, false, false, false, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, true, true, true, true, true, true, true, true, true, true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true, false, false, true, true, true, false, true, true, false, false, false, false, false, false],
 };
 
 /**
@@ -103,6 +103,8 @@ export const ANIM_BIT = {
   transformOriginPercentY: 27,
   transformOriginX: 28,
   transformOriginY: 29,
+  fill: 30,
+  stroke: 31,
 } as const;
 
 /**
@@ -117,7 +119,7 @@ export const ANIM_BIT = {
 export type AnimatableField = keyof typeof ANIM_BIT;
 
 /** Every animatable field's mask bit at once — what `transition-property: all` means here. */
-export const ANIM_ALL = 0x3fffffff;
+export const ANIM_ALL = 0xffffffff;
 
 export const TABLE_NAMES = ["nodes", "styles", "variants", "variantSlots", "media", "lists", "tweens", "keyframes", "controls", "layout", "strings"] as const;
 export type TableName = (typeof TABLE_NAMES)[number];
@@ -181,94 +183,113 @@ export const F = {
     flexDirection: 39,
     flexWrap: 40,
     justifyContent: 41,
-    alignItems: 42,
-    alignSelf: 43,
-    justifyItems: 44, // Grid only
-    justifySelf: 45, // Grid only
-    flexGrow: 46,
-    flexShrink: 47,
-    flexBasis: 48,
-    flexBasisPct: 49,
-    order: 50,
-    gapRow: 51,
-    gapColumn: 52,
-    gridColumns: 53, // repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N
-    gridRows: 54,
-    gridColumnStart: 55,
-    gridColumnSpan: 56,
-    gridRowStart: 57,
-    gridRowSpan: 58,
-    width: 59,
-    widthPct: 60, // fraction of containing-block width
-    widthVp: 61, // fraction of the window's width
-    height: 62,
-    heightPct: 63, // fraction of containing-block height
-    heightVp: 64, // fraction of the window's height
-    minWidth: 65,
-    minWidthPct: 66,
-    minWidthVp: 67,
-    minHeight: 68,
-    minHeightPct: 69,
-    minHeightVp: 70,
-    maxWidth: 71,
-    maxWidthPct: 72,
-    maxWidthVp: 73,
-    maxHeight: 74,
-    maxHeightPct: 75,
-    maxHeightVp: 76,
-    aspectRatio: 77,
-    position: 78, // 0 relative, 1 absolute
-    insetTop: 79,
-    insetRight: 80,
-    insetBottom: 81,
-    insetLeft: 82,
-    insetTopPct: 83,
-    insetRightPct: 84,
-    insetBottomPct: 85,
-    insetLeftPct: 86,
-    borderSpacingH: 87,
-    borderSpacingV: 88,
-    scrollMarginTop: 89,
-    scrollMarginRight: 90,
-    scrollMarginBottom: 91,
-    scrollMarginLeft: 92,
-    scrollPaddingTop: 93,
-    scrollPaddingRight: 94,
-    scrollPaddingBottom: 95,
-    scrollPaddingLeft: 96,
-    fontSize: 97,
-    fontWeight: 98,
-    fontStyle: 99, // 0 normal, 1 italic
-    fontFamily: 100, // generic family: 0 default, 1 monospace
-    lineHeight: 101, // multiplier of font size; 0 = normal
-    lineHeightPx: 102, // absolute px; NaN = unset
-    textIndent: 103, // px; NaN = unset
-    lineClamp: 104, // 0 = unlimited; drives SkParagraph maxLines
-    overflowX: 105, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
-    overflowY: 106, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
-    scrollbarWidth: 107, // 0 auto, 1 thin, 2 none
-    scrollbarThumb: 108,
-    scrollbarTrack: 109,
-    accentColor: 110,
-    caretColor: 111,
-    appearance: 112, // 0 none, 1 auto
-    cursor: 113, // SDL_SystemCursor enum
-    opacity: 114, // 0..1, initial 1
-    translateX: 115,
-    translateY: 116,
-    translatePercentX: 117, // fraction of own border-box width
-    translatePercentY: 118, // fraction of own border-box height
-    rotate: 119, // degrees, unnormalised
-    scaleX: 120, // initial 1
-    scaleY: 121, // initial 1
-    skewX: 122, // degrees
-    skewY: 123, // degrees
-    transformOriginPercentX: 124, // initial 0.5
-    transformOriginPercentY: 125, // initial 0.5
-    transformOriginX: 126, // px, added to the percentage
-    transformOriginY: 127, // px, added to the percentage
-    transition: 128, // tween row + 1, or 0 for none
-    animation: 129, // tween row + 1, or 0 for none
+    alignContent: 42,
+    alignItems: 43,
+    alignSelf: 44,
+    justifyItems: 45, // Grid only
+    justifySelf: 46, // Grid only
+    flexGrow: 47,
+    flexShrink: 48,
+    flexBasis: 49,
+    flexBasisPct: 50,
+    order: 51,
+    gapRow: 52,
+    gapColumn: 53,
+    gridColumns: 54, // repeat(N, minmax(0,1fr)) — Tailwind's grid-cols-N
+    gridRows: 55,
+    gridColumnStart: 56,
+    gridColumnSpan: 57,
+    gridRowStart: 58,
+    gridRowSpan: 59,
+    width: 60,
+    widthPct: 61, // fraction of containing-block width
+    widthVp: 62, // fraction of the window's width
+    height: 63,
+    heightPct: 64, // fraction of containing-block height
+    heightVp: 65, // fraction of the window's height
+    minWidth: 66,
+    minWidthPct: 67,
+    minWidthVp: 68,
+    minHeight: 69,
+    minHeightPct: 70,
+    minHeightVp: 71,
+    maxWidth: 72,
+    maxWidthPct: 73,
+    maxWidthVp: 74,
+    maxHeight: 75,
+    maxHeightPct: 76,
+    maxHeightVp: 77,
+    aspectRatio: 78,
+    position: 79, // 0 relative, 1 absolute
+    insetTop: 80,
+    insetRight: 81,
+    insetBottom: 82,
+    insetLeft: 83,
+    insetTopPct: 84,
+    insetRightPct: 85,
+    insetBottomPct: 86,
+    insetLeftPct: 87,
+    borderSpacingH: 88,
+    borderSpacingV: 89,
+    scrollMarginTop: 90,
+    scrollMarginRight: 91,
+    scrollMarginBottom: 92,
+    scrollMarginLeft: 93,
+    scrollPaddingTop: 94,
+    scrollPaddingRight: 95,
+    scrollPaddingBottom: 96,
+    scrollPaddingLeft: 97,
+    fontSize: 98,
+    fontWeight: 99,
+    fontStyle: 100, // 0 normal, 1 italic
+    fontFamily: 101, // generic family: 0 default, 1 monospace
+    lineHeight: 102, // multiplier of font size; 0 = normal
+    lineHeightPx: 103, // absolute px; NaN = unset
+    textIndent: 104, // px; NaN = unset
+    lineClamp: 105, // 0 = unlimited; drives SkParagraph maxLines
+    overflowX: 106, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
+    overflowY: 107, // 0 visible, 1 hidden, 2 ellipsis, 3 scroll
+    scrollbarWidth: 108, // 0 auto, 1 thin, 2 none
+    scrollbarThumb: 109,
+    scrollbarTrack: 110,
+    accentColor: 111,
+    caretColor: 112,
+    appearance: 113, // 0 none, 1 auto
+    cursor: 114, // SDL_SystemCursor enum
+    opacity: 115, // 0..1, initial 1
+    translateX: 116,
+    translateY: 117,
+    translatePercentX: 118, // fraction of own border-box width
+    translatePercentY: 119, // fraction of own border-box height
+    rotate: 120, // degrees, unnormalised
+    scaleX: 121, // initial 1
+    scaleY: 122, // initial 1
+    skewX: 123, // degrees
+    skewY: 124, // degrees
+    transformOriginPercentX: 125, // initial 0.5
+    transformOriginPercentY: 126, // initial 0.5
+    transformOriginX: 127, // px, added to the percentage
+    transformOriginY: 128, // px, added to the percentage
+    maskComposite: 129, // 0 add, 1 subtract, 2 intersect, 3 exclude
+    maskImage: 130, // 0 none, 1 has mask layers
+    filter: 131, // 0 none, 1 has filter functions
+    backdropFilter: 132, // 0 none, 1 has backdrop filter functions
+    zIndex: 133, // i32::MIN = auto
+    letterSpacing: 134, // px; 0 = normal
+    mixBlendMode: 135, // BlendMode enum; 0 normal
+    backgroundBlendMode: 136, // BlendMode enum; 0 normal
+    columnCount: 137, // 0 = auto
+    columnWidth: 138, // px; NaN = auto
+    zoom: 139, // multiplier; NaN = unset
+    touchAction: 140, // bitmask: 1 pan-x, 2 pan-y, 4 pinch-zoom; 0 none, 7 auto
+    whiteSpace: 141, // 0 normal, 1 nowrap, 2 pre, 3 pre-line, 4 pre-wrap, 5 break-spaces
+    fontStretch: 142, // percent of normal; 100 = normal
+    maskPosition: 143, // 0 initial, 1 set
+    fill: 144, // SVG fill; alpha 0 = unset
+    stroke: 145, // SVG stroke; alpha 0 = unset
+    strokeWidth: 146, // SVG stroke-width, px; NaN = unset
+    transition: 147, // tween row + 1, or 0 for none
+    animation: 148, // tween row + 1, or 0 for none
   },
   /** Per-node predicate mask and where that node's style run begins. */
   variants: {
@@ -346,7 +367,7 @@ export const F = {
 /** Field counts, asserted against the engine's descriptor at startup. */
 export const FIELD_COUNTS: Record<TableName, number> = {
   nodes: 10,
-  styles: 130,
+  styles: 149,
   variants: 3,
   variantSlots: 1,
   media: 3,
@@ -361,7 +382,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
 /** Typed-array constructor per field, used to wrap the engine's memory. */
 export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   nodes: [Uint8Array, Uint16Array, Int32Array, Int32Array, Int32Array, Int32Array, Int16Array, Uint8Array, Uint8Array, Int32Array],
-  styles: [Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Uint8Array, Uint32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Int32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint16Array],
+  styles: [Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Float32Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Float32Array, Float32Array, Uint8Array, Uint32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Int32Array, Float32Array, Float32Array, Uint16Array, Uint16Array, Int16Array, Int16Array, Int16Array, Int16Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Uint16Array, Uint8Array, Uint8Array, Uint8Array, Uint32Array, Uint32Array, Uint32Array, Uint32Array, Uint8Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Uint8Array, Uint8Array, Int32Array, Float32Array, Uint8Array, Uint8Array, Uint16Array, Float32Array, Float32Array, Uint8Array, Uint8Array, Float32Array, Uint8Array, Uint32Array, Uint32Array, Float32Array, Uint16Array, Uint16Array],
   variants: [Int32Array, Uint32Array, Int32Array],
   variantSlots: [Uint16Array],
   media: [Uint32Array, Uint8Array, Float32Array],
@@ -430,6 +451,7 @@ export type SharedTables = {
     flexDirection: Uint8Array;
     flexWrap: Uint8Array;
     justifyContent: Uint8Array;
+    alignContent: Uint8Array;
     alignItems: Uint8Array;
     alignSelf: Uint8Array;
     justifyItems: Uint8Array;
@@ -516,6 +538,24 @@ export type SharedTables = {
     transformOriginPercentY: Float32Array;
     transformOriginX: Float32Array;
     transformOriginY: Float32Array;
+    maskComposite: Uint8Array;
+    maskImage: Uint8Array;
+    filter: Uint8Array;
+    backdropFilter: Uint8Array;
+    zIndex: Int32Array;
+    letterSpacing: Float32Array;
+    mixBlendMode: Uint8Array;
+    backgroundBlendMode: Uint8Array;
+    columnCount: Uint16Array;
+    columnWidth: Float32Array;
+    zoom: Float32Array;
+    touchAction: Uint8Array;
+    whiteSpace: Uint8Array;
+    fontStretch: Float32Array;
+    maskPosition: Uint8Array;
+    fill: Uint32Array;
+    stroke: Uint32Array;
+    strokeWidth: Float32Array;
     transition: Uint16Array;
     animation: Uint16Array;
   };
@@ -645,6 +685,27 @@ export const Justify = {
   UNSET: 255,
 } as const;
 export type Justify = (typeof Justify)[keyof typeof Justify];
+
+/** `styles.mixBlendMode` / `styles.backgroundBlendMode`. CSS <blend-mode> keywords. */
+export const BlendMode = {
+  NORMAL: 0,
+  MULTIPLY: 1,
+  SCREEN: 2,
+  OVERLAY: 3,
+  DARKEN: 4,
+  LIGHTEN: 5,
+  COLOR_DODGE: 6,
+  COLOR_BURN: 7,
+  HARD_LIGHT: 8,
+  SOFT_LIGHT: 9,
+  DIFFERENCE: 10,
+  EXCLUSION: 11,
+  HUE: 12,
+  SATURATION: 13,
+  COLOR: 14,
+  LUMINOSITY: 15,
+} as const;
+export type BlendMode = (typeof BlendMode)[keyof typeof BlendMode];
 
 /** `styles.alignItems` / `alignSelf` / `justifyItems` / `justifySelf`. */
 export const Align = {
@@ -872,6 +933,7 @@ export const STYLE_FIELDS = [
   ["direction", "Uint8Array", false, true],
   ["wrap", "Uint8Array", false, true],
   ["justify", "Uint8Array", false, true],
+  ["alignContent", "Uint8Array", false, true],
   ["align", "Uint8Array", false, true],
   ["alignSelf", "Uint8Array", false, true],
   ["justifyItems", "Uint8Array", false, true],
@@ -957,6 +1019,24 @@ export const STYLE_FIELDS = [
   ["originPctY", "Float32Array", false, false],
   ["originPxX", "Float32Array", false, false],
   ["originPxY", "Float32Array", false, false],
+  ["maskComposite", "Uint8Array", false, false],
+  ["maskImage", "Uint8Array", false, false],
+  ["filter", "Uint8Array", false, false],
+  ["backdropFilter", "Uint8Array", false, false],
+  ["zIndex", "Int32Array", false, false],
+  ["letterSpacing", "Float32Array", true, true],
+  ["mixBlendMode", "Uint8Array", false, false],
+  ["backgroundBlendMode", "Uint8Array", false, false],
+  ["columnCount", "Uint16Array", false, true],
+  ["columnWidth", "Float32Array", false, true],
+  ["zoom", "Float32Array", false, true],
+  ["touchAction", "Uint8Array", false, false],
+  ["whiteSpace", "Uint8Array", true, true],
+  ["fontStretch", "Float32Array", true, true],
+  ["maskPosition", "Uint8Array", false, false],
+  ["fill", "Uint32Array", false, false],
+  ["stroke", "Uint32Array", false, false],
+  ["strokeWidth", "Float32Array", false, false],
   ["transition", "Uint16Array", false, false],
   ["animation", "Uint16Array", false, false],
 ] as const;
@@ -1013,6 +1093,7 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[
   ["flexDirection", "direction"],
   ["flexWrap", "wrap"],
   ["justifyContent", "justify"],
+  ["alignContent", "alignContent"],
   ["alignItems", "align"],
   ["alignSelf", "alignSelf"],
   ["justifyItems", "justifyItems"],
@@ -1098,6 +1179,24 @@ export const NUMBER_FIELDS: Array<[keyof typeof F.styles, (typeof STYLE_FIELDS)[
   ["transformOriginPercentY", "originPctY"],
   ["transformOriginX", "originPxX"],
   ["transformOriginY", "originPxY"],
+  ["maskComposite", "maskComposite"],
+  ["maskImage", "maskImage"],
+  ["filter", "filter"],
+  ["backdropFilter", "backdropFilter"],
+  ["zIndex", "zIndex"],
+  ["letterSpacing", "letterSpacing"],
+  ["mixBlendMode", "mixBlendMode"],
+  ["backgroundBlendMode", "backgroundBlendMode"],
+  ["columnCount", "columnCount"],
+  ["columnWidth", "columnWidth"],
+  ["zoom", "zoom"],
+  ["touchAction", "touchAction"],
+  ["whiteSpace", "whiteSpace"],
+  ["fontStretch", "fontStretch"],
+  ["maskPosition", "maskPosition"],
+  ["fill", "fill"],
+  ["stroke", "stroke"],
+  ["strokeWidth", "strokeWidth"],
   ["transition", "transition"],
   ["animation", "animation"],
 ];

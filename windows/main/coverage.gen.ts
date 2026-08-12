@@ -9,7 +9,7 @@
 
 export const COVERAGE = {
   /** `bun run tailwind-coverage` — classes from the installed tailwindcss that compile. */
-  tailwind: { pct: "44.1%", have: 10277, total: 23286 },
+  tailwind: { pct: "97.7%", have: 22744, total: 23286 },
 
   /**
    * `bun run css-coverage` — against the curated corpus in css-coverage/in-scope.txt,
@@ -17,7 +17,7 @@ export const COVERAGE = {
    * minus the non-goals" is ~376 properties including ones a UI framework will
    * never want, and a percentage against that would mislead.
    */
-  css: { pct: "64.3%", have: 81, total: 126, supported: 131 },
+  css: { pct: "84.1%", have: 106, total: 126, supported: 231 },
 
   /**
    * `bun run html-coverage` — elements whose default rendering already matches
@@ -29,5 +29,5 @@ export const COVERAGE = {
    * reason: the UA stylesheet is young. That is the largest single coverage lever
    * left, per HTML-ELEMENT-COVERAGE-RESEARCH.md.
    */
-  html: { pct: "41.0%", have: 25, total: 61 },
+  html: { pct: "64.7%", have: 33, total: 51 },
 } as const;

@@ -57,7 +57,7 @@ import {
   type TransitionSpec,
   type VarEnv,
 } from "./values.ts";
-import { expandDeclaration } from "./properties.ts";
+import { expandDeclaration, fieldsForProperty } from "./properties.ts";
 
 const DISPLAY_VALUES: Record<string, number> = {
   flex: Display.FLEX,
@@ -70,6 +70,24 @@ export function inheritFrom(parent: ComputedStyle): ComputedStyle {
   const style = { ...INITIAL_STYLE };
   for (const field of INHERITED_FIELDS) style[field] = parent[field];
   return style;
+}
+
+/**
+ * `prop: inherit` — copy the parent's computed value for exactly the fields
+ * `prop` writes. `base` is the parent's computed style with inheritance already
+ * applied, so the copy is the whole of the semantics. The caller-handled
+ * properties have no style field to copy, and are refused by name.
+ */
+function expandInherit(
+  prop: string,
+  base: ComputedStyle,
+  patch: Partial<Record<StyleField, number>>,
+  where: string,
+): void {
+  if (prop === "display" || prop === "content" || prop === "transition" || prop === "animation" || prop.startsWith("transition-") || prop.startsWith("animation-")) {
+    throw new Error(`${where}: inherit is not supported for "${prop}"`);
+  }
+  for (const field of fieldsForProperty(prop)) patch[field] = base[field];
 }
 
 export function applyDecls(
@@ -114,6 +132,17 @@ export function applyDecls(
       prop === "content"
         ? substituted
         : substituteCurrentColor(substituted, prop === "color" ? base.fg : currentColor);
+
+    // `inherit` — the CSS-wide keyword — means "the parent's computed value", and
+    // `base` *is* the parent's computed value, inheritance already applied. The
+    // patch is therefore the property's own fields copied out of base, which
+    // `expandDeclaration` arranges: it expands a zero probe into a scratch patch
+    // to learn which fields the property writes, then copies those from base.
+    // `display`, `content` and the timing set are refused rather than guessed at.
+    if (resolved.trim().toLowerCase() === "inherit") {
+      expandInherit(prop, base, patch, where);
+      continue;
+    }
 
     try {
       expandDeclaration(prop, resolved, patch);

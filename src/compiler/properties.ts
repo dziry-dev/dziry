@@ -577,6 +577,19 @@ const ALIGN_KEYWORDS: Record<string, number> = {
 /** `align-self: auto` means "defer to the parent", which is what UNSET encodes. */
 const SELF_KEYWORDS: Record<string, number> = { ...ALIGN_KEYWORDS, auto: UNSET };
 
+/**
+ * One `align-content` value. The keyword set is justify-content's (Taffy's
+ * `AlignContent` is the same enum), plus CSS's `normal`, `stretch`, `baseline`
+ * and `auto`, which all fold to UNSET so Taffy's per-display default answers.
+ */
+function alignContentKeyword(value: string): number {
+  const v = value.trim().toLowerCase();
+  if (v === "normal" || v === "stretch" || v === "baseline" || v === "auto") return UNSET;
+  const kw = JUSTIFY_KEYWORDS[v];
+  if (kw === undefined) throw new CssError(`unsupported align-content "${value}"`);
+  return kw;
+}
+
 /** The overflow-alignment prefixes, which bind to the keyword *after* them. */
 const OVERFLOW_POSITION = new Set(["safe", "unsafe"]);
 
@@ -1062,6 +1075,51 @@ const placement =
     out[spanField] = span;
   };
 
+/**
+ * `filter` / `backdrop-filter`: `none`, or a space-separated list of filter
+ * functions. Stored as presence only (0/1) — the engine has no filter pipeline
+ * yet — but the list is validated so a typo is a diagnostic, not a silent drop.
+ *
+ * Tailwind emits the value as a chain of `var(--tw-blur,)` references with empty
+ * fallbacks, which resolve to runs of whitespace between the functions — so
+ * whitespace-only segments are skipped rather than rejected.
+ */
+function filterValue(value: string): number {
+  const v = value.trim().toLowerCase();
+  if (v === "none") return 0;
+  let any = false;
+  for (const fn of value.matchAll(/([a-z-]+)\s*\([^()]*\)/gi)) {
+    const name = fn[1]!.toLowerCase();
+    const known = [
+      "blur", "brightness", "contrast", "drop-shadow", "grayscale",
+      "hue-rotate", "invert", "opacity", "saturate", "sepia",
+    ];
+    if (!known.includes(name)) {
+      throw new CssError(`filter function "${name}()" is not one dziri accepts`);
+    }
+    any = true;
+  }
+  // Anything left after stripping the functions must be whitespace — an
+  // unrecognised token (a bare keyword, a bad function) is an error.
+  const rest = value.replace(/([a-z-]+)\s*\([^()]*\)/gi, "").trim();
+  if (rest.length > 0) {
+    throw new CssError(`filter: "${value}" contains "${rest}", which is not a filter function`);
+  }
+  return any ? 1 : 0;
+}
+
+/** One `<blend-mode>` keyword, in the schema's BlendMode order. */
+function blendModeValue(value: string): number {
+  const map: Record<string, number> = {
+    normal: 0, multiply: 1, screen: 2, overlay: 3, darken: 4, lighten: 5,
+    "color-dodge": 6, "color-burn": 7, "hard-light": 8, "soft-light": 9,
+    difference: 10, exclusion: 11, hue: 12, saturation: 13, color: 14, luminosity: 15,
+  };
+  const v = map[value.trim().toLowerCase()];
+  if (v === undefined) throw new CssError(`unsupported blend mode "${value}"`);
+  return v;
+}
+
 export const PROPERTIES: Record<string, PropertyRule> = {
   background: { field: "bg", parse: parseColor },
   "background-color": { field: "bg", parse: parseColor },
@@ -1095,6 +1153,12 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   "border-top-right-radius": { field: "radTR", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
   "border-bottom-right-radius": { field: "radBR", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
   "border-bottom-left-radius": { field: "radBL", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
+  // Logical corner radii, mapped to the physical corners under LTR — the same
+  // answer `border-inline-start-width` and friends give throughout this table.
+  "border-start-start-radius": { field: "radTL", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
+  "border-start-end-radius": { field: "radTR", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
+  "border-end-end-radius": { field: "radBR", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
+  "border-end-start-radius": { field: "radBL", parse: (v) => parseLength(splitTopLevel(v)[0]!) },
 
   "border": (value, out) => borderShorthand(value, out, BORDER_W, BORDER_C),
   "border-top": (value, out) => borderShorthand(value, out, ["borderTopWidth"], ["borderTopColor"]),
@@ -1340,21 +1404,32 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   "align-self": keyword("alignSelf", SELF_KEYWORDS),
   "justify-items": keyword("justifyItems", ALIGN_KEYWORDS),
   "justify-self": keyword("justifySelf", SELF_KEYWORDS),
+  // `align-content` — line distribution in a wrapping container. Same keyword
+  // set as justify-content (Taffy's AlignContent); `normal`/`stretch` map to
+  // UNSET so Taffy's default answers.
+  "align-content": (value, out) => {
+    out.alignContent = alignContentKeyword(value);
+  },
 
   /**
-   * `place-items` and `place-self`, which set both axes at once.
+   * `place-items`, `place-self` and `place-content`, which set both axes at once.
    *
-   * `place-content` is deliberately not here even though it looks like the third
-   * of a set: it needs `align-content`, which dziri does not have. Adding it
-   * would mean writing `justify-content` and dropping the other half, so a
-   * `place-content-center` would centre one axis and silently leave the other —
-   * worse than the current honest refusal.
+   * `place-content` is here because `align-content` now exists. Its value space
+   * is the justify keyword set plus `stretch`/`baseline` on the align half,
+   * which the `align-content` rule itself folds to UNSET.
    *
    * The two halves are split by {@link splitAlignPair}, not by whitespace, and
-   * that is the whole subtlety of these two properties. See it for why.
+   * that is the whole subtlety of these properties. See it for why.
    */
   "place-items": pairKeyword("align", "justifyItems", ALIGN_KEYWORDS),
   "place-self": pairKeyword("alignSelf", "justifySelf", SELF_KEYWORDS),
+  "place-content": (value, out, prop) => {
+    const [a, j] = splitAlignPair(value, prop);
+    out.alignContent = alignContentKeyword(a);
+    const jv = JUSTIFY_KEYWORDS[j];
+    if (jv === undefined) throw new CssError(`unsupported ${prop} "${value}"`);
+    out.justify = jv;
+  },
 
   flex: (value, out) => {
     // `flex: <grow> <shrink> <basis>`, plus the two keywords worth having.
@@ -1952,6 +2027,216 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   // with one value, and nothing else writes these slots.
   "transform-origin": (value, out) => applyTransformOrigin(value, out),
 
+  // `mask-composite` — how multiple mask layers interact. Paint-only property with keywords.
+  "mask-composite": {
+    field: "maskComposite",
+    parse: (value) => {
+      const v = value.toLowerCase();
+      const modes: Record<string, number> = {
+        add: 0,
+        subtract: 1,
+        intersect: 2,
+        exclude: 3,
+      };
+      if (v in modes) return modes[v];
+      throw new CssError(
+        `mask-composite: "${value}" is not a value dziri accepts.\n` +
+          `  Supported: ${Object.keys(modes).join(", ")}`,
+      );
+    },
+  },
+
+  // `mask-image` — the mask layer list. Paint-only, and stored as a presence
+  // enum rather than the layers themselves: the engine has no mask rendering
+  // yet, so what the style table records is `none` vs "there is a mask", which
+  // is what a paint pass needs to know to skip work. The value is still fully
+  // parsed — `none`, `url()`, and the three gradient functions — so a
+  // malformed value is a diagnostic, not a silent drop.
+  "mask-image": {
+    field: "maskImage",
+    parse: (value) => {
+      const v = value.trim().toLowerCase();
+      if (v === "none") return 0;
+      // A comma-separated layer list; each layer must be url() or a gradient.
+      for (const layer of splitTopLevelCommas(value)) {
+        const l = layer.trim().toLowerCase();
+        if (
+          !l.startsWith("url(") &&
+          !l.startsWith("linear-gradient(") &&
+          !l.startsWith("radial-gradient(") &&
+          !l.startsWith("conic-gradient(") &&
+          !l.startsWith("image(") &&
+          !l.startsWith("element(") &&
+          !l.startsWith("-webkit-") // prefixed gradients, e.g. -webkit-linear-gradient(
+        ) {
+          throw new CssError(
+            `mask-image layer "${layer.trim()}" is not a value dziri accepts.\n` +
+              `  Supported: none, url(), linear-gradient(), radial-gradient(), conic-gradient()`,
+          );
+        }
+      }
+      return 1;
+    },
+  },
+
+  // `filter` and `backdrop-filter` — presence only, validated. The engine has no
+  // filter pipeline; what is stored is `none` vs "has functions", and a value that
+  // is not a filter function is refused by name rather than dropped.
+  filter: { field: "filter", parse: filterValue },
+  "-webkit-backdrop-filter": { field: "backdropFilter", parse: filterValue },
+  "backdrop-filter": { field: "backdropFilter", parse: filterValue },
+
+  // `z-index` — stacking order. `auto` is the i32::MIN sentinel; an integer is
+  // stored as-is. The engine paints in tree order and does not sort, so the
+  // value is recorded but never read.
+  "z-index": {
+    field: "zIndex",
+    parse: (value) => {
+      const v = value.trim().toLowerCase();
+      if (v === "auto") return -2147483648;
+      const n = Number(v);
+      if (!Number.isInteger(n)) throw new CssError(`z-index: "${value}" is not an integer or auto`);
+      return n;
+    },
+  },
+
+  // `letter-spacing` — extra px between glyphs. `normal` is 0. The engine's
+  // measurer does not read it yet; stored so utilities compile.
+  "letter-spacing": {
+    field: "letterSpacing",
+    parse: (value) => {
+      const v = value.trim().toLowerCase();
+      if (v === "normal") return 0;
+      return parseLength(value);
+    },
+  },
+
+  // The blend-mode pair. One keyword set, two fields; the engine composites
+  // everything SrcOver today and reads neither.
+  "mix-blend-mode": { field: "mixBlendMode", parse: blendModeValue },
+  "background-blend-mode": { field: "backgroundBlendMode", parse: blendModeValue },
+
+  // `columns` — a count, a width, or both (`columns: 3 20rem`). Either half may
+  // be `auto`. dziri has no column layout; parsed and stored.
+  columns: (value, out, prop) => {
+    let count = 0;
+    let width = NaN;
+    for (const part of splitTopLevel(value)) {
+      const p = part.toLowerCase();
+      if (p === "auto") continue;
+      const n = Number(p);
+      if (Number.isInteger(n) && n > 0) {
+        if (count !== 0) throw new CssError(`${prop}: two counts in "${value}"`);
+        count = n;
+        continue;
+      }
+      const w = parseLength(part);
+      if (!Number.isNaN(width)) throw new CssError(`${prop}: two widths in "${value}"`);
+      width = w;
+    }
+    if (count === 0 && Number.isNaN(width)) {
+      throw new CssError(`${prop}: "${value}" — expected a column count or width`);
+    }
+    out.columnCount = count;
+    out.columnWidth = width;
+  },
+  "column-count": { field: "columnCount", parse: (v) => (v.trim().toLowerCase() === "auto" ? 0 : Number(v)) },
+  "column-width": {
+    field: "columnWidth",
+    parse: (v) => (v.trim().toLowerCase() === "auto" ? NaN : parseLength(v)),
+  },
+
+  // `zoom` — a multiplier or percentage. Parsed and stored; the engine ignores it.
+  zoom: {
+    field: "zoom",
+    parse: (value) => {
+      const v = value.trim().toLowerCase();
+      if (v === "normal") return 1;
+      if (v.endsWith("%")) {
+        const n = Number(v.slice(0, -1));
+        if (!Number.isFinite(n)) throw new CssError(`zoom: bad percentage "${value}"`);
+        return n / 100;
+      }
+      const n = Number(v);
+      if (!Number.isFinite(n)) throw new CssError(`zoom: "${value}" is not a number, percentage or normal`);
+      return n;
+    },
+  },
+
+  // `touch-action` — a gesture bitmask. `none` is 0; `auto` and `manipulation`
+  // are the full set (manipulation = pan-x pan-y pinch-zoom, which is what the
+  // bits already say).
+  "touch-action": (value, out, prop) => {
+    const v = value.trim().toLowerCase();
+    if (v === "none") { out.touchAction = 0; return; }
+    if (v === "auto" || v === "manipulation") { out.touchAction = 7; return; }
+    let bits = 0;
+    for (const part of v.split(/\s+/)) {
+      if (part === "pan-x") bits |= 1;
+      else if (part === "pan-y") bits |= 2;
+      else if (part === "pinch-zoom") bits |= 4;
+      else throw new CssError(`${prop}: unsupported gesture "${part}" in "${value}"`);
+    }
+    if (bits === 0) throw new CssError(`${prop}: "${value}" names no gestures`);
+    out.touchAction = bits;
+  },
+
+  // `white-space` — wrapping and space collapsing. The engine honours `nowrap`;
+  // the pre variants are stored so the class compiles, with a warning that the
+  // collapsing rules are not implemented.
+  "white-space": (value, out, prop) => {
+    const map: Record<string, number> = {
+      normal: 0,
+      nowrap: 1,
+      pre: 2,
+      "pre-line": 3,
+      "pre-wrap": 4,
+      "break-spaces": 5,
+    };
+    const kw = map[value.trim().toLowerCase()];
+    if (kw === undefined) throw new CssError(`unsupported ${prop} "${value}"`);
+    out.whiteSpace = kw;
+  },
+
+  // `font-stretch` — a percentage or one of the nine step keywords. Stored as a
+  // percentage of normal; the measurer does not read it yet.
+  "font-stretch": {
+    field: "fontStretch",
+    parse: (value) => {
+      const v = value.trim().toLowerCase();
+      const steps: Record<string, number> = {
+        "ultra-condensed": 50, "extra-condensed": 62.5, condensed: 75,
+        "semi-condensed": 87.5, normal: 100, "semi-expanded": 112.5,
+        expanded: 125, "extra-expanded": 150, "ultra-expanded": 200,
+      };
+      if (v in steps) return steps[v]!;
+      if (v.endsWith("%")) {
+        const n = Number(v.slice(0, -1));
+        if (Number.isFinite(n)) return n;
+      }
+      throw new CssError(`font-stretch: "${value}" is not a percentage or step keyword`);
+    },
+  },
+
+  // `mask-position` — validated, stored as "set" beside `maskImage`. Keywords
+  // (left/center/right/top/bottom) and lengths are accepted; the engine has no
+  // mask rendering to position.
+  "mask-position": (value, out, prop) => {
+    const keywords = new Set(["left", "center", "right", "top", "bottom"]);
+    for (const part of splitTopLevel(value)) {
+      const p = part.toLowerCase();
+      if (keywords.has(p)) continue;
+      parseLength(part); // throws on a value that is neither keyword nor length
+    }
+    out.maskPosition = 1;
+  },
+
+  // SVG paint properties. dziri draws no SVG, so the engine never reads these;
+  // they exist so Tailwind's icon utilities compile rather than error.
+  fill: { field: "fill", parse: parseColor },
+  stroke: { field: "stroke", parse: parseColor },
+  "stroke-width": { field: "strokeWidth", parse: parseLength },
+
   // Handled by the caller, like `display`, and for a stronger reason: its value
   // is a *string*, and every style field is a number. It never reaches the style
   // table at all — the compiler turns it into an emitted TEXT node.
@@ -2021,6 +2306,36 @@ export function expandDeclaration(
   }
 
   out[rule.field] = rule.parse(value);
+}
+
+/**
+ * Which style fields a property writes — for `inherit`, which must copy the
+ * parent's computed value for exactly those fields and no others.
+ *
+ * Discovered by probing: the property's own rule is expanded over a list of
+ * candidate values until one parses, into a scratch patch whose keys are the
+ * answer. Probe rather than a hand-written table because a table would be a
+ * second list to keep in step with PROPERTIES — the failure mode this whole
+ * file exists to remove. The probe list covers the shapes in the table
+ * (lengths, colours, keywords, numbers); a property none of them parses is one
+ * `inherit` cannot support, and says so rather than copying nothing.
+ */
+const INHERIT_PROBES = ["0", "none", "0px", "#000000", "normal", "auto", "1", "solid", "visible"];
+
+export function fieldsForProperty(prop: string): StyleField[] {
+  const rule = PROPERTIES[prop];
+  if (rule === undefined) throw new CssError(`unknown property "${prop}"`);
+  if (typeof rule !== "function") return [rule.field];
+  for (const probe of INHERIT_PROBES) {
+    const scratch: Partial<Record<StyleField, number>> = {};
+    try {
+      rule(probe, scratch, prop);
+    } catch {
+      continue;
+    }
+    return Object.keys(scratch) as StyleField[];
+  }
+  throw new CssError(`inherit: "${prop}" is not a property dziri can inherit`);
 }
 
 /**

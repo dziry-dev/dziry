@@ -358,6 +358,10 @@ const STYLES: Table = {
     { name: "flexDirection", type: "u8", affects: "layout", ir: "direction" },
     { name: "flexWrap", type: "u8", affects: "layout", ir: "wrap" },
     { name: "justifyContent", type: "u8", affects: "layout", ir: "justify" },
+    // `align-content` — distribution of *lines* in a wrapping flex container (or
+    // rows in a grid). Same keyword set as `justify-content` per Taffy's
+    // AlignContent, which is why it shares the Justify enum on the wire.
+    { name: "alignContent", type: "u8", affects: "layout" },
     { name: "alignItems", type: "u8", affects: "layout", ir: "align" },
     { name: "alignSelf", type: "u8", affects: "layout" },
     { name: "justifyItems", type: "u8", affects: "layout", doc: "Grid only" },
@@ -551,6 +555,54 @@ const STYLES: Table = {
     { name: "transformOriginPercentY", type: "f32", affects: "paint", interp: "number", doc: "initial 0.5", ir: "originPctY" },
     { name: "transformOriginX", type: "f32", affects: "paint", interp: "number", doc: "px, added to the percentage", ir: "originPxX" },
     { name: "transformOriginY", type: "f32", affects: "paint", interp: "number", doc: "px, added to the percentage", ir: "originPxY" },
+    // `mask-composite` — how multiple mask layers interact. Paint-only (no layout effect).
+    // Keywords: 0 add, 1 subtract, 2 intersect, 3 exclude. Initial is 0 (add).
+    { name: "maskComposite", type: "u8", affects: "paint", doc: "0 add, 1 subtract, 2 intersect, 3 exclude" },
+    // `mask-image` — presence only: 0 none, 1 has layers. The layer list itself
+    // is not stored (no mask rendering in the engine yet); the parser validates it.
+    { name: "maskImage", type: "u8", affects: "paint", doc: "0 none, 1 has mask layers" },
+    // `filter` / `backdrop-filter` — presence only: 0 none, 1 has filter functions.
+    // The function list (blur, brightness, …) is validated by the parser but not
+    // stored — the engine has no filter pipeline yet.
+    { name: "filter", type: "u8", affects: "paint", doc: "0 none, 1 has filter functions" },
+    { name: "backdropFilter", type: "u8", affects: "paint", doc: "0 none, 1 has backdrop filter functions" },
+    // `z-index` — stacking order. i32, NaN→auto is not expressible, so i32::MIN is
+    // the auto sentinel. Paint-only: dziri paints in tree order and does not sort.
+    { name: "zIndex", type: "i32", affects: "paint", doc: "i32::MIN = auto" },
+    // `letter-spacing` — extra space between glyphs, px. 0 = normal. Layout,
+    // because it changes the measured width of a text run.
+    { name: "letterSpacing", type: "f32", affects: "layout", inherited: true, doc: "px; 0 = normal" },
+    // `mix-blend-mode` / `background-blend-mode` — blend with the backdrop / the
+    // element's own background layers. One enum shared by both (BlendMode in the
+    // generated protocol). Paint-only; the engine composites everything SrcOver
+    // today and reads neither.
+    { name: "mixBlendMode", type: "u8", affects: "paint", doc: "BlendMode enum; 0 normal" },
+    { name: "backgroundBlendMode", type: "u8", affects: "paint", doc: "BlendMode enum; 0 normal" },
+    // `columns` — multi-column layout, as count (0 = auto) and width (NaN = auto).
+    // dziri has no column layout; parsed and stored so utilities compile.
+    { name: "columnCount", type: "u16", affects: "layout", doc: "0 = auto" },
+    { name: "columnWidth", type: "f32", affects: "layout", doc: "px; NaN = auto" },
+    // `zoom` — a real scale in a browser; here parsed and stored, engine ignores.
+    { name: "zoom", type: "f32", affects: "layout", doc: "multiplier; NaN = unset" },
+    // `touch-action` — which gestures a touch may start. Bitmask: 1 pan-x,
+    // 2 pan-y, 4 pinch-zoom; 0 none, 7 auto/manipulation. Paint-only: dziri's
+    // pointer is a mouse, and the engine reads no gesture state.
+    { name: "touchAction", type: "u8", affects: "paint", doc: "bitmask: 1 pan-x, 2 pan-y, 4 pinch-zoom; 0 none, 7 auto" },
+    // `white-space` — how text wraps and collapses. Layout, because it changes
+    // the measured size of a text run. Engine honours `nowrap` only.
+    { name: "whiteSpace", type: "u8", affects: "layout", inherited: true, doc: "0 normal, 1 nowrap, 2 pre, 3 pre-line, 4 pre-wrap, 5 break-spaces" },
+    // `font-stretch` — width axis of font selection, as a percentage of normal.
+    // 100 = normal. Layout, through the measure callback like fontSize.
+    { name: "fontStretch", type: "f32", affects: "layout", inherited: true, doc: "percent of normal; 100 = normal" },
+    // `mask-position` — where mask layers sit. Keywords/lengths, validated and
+    // stored as presence beside `maskImage` (no mask rendering yet).
+    { name: "maskPosition", type: "u8", affects: "paint", doc: "0 initial, 1 set" },
+    // `fill`, `stroke`, `stroke-width` — SVG paint properties. dziri does not
+    // render SVG, so these are parsed and stored but never painted. Alpha 0 is
+    // "nothing said" for the colours, the borderColor convention; NaN for the width.
+    { name: "fill", type: "u32", affects: "paint", interp: "color", doc: "SVG fill; alpha 0 = unset" },
+    { name: "stroke", type: "u32", affects: "paint", interp: "color", doc: "SVG stroke; alpha 0 = unset" },
+    { name: "strokeWidth", type: "f32", affects: "paint", doc: "SVG stroke-width, px; NaN = unset" },
     // `transition` and `animation`, as one `u16` each into the `tweens` table.
     //
     // A reference rather than a spelt-out spec, and that is the whole design.
@@ -879,6 +931,29 @@ export const ENUMS: EnumDef[] = [
       SPACE_AROUND: 4,
       SPACE_EVENLY: 5,
       UNSET: 255,
+    },
+  },
+  {
+    name: "BlendMode",
+    doc: "`styles.mixBlendMode` / `styles.backgroundBlendMode`. CSS <blend-mode> keywords.",
+    ty: "u8",
+    values: {
+      NORMAL: 0,
+      MULTIPLY: 1,
+      SCREEN: 2,
+      OVERLAY: 3,
+      DARKEN: 4,
+      LIGHTEN: 5,
+      COLOR_DODGE: 6,
+      COLOR_BURN: 7,
+      HARD_LIGHT: 8,
+      SOFT_LIGHT: 9,
+      DIFFERENCE: 10,
+      EXCLUSION: 11,
+      HUE: 12,
+      SATURATION: 13,
+      COLOR: 14,
+      LUMINOSITY: 15,
     },
   },
   {
@@ -1492,7 +1567,7 @@ export const ENUMS: EnumDef[] = [
  * measure callback like `fontSize`. `fontFamily` is a generic-family enum, not
  * a name — the engine resolves one concrete face per generic at startup.
  */
-export const PROTOCOL_VERSION = 37;
+export const PROTOCOL_VERSION = 42;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

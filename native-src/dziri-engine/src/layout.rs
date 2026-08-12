@@ -1162,6 +1162,18 @@ fn style_of(tables: &Tables, node: usize, globals: u32, surface: [f32; 2]) -> St
         _ => None,
     };
 
+    // `align-content` shares the Justify enum on the wire — Taffy's AlignContent
+    // is the same keyword set.
+    s.align_content = match u8f(f::ALIGN_CONTENT) {
+        justify::CENTER => Some(AlignContent::Center),
+        justify::FLEX_END => Some(AlignContent::FlexEnd),
+        justify::SPACE_BETWEEN => Some(AlignContent::SpaceBetween),
+        justify::SPACE_AROUND => Some(AlignContent::SpaceAround),
+        justify::SPACE_EVENLY => Some(AlignContent::SpaceEvenly),
+        justify::FLEX_START => Some(AlignContent::FlexStart),
+        _ => None,
+    };
+
     s.align_items = align_of(u8f(f::ALIGN_ITEMS));
     s.justify_items = align_of(u8f(f::JUSTIFY_ITEMS));
 

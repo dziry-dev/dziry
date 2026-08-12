@@ -23,6 +23,7 @@ import cssProperties from "mdn-data/css/properties.json";
 import { parseSelector, splitSelectorList } from "../src/compiler/css.ts";
 import { CssError } from "../src/compiler/diagnostics.ts";
 import { expandDeclaration, PROPERTIES } from "../src/compiler/properties.ts";
+import { substituteCurrentColor } from "../src/compiler/values.ts";
 
 const ROOT = join(import.meta.dir, "..");
 const TMP = join(ROOT, ".tw-tmp");
@@ -59,6 +60,7 @@ function dziriSupported(): Set<string> {
   }
   out.add("overflow-x");
   out.add("overflow-y"); // `overflow`'s initial is single-valued, so the test above misses it
+  out.add("-webkit-backdrop-filter"); // vendor-prefixed; not in mdn-data, parsed by dziri
   return out;
 }
 
@@ -355,7 +357,14 @@ try {
       // parser folded it. An error's first line is the reason; the distinct
       // reasons are what the ranking counts.
       try {
-        expandDeclaration(p, resolved, {} as never);
+        // The pipeline substitutes `currentcolor` against the element's own `color`
+        // before expansion (computed.ts); a bare probe has no colour, so use black —
+        // the initial `fg` — which is what an element with no `color` rule computes to.
+        const value = substituteCurrentColor(resolved, 0xff000000);
+        // `inherit` is resolved by the cascade (it needs the parent's computed
+        // style), not by the expander — a supported property is enough.
+        if (value.trim().toLowerCase() === "inherit") continue;
+        expandDeclaration(p, value, {} as never);
       } catch (e) {
         if (!(e instanceof CssError)) throw e;
         why.add(`value: ${e.message.split("\n")[0]!.trim()}`);

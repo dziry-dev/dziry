@@ -65,6 +65,25 @@ export default function Colors() {
           </div>
         </div>
       </div>
+
+      <div className="flex flex-col gap-3 rounded-xl bg-zinc-900 p-6">
+        <div className="text-lg font-semibold text-zinc-50">currentcolor</div>
+        <div className="text-xs text-zinc-400">
+          border-current — the border takes the element's own text colour, resolved by the cascade
+          at build time, so each box's ring matches its label without naming a colour twice
+        </div>
+        <div className="flex flex-row gap-3">
+          <div className="rounded-lg border-2 border-current px-4 py-3 text-sm text-red-400">
+            red-400
+          </div>
+          <div className="rounded-lg border-2 border-current px-4 py-3 text-sm text-emerald-400">
+            emerald-400
+          </div>
+          <div className="rounded-lg border-2 border-current px-4 py-3 text-sm text-sky-400">
+            sky-400
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
