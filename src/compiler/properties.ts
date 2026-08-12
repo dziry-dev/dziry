@@ -1769,7 +1769,13 @@ export const PROPERTIES: Record<string, PropertyRule> = {
         help: 18,
         progress: 19,
       };
-      if (v in cursors) return cursors[v];
+      // The lookup *is* the test, which is what `noUncheckedIndexedAccess` asks for: `v in
+      // cursors` narrows a property access on a known key and not an index into a
+      // `Record<string, number>`, so the guarded `cursors[v]` was still `number | undefined`
+      // and violated this function's declared return type. Reading once and testing the result
+      // needs no assertion and no second lookup.
+      const found = cursors[v];
+      if (found !== undefined) return found;
       throw new CssError(
         `cursor: "${value}" is not a value dziri accepts.\n` +
           `  Supported: ${Object.keys(cursors).join(", ")}`,
@@ -2038,7 +2044,10 @@ export const PROPERTIES: Record<string, PropertyRule> = {
         intersect: 2,
         exclude: 3,
       };
-      if (v in modes) return modes[v];
+      // Read once and test the result — see `cursor` above for why `v in modes` does not
+      // narrow this and the guarded index was `number | undefined`.
+      const found = modes[v];
+      if (found !== undefined) return found;
       throw new CssError(
         `mask-composite: "${value}" is not a value dziri accepts.\n` +
           `  Supported: ${Object.keys(modes).join(", ")}`,
