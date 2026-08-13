@@ -176,6 +176,7 @@ if (LIVE) {
       keyframes: ui.keyframes,
       controls: ui.controls,
       images: ui.images,
+      numerics: ui.numerics,
       root: ui.root,
     };
 

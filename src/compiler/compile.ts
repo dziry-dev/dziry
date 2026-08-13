@@ -451,6 +451,13 @@ export type BuiltControl = {
    * engine. See `controls.rows` in the schema.
    */
   rows: number;
+  /**
+   * A RANGE's initial thumb position, per-mille of the track — `value` mapped
+   * through `min`/`max` and snapped to `step`, all of which are compile-time
+   * constants. `65535` when the author said nothing, which the engine reads as
+   * mid-track, matching a browser. 0 on every other kind.
+   */
+  value: number;
 };
 
 /**
@@ -464,6 +471,71 @@ export type BuiltImage = {
   /** String slot of the URL or file path. */
   src: number;
 };
+
+/**
+ * One row of the `numerics` side table: the `min`/`max`/`step` of a range or
+ * number input, as floats.
+ *
+ * A side table beside the IR rather than columns on the shared `controls` table,
+ * and that is the boundary doing its job: the engine needs the *fraction* (it
+ * positions a thumb with it) but never the mapping — min/max/step are read by
+ * the binding when a CHANGE comes back, and by nothing else. NaN where the
+ * attribute is absent, which for a number field means "unbounded" and for a
+ * range is impossible: its defaults (0, 100, 1) are filled at compile time.
+ */
+export type BuiltNumeric = {
+  node: number;
+  min: number;
+  max: number;
+  step: number;
+};
+
+/**
+ * The numeric envelope of a range or number input, or null for anything else.
+ *
+ * Parsed from the attributes with the HTML defaults filled: a range is 0..100
+ * by 1, a number unbounded by 1. `value` snapped *into* that envelope is the
+ * thumb's initial per-mille for a range; for a number it is only the clamp the
+ * binding applies later.
+ */
+function numericOf(el: Element): BuiltNumeric | null {
+  if (el.tag !== "input") return null;
+  const type = typeOf(el);
+  if (type !== "range" && type !== "number") return null;
+
+  const num = (name: string): number => {
+    const raw = el.attrs.get(name)?.trim();
+    if (raw === undefined || raw === "") return NaN;
+    return Number(raw);
+  };
+  const or = (v: number, fallback: number) => (Number.isFinite(v) ? v : fallback);
+
+  return type === "range"
+    ? { node: -1, min: or(num("min"), 0), max: or(num("max"), 100), step: or(num("step"), 1) }
+    : { node: -1, min: num("min"), max: num("max"), step: or(num("step"), 1) };
+}
+
+/**
+ * A range's initial thumb position, per-mille of the track.
+ *
+ * `value` clamped into [min, max] and snapped down to a step boundary, which is
+ * what a browser does with an out-of-envelope or off-step default. With no
+ * `value` at all the answer is the 65535 sentinel — "the author said nothing" —
+ * which the engine reads as mid-track.
+ */
+function rangeInitialPermille(el: Element, numeric: BuiltNumeric): number {
+  const raw = el.attrs.get("value")?.trim();
+  if (raw === undefined || raw === "") return 0xffff;
+  const v = Number(raw);
+  if (!Number.isFinite(v)) return 0xffff;
+
+  const { min, max, step } = numeric;
+  const span = max - min;
+  if (span <= 0) return 0;
+  const clamped = Math.min(Math.max(v, min), max);
+  const snapped = step > 0 ? min + Math.floor((clamped - min) / step) * step : clamped;
+  return Math.round(((snapped - min) / span) * 1000);
+}
 
 /**
  * `ControlKind` by tag and `type` attribute.
@@ -508,6 +580,15 @@ function controlKindOf(el: Element, path: Element[] = []): number {
       return ControlKind.CHECKBOX;
     case "radio":
       return ControlKind.RADIO;
+    // A slider's press *positions* the thumb — a real behaviour, so a real row.
+    // The same press on `date`, `number` or `color` does nothing a table row
+    // would describe: the first two are text fields (see TEXT_ENTRY_TYPES) and a
+    // color's swatch answers an ordinary CLICK, the picker being a documented
+    // deferral. `file` is the one that acts: its press opens the OS dialog.
+    case "range":
+      return ControlKind.RANGE;
+    case "file":
+      return ControlKind.FILE;
     default:
       return ControlKind.NONE;
   }
@@ -533,6 +614,13 @@ function typeOf(el: Element): string {
  * table's plain-pixel `width` cannot express for an image that has not loaded —
  * so it is not a hint here, and the attribute is ignored rather than misread.
  */function presentationalHints(el: Element): Map<string, string> | undefined {
+  // The color well's fill *is* its value — the one control whose background is
+  // content. `#000000` when absent, per the spec's default value.
+  if (el.tag === "input" && typeOf(el) === "color") {
+    const raw = el.attrs.get("value")?.trim() ?? "";
+    const color = /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : "#000000";
+    return new Map([["background-color", color]]);
+  }
   if (el.tag !== "img") return undefined;
   const hints = new Map<string, string>();
   for (const attr of ["width", "height"] as const) {
@@ -630,12 +718,17 @@ const TEXT_ENTRY_TYPES = new Set([
   "email",
   "password",
   /**
-   * `number` and `range` are typed into as well, and leaving them out was visible.
+   * `number` is typed into as well, and leaving it out was visible.
    *
    * An `<input type="number">` compiled to a box with no editor and no line height: four
    * pixels of border, which is what the forms demo drew where its age field should have been.
-   * A browser routes both to the same text editor and adds chrome dziri does not have — a
-   * spinner, a slider track — so being typeable is the part that transfers.
+   * A browser routes it to the same text editor and adds chrome dziri does not have — a
+   * spinner — so being typeable is the part that transfers.
+   *
+   * `range` *was* here on the same argument and left when it became a real control: a
+   * slider's value is its thumb, not text, so there is nothing to type into. Its
+   * `min`/`max`/`step` live in the `numerics` table beside the IR, where the binding
+   * reads them — see `numericOf`.
    *
    * This set is **not** the implicit-submission blocking set, which is what it used to be as
    * well. That one is measured (`probes/implicit-submission.html`) and was measured over the
@@ -643,7 +736,9 @@ const TEXT_ENTRY_TYPES = new Set([
    * See `blocksImplicitSubmission`.
    */
   "number",
-  "range",
+  // A date is text the runtime masks, not a widget — the calendar popup is the
+  // same deferral `datalist` took, recorded in HTML-ELEMENT-COVERAGE-RESEARCH.md.
+  "date",
 ]);
 
 /**
@@ -790,6 +885,8 @@ export type CompileResult = {
   controls: BuiltControl[];
   /** Image references, ascending by node. */
   images: BuiltImage[];
+  /** `min`/`max`/`step` per range or number input, ascending by node. */
+  numerics: BuiltNumeric[];
   /** Every `<form>`, with Enter's outcome already resolved. */
   forms: BuiltForm[];
   /**
@@ -1012,6 +1109,8 @@ export function compileTree(
   const controls: BuiltControl[] = [];
   /** Image references, ascending by node — the walk is document order. */
   const images: BuiltImage[] = [];
+  /** `min`/`max`/`step` for range and number inputs — see `BuiltNumeric`. */
+  const numerics: BuiltNumeric[] = [];
   /** Labels in document order, with their node, for the pass below. */
   const labelEls: Array<{ el: Element; node: number }> = [];
   /**
@@ -1898,6 +1997,14 @@ export function compileTree(
       const src = el.attrs.get("src")?.trim();
       if (src) images.push({ node: self, src: internString(src) });
     }
+
+    // The numeric envelope a binding needs later — range and number only. The
+    // engine positions a thumb in fractions and never reads these; they are for
+    // the runtime's half of the value, which is why this is a side table and not
+    // three more columns of the shared one.
+    const numeric = numericOf(el);
+    if (numeric !== null) numerics.push({ ...numeric, node: self });
+
     const controlKind = controlKindOf(el, path);
     if (needsControlRow(el, path)) {
       // Set by `walkPicker` before this option was walked, so it is here for every
@@ -1919,6 +2026,12 @@ export function compileTree(
         // compiling a pixel height here — the 17px it looks like at the default font is
         // an instance, not a constant.
         rows: listbox?.rows ?? 0,
+        // A range's initial thumb position, computed now because value/min/max/step
+        // are all compile-time constants; 65535 ("unset", i.e. mid-track) elsewhere.
+        value:
+          controlKind === ControlKind.RANGE
+            ? rangeInitialPermille(el, numericOf(el)!)
+            : 0xffff,
         // Presence, not value: `<input checked>` and `checked=""` both mean checked,
         // which is what `parseAttributes` already normalises to.
         //
@@ -2326,6 +2439,7 @@ export function compileTree(
   // those passes fill in — replicating before them would copy two -1s.
   replicateListControls(nodes, controls, lists);
   replicateListImages(images, lists);
+  replicateListNumerics(numerics, lists);
   // After `replicateListControls` for the same reason `resolveDisabled` is: a field's
   // control row is an index into a table that pass appends to and re-sorts.
   const forms = resolveForms(rootEl, nodeOfEl, fieldSpecs, controls, ownership, fieldGroups, fieldArrays, (m) => warnings.push(m));
@@ -2358,6 +2472,7 @@ export function compileTree(
     keyframes: tweens.keyframes,
     controls,
     images,
+    numerics,
     forms,
     fieldCells,
     disabled,
@@ -2933,6 +3048,7 @@ function replicateListControls(
           flags: c.flags,
           label: c.label >= 0 ? c.label + shift : -1,
           rows: c.rows,
+          value: c.value,
         });
         added = true;
       }
@@ -2975,6 +3091,32 @@ function replicateListImages(images: BuiltImage[], lists: BuiltList[]): void {
 
   // Sorted for the engine's binary search, same as the controls table.
   if (added) images.sort((a, b) => a.node - b.node);
+}
+
+/**
+ * The numerics table's half of arena replication — same argument as
+ * `replicateListImages`: one template row is `capacity` rendered sliders, and a
+ * binding reading row 3's `min` must find it. `min`/`max`/`step` copy unchanged;
+ * they are constants of the template, not per-row state.
+ */
+function replicateListNumerics(numerics: BuiltNumeric[], lists: BuiltList[]): void {
+  let added = false;
+
+  for (const list of lists) {
+    const { arenaStart, stride, capacity } = list;
+    const end = arenaStart + stride;
+    const template = numerics.filter((n) => n.node >= arenaStart && n.node < end);
+
+    for (let item = 1; item < capacity; item++) {
+      const shift = item * stride;
+      for (const num of template) {
+        numerics.push({ ...num, node: num.node + shift });
+        added = true;
+      }
+    }
+  }
+
+  if (added) numerics.sort((a, b) => a.node - b.node);
 }
 
 /**
@@ -3196,6 +3338,7 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     keyframes: keyframeTable(result.keyframes),
     controls: controlTable(result.controls),
     images: imageTable(result.images),
+    numerics: numericTable(result.numerics),
     root: result.root,
   };
 }
@@ -3214,6 +3357,17 @@ function controlTable(controls: BuiltControl[]): CompiledUi["controls"] {
     flags: Uint8Array.from(controls, (c) => c.flags),
     label: Int32Array.from(controls, (c) => c.label),
     rows: Int32Array.from(controls, (c) => c.rows),
+    value: Uint16Array.from(controls, (c) => c.value),
+  };
+}
+
+function numericTable(numerics: BuiltNumeric[]): CompiledUi["numerics"] {
+  return {
+    count: numerics.length,
+    node: Int32Array.from(numerics, (n) => n.node),
+    min: Float32Array.from(numerics, (n) => n.min),
+    max: Float32Array.from(numerics, (n) => n.max),
+    step: Float32Array.from(numerics, (n) => n.step),
   };
 }
 
@@ -3737,7 +3891,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -3947,7 +4101,22 @@ export const controls = {
   flags: ${typedArray("Uint8Array", controlRows.map((c) => c.flags))},
   label: ${typedArray("Int32Array", controlRows.map((c) => c.label))},
   rows: ${typedArray("Int32Array", controlRows.map((c) => c.rows))},
+  value: ${typedArray("Uint16Array", controlRows.map((c) => c.value))},
 } satisfies ControlTable;
+
+/**
+ * min/max/step per range or number input, sorted by node. A side table beside
+ * the shared protocol, not columns of it: the engine positions a thumb in
+ * fractions and never reads these — the binding does, when a CHANGE comes back
+ * as per-mille and somebody has to say what 612 per-mille means.
+ */
+export const numerics = {
+  count: ${result.numerics.length},
+  node: ${typedArray("Int32Array", result.numerics.map((n) => n.node))},
+  min: ${typedArray("Float32Array", result.numerics.map((n) => n.min))},
+  max: ${typedArray("Float32Array", result.numerics.map((n) => n.max))},
+  step: ${typedArray("Float32Array", result.numerics.map((n) => n.step))},
+} satisfies NumericTable;
 
 /**
  * Image references, sparse and sorted by node. Only the *reference* crosses:

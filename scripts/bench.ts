@@ -143,6 +143,7 @@ async function compile(dir: string, n: number): Promise<CompiledUi> {
     keyframes: m.keyframes,
     controls: m.controls,
     images: m.images,
+    numerics: m.numerics,
     root: m.root,
   };
 }

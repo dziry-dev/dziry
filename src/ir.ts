@@ -462,6 +462,16 @@ export type ControlTable = {
    * at the default font.
    */
   rows: Int32Array;
+  /**
+   * A RANGE's thumb position, per-mille of the track: 0..1000, 65535 for unset
+   * (mid-track, a browser's default). 0 on every other kind.
+   *
+   * **Bun writes this one** — the same direction as `flags`' DISABLED bit: a
+   * binding that sets the value moves the thumb. The engine applies it on rescan
+   * only when it *changed*, so a user's drag is not snapped back by an unrelated
+   * republish. See `controls.rs`.
+   */
+  value: Uint16Array;
 };
 
 export function emptyControlTable(): ControlTable {
@@ -473,6 +483,35 @@ export function emptyControlTable(): ControlTable {
     flags: new Uint8Array(0),
     label: new Int32Array(0),
     rows: new Int32Array(0),
+    value: new Uint16Array(0),
+  };
+}
+
+/**
+ * `min`/`max`/`step` for range and number inputs, sorted by `node`.
+ *
+ * A side table beside the shared-memory protocol, deliberately: the engine
+ * positions a thumb as a fraction and never needs the mapping, so these columns
+ * never cross the boundary. The runtime reads them when a `CHANGE` arrives as
+ * per-mille and when a number field is stepped. NaN means "no bound" (a number
+ * field without the attribute); a range's defaults are filled at compile time.
+ */
+export type NumericTable = {
+  count: number;
+  /** Sorted ascending, for binary search. */
+  node: Int32Array;
+  min: Float32Array;
+  max: Float32Array;
+  step: Float32Array;
+};
+
+export function emptyNumericTable(): NumericTable {
+  return {
+    count: 0,
+    node: new Int32Array(0),
+    min: new Float32Array(0),
+    max: new Float32Array(0),
+    step: new Float32Array(0),
   };
 }
 
@@ -1054,6 +1093,7 @@ export type CompiledUi = {
   keyframes: KeyframeTable;
   controls: ControlTable;
   images: ImageTable;
+  numerics: NumericTable;
   root: number;
 };
 

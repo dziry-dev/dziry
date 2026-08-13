@@ -10,6 +10,13 @@
 import { findRow } from "../find-row.ts";
 import type { CompiledUi, FormBinding } from "../ir.ts";
 import { ControlFlags, ControlKind } from "../protocol/generated.ts";
+import {
+  isRangeControl,
+  numericFor,
+  rangePermille,
+  rangeValue,
+  stepValue,
+} from "./numerics.ts";
 import { applyIssues, formPayload, validatePayload, type Validated } from "./forms.ts";
 import { batch, type Signal } from "./signal.ts";
 
@@ -83,6 +90,95 @@ export function subscribeBindings(ui: CompiledUi, onChange: () => void): () => v
 }
 
 export type EditableRef = { node: number; signal: Signal<string> };
+
+// The numeric bridge's pure half lives in `numerics.ts` (shared with
+// `forms.ts`, which this module already imports — a shared home is the only
+// acyclic one). Re-exported so the worker and tests import one place.
+export { numericFor, rangePermille, rangeValue } from "./numerics.ts";
+
+/**
+ * The engine's slider CHANGE, written to the bound signal if there is one.
+ *
+ * A slider with `bind:value` is two-way like any field: the drag writes the
+ * signal here, and `writeRangeValue` carries a signal write back to the thumb.
+ * The number is stringified because a field's signal holds text — the same
+ * shape `bind:value` has everywhere else, so one signal type serves both.
+ */
+export function applyRangeChange(
+  ui: CompiledUi,
+  editables: EditableRef[],
+  node: number,
+  perMille: number,
+): boolean {
+  const target = editables.find((e) => e.node === node);
+  if (!target) return false;
+  const value = rangeValue(ui, node, perMille);
+  if (value === null) return false;
+  const next = String(value);
+  if (target.signal.value === next) return true;
+  batch(() => {
+    target.signal.value = next;
+  });
+  return true;
+}
+
+/**
+ * A bound slider's signal, written back into the controls table as per-mille.
+ *
+ * The other direction of `applyRangeChange`: a reset button sets the signal,
+ * and the thumb has to follow. The engine applies the table value on rescan
+ * only when it *changed*, so writing here cannot fight a drag in progress —
+ * a drag reports through `applyRangeChange`, which writes this same signal,
+ * and the round trip lands on the value the engine already has.
+ *
+ * Returns the dirty level: the controls table is uploaded on
+ * `controlsDirty`, and a thumb that moved is a paint, not a layout.
+ */
+export function writeRangeValue(ui: CompiledUi, node: number, value: number): Dirty {
+  const perMille = rangePermille(ui, node, value);
+  if (perMille === null) return Dirty.NONE;
+  let dirty: Dirty = Dirty.NONE;
+  for (let r = 0; r < ui.controls.count; r++) {
+    // Every row naming this node: a slider in a list template is one row per
+    // replica, and the replica showing this value is not knowable here — so all
+    // of them, which is right only because replicas share the template's value.
+    if (ui.controls.node[r] !== node) continue;
+    if (ui.controls.value[r] !== perMille) {
+      ui.controls.value[r] = perMille;
+      dirty = Dirty.PAINT;
+    }
+  }
+  return dirty;
+}
+
+/**
+ * ArrowUp/ArrowDown on a number field: step the value, clamped.
+ *
+ * Here and not in the engine for the reason the whole numeric bridge is: the
+ * value is a signal, and signals are Bun's. The engine forwards the two keys
+ * (they are not caret moves on a single-line field) and this answers them.
+ *
+ * An empty field steps from `min` — or from 0 when unbounded — which is what a
+ * browser does: the first ArrowUp on an empty `min="10"` field gives 10, not 1.
+ */
+export function stepNumber(
+  ui: CompiledUi,
+  editables: EditableRef[],
+  node: number,
+  direction: 1 | -1,
+): boolean {
+  if (isRangeControl(ui, node)) return false; // the engine already answered it
+  const n = numericFor(ui, node);
+  if (n === null) return false;
+  const target = editables.find((e) => e.node === node);
+  if (!target) return false;
+
+  batch(() => {
+    target.signal.value = stepValue(target.signal.value, n, direction);
+  });
+  return true;
+}
+
 
 /**
  * Which way an erasing key eats: Backspace behind the caret, Delete in front of it.
@@ -268,6 +364,11 @@ export function dispatchChange(
   // than guessing — an unknown kind is a kind this function has not been taught, and
   // inventing a conversion for it would be inventing behaviour.
   //
+  // A **slider** carries per-mille of the track, and the conversion is this side's
+  // whole job in the numeric bridge: the engine knows fractions, the author wrote
+  // min/max/step. The handler gets the *value*, because nobody's `onChange` wants
+  // per-mille.
+  //
   // A **list box** is the one whose answer is not in `raw` at all. Its selection is a set,
   // measured to fire one `change` per gesture however many rows moved, so `raw` is only
   // the row the gesture landed on and the set arrives beside the event — see
@@ -278,7 +379,9 @@ export function dispatchChange(
       ? raw === 1
       : kind === ControlKind.LISTBOX
         ? [...selected]
-        : raw;
+        : kind === ControlKind.RANGE
+          ? (rangeValue(ui, node, raw) ?? raw)
+          : raw;
 
   batch(() => fn(value));
   return true;

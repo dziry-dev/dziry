@@ -80,6 +80,7 @@ export function buildUi(artifact: WindowArtifact): CompiledUi {
     keyframes: artifact.keyframes,
     controls: artifact.controls,
     images: artifact.images,
+    numerics: artifact.numerics,
     root: artifact.root,
   };
 }

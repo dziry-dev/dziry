@@ -306,6 +306,7 @@ function growControls(
   const flags = growU8(controls.flags, count);
   const label = growI32(controls.label, count);
   const rows = growI32(controls.rows, count);
+  const value = growU16(controls.value, count);
 
   let at = controls.count;
   for (let item = 0; item < capacity; item++) {
@@ -321,6 +322,9 @@ function growControls(
       // a control in a row labelled by static text, which the compiler does not produce.
       label[at] = controls.label[r]! === -1 ? -1 : controls.label[r]! + shift;
       rows[at] = controls.rows[r]!;
+      // A slider's authored start is the template's; the engine takes it from
+      // there, exactly like CHECKED.
+      value[at] = controls.value[r]!;
       at++;
     }
   }
@@ -331,6 +335,7 @@ function growControls(
   controls.flags = flags;
   controls.label = label;
   controls.rows = rows;
+  controls.value = value;
   controls.count = count;
 }
 

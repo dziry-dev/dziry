@@ -933,6 +933,16 @@ impl Painter {
         self.images.provide(src, bytes)
     }
 
+    /// A RANGE's thumb as a fraction of its track — see `Controls::fraction_of`.
+    pub fn range_fraction(&self, node: i32) -> Option<f32> {
+        self.controls.fraction_of(node)
+    }
+
+    /// Moves a RANGE's thumb; whether it moved. See `Controls::set_fraction`.
+    pub fn set_range_fraction(&mut self, node: i32, fraction: f32) -> bool {
+        self.controls.set_fraction(node, fraction)
+    }
+
     /// Runs the activation behaviour for a press on `node`. See `Controls::activate`.
     pub fn activate_control(&mut self, tables: &Tables, node: i32) -> Option<Activation> {
         self.controls.activate(tables, node)
@@ -2404,6 +2414,43 @@ impl Painter {
                         svg.render(canvas, content, c(f::FG));
                     }
                 }
+            }
+        }
+
+        // A slider: the track and the thumb, drawn from the fraction. The one
+        // control whose appearance is not the stylesheet's — the thumb's position
+        // is geometry, and a style row cannot say "40% along" — so it lives here
+        // beside the caret, which is the other piece of paint that state drives.
+        //
+        // The palette follows the UA sheet's conventions: the track is the control
+        // grey #767676 at a third alpha (the input's own border box already reads
+        // as the groove's edges would), the thumb the accent — the node's
+        // accent-color when set, so `accent-color` on the input themes it, which
+        // is exactly what that property is for.
+        if let Some(fraction) = self.range_fraction(node as i32) {
+            if w > 0.0 && h > 0.0 {
+                let track_h = 4.0_f32.min(h);
+                let track_y = y + (h - track_h) / 2.0;
+                self.fill.set_color(Color::from(0x5576_7676));
+                canvas.draw_rrect(
+                    RRect::new_rect_xy(Rect::from_xywh(x, track_y, w, track_h), track_h / 2.0, track_h / 2.0),
+                    &self.fill,
+                );
+
+                let accent = {
+                    let a = c(f::ACCENT_COLOR);
+                    if a >> 24 != 0 { a } else { 0xff33_90ff }
+                };
+                let thumb = 12.0_f32.min(h);
+                // The thumb's *centre* rides the track's ends: at 0 it is fully
+                // visible at the left edge, not half off it.
+                let cx = x + thumb / 2.0 + fraction * (w - thumb);
+                self.fill.set_color(Color::from(accent));
+                canvas.draw_circle(
+                    Point::new(cx, y + h / 2.0),
+                    thumb / 2.0,
+                    &self.fill,
+                );
             }
         }
 

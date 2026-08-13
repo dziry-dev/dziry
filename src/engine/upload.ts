@@ -410,6 +410,7 @@ export class Uploader {
     t.flags.set(controls.flags.subarray(0, n));
     t.label.set(controls.label.subarray(0, n));
     t.rows.set(controls.rows.subarray(0, n));
+    t.value.set(controls.value.subarray(0, n));
 
     t.node.fill(NO_CONTROL_NODE, n);
     t.kind.fill(0, n);
@@ -423,6 +424,9 @@ export class Uploader {
     // 0 is "not a list box", which is what every non-LISTBOX row carries anyway — so
     // unlike the two above, this fill needs no sentinel of its own.
     t.rows.fill(0, n);
+    // 65535 is "the author said nothing" — mid-track — rather than 0, which would
+    // pin a spare row's imaginary slider to the rail's end.
+    t.value.fill(0xffff, n);
   }
 
   /**

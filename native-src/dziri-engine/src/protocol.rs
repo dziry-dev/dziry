@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: u32 = 43;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0xd3379ef3;
+pub const SCHEMA_HASH: u32 = 0x16ddcb5c;
 
 pub const TABLE_COUNT: usize = 12;
 
@@ -639,11 +639,12 @@ pub mod controls {
     pub const FLAGS: usize = 3;
     pub const LABEL: usize = 4;
     pub const ROWS: usize = 5;
+    pub const VALUE: usize = 6;
 
-    pub const FIELD_COUNT: usize = 6;
-    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 1, 4, 1, 4, 4];
+    pub const FIELD_COUNT: usize = 7;
+    pub const ELEM_SIZES: [usize; FIELD_COUNT] = [4, 1, 4, 1, 4, 4, 2];
     pub const FIELD_NAMES: [&str; FIELD_COUNT] =
-        ["node", "kind", "group", "flags", "label", "rows"];
+        ["node", "kind", "group", "flags", "label", "rows", "value"];
 }
 
 /// Final bounds per node, written by the engine.

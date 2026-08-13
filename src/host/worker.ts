@@ -32,6 +32,7 @@ import { EventKind } from "../protocol/generated.ts";
 import { acquire, publish, release } from "./channel.ts";
 import type { ToMain, ToWorker } from "./messages.ts";
 import {
+  applyRangeChange,
   applyTextBindings,
   Dirty,
   subscribeBindings,
@@ -39,12 +40,15 @@ import {
   dispatchChange,
   formSubmittedByPress,
   revalidate,
+  stepNumber,
   submitForm,
   submitFrom,
   typeInto,
+  writeRangeValue,
 } from "../runtime/bindings.ts";
 import { setAlertSink, type AlertRequest } from "../runtime/alert.ts";
 import { applyFieldChange } from "../runtime/forms.ts";
+import { isRangeControl } from "../runtime/numerics.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
 import { applyDisabled, subscribeDisabled } from "../runtime/controls.ts";
 import type { Signal } from "../runtime/signal.ts";
@@ -82,6 +86,10 @@ const KEY_BACKSPACE = 8;
 const KEY_RETURN = 13;
 const KEY_ESCAPE = 27;
 const KEY_DELETE = 127;
+// SDL scancodes with the keycode mask, matching `keys` in engine.rs: the engine
+// forwards them to the host un-translated, and the host answers the two it owns.
+const KEY_ARROW_UP = (1 << 30) | 82;
+const KEY_ARROW_DOWN = (1 << 30) | 81;
 
 /**
  * The worker global, typed to this channel rather than to the DOM.
@@ -318,6 +326,21 @@ function start(
     schedule();
   });
 
+  // A bound slider's other direction: the app writes the signal (a reset button,
+  // a preset), and the thumb follows. Per-signal because the set of bound sliders
+  // is the small one, and the write lands in the controls table — which is why it
+  // marks `controlsDirty`, the same path `disabled={signal}` takes.
+  for (const e of editables) {
+    if (!isRangeControl(ui, e.node)) continue;
+    e.signal.subscribe(() => {
+      const v = Number(e.signal.value);
+      if (writeRangeValue(ui, e.node, v) === Dirty.NONE) return;
+      controlsDirty = true;
+      dirty = true;
+      schedule();
+    });
+  }
+
   if (routeSignal) {
     routeSignal.subscribe(() => {
       const next = indexOfRoute(routeNodes, routeSignal.value);
@@ -519,6 +542,10 @@ function start(
               // the form it is in. The engine owns checkedness and the chosen option, so
               // this event is the only place Bun can learn either.
               applyFieldChange(ui, e.node, e.a, e.selected);
+              // A bound slider: the drag writes its signal, the same two-way
+              // street a text field has. Unbound, this is a no-op and the engine
+              // remains the only owner of the thumb.
+              if (applyRangeChange(ui, editables, e.node, e.a)) dirty = true;
               if (!dispatchItemChange(ui, listBindings, e.node, e.a)) {
                 dispatchChange(ui, e.node, e.a, e.selected);
               }
@@ -580,6 +607,17 @@ function start(
                 // `submitFrom` is left with the two questions that depend on where focus
                 // is. See BROWSER-FACTS, "Implicit submission".
                 validated(submitFrom(ui, e.node));
+              } else if (e.a === KEY_ARROW_UP || e.a === KEY_ARROW_DOWN) {
+                // A number field's stepping. The engine forwards the two keys —
+                // they are not caret moves on a single-line field — and the
+                // answer is arithmetic on a signal, which is Bun's half of the
+                // numeric bridge. A slider never reaches this: its arrows are
+                // the engine's, consumed in `group_key`.
+                const dir = e.a === KEY_ARROW_UP ? 1 : -1;
+                if (stepNumber(ui, editables, e.node, dir)) {
+                  dirty = true;
+                  validated(revalidate(ui, e.node, "change"));
+                }
               } else if (e.a === KEY_ESCAPE) {
                 post({ t: "input", hovered: -1, pressed: -1, focused: -1 });
               }

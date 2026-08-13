@@ -19,7 +19,7 @@ export const PROTOCOL_VERSION = 43;
  * field or reordering two same-width fields keeps the count identical while
  * changing what the bytes mean.
  */
-export const SCHEMA_HASH = 0xd3379ef3;
+export const SCHEMA_HASH = 0x16ddcb5c;
 
 /** Element size in bytes per field, indexed as `FIELD_SIZES[table][field]`. */
 export const FIELD_SIZES: Record<TableName, number[]> = {
@@ -31,7 +31,7 @@ export const FIELD_SIZES: Record<TableName, number[]> = {
   lists: [4, 4, 4, 4, 4, 4, 4],
   tweens: [4, 4, 4, 4, 4, 2, 1, 4, 4, 4, 4],
   keyframes: [2, 4, 1, 4, 4, 4, 4],
-  controls: [4, 1, 4, 1, 4, 4],
+  controls: [4, 1, 4, 1, 4, 4, 2],
   layout: [4, 4, 4, 4],
   strings: [4, 4],
   images: [4, 4],
@@ -47,7 +47,7 @@ export const FIELD_NAMES: Record<TableName, string[]> = {
   lists: ["container", "anchorPrev", "anchorNext", "arenaStart", "stride", "capacity", "active"],
   tweens: ["mask", "duration", "delay", "iterations", "firstSegment", "segmentCount", "easing", "easeA", "easeB", "easeC", "easeD"],
   keyframes: ["style", "offset", "easing", "easeA", "easeB", "easeC", "easeD"],
-  controls: ["node", "kind", "group", "flags", "label", "rows"],
+  controls: ["node", "kind", "group", "flags", "label", "rows", "value"],
   layout: ["x", "y", "width", "height"],
   strings: ["offset", "length"],
   images: ["node", "src"],
@@ -351,6 +351,7 @@ export const F = {
     flags: 3, // ControlFlags: the authored initial state
     label: 4, // The text-run node this control's label lives on, or -1. On a SELECT it is the run inside <selectedcontent>, whose string the engine repoints at the committed option's; on an OPTION it is that option's own run. Nothing else fills it.
     rows: 5, // A LISTBOX's height in rows — its `size`, defaulting to 4. 0 on every other kind. The engine multiplies it by the option row height, which only the engine knows.
+    value: 6, // A RANGE's thumb position, per-mille of the track: 0..1000, or 65535 for 'the author said nothing', which is 500 — a browser's slider with no value starts mid-track (measured, probes/range-default.html). Re-read on rescan like DISABLED, because the binding is the authority when there is one; the engine tracks what it last applied so a drag is not undone by an unrelated republish.
   },
   /** Final bounds per node, written by the engine. */
   layout: {
@@ -381,7 +382,7 @@ export const FIELD_COUNTS: Record<TableName, number> = {
   lists: 7,
   tweens: 11,
   keyframes: 7,
-  controls: 6,
+  controls: 7,
   layout: 4,
   strings: 2,
   images: 2,
@@ -397,7 +398,7 @@ export const FIELD_VIEWS: Record<TableName, unknown[]> = {
   lists: [Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array, Int32Array],
   tweens: [Uint32Array, Float32Array, Float32Array, Float32Array, Int32Array, Uint16Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
   keyframes: [Uint16Array, Float32Array, Uint8Array, Float32Array, Float32Array, Float32Array, Float32Array],
-  controls: [Int32Array, Uint8Array, Int32Array, Uint8Array, Int32Array, Int32Array],
+  controls: [Int32Array, Uint8Array, Int32Array, Uint8Array, Int32Array, Int32Array, Uint16Array],
   layout: [Float32Array, Float32Array, Float32Array, Float32Array],
   strings: [Uint32Array, Uint32Array],
   images: [Int32Array, Int32Array],
@@ -619,6 +620,7 @@ export type SharedTables = {
     flags: Uint8Array;
     label: Int32Array;
     rows: Int32Array;
+    value: Uint16Array;
   };
   layout: {
     x: Float32Array;

@@ -215,6 +215,16 @@ const CONTROLS: Table = {
         "A LISTBOX's height in rows — its `size`, defaulting to 4. 0 on every other kind. " +
         "The engine multiplies it by the option row height, which only the engine knows.",
     },
+    {
+      name: "value",
+      type: "u16",
+      doc:
+        "A RANGE's thumb position, per-mille of the track: 0..1000, or 65535 for " +
+        "'the author said nothing', which is 500 — a browser's slider with no value " +
+        "starts mid-track (measured, probes/range-default.html). Re-read on rescan like " +
+        "DISABLED, because the binding is the authority when there is one; the engine " +
+        "tracks what it last applied so a drag is not undone by an unrelated republish.",
+    },
   ],
 };
 
@@ -1658,13 +1668,15 @@ export const ENUMS: EnumDef[] = [
  * base style. A wrong picture only in the sense that a validation failure is invisible.
  */
 /*
- * v43 — the `images` table and two control kinds. `<img>` stops being an empty
- * box: the table carries (node, src) pairs, the host resolves the bytes, and
- * the engine decodes, measures and paints them — a replaced element, which the
- * layout side expresses through the same measure callback text uses.
- * `ControlKind.RANGE` is the slider (the engine owns the thumb fraction) and
- * `ControlKind.FILE` the file dialog (SDL's, since SDL owns the window). Enum
- * additions move no bytes; the table does, and the hash sees it.
+ * v43 — the `images` table, `controls.value`, and two control kinds. `<img>`
+ * stops being an empty box: the table carries (node, src) pairs, the host
+ * resolves the bytes, and the engine decodes, measures and paints them — a
+ * replaced element, which the layout side expresses through the same measure
+ * callback text uses. `ControlKind.RANGE` is the slider (the engine owns the
+ * thumb fraction; `controls.value` carries it as per-mille so a binding can
+ * drive it) and `ControlKind.FILE` the file dialog (SDL's, since SDL owns the
+ * window). Enum additions move no bytes; the table and column do, and the hash
+ * sees both.
  */
 export const PROTOCOL_VERSION = 43;
 

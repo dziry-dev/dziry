@@ -1867,6 +1867,27 @@ impl Engine {
 
         let focused = self.state.focused;
         let kind = self.painter.control_kind(&self.tables, focused);
+        // A focused slider owns the arrows too, and ahead of the radio branch:
+        // Left/Down step down, Right/Up step up, all four on **keydown** — measured
+        // against Chrome, where a range answers an arrow before anything else sees it.
+        // The quantum is 10 per-mille, which with the HTML default min=0 max=100
+        // step=1 is exactly one step; finer `step`s are the binding's to quantize.
+        if kind == control_kind::RANGE {
+            let delta = if forward { 0.01 } else { -0.01 };
+            let now = self.painter.range_fraction(focused).unwrap_or(0.5);
+            if self.painter.set_range_fraction(focused, now + delta) {
+                self.needs_paint = true;
+                let per_mille = (self.painter.range_fraction(focused).unwrap_or(0.5) * 1000.0)
+                    .round() as i32;
+                self.events.push(Event {
+                    kind: event_kind::CHANGE,
+                    node: focused,
+                    a: per_mille,
+                    ..Default::default()
+                });
+            }
+            return true;
+        }
         let Some(nav) = controls::arrow_nav(kind) else {
             return false;
         };
@@ -2210,6 +2231,18 @@ impl Engine {
             return;
         }
 
+        // A press held on a slider is a thumb drag, and it owns the pointer the way a
+        // selection drag owns it — keyed on the *pressed* node for the same reason: the
+        // thumb follows the pointer past the track's end, and chasing the hovered node
+        // would freeze the drag the moment the pointer left the bar.
+        if self.state.pressed != -1 {
+            let slider = self.activates_of(self.state.pressed);
+            if slider >= 0 && self.painter.control_kind(&self.tables, slider) == control_kind::RANGE {
+                self.move_slider(slider, x);
+                return;
+            }
+        }
+
         // A press held inside a field is a selection drag, and it owns the pointer the way a
         // bar drag does: the focus follows x while the anchor stays where the press landed.
         //
@@ -2238,8 +2271,33 @@ impl Engine {
         }
     }
 
-    /// A wheel or trackpad scroll of `(dx, dy)` notches at `(x, y)`.
+    /// Positions a RANGE's thumb under the pointer, and reports the move.
     ///
+    /// The fraction is of the node's whole box rather than of a "track" — the track
+    /// *is* the content box, and press-anywhere-to-jump is the measured behaviour:
+    /// Chrome's slider positions the thumb at the press, it does not only grab it.
+    ///
+    /// `CHANGE` carries per-mille in `a`, because the wire is an integer and a
+    /// thousandth of a track is finer than a pixel on any track that fits a screen.
+    /// min/max/step are the binding's to apply — they are author values the engine
+    /// never needed, and the signal the value lives in is Bun's.
+    fn move_slider(&mut self, node: i32, x: f32) {
+        let [bx, _, bw, _] = self.tree.bounds()[node as usize];
+        let fraction = if bw > 0.0 { (x - bx) / bw } else { 0.0 };
+        if self.painter.set_range_fraction(node, fraction) {
+            self.needs_paint = true;
+            let per_mille =
+                (self.painter.range_fraction(node).unwrap_or(0.0) * 1000.0).round() as i32;
+            self.events.push(Event {
+                kind: event_kind::CHANGE,
+                node,
+                a: per_mille,
+                ..Default::default()
+            });
+        }
+    }
+
+    /// A wheel or trackpad scroll of `(dx, dy)` notches at `(x, y)`.
     /// Notches to pixels happens here rather than in `window.rs`, which reports what the
     /// platform said and nothing more.
     ///
@@ -2366,6 +2424,25 @@ impl Engine {
             && self.painter.control_kind(&self.tables, target) == control_kind::SELECT
             && self.open_picker_of(target)
         {
+            self.events.push(Event {
+                kind: event_kind::MOUSE_DOWN,
+                node: hit,
+                x,
+                y,
+                ..Default::default()
+            });
+            return;
+        }
+
+        // A slider, and the other control whose behaviour starts on the **press**:
+        // the thumb goes where the pointer is, and the drag that follows keeps it
+        // there — one gesture, so it is one owner of the pointer from here to the
+        // release. `activate` on the release deliberately declines the kind.
+        //
+        // Beside the SELECT arm rather than merged with it, because what the two do
+        // with the press shares nothing but the trigger point.
+        if target >= 0 && self.painter.control_kind(&self.tables, target) == control_kind::RANGE {
+            self.move_slider(target, x);
             self.events.push(Event {
                 kind: event_kind::MOUSE_DOWN,
                 node: hit,

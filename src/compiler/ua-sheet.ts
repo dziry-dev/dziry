@@ -222,6 +222,44 @@ input {
   font-size: 13.3333px;
 }
 
+/* The slider: 129px is Chrome's default width (measured in
+   probes/control-metrics.html's run), and 14px is enough height for the thumb
+   the engine draws. No border, no background, no padding — the box is the
+   track's runway, and the chrome is painted from the fraction. */
+input[type="range"] {
+  width: 129px;
+  height: 14px;
+  border-width: 0;
+  padding: 0;
+  background-color: transparent;
+}
+
+/* The color well: a swatch of the value in a button-like frame. 44x23 is
+   Chrome's default box (same measurement run). The *fill* is the compiler's
+   presentational hint from value=, since it is per-element; this is only the
+   frame around it. */
+input[type="color"] {
+  width: 44px;
+  height: 23px;
+  border-width: 1px;
+  border-color: #767676;
+  padding: 2px;
+  background-color: #ffffff;
+}
+
+/* The file picker reads as its button, which is the part of the control a
+   browser lets you press. The filename appears beside it when the binding
+   carries one — this sheet styles the box, not the text. */
+input[type="file"] {
+  border-width: 2px;
+  border-color: #767676;
+  padding-top: 1px; padding-bottom: 1px;
+  padding-left: 6px; padding-right: 6px;
+  background-color: #f0f0f0;
+  font-size: 13.3333px;
+}
+input[type="file"]::before { content: "Choose file" }
+
 input[type="hidden"] { display: none }
 
 textarea {

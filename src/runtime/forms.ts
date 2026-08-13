@@ -14,6 +14,7 @@
  */
 import type { CompiledUi, FormBinding, FormField } from "../ir.ts";
 import { ControlFlags } from "../protocol/generated.ts";
+import { isRangeControl, rangeValue } from "./numerics.ts";
 
 /**
  * A leaf of a payload, before a schema has had a chance to narrow it.
@@ -248,6 +249,20 @@ export function applyFieldChange(
           cell.value = raw;
           moved = true;
           break;
+
+        // A slider. `raw` is per-mille of the track, and the conversion is the
+        // numeric bridge's — the same one the `onChange` handler path uses, so a
+        // form's payload and a handler can never disagree about what the thumb
+        // meant. The kind on the *control* is what decides: a number *field* never
+        // arrives here (it is text, and text comes through `typeInto`).
+        case "number": {
+          if (!isRangeControl(ui, node)) break;
+          const value = rangeValue(ui, node, raw);
+          if (value === null) break;
+          cell.value = value;
+          moved = true;
+          break;
+        }
 
         // A list box's answer is a *set*, and it cannot ride in one integer — so it arrives
         // beside the event, read on the engine thread. Copied rather than kept: the drained

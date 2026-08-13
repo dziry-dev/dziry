@@ -66,6 +66,18 @@ pub struct Controls {
     seen: Vec<bool>,
     /// Whether the page has any controls at all, so the common case costs one branch.
     any: bool,
+    /// Per node, a RANGE's thumb as a fraction of the track. NaN is "not a slider".
+    ///
+    /// Engine-owned like the flags and for the same reason: nobody declared where
+    /// the thumb is while the user is dragging it. The difference is that a binding
+    /// *can* declare it, which is what `applied` reconciles — see `rescan`.
+    values: Vec<f32>,
+    /// The `controls.value` last applied per node. The table is re-read every
+    /// rescan, because a binding that moves (a reset button) must move the thumb —
+    /// but a *drag* moves only `values`, and without this record the next unrelated
+    /// republish would read the stale table back over it and snap the thumb home.
+    /// Applying only on a *change* in the table is what lets both be true.
+    applied: Vec<u16>,
 }
 
 impl Controls {
@@ -81,6 +93,8 @@ impl Controls {
     pub fn rescan(&mut self, tables: &Tables, node_count: usize) {
         self.state.resize(node_count, 0);
         self.seen.resize(node_count, false);
+        self.values.resize(node_count, f32::NAN);
+        self.applied.resize(node_count, u16::MAX);
         // Not cleared: the resize preserves what is already there, which is the whole
         // point. Only the disabled bit is rebuilt, and only where a row says so.
         for slot in self.state.iter_mut() {
@@ -89,6 +103,8 @@ impl Controls {
 
         let ids = tables.i32s(CONTROLS, protocol::controls::NODE);
         let flags = tables.u8s(CONTROLS, protocol::controls::FLAGS);
+        let kinds = tables.u8s(CONTROLS, protocol::controls::KIND);
+        let values = tables.u16s(CONTROLS, protocol::controls::VALUE);
         self.any = false;
 
         for (row, &node) in ids.iter().enumerate() {
@@ -112,6 +128,16 @@ impl Controls {
             // the table is the authority for it, so re-reading is exactly right, and seeding
             // it once like `CHECKED` would freeze the first verdict forever.
             self.state[n] |= authored & (control_flags::DISABLED | control_flags::INVALID);
+
+            // A slider's authored position: applied only when the table *moved* — see
+            // `applied`. `u16::MAX` is "the author said nothing", which is mid-track.
+            if kinds.get(row).copied().unwrap_or(0) == control_kind::RANGE {
+                let v = values.get(row).copied().unwrap_or(u16::MAX);
+                if v != self.applied[n] {
+                    self.applied[n] = v;
+                    self.values[n] = if v == u16::MAX { 0.5 } else { f32::from(v) / 1000.0 };
+                }
+            }
         }
     }
 
@@ -235,6 +261,12 @@ impl Controls {
             // Putting it here anyway would make a select feel a frame late in exactly the
             // gesture people use most, and would then *close* on the release of the press
             // that opened it.
+            //
+            // `RANGE` is beside it for the mirror-image reason: its behaviour *started* on
+            // the press — the thumb is already where the pointer put it — and the release
+            // would only re-state it. `FILE` because its behaviour is not a state at all:
+            // it opens the platform dialog, which `Engine` drives and this table of *state*
+            // transitions cannot express.
             _ => None,
         }
     }
@@ -285,9 +317,39 @@ impl Controls {
         }
     }
 
+    /// A RANGE's thumb as a fraction of its track, if `node` is a slider.
+    #[inline]
+    pub fn fraction_of(&self, node: i32) -> Option<f32> {
+        if node < 0 {
+            return None;
+        }
+        let v = *self.values.get(node as usize)?;
+        if v.is_nan() { None } else { Some(v) }
+    }
+
+    /// Moves a RANGE's thumb, clamped to the track. Returns whether it moved —
+    /// a drag to the far end holds at 1.0, and re-reporting the same fraction
+    /// would mint a `CHANGE` event for a change that did not happen.
+    pub fn set_fraction(&mut self, node: i32, fraction: f32) -> bool {
+        if node < 0 {
+            return false;
+        }
+        let Some(slot) = self.values.get_mut(node as usize) else {
+            return false;
+        };
+        if slot.is_nan() {
+            return false;
+        }
+        let clamped = fraction.clamp(0.0, 1.0);
+        if *slot == clamped {
+            return false;
+        }
+        *slot = clamped;
+        true
+    }
+
     /// A `LISTBOX`'s height in rows, or 0 for anything else. `controls.rows`.
-    pub fn rows_of(&self, tables: &Tables, node: i32) -> i32 {
-        match self.row_of(tables, node) {
+    pub fn rows_of(&self, tables: &Tables, node: i32) -> i32 {        match self.row_of(tables, node) {
             Some(row) => tables
                 .i32s(CONTROLS, protocol::controls::ROWS)
                 .get(row)
