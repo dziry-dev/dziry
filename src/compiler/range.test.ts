@@ -1,4 +1,4 @@
-// range/number/color/file/date input compiler tests
+﻿// range/number/color/file/date input compiler tests
 import { expect, test } from "bun:test";
 import { compile, toCompiledUi } from "./compile.ts";
 import { ControlKind } from "../ir.ts";
@@ -75,4 +75,16 @@ test("controls.node is sorted ascending for range and file", () => {
   const ui = toCompiledUi(compile('<body><input type="range"><input type="file"></body>', ''));
   const nodes = [...ui.controls.node.subarray(0, ui.controls.count)];
   expect(nodes).toEqual([...nodes].sort((a, b) => a - b));
+});
+
+test("color input presentational hint sets background-color from value attr", () => {
+  const ui = toCompiledUi(compile('<body><input type="color" value="#ff0000"></body>', ''));
+  // The color overlay forces bg = 0xFFFF0000 (ARGB: opaque red).
+  // Find any style row with that bg value.
+  const RED_ARGB = 0xffff0000;
+  let found = false;
+  for (let i = 0; i < ui.styles.count; i++) {
+    if ((ui.styles.bg[i]! >>> 0) === RED_ARGB) { found = true; break; }
+  }
+  expect(found).toBe(true);
 });

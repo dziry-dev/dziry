@@ -1,4 +1,4 @@
-/**
+﻿/**
  * The compiler: HTML + CSS in, IR out.
  *
  * Everything expensive and static happens here — tokenizing, selector matching,
@@ -30,7 +30,7 @@ import { isParamSentinel, ParamExpressionError } from "./route-args.ts";
 import { allLocals } from "./reactive-runtime.ts";
 import { type VariantCompiled } from "./variant-compile.ts";
 import { parseCss, Origin, type Pseudo, type PseudoElement } from "./css.ts";
-import { EMPTY_VARS, extendVarEnv, substituteVars, type VarEnv } from "./values.ts";
+import { EMPTY_VARS, extendVarEnv, parseColor, substituteVars, type VarEnv } from "./values.ts";
 import { parseContent, parseInlineStyle } from "./properties.ts";
 import { UA_SHEET } from "./ua-sheet.ts";
 import { listboxOf, optionsOf, uaParts, type UaParts } from "./ua-structure.ts";
@@ -614,13 +614,6 @@ function typeOf(el: Element): string {
  * table's plain-pixel `width` cannot express for an image that has not loaded —
  * so it is not a hint here, and the attribute is ignored rather than misread.
  */function presentationalHints(el: Element): Map<string, string> | undefined {
-  // The color well's fill *is* its value — the one control whose background is
-  // content. `#000000` when absent, per the spec's default value.
-  if (el.tag === "input" && typeOf(el) === "color") {
-    const raw = el.attrs.get("value")?.trim() ?? "";
-    const color = /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : "#000000";
-    return new Map([["background-color", color]]);
-  }
   if (el.tag !== "img") return undefined;
   const hints = new Map<string, string>();
   for (const attr of ["width", "height"] as const) {
@@ -630,6 +623,25 @@ function typeOf(el: Element): string {
     }
   }
   return hints.size > 0 ? hints : undefined;
+}
+
+/**
+ * The overlay that forces the color well's background to its authored value.
+ *
+ * Presentational hints lose to the UA sheet (`input { background-color: #ffffff }`),
+ * so the swatch color must be applied *after* the cascade via overlay. This is the
+ * one case where a content attribute directly becomes a painted pixel with no rule
+ * in between — exactly what the overlay slot is for.
+ */
+function colorWellOverlay(el: Element): Partial<ComputedStyle> | undefined {
+  if (el.tag !== "input" || typeOf(el) !== "color") return undefined;
+  const raw = el.attrs.get("value")?.trim() ?? "";
+  const hex = /^#[0-9a-fA-F]{6}$/.test(raw) ? raw : "#000000";
+  // Parse #rrggbb -> 0xFFRRGGBB (ARGB, fully opaque)
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return { bg: (0xff000000 | (r << 16) | (g << 8) | b) >>> 0 };
 }
 
 /**
@@ -1852,7 +1864,7 @@ export function compileTree(
       where,
       null,
       presentationalHints(el),
-      selectionColors(path, inherited, parentVars, where),
+      { ...selectionColors(path, inherited, parentVars, where), ...colorWellOverlay(el) },
       // The node with no parent is the window root, and its box is the viewport.
       parent === -1,
     );

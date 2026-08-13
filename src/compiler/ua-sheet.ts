@@ -244,7 +244,6 @@ input[type="color"] {
   border-width: 1px;
   border-color: #767676;
   padding: 2px;
-  background-color: #ffffff;
 }
 
 /* The file picker reads as its button, which is the part of the control a
