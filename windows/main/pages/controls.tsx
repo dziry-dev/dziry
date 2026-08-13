@@ -112,6 +112,9 @@ export default function Controls() {
   const formName = signal("");
   const formTwo = signal("");
   const formFields = signal("");
+  const rangeVal = signal("50");
+  const colorVal = signal("#6366f1");
+  const numVal = signal("42");
 
   return (
     <div className="flex flex-col gap-5">
@@ -413,6 +416,86 @@ export default function Controls() {
           </button>
           <span className={LABEL}>presses that landed:</span>
           <span className="text-xs font-semibold text-sky-300">{saves}</span>
+        </div>
+      </div>
+
+      <div className={CARD}>
+        <div className={H}>input[type=range]</div>
+        <div className={SUB}>
+          drag or arrow-key the thumb - bind:value wires the position as a number between
+          min and max - step/min/max are compiler-side constants, never in shared memory
+        </div>
+        <div className='flex flex-col gap-3'>
+          <div className={ROW}>
+            <input type='range' min='0' max='100' step='1' bind:value={rangeVal} className='w-48' />
+            <span className='text-xs font-semibold text-sky-300'>{rangeVal}</span>
+          </div>
+          <div className={ROW}>
+            <input type='range' min='0' max='100' value='25' className='w-48' />
+            <span className={LABEL}>unbound, value=25</span>
+          </div>
+          <div className={ROW}>
+            <input type='range' disabled className='w-48' />
+            <span className={LABEL}>disabled</span>
+          </div>
+        </div>
+      </div>
+
+      <div className={CARD}>
+        <div className={H}>input[type=color]</div>
+        <div className={SUB}>
+          the authored value (a hex colour) becomes a presentational background-color hint -
+          the fill is the content box - bind:value wires it to a signal
+        </div>
+        <div className='flex flex-col gap-3'>
+          <div className={ROW}>
+            <input type='color' bind:value={colorVal} />
+            <span className='text-xs font-semibold text-sky-300'>{colorVal}</span>
+          </div>
+          <div className={ROW}>
+            <input type='color' value='#10b981' />
+            <span className={LABEL}>unbound, value=#10b981</span>
+          </div>
+        </div>
+      </div>
+
+      <div className={CARD}>
+        <div className={H}>input[type=file]</div>
+        <div className={SUB}>
+          the UA sheet adds ::before content: 'Choose file' to make it look like a button
+        </div>
+        <div className='flex flex-col gap-3'>
+          <div className={ROW}>
+            <input type='file' />
+          </div>
+          <div className={ROW}>
+            <input type='file' disabled />
+            <span className={LABEL}>disabled</span>
+          </div>
+        </div>
+      </div>
+
+      <div className={CARD}>
+        <div className={H}>input[type=number]</div>
+        <div className={SUB}>
+          arrow-up/down step by the step attribute (default 1), clamped to min/max -
+          bind:value wires to a signal, typing works like a text field
+        </div>
+        <div className='flex flex-col gap-3'>
+          <div className={ROW}>
+            <input
+              type='number'
+              min='0'
+              max='100'
+              step='5'
+              bind:value={numVal}
+              className='w-24 rounded-lg bg-zinc-800 px-2 py-1 text-xs text-zinc-100'
+            />
+            <span className='text-xs font-semibold text-sky-300'>{numVal}</span>
+          </div>
+          <div className={ROW}>
+            <span className={LABEL}>arrow up/down steps by 5, clamped 0-100</span>
+          </div>
         </div>
       </div>
 
