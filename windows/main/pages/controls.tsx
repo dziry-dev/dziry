@@ -74,7 +74,7 @@
  * Scrolling outside does not dismiss it, `<optgroup>` labels do not render, and there is no
  * type-to-select.
  */
-import { signal } from "dziri";
+import { signal, fileInfo } from "dziri";
 
 const CARD = "flex flex-col gap-3 rounded-xl bg-zinc-900 p-6";
 const H = "text-lg font-semibold text-zinc-50";
@@ -115,6 +115,10 @@ export default function Controls() {
   const rangeVal = signal("50");
   const colorVal = signal("#6366f1");
   const numVal = signal("42");
+  const filePath = signal("");
+  const fileName = signal("");
+  const fileSize = signal(0);
+  const fileType = signal("");
 
   return (
     <div className="flex flex-col gap-5">
@@ -462,15 +466,50 @@ export default function Controls() {
       <div className={CARD}>
         <div className={H}>input[type=file]</div>
         <div className={SUB}>
-          the UA sheet adds ::before content: 'Choose file' to make it look like a button
+          the UA sheet adds ::before content: 'Choose file' to make it look like a button ·
+          click opens the native OS file picker · accept and multiple attributes configure
+          the dialog
         </div>
         <div className='flex flex-col gap-3'>
           <div className={ROW}>
             <input type='file' />
+            <span className={LABEL}>unbound, no filter</span>
+          </div>
+          <div className={ROW}>
+            <input
+              type='file'
+              accept='image/*'
+              bind:value={filePath}
+              onChange={() => {
+                const p = filePath.value;
+                if (p) {
+                  fileInfo(p).then((info) => {
+                    fileName.set(info.name);
+                    fileSize.set(info.size);
+                    fileType.set(info.type);
+                  });
+                }
+              }}
+            />
+            <span className={LABEL}>accept=image/*, bound, shows metadata</span>
           </div>
           <div className={ROW}>
             <input type='file' disabled />
             <span className={LABEL}>disabled</span>
+          </div>
+          <div className={ROW}>
+            <span className={LABEL}>path:</span>
+            <span className='text-xs text-zinc-200'>{filePath}</span>
+          </div>
+          <div className={ROW}>
+            <span className={LABEL}>name:</span>
+            <span className='text-xs text-zinc-200'>{fileName}</span>
+          </div>
+          <div className={ROW}>
+            <span className={LABEL}>size:</span>
+            <span className='text-xs text-zinc-200'>{fileSize}</span>
+            <span className={LABEL}>type:</span>
+            <span className='text-xs text-zinc-200'>{fileType}</span>
           </div>
         </div>
       </div>

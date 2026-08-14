@@ -53,7 +53,10 @@ async function resolve(src: string): Promise<Uint8Array> {
     if (!res.ok) throw new Error(`${res.status}`);
     return new Uint8Array(await res.arrayBuffer());
   }
-  return new Uint8Array(await Bun.file(src).arrayBuffer());
+  // A file dialog's answer is an absolute path; strip the `file://` prefix an
+  // author might add, then read from disk. The existing fallback handles both.
+  const path = src.startsWith("file://") ? src.slice(7) : src;
+  return new Uint8Array(await Bun.file(path).arrayBuffer());
 }
 
 /**

@@ -51,7 +51,7 @@ export type ToMain =
   /** An unhandled failure on the app thread. The window should say so, not vanish. */
   | { t: "error"; message: string }
   /** Open the native OS file picker for `input[type="file"]` on the given node. */
-  | { t: "file_dialog"; node: number };
+  | { t: "file_dialog"; node: number; accept?: string; multiple?: boolean };
 
 export type ToWorker =
   /**
@@ -70,4 +70,4 @@ export type ToWorker =
   | { t: "events"; events: EngineEvent[] }
   | { t: "quit" }
   /** Result of a file dialog opened via `{ t: "file_dialog" }`. */
-  | { t: "file_dialog_result"; node: number; path: string | null };
+  | { t: "file_dialog_result"; node: number; paths: string[] };

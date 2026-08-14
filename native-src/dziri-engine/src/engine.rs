@@ -315,8 +315,9 @@ pub struct Engine {
     /// The most recently encoded PNG, waiting to be copied out.
     png: Vec<u8>,
     /// Completed file dialog results waiting for the host to drain them.
-    /// Each entry is `(node_id, Option<path>)`.
-    pub file_dialog_results: Arc<Mutex<Vec<(i32, Option<String>)>>>,
+    /// Each entry is `(node_id, paths)` — empty paths on cancel, one path
+    /// normally, several when the input had `multiple`.
+    pub file_dialog_results: Arc<Mutex<Vec<(i32, Vec<String>)>>>,
 }
 
 impl Engine {
@@ -468,13 +469,22 @@ impl Engine {
     ///
     /// The dialog is asynchronous: the result is pushed into `file_dialog_results`
     /// and the host polls it with [`Self::take_file_dialog_result`].
-    pub fn open_file_dialog(&self, node: i32) -> Result<(), EngineError> {
+    ///
+    /// `filters` is the SDL filter list parsed from the element's `accept`
+    /// attribute; empty means "All files". `allow_many` is the element's
+    /// `multiple` attribute.
+    pub fn open_file_dialog(
+        &self,
+        node: i32,
+        filters: &[(&str, &str)],
+        allow_many: bool,
+    ) -> Result<(), EngineError> {
         let results = Arc::clone(&self.file_dialog_results);
-        crate::window::open_file_dialog(self.window.as_ref(), node, results)
+        crate::window::open_file_dialog(self.window.as_ref(), node, results, filters, allow_many)
     }
 
     /// Returns and removes the oldest pending file-dialog result, if any.
-    pub fn take_file_dialog_result(&self) -> Option<(i32, Option<String>)> {
+    pub fn take_file_dialog_result(&self) -> Option<(i32, Vec<String>)> {
         let mut guard = self.file_dialog_results.lock().ok()?;
         if guard.is_empty() { None } else { Some(guard.remove(0)) }
     }

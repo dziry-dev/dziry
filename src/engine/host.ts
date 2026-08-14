@@ -96,7 +96,7 @@ const SYMBOLS = {
   dziri_engine_provide_image: { args: [u32, PTR, u32, PTR, u32], returns: i32 },
   dziri_engine_last_frame_ms: { args: [u32, PTR], returns: i32 },
   dziri_engine_panic_for_testing: { args: [u32], returns: i32 },
-  dziri_engine_open_file_dialog: { args: [u32, i32, PTR], returns: i32 },
+  dziri_engine_open_file_dialog: { args: [u32, i32, PTR, u32, i32, PTR], returns: i32 },
   dziri_engine_take_file_dialog_result: { args: [u32, PTR, PTR, u32, PTR], returns: i32 },
 } as const;
 
@@ -887,9 +887,19 @@ export class Engine {
   }
 
   /** Opens the native OS file picker for the FILE input identified by `node`. */
-  openFileDialog(node: number): void {
+  openFileDialog(node: number, filters?: [string, string][], multiple?: boolean): void {
+    const filtersJson = filters && filters.length > 0
+      ? new TextEncoder().encode(JSON.stringify(filters))
+      : null;
     check(
-      engine.dziri_engine_open_file_dialog(this.#handle, node, null),
+      engine.dziri_engine_open_file_dialog(
+        this.#handle,
+        node,
+        filtersJson ? (ptr(filtersJson) as Pointer) : null,
+        filtersJson?.length ?? 0,
+        multiple ? 1 : 0,
+        null,
+      ),
       "dziri_engine_open_file_dialog",
     );
   }
@@ -897,27 +907,27 @@ export class Engine {
   /**
    * Returns the oldest pending file-dialog result, or null if none is ready.
    *
-   * `node` is the FILE input that triggered the dialog; `path` is the chosen path,
-   * or null when the user cancelled.
+   * `node` is the FILE input that triggered the dialog; `paths` is the chosen
+   * path list — empty on cancel, one normally, several with `multiple`.
    */
-  takeFileDialogResult(): { node: number; path: string | null } | null {
+  takeFileDialogResult(): { node: number; paths: string[] } | null {
     const nodeBuf = new Int32Array(1);
-    const pathBuf = new Uint8Array(4096);
+    const pathBuf = new Uint8Array(65536);
     const lenBuf = new Uint32Array(1);
     check(
       engine.dziri_engine_take_file_dialog_result(
         this.#handle,
         ptr(nodeBuf) as Pointer,
         ptr(pathBuf) as Pointer,
-        4096,
+        65536,
         ptr(lenBuf) as Pointer,
       ),
       "dziri_engine_take_file_dialog_result",
     );
     if (nodeBuf[0]! === -1) return null;
     const len = lenBuf[0]!;
-    const path = len > 0 ? decoder.decode(pathBuf.subarray(0, len)) : null;
-    return { node: nodeBuf[0]!, path };
+    const paths = len > 0 ? decoder.decode(pathBuf.subarray(0, len)).split("\n") : [];
+    return { node: nodeBuf[0]!, paths };
   }
 
   close(): void {

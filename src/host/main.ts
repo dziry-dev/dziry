@@ -34,6 +34,52 @@ import { alive, createChannel, DIRTY, stop, takeDirty, tryAcquire, release } fro
 import type { ToMain, ToWorker, WindowRequest } from "./messages.ts";
 import { applyMinSize, sizeFrom } from "./registry.ts";
 
+/**
+ * Parses an HTML `accept` attribute into SDL file-dialog filter pairs.
+ *
+ * The attribute is a comma-separated list of MIME types, extensions and
+ * wildcards: `accept="image/*,.pdf,.doc"`. SDL wants `[name, pattern]`
+ * pairs where pattern is semicolon-separated extensions without the dot.
+ *
+ * Well-known wildcards get readable names; bare extensions are grouped
+ * under "Accepted files".
+ */
+export function parseAcceptToFilters(accept: string): [string, string][] {
+  const MIME_NAMES: Record<string, string> = {
+    "image/*": "Images",
+    "video/*": "Videos",
+    "audio/*": "Audio",
+    "text/*": "Text files",
+  };
+  const filters: [string, string][] = [];
+  const extensions: string[] = [];
+  for (const part of accept.split(",")) {
+    const trimmed = part.trim().toLowerCase();
+    if (trimmed === "") continue;
+    if (trimmed.endsWith("/*")) {
+      const name = MIME_NAMES[trimmed] ?? trimmed.replace("/*", " files");
+      // SDL has no wildcard MIME; map to common extensions per category.
+      const patterns: Record<string, string> = {
+        "image/*": "png;jpg;jpeg;gif;webp;svg;bmp;ico",
+        "video/*": "mp4;webm;avi;mov;mkv",
+        "audio/*": "mp3;wav;ogg;flac;aac;m4a",
+        "text/*": "txt;md;csv;log;json;xml;html;css;js;ts",
+      };
+      filters.push([name, patterns[trimmed] ?? "*"]);
+    } else if (trimmed.startsWith(".")) {
+      extensions.push(trimmed.slice(1));
+    } else if (trimmed.includes("/")) {
+      // A specific MIME type like "application/pdf" — map to extension.
+      const ext = trimmed.split("/").pop() ?? trimmed;
+      extensions.push(ext);
+    }
+  }
+  if (extensions.length > 0) {
+    filters.push(["Accepted files", extensions.join(";")]);
+  }
+  return filters;
+}
+
 export type MainOptions = {
   /** The app thread's entry. A URL in dev; an extracted path in a packaged build. */
   worker: string;
@@ -202,9 +248,12 @@ export async function runMain(options: MainOptions): Promise<void> {
         running = false;
         break;
 
-      case "file_dialog":
-        engine.openFileDialog(message.node);
+      case "file_dialog": {
+        // Parse the `accept` attribute into SDL filter pairs and pass `multiple`.
+        const filters = message.accept ? parseAcceptToFilters(message.accept) : undefined;
+        engine.openFileDialog(message.node, filters, message.multiple ?? false);
         break;
+      }
 
       case "ready":
         break;
@@ -517,7 +566,7 @@ export async function runMain(options: MainOptions): Promise<void> {
     // Poll for file dialog results and forward to the app thread.
     const fdResult = engine.takeFileDialogResult();
     if (fdResult !== null) {
-      send({ t: "file_dialog_result", node: fdResult.node, path: fdResult.path });
+      send({ t: "file_dialog_result", node: fdResult.node, paths: fdResult.paths });
     }
 
     if (showStats && frames % 60 === 0) {

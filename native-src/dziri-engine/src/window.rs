@@ -555,30 +555,44 @@ impl Window {
 /// Opens the native OS file picker asynchronously.
 ///
 /// SDL calls the callback on a background thread once the user dismisses the
-/// dialog. The result — `(node, Some(path))` for a selection, `(node, None)`
-/// for a cancel — is pushed into `results` and the host drains it on the next
-/// frame via `dziri_engine_take_file_dialog_result`.
+/// dialog. The result — `(node, paths)` — is pushed into `results` and the host
+/// drains it on the next frame via `dziri_engine_take_file_dialog_result`.
+/// `paths` is empty on cancel; one entry normally; several when `allow_many`.
+///
+/// `filters` is the SDL filter list parsed from the element's `accept`
+/// attribute; empty means "All files". `allow_many` is the element's
+/// `multiple` attribute.
 pub fn open_file_dialog(
     window: Option<&Window>,
     node: i32,
-    results: std::sync::Arc<std::sync::Mutex<Vec<(i32, Option<String>)>>>,
+    results: std::sync::Arc<std::sync::Mutex<Vec<(i32, Vec<String>)>>>,
+    filters: &[(&str, &str)],
+    allow_many: bool,
 ) -> Result<(), crate::error::EngineError> {
-    use sdl3::dialog::{show_open_file_dialog, DialogError};
+    use sdl3::dialog::{show_open_file_dialog, DialogError, DialogFileFilter};
+
+    let sdl_filters: Vec<DialogFileFilter> = filters
+        .iter()
+        .map(|(name, pattern)| DialogFileFilter { name, pattern })
+        .collect();
 
     let win_ref = window.map(|w| w.canvas.window());
     show_open_file_dialog(
-        &[],
+        &sdl_filters,
         None::<&std::path::Path>,
-        false,
+        allow_many,
         win_ref,
         Box::new(move |result, _filter| {
-            let path = match result {
-                Ok(paths) => paths.into_iter().next().map(|p| p.to_string_lossy().into_owned()),
-                Err(DialogError::Canceled) => None,
-                Err(_) => None,
+            let paths = match result {
+                Ok(paths) => paths
+                    .into_iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect(),
+                Err(DialogError::Canceled) => Vec::new(),
+                Err(_) => Vec::new(),
             };
             if let Ok(mut guard) = results.lock() {
-                guard.push((node, path));
+                guard.push((node, paths));
             }
         }),
     )

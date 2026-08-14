@@ -505,7 +505,13 @@ function start(
                 e.node,
               );
               if (controlRow >= 0 && ui.controls.kind[controlRow] === ControlKind.FILE) {
-                post({ t: "file_dialog", node: e.node } satisfies ToMain);
+                const ctrl = generated.controls[controlRow];
+                post({
+                  t: "file_dialog",
+                  node: e.node,
+                  accept: ctrl?.accept,
+                  multiple: ctrl?.multiple,
+                } satisfies ToMain);
                 break;
               }
               // A row's handler is found by decomposing the node into (slot,
@@ -646,13 +652,16 @@ function start(
 
       case "file_dialog_result": {
         // A file was chosen (or the dialog was cancelled). Update the FILE input's bound
-        // signal with the path, then dispatch onChange so app code can react.
-        const { node, path } = message;
-        if (path !== null) {
+        // signal with the path(s), then dispatch onChange so app code can react.
+        const { node, paths } = message;
+        if (paths.length > 0) {
           // Treat the chosen path as a text value — applyFieldChange records it in the
           // control and typeInto writes it to any bound editable signal.
+          // For multiple selections the paths are newline-joined, matching how a
+          // browser's `files` collection stringifies.
+          const text = paths.join("\n");
           applyFieldChange(ui, node, 0, []);
-          typeInto(editables, node, { text: path, caret: path.length, anchor: 0 });
+          typeInto(editables, node, { text, caret: text.length, anchor: 0 });
           dispatchChange(ui, node, 0, []);
           dirty = true;
           schedule();

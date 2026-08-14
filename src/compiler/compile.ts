@@ -458,6 +458,10 @@ export type BuiltControl = {
    * mid-track, matching a browser. 0 on every other kind.
    */
   value: number;
+  /** The element's `accept` attribute, for FILE inputs. Undefined elsewhere. */
+  accept?: string;
+  /** The element's `multiple` attribute, for FILE inputs. Undefined elsewhere. */
+  multiple?: boolean;
 };
 
 /**
@@ -2059,6 +2063,11 @@ export function compileTree(
           (listbox?.multiple === true ? ControlFlags.MULTIPLE : 0),
         // Not knowable yet — the run is a child and children have not been walked.
         label: -1,
+        // A file input's dialog config, read on the app thread when the click
+        // arrives. Not on the wire: it is compile-time constant and only Bun
+        // needs it, so it rides the artifact rather than the shared table.
+        accept: controlKind === ControlKind.FILE ? el.attrs.get("accept") : undefined,
+        multiple: controlKind === ControlKind.FILE ? el.attrs.has("multiple") : undefined,
       });
     }
 
@@ -3061,6 +3070,8 @@ function replicateListControls(
           label: c.label >= 0 ? c.label + shift : -1,
           rows: c.rows,
           value: c.value,
+          accept: c.accept,
+          multiple: c.multiple,
         });
         added = true;
       }

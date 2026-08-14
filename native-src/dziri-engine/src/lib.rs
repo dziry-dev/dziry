@@ -1093,19 +1093,47 @@ pub extern "C" fn dziri_engine_panic_for_testing(handle: Handle) -> i32 {
 
 /// Opens the native OS file picker for `input[type="file"]` identified by `node`.
 ///
-/// The dialog is asynchronous. When the user picks a file (or cancels), the result
-/// is available via [`dziri_engine_take_file_dialog_result`]. The `out` parameter is
-/// unused (reserved for future use) and may be null.
+/// The dialog is asynchronous. When the user picks files (or cancels), the result
+/// is available via [`dziri_engine_take_file_dialog_result`].
+///
+/// `filters_json` is a pointer to a UTF-8 JSON array of `[name, pattern]` pairs
+/// (e.g. `[["Images", "png;jpg;gif"]]`). Pass null for no filter ("All files").
+/// `filters_len` is the byte length of the JSON.
+///
+/// `allow_many` is non-zero when the element has the `multiple` attribute.
+///
+/// The `out` parameter is unused (reserved for future use) and may be null.
 ///
 /// # Safety
+/// `filters_json` must be readable for `filters_len` bytes, or null.
 /// `out` must be writable for one `i32`, or null.
 #[no_mangle]
 pub unsafe extern "C" fn dziri_engine_open_file_dialog(
     handle: Handle,
     node: i32,
+    filters_json: *const u8,
+    filters_len: u32,
+    allow_many: i32,
     out: *mut i32,
 ) -> i32 {
-    with(handle, |engine| match engine.open_file_dialog(node) {
+    let filters: Vec<(String, String)> = if filters_json.is_null() || filters_len == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: checked non-null and len > 0.
+        let bytes = unsafe { std::slice::from_raw_parts(filters_json, filters_len as usize) };
+        match std::str::from_utf8(bytes) {
+            Ok(s) => match parse_filter_json(s) {
+                Some(f) => f,
+                None => Vec::new(),
+            },
+            Err(_) => Vec::new(),
+        }
+    };
+    let filter_refs: Vec<(&str, &str)> = filters
+        .iter()
+        .map(|(n, p)| (n.as_str(), p.as_str()))
+        .collect();
+    with(handle, |engine| match engine.open_file_dialog(node, &filter_refs, allow_many != 0) {
         Ok(()) => {
             if !out.is_null() {
                 // SAFETY: checked non-null.
@@ -1117,11 +1145,53 @@ pub unsafe extern "C" fn dziri_engine_open_file_dialog(
     })
 }
 
+/// Minimal JSON parse for `[["name","pattern"],...]` — no serde dependency.
+/// Returns None on any malformed input.
+fn parse_filter_json(s: &str) -> Option<Vec<(String, String)>> {
+    let s = s.trim();
+    if !s.starts_with('[') || !s.ends_with(']') {
+        return None;
+    }
+    let inner = &s[1..s.len() - 1];
+    let mut out = Vec::new();
+    let mut rest = inner;
+    while !rest.trim().is_empty() {
+        let rest_trim = rest.trim_start();
+        if !rest_trim.starts_with('[') {
+            return None;
+        }
+        let close = rest_trim.find(']')?;
+        let pair = &rest_trim[1..close];
+        let mut parts = pair.splitn(2, ',');
+        let name = unquote(parts.next()?.trim())?;
+        let pattern = unquote(parts.next()?.trim())?;
+        out.push((name, pattern));
+        rest = &rest_trim[close + 1..];
+        let rest_trim2 = rest.trim_start();
+        if rest_trim2.starts_with(',') {
+            rest = &rest_trim2[1..];
+        } else if !rest_trim2.is_empty() {
+            return None;
+        }
+    }
+    Some(out)
+}
+
+fn unquote(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        Some(s[1..s.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+
 /// Returns a pending file-dialog result, if one is ready.
 ///
 /// When a result is available, writes the node id to `node_out`, copies up to
-/// `path_cap` bytes of the UTF-8 path into `path_buf`, and writes the actual byte
-/// length to `path_len_out`. A cancelled dialog gives `path_len_out = 0`.
+/// `path_cap` bytes of a **newline-joined** UTF-8 path list into `path_buf`,
+/// and writes the actual byte length to `path_len_out`. A cancelled dialog gives
+/// `path_len_out = 0`.
 ///
 /// When no result is ready, writes `-1` to `node_out` and `0` to `path_len_out`
 /// and still returns `OK` — the caller must check `node_out` rather than the status.
@@ -1149,10 +1219,11 @@ pub unsafe extern "C" fn dziri_engine_take_file_dialog_result(
                     *path_len_out = 0;
                 }
             }
-            Some((node, path)) => {
+            Some((node, paths)) => {
                 // SAFETY: checked non-null above.
                 unsafe { *node_out = node; }
-                let bytes = path.as_deref().unwrap_or("").as_bytes();
+                let joined = paths.join("\n");
+                let bytes = joined.as_bytes();
                 let len = bytes.len().min(path_cap as usize);
                 // SAFETY: path_buf is writable for path_cap bytes; len ≤ path_cap.
                 unsafe {

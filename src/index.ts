@@ -52,3 +52,13 @@ export type { MapOptions, ReadonlySignal, Signal } from "./runtime/signal.ts";
  */
 export { alert } from "./runtime/alert.ts";
 export type { AlertLevel } from "./runtime/alert.ts";
+
+/**
+ * Reading a file the user picked via `input[type=file]`.
+ *
+ * The dialog returns a path; these helpers turn it into metadata or bytes.
+ * `fileInfo` gives name/size/type like a browser's `File` object; `readFile`
+ * and `readFileText` load the content.
+ */
+export { fileInfo, readFile, readFileText } from "./runtime/files.ts";
+export type { FileInfo } from "./runtime/files.ts";
