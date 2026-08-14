@@ -202,6 +202,10 @@ export async function runMain(options: MainOptions): Promise<void> {
         running = false;
         break;
 
+      case "file_dialog":
+        engine.openFileDialog(message.node);
+        break;
+
       case "ready":
         break;
     }
@@ -509,6 +513,12 @@ export async function runMain(options: MainOptions): Promise<void> {
     }
 
     frames++;
+
+    // Poll for file dialog results and forward to the app thread.
+    const fdResult = engine.takeFileDialogResult();
+    if (fdResult !== null) {
+      send({ t: "file_dialog_result", node: fdResult.node, path: fdResult.path });
+    }
 
     if (showStats && frames % 60 === 0) {
       console.log(

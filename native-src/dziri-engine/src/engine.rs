@@ -22,6 +22,8 @@
 //! surface it can hand back as pixels. That is what the Rust tests use, and what
 //! `--screenshot` becomes.
 
+use std::sync::{Arc, Mutex};
+
 use skia_safe::{
     surfaces, Color, ImageInfo, PixelGeometry, Surface, SurfaceProps, SurfacePropsFlags,
 };
@@ -312,6 +314,9 @@ pub struct Engine {
     drag: Option<BarDrag>,
     /// The most recently encoded PNG, waiting to be copied out.
     png: Vec<u8>,
+    /// Completed file dialog results waiting for the host to drain them.
+    /// Each entry is `(node_id, Option<path>)`.
+    pub file_dialog_results: Arc<Mutex<Vec<(i32, Option<String>)>>>,
 }
 
 impl Engine {
@@ -384,6 +389,7 @@ impl Engine {
             time_step: None,
             drag: None,
             png: Vec::new(),
+            file_dialog_results: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
@@ -456,6 +462,21 @@ impl Engine {
     /// Takes the encoded bytes, leaving the buffer empty.
     pub fn take_png(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.png)
+    }
+
+    /// Opens the native OS file picker for a FILE input.
+    ///
+    /// The dialog is asynchronous: the result is pushed into `file_dialog_results`
+    /// and the host polls it with [`Self::take_file_dialog_result`].
+    pub fn open_file_dialog(&self, node: i32) -> Result<(), EngineError> {
+        let results = Arc::clone(&self.file_dialog_results);
+        crate::window::open_file_dialog(self.window.as_ref(), node, results)
+    }
+
+    /// Returns and removes the oldest pending file-dialog result, if any.
+    pub fn take_file_dialog_result(&self) -> Option<(i32, Option<String>)> {
+        let mut guard = self.file_dialog_results.lock().ok()?;
+        if guard.is_empty() { None } else { Some(guard.remove(0)) }
     }
 
     /// The pixels of the last painted frame, as BGRA_8888.

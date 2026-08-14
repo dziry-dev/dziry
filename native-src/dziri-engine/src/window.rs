@@ -552,6 +552,39 @@ impl Window {
 // canvas is gone. Dropping the canvas is the correct teardown, and `resize` is
 // the one place a texture is orphaned early enough to destroy by hand.
 
+/// Opens the native OS file picker asynchronously.
+///
+/// SDL calls the callback on a background thread once the user dismisses the
+/// dialog. The result — `(node, Some(path))` for a selection, `(node, None)`
+/// for a cancel — is pushed into `results` and the host drains it on the next
+/// frame via `dziri_engine_take_file_dialog_result`.
+pub fn open_file_dialog(
+    window: Option<&Window>,
+    node: i32,
+    results: std::sync::Arc<std::sync::Mutex<Vec<(i32, Option<String>)>>>,
+) -> Result<(), crate::error::EngineError> {
+    use sdl3::dialog::{show_open_file_dialog, DialogError};
+
+    let win_ref = window.map(|w| w.canvas.window());
+    show_open_file_dialog(
+        &[],
+        None::<&std::path::Path>,
+        false,
+        win_ref,
+        Box::new(move |result, _filter| {
+            let path = match result {
+                Ok(paths) => paths.into_iter().next().map(|p| p.to_string_lossy().into_owned()),
+                Err(DialogError::Canceled) => None,
+                Err(_) => None,
+            };
+            if let Ok(mut guard) = results.lock() {
+                guard.push((node, path));
+            }
+        }),
+    )
+    .map_err(|e| crate::error::EngineError::sdl(format!("SDL_ShowOpenFileDialog: {e}")))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

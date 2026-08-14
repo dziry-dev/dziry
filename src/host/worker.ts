@@ -29,6 +29,8 @@ import { routeChain } from "../ir.ts";
 import { bindSpans, type Bound, type Span } from "../engine/bind.ts";
 import { Uploader, type TableHost } from "../engine/upload.ts";
 import { EventKind } from "../protocol/generated.ts";
+import { ControlKind } from "../ir.ts";
+import { findRow } from "../find-row.ts";
 import { acquire, publish, release } from "./channel.ts";
 import type { ToMain, ToWorker } from "./messages.ts";
 import {
@@ -495,7 +497,17 @@ function start(
       case "events": {
         for (const e of message.events) {
           switch (e.kind) {
-            case EventKind.CLICK:
+            case EventKind.CLICK: {
+              // If the clicked node is a FILE input, open the native file picker on
+              // the engine thread and wait for the result — don't dispatch a click.
+              const controlRow = findRow(
+                ui.controls.node.subarray(0, ui.controls.count),
+                e.node,
+              );
+              if (controlRow >= 0 && ui.controls.kind[controlRow] === ControlKind.FILE) {
+                post({ t: "file_dialog", node: e.node } satisfies ToMain);
+                break;
+              }
               // A row's handler is found by decomposing the node into (slot,
               // offset); a plain handler is looked up by node. Both batch, so one
               // click costs one repaint however many signals it writes.
@@ -509,6 +521,7 @@ function start(
                 else dispatch(ui, e.node);
               }
               break;
+            }
 
             case EventKind.FOCUS_IN:
               // Rows first, for the same reason a click checks them first: a handler
@@ -630,6 +643,25 @@ function start(
 
       case "quit":
         process.exit(0);
+
+      case "file_dialog_result": {
+        // A file was chosen (or the dialog was cancelled). Update the FILE input's bound
+        // signal with the path, then dispatch onChange so app code can react.
+        const { node, path } = message;
+        if (path !== null) {
+          // Treat the chosen path as a text value — applyFieldChange records it in the
+          // control and typeInto writes it to any bound editable signal.
+          applyFieldChange(ui, node, 0, []);
+          typeInto(editables, node, { text: path, caret: path.length, anchor: 0 });
+          dispatchChange(ui, node, 0, []);
+          dirty = true;
+          schedule();
+        }
+        // Also call any onClick handler, mirroring how a browser fires `change` then `input`.
+        dispatch(ui, node);
+        schedule();
+        break;
+      }
     }
   };
 }

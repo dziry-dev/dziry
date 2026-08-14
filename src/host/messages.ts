@@ -49,7 +49,9 @@ export type ToMain =
    */
   | { t: "alert"; message: string; title: string; level: 0 | 1 | 2 }
   /** An unhandled failure on the app thread. The window should say so, not vanish. */
-  | { t: "error"; message: string };
+  | { t: "error"; message: string }
+  /** Open the native OS file picker for `input[type="file"]` on the given node. */
+  | { t: "file_dialog"; node: number };
 
 export type ToWorker =
   /**
@@ -66,4 +68,6 @@ export type ToWorker =
   /** Where the tables are *now*. Sent after every grow. */
   | { t: "rebound"; spans: Span[] }
   | { t: "events"; events: EngineEvent[] }
-  | { t: "quit" };
+  | { t: "quit" }
+  /** Result of a file dialog opened via `{ t: "file_dialog" }`. */
+  | { t: "file_dialog_result"; node: number; path: string | null };

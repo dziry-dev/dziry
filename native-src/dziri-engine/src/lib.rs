@@ -1090,3 +1090,77 @@ pub extern "C" fn dziri_engine_panic_for_testing(handle: Handle) -> i32 {
         panic!("deliberate panic from dziri_engine_panic_for_testing")
     })
 }
+
+/// Opens the native OS file picker for `input[type="file"]` identified by `node`.
+///
+/// The dialog is asynchronous. When the user picks a file (or cancels), the result
+/// is available via [`dziri_engine_take_file_dialog_result`]. The `out` parameter is
+/// unused (reserved for future use) and may be null.
+///
+/// # Safety
+/// `out` must be writable for one `i32`, or null.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_open_file_dialog(
+    handle: Handle,
+    node: i32,
+    out: *mut i32,
+) -> i32 {
+    with(handle, |engine| match engine.open_file_dialog(node) {
+        Ok(()) => {
+            if !out.is_null() {
+                // SAFETY: checked non-null.
+                unsafe { *out = 0 };
+            }
+            status::OK
+        }
+        Err(e) => fail(e.status, e.detail),
+    })
+}
+
+/// Returns a pending file-dialog result, if one is ready.
+///
+/// When a result is available, writes the node id to `node_out`, copies up to
+/// `path_cap` bytes of the UTF-8 path into `path_buf`, and writes the actual byte
+/// length to `path_len_out`. A cancelled dialog gives `path_len_out = 0`.
+///
+/// When no result is ready, writes `-1` to `node_out` and `0` to `path_len_out`
+/// and still returns `OK` — the caller must check `node_out` rather than the status.
+///
+/// # Safety
+/// `node_out` and `path_len_out` must each be writable for one element.
+/// `path_buf` must be writable for `path_cap` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_take_file_dialog_result(
+    handle: Handle,
+    node_out: *mut i32,
+    path_buf: *mut u8,
+    path_cap: u32,
+    path_len_out: *mut u32,
+) -> i32 {
+    if node_out.is_null() || path_buf.is_null() || path_len_out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        match engine.take_file_dialog_result() {
+            None => {
+                // SAFETY: checked non-null above.
+                unsafe {
+                    *node_out = -1;
+                    *path_len_out = 0;
+                }
+            }
+            Some((node, path)) => {
+                // SAFETY: checked non-null above.
+                unsafe { *node_out = node; }
+                let bytes = path.as_deref().unwrap_or("").as_bytes();
+                let len = bytes.len().min(path_cap as usize);
+                // SAFETY: path_buf is writable for path_cap bytes; len ≤ path_cap.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), path_buf, len);
+                    *path_len_out = len as u32;
+                }
+            }
+        }
+        status::OK
+    })
+}
