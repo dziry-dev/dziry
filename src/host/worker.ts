@@ -200,8 +200,8 @@ function start(
   // The window's Effect layer, if it declared one. Acquisition starts now — the
   // design doc's "built at launch" — so services open while the first frame
   // paints. A window without a layer never reaches effects.ts at all.
-  if (generated.layer !== null && generated.layer !== undefined) {
-    provideWindowLayer(generated.layer);
+  if (generated.windowLayer !== null && generated.windowLayer !== undefined) {
+    provideWindowLayer(generated.windowLayer);
   }
 
   /**

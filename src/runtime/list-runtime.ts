@@ -19,6 +19,7 @@ import type { CompiledUi } from "../ir.ts";
 import type { ItemPath } from "../compiler/item-path.ts";
 import { ControlFlags, ControlKind } from "../protocol/generated.ts";
 import { Dirty, editText, type Erase } from "./bindings.ts";
+import { runDispatched } from "./effects.ts";
 import { batch, type ReadonlySignal } from "./signal.ts";
 
 /**
@@ -564,7 +565,10 @@ export function dispatchItem(
   const handler = row.ref.itemHandlers.find((h) => h.offset === row.offset && h.kind === kind);
   if (!handler) return false;
 
-  batch(() => handler.fn(row.item as never, row.index));
+  runDispatched(
+    batch(() => handler.fn(row.item as never, row.index)),
+    `item ${kind} handler at node ${node}`,
+  );
   return true;
 }
 
@@ -607,7 +611,10 @@ export function dispatchItemChange(
   }
   const value = kind === ControlKind.CHECKBOX || kind === ControlKind.RADIO ? raw === 1 : raw;
 
-  batch(() => handler.fn(row.item as never, row.index, value));
+  runDispatched(
+    batch(() => handler.fn(row.item as never, row.index, value)),
+    `item change handler at node ${node}`,
+  );
   return true;
 }
 

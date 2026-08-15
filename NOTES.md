@@ -24,6 +24,7 @@ that lands in the runtime should come with a note saying which question was answ
 | Text advance widths | **dynamic**, provisionally | depends on typeface, size, DPI, shaping. Escape hatch: embed the font and precompute advances for static strings — then this moves to compile-time too |
 | Hit-testing | **dynamic** | needs final layout bounds |
 | Layout | **dynamic** in part | window size is a runtime input; everything else about it is precomputed |
+| Live service instances (`<Window layer={…}>`) | **dynamic** | a layer's services acquire OS resources — a store handle, a socket — that exist only at launch. Which export the layer is, and whether one exists, are compile-time; the runtime holds one disposable `ManagedRuntime` handle per window, plus the one bit per dispatch "did this handler return an Effect". Absent a layer, no trace (2026-08-15, runtime/effects.ts) |
 
 ## The Rust engine — what exists (2026-07-30)
 

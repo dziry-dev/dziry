@@ -6,8 +6,8 @@
 // 0 text bindings, 0 handlers.
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, KeyframeTable, ListTable, MediaTable, NodeTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
-import type { EditableRef } from "dziri/runtime/bindings.ts";
+import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
+import type { EditableRef, ImageBinding } from "dziri/runtime/bindings.ts";
 import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
 import type { StylePatchRef } from "dziri/runtime/patches.ts";
 
@@ -59,6 +59,7 @@ export const styles = {
   direction: new Uint8Array([1,0,1,1,0,1]),
   wrap: new Uint8Array(6),
   justify: new Uint8Array(6),
+  alignContent: new Uint8Array(6).fill(255),
   align: new Uint8Array(6).fill(255),
   alignSelf: new Uint8Array(6).fill(255),
   justifyItems: new Uint8Array(6).fill(255),
@@ -67,6 +68,7 @@ export const styles = {
   shrink: new Float32Array(6).fill(1),
   basis: new Float32Array(6).fill(NaN),
   basisPct: new Float32Array(6),
+  order: new Int32Array(6),
   gapRow: new Float32Array([8,6,0,0,6,0]),
   gapCol: new Float32Array([8,6,0,0,6,0]),
   gridCols: new Uint16Array(6),
@@ -109,6 +111,10 @@ export const styles = {
   scrollMarginRight: new Float32Array(6),
   scrollMarginBottom: new Float32Array(6),
   scrollMarginLeft: new Float32Array(6),
+  scrollPaddingTop: new Float32Array(6),
+  scrollPaddingRight: new Float32Array(6),
+  scrollPaddingBottom: new Float32Array(6),
+  scrollPaddingLeft: new Float32Array(6),
   fontSize: new Float32Array(6).fill(14),
   fontWeight: new Uint16Array([400,400,600,400,400,600]),
   fontStyle: new Uint8Array(6),
@@ -139,6 +145,24 @@ export const styles = {
   originPctY: new Float32Array(6).fill(0.5),
   originPxX: new Float32Array(6),
   originPxY: new Float32Array(6),
+  maskComposite: new Uint8Array(6),
+  maskImage: new Uint8Array(6),
+  filter: new Uint8Array(6),
+  backdropFilter: new Uint8Array(6),
+  zIndex: new Int32Array(6).fill(-2147483648),
+  letterSpacing: new Float32Array(6),
+  mixBlendMode: new Uint8Array(6),
+  backgroundBlendMode: new Uint8Array(6),
+  columnCount: new Uint16Array(6),
+  columnWidth: new Float32Array(6).fill(NaN),
+  zoom: new Float32Array(6).fill(NaN),
+  touchAction: new Uint8Array(6).fill(7),
+  whiteSpace: new Uint8Array(6),
+  fontStretch: new Float32Array(6).fill(100),
+  maskPosition: new Uint8Array(6),
+  fill: new Uint32Array(6),
+  stroke: new Uint32Array(6),
+  strokeWidth: new Float32Array(6).fill(NaN),
   transition: new Uint16Array(6),
   animation: new Uint16Array(6),
 } satisfies StyleTable;
@@ -229,6 +253,14 @@ export const disabledBindings = [
 export const editables = [
 
 ] satisfies EditableRef[];
+
+/**
+ * Dynamic image sources. When the signal moves, the worker rewrites
+ * strings[slot] and the loader fetches the new path on the next frame.
+ */
+export const imageBindings = [
+
+] satisfies ImageBinding[];
 
 /**
  * Conditional classes, compiled to style-table writes.
@@ -334,6 +366,34 @@ export const controls = {
   flags: new Uint8Array([]),
   label: new Int32Array([]),
   rows: new Int32Array([]),
+  value: new Uint16Array([]),
+  accept: [],
+  multiple: new Uint8Array([]),
 } satisfies ControlTable;
+
+/**
+ * min/max/step per range or number input, sorted by node. A side table beside
+ * the shared protocol, not columns of it: the engine positions a thumb in
+ * fractions and never reads these — the binding does, when a CHANGE comes back
+ * as per-mille and somebody has to say what 612 per-mille means.
+ */
+export const numerics = {
+  count: 0,
+  node: new Int32Array([]),
+  min: new Float32Array([]),
+  max: new Float32Array([]),
+  step: new Float32Array([]),
+} satisfies NumericTable;
+
+/**
+ * Image references, sparse and sorted by node. Only the *reference* crosses:
+ * the host resolves each src — a file read or a fetch — and hands the bytes to
+ * the engine over FFI. See images.rs.
+ */
+export const images = {
+  count: 0,
+  node: new Int32Array([]),
+  src: new Int32Array([]),
+} satisfies ImageTable;
 
 export const root: number = 0;

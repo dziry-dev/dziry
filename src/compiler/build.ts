@@ -30,7 +30,7 @@ import { compileVariants, findToggles, type VariantCompiled } from "./variant-co
 import { toDocument } from "./jsx-runtime.ts";
 import { emitRoutes, RouteError, scanWindows, type WindowDef } from "./routes.ts";
 import { withPage, withWindowRoute } from "./route.ts";
-import { configOf, routeSignalOf, WindowError } from "./window.ts";
+import { configOf, layerOf, routeSignalOf, WindowError } from "./window.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./window-tree.ts";
 import { setCompiling, signal } from "../runtime/signal.ts";
 import { installReactivePlugin, reactiveEnabled } from "./reactive-plugin.ts";
@@ -353,6 +353,29 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
   }
 
   /**
+   * The window's Effect layer, resolved to an export name the same way. The
+   * error is the route signal's, because it is the same mistake: an object that
+   * must survive into the artifact can only do so as a name.
+   */
+  let layerName: string | null = null;
+  const layer = layerOf(shell);
+  if (layer !== undefined) {
+    const ref = index.get(layer);
+    if (!ref) {
+      throw new WindowError(
+        `<Window layer={…}> was given a value that is not a module-level export.\n` +
+          `  The generated artifact imports the layer by name, so it has to be exported —\n` +
+          `  conventionally from the window's runtime.ts. A layer built inside a component\n` +
+          `  has nowhere to live, because components are erased at build time.`,
+      );
+    }
+    layerName = ref.name;
+    const names = imports.get(ref.specifier) ?? new Set<string>();
+    names.add(ref.name);
+    imports.set(ref.specifier, names);
+  }
+
+  /**
    * A route's roots as node ids.
    *
    * An element that produced no node is dropped rather than emitted as -1: the
@@ -377,6 +400,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     routes: routeNodes,
     initial,
     routeSignal: routeSignalName,
+    layer: layerName,
   };
 
   const source = emit(

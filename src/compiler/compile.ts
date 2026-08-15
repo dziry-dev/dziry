@@ -4263,8 +4263,12 @@ export const routeSignal: ReadonlySignal<string> | null = ${routing.routeSignal 
  * The host builds a ManagedRuntime from it at launch and disposes it on quit, so
  * layer finalizers run. \`unknown\` because dziri does not depend on effect; the
  * value is recognised and run through a lazy import (runtime/effects.ts).
+ *
+ * \`windowLayer\`, not \`layer\`: the app's own export is conventionally named
+ * \`layer\`, and an emitted export of the same name would shadow its import —
+ * \`export const layer = layer\` is a TDZ self-reference, found by the smoke run.
  */
-export const layer: unknown = ${routing.layer ?? "null"};
+export const windowLayer: unknown = ${routing.layer ?? "null"};
 
 /** Folder name of the window, for diagnostics and multi-window dispatch later. */
 export const windowId: string = ${JSON.stringify(routing.window)};

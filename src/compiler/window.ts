@@ -70,6 +70,18 @@ export type WindowProps = Props &
      * makes the ownership explicit and leaves `navigate`'s eventual shape open.
      */
     route?: ReadonlySignal<string>;
+    /**
+     * The window's Effect layer — its DI root (data-layer-design.md §4,
+     * "Provision"). A module-level export, like the route signal and for the
+     * same reason: the artifact imports it by name. The host builds a
+     * ManagedRuntime from it at launch and disposes it when the window closes,
+     * so `Layer.scoped` finalizers actually run.
+     *
+     * Typed `unknown` because dziri does not depend on `effect` — the value is
+     * recognised structurally at run time and the library is imported lazily.
+     * A window without one carries no effect machinery at all.
+     */
+    layer?: unknown;
   };
 
 /**
@@ -84,6 +96,9 @@ const configs = new Map<Element, WindowConfig>();
 
 /** Route signals by window root, kept apart from the config because it is not data. */
 const routeSignals = new Map<Element, ReadonlySignal<string>>();
+
+/** Effect layers by window root — same side-table shape as the route signal. */
+const layers = new Map<Element, unknown>();
 
 export class WindowError extends Error {
   constructor(message: string) {
@@ -141,6 +156,10 @@ export function Window(props: WindowProps): Element {
     root.droppedSignals = root.droppedSignals?.filter((p) => p !== "route");
   }
 
+  // No droppedSignals dance for `layer`: a Layer is not a signal, and `attrsOf`
+  // already ignores object-valued props in silence — this side table is where it goes.
+  if (props.layer !== undefined && props.layer !== null) layers.set(root, props.layer);
+
   return root;
 }
 
@@ -168,4 +187,9 @@ export function configOf(root: Element): WindowConfig | undefined {
 /** The route signal `<Window route=…>` was given, if any. */
 export function routeSignalOf(root: Element): ReadonlySignal<string> | undefined {
   return routeSignals.get(root);
+}
+
+/** The Effect layer `<Window layer=…>` was given, if any. */
+export function layerOf(root: Element): unknown {
+  return layers.get(root);
 }

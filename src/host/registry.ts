@@ -34,8 +34,9 @@ export type WindowArtifact = CompiledUi & {
   /**
    * The window's Effect layer — `<Window layer={…}>` — or null. The worker
    * builds a ManagedRuntime from it at launch and disposes it on quit.
+   * `windowLayer` rather than `layer` so it cannot shadow the app's own export.
    */
-  layer: unknown;
+  windowLayer: unknown;
 };
 
 /** Every window in the project, as `windows.gen.ts` exports them. */

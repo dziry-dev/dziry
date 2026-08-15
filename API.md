@@ -123,7 +123,9 @@ Anything that trades robustness for capability stays a proposal.
 | `href` checked against the route table | planned — needs `<a>` as a tag the compiler accepts | M7 |
 | `defineScreen` | planned — `args` moved to `useRoute`; only `data` remains | M8 |
 | route `loader` — sync fn \| async fn \| Effect; exits drive navigation | planned — design in data-layer-design.md §4 (2026-08-15): `Redirect`/`Cancel` tags, failure views as tag-named exports in `failure.tsx`, Effect recognised by its registered symbol and imported lazily | M7/M8 |
-| `<Window layer={…}>` — Effect Layer as the window's DI root | planned — data-layer-design.md §4 "Provision": ManagedRuntime built at launch, disposed on close; loaders/handlers `yield*` tags; parent screens re-provide via a `provides` export; works identically without `effect` installed | M7/M8 |
+| `<Window layer={…}>` — Effect Layer as the window's DI root | **done** (2026-08-15) — `src/compiler/window.ts` captures it, `src/compiler/build.ts` resolves it to an export name, `src/runtime/effects.ts` builds the ManagedRuntime at launch and disposes it on quit so `Layer.scoped` finalizers run. Launch-failure *view* still rides M8; today a failed layer prints at launch | — |
+| handlers may return an `Effect` — run on the window's runtime | **done** (2026-08-15) — every dispatch path (`click`/`change`/`focus`/`blur`, list items, form `submit`/`invalid`) hands the return to `runDispatched`; failures print the full Cause, interruption is silent. `effect` recognised structurally and imported lazily; apps without it load none of it | — |
+| `Redirect` / `Cancel` navigation tags | **done** (2026-08-15) — exported from `dziri`, dependency-free classes failable from Effects and throwable from plain functions; the router that *interprets* them rides M7/M8 with `loader` | — |
 | `defineQuery` / `defineMutation` | planned | — |
 | `import "./app.css"` from a window module | **done** — module-graph order, `src/compiler/css-imports.ts` | — |
 | Tailwind as an ordinary project dependency | **done** — the project's `tailwindcss`, run in-process, `src/compiler/stylesheet.ts` | — |

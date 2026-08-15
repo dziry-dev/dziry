@@ -15,7 +15,7 @@ import { expect, test } from "bun:test";
 
 import type { Element, Node } from "./html.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./window-tree.ts";
-import { Outlet, Window } from "./window.ts";
+import { layerOf, Outlet, Window } from "./window.ts";
 
 /** The tags of an element's children, one level deep. */
 const tags = (el: Element): string[] =>
@@ -219,3 +219,22 @@ function layoutOf(name: string): Element {
     </div>
   ) as Element;
 }
+
+test("<Window layer={…}> is captured beside the tree and never becomes an attribute", () => {
+  const layer = { pipe: () => {} }; // any object export-shaped value
+  const shell = Window({
+    title: "dziri",
+    layer,
+    children: <Outlet />,
+  });
+
+  expect(layerOf(shell)).toBe(layer);
+  // The cascade must never see it — attrsOf ignores object props, and this is
+  // the test that keeps `[layer=…]` from ever being a selector someone can write.
+  expect(shell.attrs.has("layer")).toBe(false);
+});
+
+test("a window without a layer records none", () => {
+  const shell = Window({ title: "dziri", children: <Outlet /> });
+  expect(layerOf(shell)).toBeUndefined();
+});
