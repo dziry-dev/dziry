@@ -310,6 +310,15 @@ export async function runMain(options: MainOptions): Promise<void> {
       }
     };
 
+    /* Freeze the clock BEFORE the first tick, not after. `advance_animations`
+       starts a tween and advances it in the same call, and `frame_dt` reads the
+       wall clock whenever no step is set — so a first frame taken unfrozen hands
+       every animation `elapsed-since-engine-creation` as its opening dt. That
+       number is table-upload and process-startup jitter, which is exactly the
+       run-to-run flap the three animation goldens had: measured, the same
+       scenario diffed against itself on consecutive runs until this moved. */
+    if (advance !== null) engine.setTimeStep(0);
+
     /* Images before the first painted frame: a screenshot taken while a fetch is
        in flight is a picture of empty boxes. This is the page's `load` event,
        headlessly — and it runs before even the priming frame, so an <img> with
@@ -318,7 +327,6 @@ export async function runMain(options: MainOptions): Promise<void> {
     await loadImages(engine);
 
     if (advance !== null) {
-      engine.setTimeStep(0);
       engine.setInputState(-1, -1, -1);
       frame();
       engine.setTimeStep(advance);
