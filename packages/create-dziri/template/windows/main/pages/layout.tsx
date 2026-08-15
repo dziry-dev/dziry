@@ -51,6 +51,46 @@ export default function Layout() {
           <div className="rounded-md bg-amber-300 p-4 text-xs text-amber-950">third</div>
         </div>
       </div>
+
+      <div className="flex flex-col gap-3 rounded-xl bg-zinc-900 p-6">
+        <div className="text-lg font-semibold text-zinc-50">line packing</div>
+        <div className="text-xs text-zinc-400">
+          align-content / place-content — how wrapped lines share the cross axis, resolved by Taffy
+        </div>
+        <div className="flex flex-row gap-3">
+          <div className="flex h-32 w-40 flex-wrap content-start gap-1 rounded-md bg-zinc-800 p-2">
+            <div className="h-6 w-6 rounded-sm bg-lime-500" />
+            <div className="h-6 w-6 rounded-sm bg-lime-500" />
+            <div className="h-6 w-6 rounded-sm bg-lime-500" />
+            <div className="h-6 w-6 rounded-sm bg-lime-500" />
+            <div className="h-6 w-6 rounded-sm bg-lime-500" />
+            <div className="h-6 w-6 rounded-sm bg-lime-500" />
+            <div className="h-6 w-6 rounded-sm bg-lime-500" />
+            <div className="h-6 w-6 rounded-sm bg-lime-500" />
+          </div>
+          <div className="flex h-32 w-40 flex-wrap content-between gap-1 rounded-md bg-zinc-800 p-2">
+            <div className="h-6 w-6 rounded-sm bg-lime-400" />
+            <div className="h-6 w-6 rounded-sm bg-lime-400" />
+            <div className="h-6 w-6 rounded-sm bg-lime-400" />
+            <div className="h-6 w-6 rounded-sm bg-lime-400" />
+            <div className="h-6 w-6 rounded-sm bg-lime-400" />
+            <div className="h-6 w-6 rounded-sm bg-lime-400" />
+            <div className="h-6 w-6 rounded-sm bg-lime-400" />
+            <div className="h-6 w-6 rounded-sm bg-lime-400" />
+          </div>
+          <div className="flex h-32 w-40 flex-wrap place-content-center gap-1 rounded-md bg-zinc-800 p-2">
+            <div className="h-6 w-6 rounded-sm bg-lime-300" />
+            <div className="h-6 w-6 rounded-sm bg-lime-300" />
+            <div className="h-6 w-6 rounded-sm bg-lime-300" />
+            <div className="h-6 w-6 rounded-sm bg-lime-300" />
+            <div className="h-6 w-6 rounded-sm bg-lime-300" />
+            <div className="h-6 w-6 rounded-sm bg-lime-300" />
+            <div className="h-6 w-6 rounded-sm bg-lime-300" />
+            <div className="h-6 w-6 rounded-sm bg-lime-300" />
+          </div>
+        </div>
+        <div className="text-xs text-zinc-500">content-start · content-between · place-content-center</div>
+      </div>
     </div>
   );
 }

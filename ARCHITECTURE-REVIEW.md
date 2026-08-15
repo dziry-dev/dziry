@@ -717,7 +717,7 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 Citation nit: `align: Align.START,` is at ir.ts:189, not 191; the comment the finding says it 'sits immediately below' is at ir.ts:190-191 and is actually *below* align, attached to alignSelf. The rhetorical framing is off by two lines; the argument is unaffected.
 
-Secondary claim also confirmed: compile.ts:589-592 passes `[]` as the path when `rootEl.tag === '#root'`, and matches() returns false for an empty path (compile.ts:60 `if (ci < 0 || pi < 0) return false;`), so a synthetic root is unstylable and keeps align=0; the warning at compile.ts:594-598 only fires when there is more than one top-level element. windows/main/index.tsx:30 exports `<body>` so this does not bite today.
+Secondary claim also confirmed: compile.ts:589-592 passes `[]` as the path when `rootEl.tag === '#root'`, and matches() returns false for an empty path (compile.ts:60 `if (ci < 0 || pi < 0) return false;`), so a synthetic root is unstylable and keeps align=0; the warning at compile.ts:594-598 only fires when there is more than one top-level element. windows/main/index.tsx:9 exports a single `<Window>` root (it exported one `<body>` when this was written) so this does not bite today.
 
 <a id="f-compiler-css-materialized-state-not-interactive"></a>
 

@@ -53,6 +53,21 @@ export default function Borders() {
           <div className="h-16 w-16 rounded-tr-2xl rounded-bl-2xl border-4 border-teal-400" />
         </div>
       </div>
+
+      <div className="flex flex-col gap-3 rounded-xl bg-zinc-900 p-6">
+        <div className="text-lg font-semibold text-zinc-50">logical corners</div>
+        <div className="text-xs text-zinc-400">
+          rounded-ss-2xl · rounded-se-2xl · rounded-es-2xl · rounded-ee-2xl — the logical
+          border-radius properties, mapped onto the physical corners as LTR
+        </div>
+        <div className="flex flex-row items-start gap-3">
+          <div className="h-16 w-16 rounded-ss-2xl bg-rose-500" />
+          <div className="h-16 w-16 rounded-se-2xl bg-rose-500" />
+          <div className="h-16 w-16 rounded-es-2xl bg-rose-500" />
+          <div className="h-16 w-16 rounded-ee-2xl bg-rose-500" />
+          <div className="h-16 w-16 rounded-ss-2xl rounded-ee-2xl border-4 border-rose-400" />
+        </div>
+      </div>
     </div>
   );
 }

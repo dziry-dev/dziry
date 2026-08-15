@@ -46,10 +46,24 @@ function isExcluded(path: string): boolean {
   return path.endsWith(".gen.ts") || /(^|[\\/])README\.md$/.test(path);
 }
 
+/**
+ * Authored in the template, never derived — the third category.
+ *
+ * The demo's landing page renders coverage figures from `coverage.gen.ts`, which
+ * only this repository's harness writes (`bun run coverage:snapshot`), so copying
+ * it produces an app that cannot compile. The template carries its own `"/"`
+ * instead. Files here are neither copied from `windows/` nor deleted from the
+ * template, which is the same standing the template's README has — it just cannot
+ * live outside `template/windows/` the way the README does, because the route
+ * *is* the file path.
+ */
+const AUTHORED = new Set(["main/pages/index.tsx"]);
+
 async function sourceFiles(): Promise<string[]> {
   const out: string[] = [];
   for await (const file of new Glob("**/*").scan({ cwd: SOURCE, onlyFiles: true })) {
-    if (!isExcluded(file)) out.push(file.replaceAll("\\", "/"));
+    const rel = file.replaceAll("\\", "/");
+    if (!isExcluded(rel) && !AUTHORED.has(rel)) out.push(rel);
   }
   return out.sort();
 }
@@ -58,7 +72,8 @@ async function targetFiles(): Promise<string[]> {
   if (!existsSync(TARGET)) return [];
   const out: string[] = [];
   for await (const file of new Glob("**/*").scan({ cwd: TARGET, onlyFiles: true })) {
-    out.push(file.replaceAll("\\", "/"));
+    const rel = file.replaceAll("\\", "/");
+    if (!AUTHORED.has(rel)) out.push(rel);
   }
   return out.sort();
 }

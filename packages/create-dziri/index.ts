@@ -153,6 +153,19 @@ if (!noInstall) {
     console.error(`\n  bun install failed (exit ${code}). The files are written; try again in ${shown}.`);
     process.exit(code);
   }
+
+  /* The first compile, here rather than left for `bun run dev`: the `*.gen.ts`
+     files do not ship (they would be someone else's stale IR), but router.ts
+     imports one — so until a compile has run, `bun run check` fails on a fresh
+     project that is not actually broken. Failure is reported but not fatal: the
+     project is written and installed, and `bun run dev` compiles again anyway. */
+  const compile = Bun.spawn(["bun", "run", "compile"], {
+    cwd: target,
+    stdio: ["inherit", "inherit", "inherit"],
+  });
+  if ((await compile.exited) !== 0) {
+    console.error(`\n  the first compile failed — the project is written; \`bun run dev\` will retry.`);
+  }
 }
 
 console.log(
