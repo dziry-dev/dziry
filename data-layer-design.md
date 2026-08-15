@@ -3,7 +3,8 @@
 **Status:** imagined API, not implemented. Written against the pre-A0 research doc
 `framework-design.md` §3–4 (screens, `Reactive<T>`, boundaries, planes) and ROADMAP A4
 (`dataOffset`). Nothing here needs new engine symbols; it lands on M7/M8 machinery that is
-already specified.
+already specified. §4's loader subsections (three shapes, exits as navigation, failure views)
+added 2026-08-15, and `load` is renamed `loader` throughout as of the same date.
 
 > `framework-design.md` was deleted on 2026-08-02 — it was research, and enough had changed
 > that it read as current design when it was not. Its section numbers are still cited below;
@@ -31,6 +32,7 @@ this write invalidate* — are both statically knowable here.
 | **Optimistic updates** | Kept for `async`/`worker`; a **compile error** on a `sync` mutation. | Optimism hides network latency. A local write completes before the next frame boundary, so the rollback path would be dead code that can still be wrong. |
 | **`useInfiniteQuery`** | **Rejected as a primitive.** A cursor query plus the list arena's `dataOffset` (ROADMAP A4) *is* infinite scroll. | Pages-array-then-flatten is a workaround for having no windowing. We have windowing, and it is the better half of the pattern. |
 | **RPC / server layer** | **None.** Bun is the backend, in-process. A remote database or HTTP service is just `mode: async`. | There is no client/server split to bridge. Inventing one would add a codec vocabulary for a boundary that does not exist. |
+| **The loader** | `export const loader` on a screen — a **sync function**, an **async function**, or an **Effect**, detected structurally at run time. One exit contract underneath; `Redirect`/`Cancel` are exported tags, not a middleware API. | The shapes are a gradient: the more the loader can say, the more UI the build can prove. Effect buys typed failure views, interruption on supersede, and route-chain DI through the R channel — with `effect` imported lazily, so dziri depends on nothing (the `validate={}` ruling, `forms.ts`). |
 | **TanStack Query itself** | **Not imported.** Semantics adopted; runtime replaced. ROADMAP's "TanStack Query core works" should be narrowed to "would run, and would duplicate the binding graph." | Same ruling as `react-reconciler`: it works and costs a parallel registry, an observer model with no mount to hook, and key hashing for keys we already have as integers. ~500 lines of runtime against 12–40 KB and a second source of truth. |
 
 ---
@@ -104,19 +106,20 @@ const rows = projectList();          // at module top level of a screen
 
 would run against the developer's database *at build time* and bake the result into the arena as
 constant data. It would look like it worked. `db/client.ts` therefore throws whenever
-`compiling === true`, with the message *"a query ran during compilation; queries execute in load(),
-in a handler, or via .bind() during construction."* This is the data-layer sibling of the
-`.value`-at-construction guard, and it is equally non-negotiable.
+`compiling === true`, with the message *"a query ran during compilation; queries execute in
+loader(), in a handler, or via .bind() during construction."* This is the data-layer sibling of
+the `.value`-at-construction guard, and it is equally non-negotiable.
 
-`load` is never invoked by the build pass — only its existence and its inferred return type are
+`loader` is never invoked by the build pass — only its existence and its inferred return type are
 read, which is what `+screen.ts` types `data` from.
 
 ---
 
 ## 4. A screen
 
-The primary path is unchanged from the research doc's §3.3 — `load` takes the args tuple and
-nothing else, because the args tuple *is* the cache key.
+The primary path is unchanged from the research doc's §3.3 — `loader` (spelled `load` there;
+renamed 2026-08-15 to the word every router already uses) takes the args tuple and nothing else,
+because the args tuple *is* the cache key.
 
 ```tsx
 // windows/main/regions/main/projects/[id=uuid]/index.tsx
@@ -130,7 +133,7 @@ export const screen = {
   // Not async. bun:sqlite is synchronous, so the compiler emits no boundary,
   // no promise cell and no pending subtree — and `loading.tsx` beside this
   // file is a compile error.
-  load: ({ id }) => ({
+  loader: ({ id }) => ({
     project: projectById(id),
     files:   projectFiles(id),
   }),
@@ -187,6 +190,177 @@ export function Search() {
 
 `debounce` is a compiled integer on the cell, not a userland `useDeferredValue`. It is the one
 call-site option that survives, because it is a property of *this* binding rather than of the query.
+
+### The loader's three shapes *(added 2026-08-15)*
+
+A screen's `loader` may be a plain function, an async function, or an **Effect**:
+
+```ts
+export const loader = ({ id }: Args) => ({ project: projectById(id) });   // sync
+export const loader = async ({ id }: Args) => api.project(id);            // async
+export const loader = ({ id }: Args) =>                                   // Effect
+  requireAuth.pipe(Effect.andThen(projectById(id)), Effect.timeout("3 seconds"));
+```
+
+Detected at run time, structurally, in a load-bearing order — Effect first, because an Effect is
+the one shape that must not be `await`ed. Every Effect value carries `Symbol.for("effect/Effect")`,
+a *registered* symbol, so the test needs no import (measured, effect 3.22). Then thenable, then
+plain value. `effect` itself is imported lazily only to actually run one — the same dance
+`validate={}` documents in `forms.ts`, under the same ruling: dziri depends on none of them.
+
+The shapes are a gradient — the more the loader can say, the more UI the build can prove:
+
+| shape | boundary | failure views | cancellation | route-chain context |
+|---|---|---|---|---|
+| sync fn | none — frame 1 has data | none typed; a throw is a defect | n/a | — |
+| async fn | emitted | `failure.tsx` default export only | `AbortSignal` passed in, best-effort | — |
+| Effect | emitted | per-tag views, tsc-exhaustive | real interruption, finalizers run | R channel |
+
+One honesty note, because the compiler is deliberately type-blind (REACTIVITY.md §2): it cannot
+see `Effect<A, never>` or prove that no instruction suspends, so **an Effect loader always emits a
+boundary**. The zero-boundary frame-1 path is the plain sync function's privilege. An author who
+wants both writes the sync function — the shape *is* the declaration.
+
+### Exits drive navigation — there is no middleware API
+
+Middleware is what routers invent because their loaders are opaque async functions that can only
+return data or throw. An Effect loader already *is* the composition — guards, retries, timeouts
+are combinators the author applies — so the router's entire contract is interpreting the exit:
+
+| exit | interpretation |
+|---|---|
+| `Success<A>` | show the screen; `A` lands in `data` |
+| `Fail<E>`, tagged | show the matching failure view |
+| `Fail<Redirect>` / `Fail<Cancel>` | **control flow, not error** — navigate elsewhere / stay put. Two tags dziri exports; an auth guard is `Effect.fail(new Redirect("login"))`. Thrown from a function loader, they mean the same. |
+| defect | the crash screen — a bug, distinguishable from a designed failure |
+| interruption | nothing; a superseded navigation |
+
+Supersession is structural: navigating again interrupts the in-flight fiber, finalizers run, and a
+stale response can never write into a screen that was already left. `Effect.retry` runs *inside*
+the loader, so the UI never flickers through failure states while a schedule is still trying — the
+boundary leaves `pending` only on the final exit.
+
+Navigation timing is configured by presence, like everything else here: `loading.tsx` beside the
+screen means navigate immediately and show it; absent means stay on the current screen until the
+exit arrives.
+
+**The R channel is the nested-screen story.** A parent's loader *provides* a service; a child's
+*requires* it — `Effect<FileDetail, DbError, ProjectContext>`. The matched chain is a static file
+path, so `tsc` proves every requirement is satisfied by an ancestor: a screen moved under the
+wrong parent is a type error at build, not a "missing context" crash at run time. No runtime
+router can make that promise; it falls out of routes-as-files.
+
+### Failure views are files
+
+No `<Boundary>` component exists — a component whose one job is routing visibility is exactly the
+runtime-shaped ceremony this design keeps deleting. A screen's failure states are screens, and the
+framework's word for a screen is a file:
+
+```
+projects/[id]/
+  index.tsx        the screen; exports loader
+  loading.tsx      optional — presence decides navigation timing (above)
+  failure.tsx      views named by error tag
+```
+
+```tsx
+// failure.tsx
+export function DbError(e: DbError)  { return <div>db is down: {e.path}</div>; }
+export function NetworkError()       { return <Offline retry={reload} />; }
+export default function Crash()      { return <SomethingBroke />; }   // defects, unmatched tags
+```
+
+Exhaustiveness is `tsc`'s job, not the compiler's — a type-blind compiler cannot enumerate `E`.
+A `satisfies FailureViews<typeof loader>` on the module makes a missing tag a red squiggle; at run
+time an unmatched tag falls through to the default export. The compiler only reads which files
+exist and emits one hidden subtree per exported view — the same machinery as routes, switched by
+the same kind of int.
+
+### Provision — the window layer *(added 2026-08-15)*
+
+DI has one root: the window. There is no component-tree injection because there is no component
+tree at run time — components are erased at build, so the consumers of services are the things
+that survive: loaders, handlers, and (eventually) route-scoped effects. The app's contribution to
+startup is a **Layer**, not a `main` — the framework owns startup, and if the layer fails to
+build, that is a typed exit like any loader's: a launch-failure view rather than a white window.
+
+```ts
+// windows/main/runtime.ts — services and the layer
+export class Store extends Context.Tag("app/Store")<Store, LiveStore>() {}
+
+export const StoreLive = Layer.scoped(
+  Store,
+  Effect.acquireRelease(
+    Effect.promise(() => createStorePromise({ schema, adapter, storeId: "local" })),
+    (store) => Effect.promise(() => store.shutdownPromise()),
+  ),
+);
+
+export const layer = Layer.mergeAll(StoreLive, AuthLive);
+```
+
+```tsx
+// windows/main/index.tsx — attached where the window is declared
+<Window title="my app" width={1040} height={700} layer={layer}>
+```
+
+`layer={layer}` rides existing machinery: the compiler reverse-maps the object to the export it
+came from — exactly how `bind:value={sig}` records a signal's name — and emits the import into
+the artifact. At launch the runtime builds a `ManagedRuntime` from it; on window close it is
+disposed, so `Store`'s release runs and the store shuts down. Scoped resources for free.
+
+Consumers `yield*` the tag. A handler (module-level, as all handlers are):
+
+```ts
+export const onAddTodo = () =>
+  Effect.gen(function* () {
+    const store = yield* Store;                                   // ← the DI
+    yield* Effect.sync(() => store.commit(events.todoCreated({ text: draft })));
+    draft.set("");                                                // bare reads, .set writes — dziri rules hold inside
+  });
+```
+
+A loader, with the guard that makes middleware unnecessary:
+
+```ts
+export const loader = ({ id }: Args) =>
+  Effect.gen(function* () {
+    const auth = yield* Auth;
+    if (!auth.currentUser()) return yield* Effect.fail(new Redirect("login"));
+    const project = (yield* Store).query(project$(id));
+    return project ?? (yield* Effect.fail(new NotFound({ id })));
+  });
+// Effect<Project, Redirect | NotFound, Store | Auth> — requirements met by the window layer, tsc-checked
+```
+
+A parent screen provides to its descendants with a `provides` export — its loader's success value
+is registered under the tag, so a child never refetches what its layout already loaded:
+
+```ts
+// pages/projects/$id.tsx
+export class CurrentProject extends Context.Tag("screen/CurrentProject")<CurrentProject, Project>() {}
+export const provides = CurrentProject;
+
+// pages/projects/$id/files.tsx
+export const loader = () =>
+  Effect.gen(function* () {
+    const project = yield* CurrentProject;      // from the ancestor; wrong nesting = type error
+    return (yield* Store).query(filesOf$(project.id));
+  });
+```
+
+**Without `effect`, everything still works.** This is a constraint, not an aspiration: `loader`
+degrades to a sync or async function through the same exits, a guard is `throw new
+Redirect("login")`, handlers stay ordinary functions, and an absent `layer={}` builds nothing.
+dziri never imports `effect` at module scope — an Effect value is recognised by its registered
+symbol and the package is imported lazily only when the app handed one over (the `validate={}`
+ruling). An app without `effect` in its manifest never loads a byte of it, and `runtime-surface`
+keeps that honest.
+
+Open edge, deliberately unresolved: a store's *reactive* queries feeding cells directly
+(`store.subscribe(query$) → cell`) is §8's `source()` primitive, and it wants a store instance at
+module level — which the layer deliberately does not give you. A `provides`-style export or
+loader-returned streams could close it; it is a real design decision, not a footnote.
 
 ---
 
@@ -344,6 +518,10 @@ as static output.
 > error`), the resolved row cardinality, the LRU cursor, and a retry counter. Everything else —
 > which queries exist, their argument arity and types, their cache capacity, their read sets, which
 > mutations invalidate which, whether a boundary is needed at all — is compile-time.
+>
+> The loader adds one word per screen: its status (`idle | pending | ready | failed`, the failed
+> case carrying a small int into the emitted view list) plus the in-flight fiber handle while one
+> runs. Which shapes exist, which failure views exist and what each tag shows are all compile-time.
 
 Applying the four questions to the rest of TanStack Query:
 
@@ -358,7 +536,7 @@ Applying the four questions to the rest of TanStack Query:
 
 ```
 const rows = projectList();  at module scope of a screen
-  -> a query ran during compilation. Queries execute in load(), in a handler,
+  -> a query ran during compilation. Queries execute in loader(), in a handler,
      or via .bind() during construction.
 
 defineQuery(() => db.run(sql`select * from projects`))
@@ -367,8 +545,11 @@ defineQuery(() => db.run(sql`select * from projects`))
 <Suspense> around only-synchronous queries
   -> nothing under this boundary can pend.
 
-loading.tsx beside a screen whose load is synchronous
+loading.tsx beside a screen whose loader is a plain sync function
   -> this screen cannot pend; delete loading.tsx.
+
+failure.tsx beside a screen whose loader is a plain sync function
+  -> nothing here can fail typed; a sync throw is a defect and gets the crash screen.
 
 defineMutation(syncFn, { optimistic })
   -> a synchronous mutation commits before the next frame; optimistic is dead code.
@@ -413,8 +594,11 @@ projectById.bind(id) outside a component body
 Nothing here is new engine work. It is a compiler stage plus a runtime module, and it needs:
 
 - **M5** (construction pass) — `.bind` registers by ordinal.
-- **M7** (screens) — `load`, `+screen.ts`, `Reactive<T>`.
+- **M7** (screens) — `loader`, `+screen.ts`, `Reactive<T>`.
 - **M8** (`resource`, Suspense, boundaries) — the async half. The sync half needs none of it.
+- The **Effect loader shape** is not a milestone of its own: it is one more producer of the same
+  exits, recognised structurally and imported lazily. It rides M7 (the sync path) and M8 (the
+  boundaries) unchanged.
 - **M10** (clipping) — windowed lists, so `page` is real.
 
 Which means the sync, local-first, no-loading-states path — the one that makes the strongest demo —

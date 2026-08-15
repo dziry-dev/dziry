@@ -122,6 +122,8 @@ Anything that trades robustness for capability stays a proposal.
 | `useRoute` params as bindings | planned — recorders exist; the emitter does not read them yet | M7 |
 | `href` checked against the route table | planned — needs `<a>` as a tag the compiler accepts | M7 |
 | `defineScreen` | planned — `args` moved to `useRoute`; only `data` remains | M8 |
+| route `loader` — sync fn \| async fn \| Effect; exits drive navigation | planned — design in data-layer-design.md §4 (2026-08-15): `Redirect`/`Cancel` tags, failure views as tag-named exports in `failure.tsx`, Effect recognised by its registered symbol and imported lazily | M7/M8 |
+| `<Window layer={…}>` — Effect Layer as the window's DI root | planned — data-layer-design.md §4 "Provision": ManagedRuntime built at launch, disposed on close; loaders/handlers `yield*` tags; parent screens re-provide via a `provides` export; works identically without `effect` installed | M7/M8 |
 | `defineQuery` / `defineMutation` | planned | — |
 | `import "./app.css"` from a window module | **done** — module-graph order, `src/compiler/css-imports.ts` | — |
 | Tailwind as an ordinary project dependency | **done** — the project's `tailwindcss`, run in-process, `src/compiler/stylesheet.ts` | — |
@@ -844,7 +846,7 @@ defineQuery<A extends unknown[], R>(fn: (...a: A) => R, opts?: QueryOptions): Qu
 defineMutation<A extends unknown[], R>(fn: (...a: A) => R, opts?: MutationOptions<A>): Mutation<A, R>
 
 interface Query<A extends unknown[], R> {
-  (...args: A): R;                       // execute — load(), handlers, tests
+  (...args: A): R;                       // execute — loader(), handlers, tests
   live(...args: Cellish<A>): Bound<R>;   // reactive cell — construction scope only
   peek(...args: A): R | undefined;
   refetch(...args: A): void;             // -> "stale", never "pending"
