@@ -50,6 +50,7 @@ function plain(tag: string, children: Node[], classes: string[] = []): Element {
     onSubmit: null,
     classWhen: null,
     bindValue: null,
+    bindSrc: null,
     style: null,
     attrs: new Map(),
   };

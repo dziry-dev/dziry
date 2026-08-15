@@ -7,7 +7,7 @@
  * mean the same thing wherever it is parsed.
  */
 import type { CompiledUi, RouteNodes, WindowConfig } from "../ir.ts";
-import type { EditableRef } from "../runtime/bindings.ts";
+import type { EditableRef, ImageBinding } from "../runtime/bindings.ts";
 import type { ListBindingRef } from "../runtime/list-runtime.ts";
 import type { StylePatchRef } from "../runtime/patches.ts";
 import type { ReadonlySignal } from "../runtime/signal.ts";
@@ -25,11 +25,17 @@ export type WindowArtifact = CompiledUi & {
   stylePatches: StylePatchRef[];
   listBindings: ListBindingRef[];
   editables: EditableRef[];
+  imageBindings: ImageBinding[];
   routeNodes: RouteNodes[];
   initialRoute: number;
   windowConfig: WindowConfig;
   windowId: string;
   routeSignal: ReadonlySignal<string> | null;
+  /**
+   * The window's Effect layer — `<Window layer={…}>` — or null. The worker
+   * builds a ManagedRuntime from it at launch and disposes it on quit.
+   */
+  layer: unknown;
 };
 
 /** Every window in the project, as `windows.gen.ts` exports them. */

@@ -73,6 +73,7 @@ export function buildUi(artifact: WindowArtifact): CompiledUi {
     forms: artifact.forms,
     disabledBindings: artifact.disabledBindings,
     textBindings: artifact.textBindings,
+    imageBindings: artifact.imageBindings,
     handlers: artifact.handlers,
     lists: artifact.lists,
     media: artifact.media,

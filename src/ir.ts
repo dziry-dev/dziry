@@ -472,6 +472,17 @@ export type ControlTable = {
    * republish. See `controls.rs`.
    */
   value: Uint16Array;
+  /**
+   * A FILE input's `accept` attribute, verbatim; `""` on every other row.
+   *
+   * Bun-side only, with `multiple` below — like the numerics table, these never
+   * cross the boundary. The engine does not open the picker; the host does, when a
+   * click resolves to a FILE row, and the row index that resolves the click indexes
+   * these two columns directly.
+   */
+  accept: readonly string[];
+  /** 1 where a FILE input has `multiple`, 0 elsewhere. Bun-side only, like `accept`. */
+  multiple: Uint8Array;
 };
 
 export function emptyControlTable(): ControlTable {
@@ -484,6 +495,8 @@ export function emptyControlTable(): ControlTable {
     label: new Int32Array(0),
     rows: new Int32Array(0),
     value: new Uint16Array(0),
+    accept: [],
+    multiple: new Uint8Array(0),
   };
 }
 
@@ -653,6 +666,19 @@ export type TextBinding = {
   /** String-table slot to write. The table's tail is mutable; `nodes.text` is not. */
   slot: number;
   parts: TextPartRef[];
+};
+
+/**
+ * A dynamic `src` on an `<img>`, from `bind:src={sig}`.
+ *
+ * The slot is the string the image table points into; when the signal moves
+ * the worker rewrites `strings[slot]` and the loader picks the new path up
+ * on the next frame.
+ */
+export type ImageBinding = {
+  node: number;
+  slot: number;
+  signal: ReadonlySignal<string>;
 };
 
 export type HandlerBinding = {
@@ -992,6 +1018,7 @@ export type CompiledUi = {
   nodes: NodeTable;
   variants: VariantTable;
   textBindings: TextBinding[];
+  imageBindings: ImageBinding[];
   handlers: HandlerBinding[];
   /** Every `<form>`, with Enter's outcome resolved. See [`FormBinding`]. */
   forms: FormBinding[];

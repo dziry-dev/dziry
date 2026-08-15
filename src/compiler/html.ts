@@ -1,4 +1,4 @@
-/**
+﻿/**
  * A small, strict HTML parser.
  *
  * Deliberately *not* an error-recovering browser parser: unbalanced tags are a
@@ -107,6 +107,15 @@ export type Element = {
    * evidence in `HTML-ELEMENT-COVERAGE-RESEARCH.md` — so it is worth keeping accurate.
    */
   bindValue: unknown;
+  /**
+   * A signal holding an `<img>`'s `src`, from `bind:src={sig}`.
+   *
+   * `src` is a string slot the image table points into; when the signal moves
+   * the worker rewrites the slot and the loader picks the new path up on the
+   * next frame — the same incremental-string mechanism a text binding uses,
+   * pointed at an image row instead of a text run.
+   */
+  bindSrc: unknown;
   /**
    * An inline `style="…"` declaration list.
    *
@@ -228,6 +237,7 @@ export function parseHtml(src: string): Element {
     onSubmit: null,
     classWhen: null,
     bindValue: null,
+    bindSrc: null,
     style: null,
     attrs: new Map(),
   };
@@ -311,6 +321,7 @@ export function parseHtml(src: string): Element {
     onSubmit: null,
         classWhen: null,
         bindValue: null,
+        bindSrc: null,
         style: null,
         attrs: parseAttributes(attrSrc),
       };
@@ -336,6 +347,7 @@ export function parseHtml(src: string): Element {
       ...(attrs.has("oninvalid") ? { onInvalid: attrs.get("oninvalid") } : {}),
       classWhen: null,
       bindValue: null,
+      bindSrc: null,
       style: attrs.get("style") ?? null,
       attrs,
     };

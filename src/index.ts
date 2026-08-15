@@ -62,3 +62,8 @@ export type { AlertLevel } from "./runtime/alert.ts";
  */
 export { fileInfo, readFile, readFileText } from "./runtime/files.ts";
 export type { FileInfo } from "./runtime/files.ts";
+
+// Navigation as control flow — thrown by plain handlers/loaders, failed by Effect
+// ones; the router interprets them (data-layer-design.md §4). Exported now so the
+// tags' identity does not move when the loader lands.
+export { Cancel, Redirect } from "./runtime/effects.ts";

@@ -25,7 +25,7 @@ import {
 } from "../ir.ts";
 import { parseHtml, type DynList, type Element, type Node, type TextPart } from "./html.ts";
 import { isItemSentinel, isRecorder, ItemExpressionError, pathOf } from "./item-path.ts";
-import { isSignal } from "../runtime/signal.ts";
+import { isSignal, type Signal } from "../runtime/signal.ts";
 import { isParamSentinel, ParamExpressionError } from "./route-args.ts";
 import { allLocals } from "./reactive-runtime.ts";
 import { type VariantCompiled } from "./variant-compile.ts";
@@ -236,6 +236,22 @@ export type BuiltTextBinding = {
   node: number;
   slot: number;
   parts: TextPart[];
+};
+
+/**
+ * A dynamic `src` on an `<img>`, from `bind:src={sig}`.
+ *
+ * The slot is the string the image table points into; when the signal moves the
+ * worker rewrites `strings[slot]` and the loader picks the new path up on the
+ * next frame — the same incremental-string mechanism a text binding uses,
+ * pointed at an image row instead of a text run.
+ */
+export type BuiltImageBinding = {
+  node: number;
+  slot: number;
+  ref: unknown;
+  /** Filled in by the resolve pass. */
+  name: string;
 };
 
 export type BuiltHandler = {
@@ -888,6 +904,7 @@ export type CompileResult = {
   nodes: BuiltNode[];
   root: number;
   textBindings: BuiltTextBinding[];
+  imageBindings: BuiltImageBinding[];
   handlers: BuiltHandler[];
   editables: BuiltEditable[];
   lists: BuiltList[];
@@ -936,6 +953,14 @@ export type EmittedRouting = {
    * changes, which is what every screenshot and golden scenario wants.
    */
   routeSignal: string | null;
+  /**
+   * Export name of the window's Effect layer — `<Window layer={…}>` — or null.
+   *
+   * Same rule as the route signal: the object survives the compiler/runtime file
+   * boundary only as a name, so it must be a module-level export. The host builds
+   * a ManagedRuntime from it at launch; absent, no effect machinery ever loads.
+   */
+  layer: string | null;
 };
 
 /**
@@ -1029,6 +1054,7 @@ export function compileTree(
     },
   };
   const textBindings: BuiltTextBinding[] = [];
+  const imageBindings: BuiltImageBinding[] = [];
   const handlers: BuiltHandler[] = [];
   const lists: BuiltList[] = [];
   /** `disabled={signal}`, per element, resolved to control rows after the walk. */
@@ -2011,7 +2037,20 @@ export function compileTree(
     // and earns no row: there is nothing to fetch.
     if (el.tag === "img") {
       const src = el.attrs.get("src")?.trim();
-      if (src) images.push({ node: self, src: internString(src) });
+      // `bind:src={sig}` makes the src dynamic: the binding owns the row's
+      // string slot — initialised from the signal's current value — and the
+      // worker rewrites it when the signal moves. A static `src` alongside is
+      // the fallback for the frame before the first publish... but since the
+      // binding applies before the first upload, the signal's value is what
+      // the row starts with, and the attribute is ignored. A missing src with
+      // no binding is a broken image by HTML's own rules and earns no row.
+      if (el.bindSrc && isSignal(el.bindSrc)) {
+        const slot = internString(String((el.bindSrc as Signal<string>).value));
+        images.push({ node: self, src: slot });
+        imageBindings.push({ node: self, slot, ref: el.bindSrc, name: "" });
+      } else if (src) {
+        images.push({ node: self, src: internString(src) });
+      }
     }
 
     // The numeric envelope a binding needs later — range and number only. The
@@ -2474,6 +2513,7 @@ export function compileTree(
     nodes,
     root: rootIndex,
     textBindings,
+    imageBindings,
     handlers,
     editables,
     lists,
@@ -3350,6 +3390,7 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     // Bindings are resolved and emitted only on the generated-module path; the
     // in-memory IR is used by tests and the variant probe, which are static.
     textBindings: [],
+    imageBindings: [],
     handlers: [],
     // The *table* needs no resolution — it is where each arena is and where it
     // splices in, all of it compile-time. Only the binding refs need a signal,
@@ -3381,6 +3422,8 @@ function controlTable(controls: BuiltControl[]): CompiledUi["controls"] {
     label: Int32Array.from(controls, (c) => c.label),
     rows: Int32Array.from(controls, (c) => c.rows),
     value: Uint16Array.from(controls, (c) => c.value),
+    accept: controls.map((c) => c.accept ?? ""),
+    multiple: Uint8Array.from(controls, (c) => (c.multiple ? 1 : 0)),
   };
 }
 
@@ -3915,7 +3958,7 @@ export function emit(
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
 import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
-import type { EditableRef } from "${typesFrom}/runtime/bindings.ts";
+import type { EditableRef, ImageBinding } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
 
@@ -4019,6 +4062,14 @@ ${result.disabled
 export const editables = [
 ${result.editables.map((e) => `  { node: ${e.node}, signal: ${e.name} },`).join("\n")}
 ] satisfies EditableRef[];
+
+/**
+ * Dynamic image sources. When the signal moves, the worker rewrites
+ * strings[slot] and the loader fetches the new path on the next frame.
+ */
+export const imageBindings = [
+${result.imageBindings.map((b) => `  { node: ${b.node}, slot: ${b.slot}, signal: ${b.name} },`).join("\n")}
+] satisfies ImageBinding[];
 
 /**
  * Conditional classes, compiled to style-table writes.
@@ -4125,6 +4176,8 @@ export const controls = {
   label: ${typedArray("Int32Array", controlRows.map((c) => c.label))},
   rows: ${typedArray("Int32Array", controlRows.map((c) => c.rows))},
   value: ${typedArray("Uint16Array", controlRows.map((c) => c.value))},
+  accept: ${JSON.stringify(controlRows.map((c) => c.accept ?? ""))},
+  multiple: ${typedArray("Uint8Array", controlRows.map((c) => (c.multiple ? 1 : 0)))},
 } satisfies ControlTable;
 
 /**
@@ -4203,6 +4256,15 @@ export const initialRoute: number = ${routing.initial};
  * \`routeNodes\`, and writes \`hidden\`. Null when the window never navigates.
  */
 export const routeSignal: ReadonlySignal<string> | null = ${routing.routeSignal ?? "null"};
+
+/**
+ * The window's Effect layer — \`<Window layer={…}>\` — or null.
+ *
+ * The host builds a ManagedRuntime from it at launch and disposes it on quit, so
+ * layer finalizers run. \`unknown\` because dziri does not depend on effect; the
+ * value is recognised and run through a lazy import (runtime/effects.ts).
+ */
+export const layer: unknown = ${routing.layer ?? "null"};
 
 /** Folder name of the window, for diagnostics and multi-window dispatch later. */
 export const windowId: string = ${JSON.stringify(routing.window)};

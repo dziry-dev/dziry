@@ -34,10 +34,12 @@ import { findRow } from "../find-row.ts";
 import { acquire, publish, release } from "./channel.ts";
 import type { ToMain, ToWorker } from "./messages.ts";
 import {
+  applyImageBindings,
   applyRangeChange,
   applyTextBindings,
   Dirty,
   subscribeBindings,
+  subscribeImageBindings,
   dispatch,
   dispatchChange,
   formSubmittedByPress,
@@ -49,6 +51,7 @@ import {
   writeRangeValue,
 } from "../runtime/bindings.ts";
 import { setAlertSink, type AlertRequest } from "../runtime/alert.ts";
+import { disposeWindowRuntime, provideWindowLayer } from "../runtime/effects.ts";
 import { applyFieldChange } from "../runtime/forms.ts";
 import { isRangeControl } from "../runtime/numerics.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
@@ -194,6 +197,13 @@ function start(
   const { stylePatches, listBindings, editables, disabledBindings } = generated;
   const { routeNodes, initialRoute, windowConfig, windowId } = generated;
 
+  // The window's Effect layer, if it declared one. Acquisition starts now — the
+  // design doc's "built at launch" — so services open while the first frame
+  // paints. A window without a layer never reaches effects.ts at all.
+  if (generated.layer !== null && generated.layer !== undefined) {
+    provideWindowLayer(generated.layer);
+  }
+
   /**
    * `alert()` reaches the engine thread from here, and nowhere else.
    *
@@ -262,6 +272,7 @@ function start(
   // grown the node arrays by now.
   const changedNodes: number[] = [];
   applyTextBindings(ui, changedNodes);
+  applyImageBindings(ui);
   updateLists(ui, listBindings);
   applyStylePatches(ui, stylePatches);
   // Before the first upload, so a control authored `disabled={sig}` with the signal
@@ -305,6 +316,12 @@ function start(
 
   subscribeBindings(ui, () => {
     applyTextBindings(ui, changedNodes);
+    dirty = true;
+    schedule();
+  });
+
+  subscribeImageBindings(ui, () => {
+    applyImageBindings(ui);
     dirty = true;
     schedule();
   });
@@ -505,12 +522,11 @@ function start(
                 e.node,
               );
               if (controlRow >= 0 && ui.controls.kind[controlRow] === ControlKind.FILE) {
-                const ctrl = generated.controls[controlRow];
                 post({
                   t: "file_dialog",
                   node: e.node,
-                  accept: ctrl?.accept,
-                  multiple: ctrl?.multiple,
+                  accept: ui.controls.accept[controlRow] || undefined,
+                  multiple: ui.controls.multiple[controlRow] === 1,
                 } satisfies ToMain);
                 break;
               }
@@ -648,7 +664,11 @@ function start(
       }
 
       case "quit":
-        process.exit(0);
+        // Dispose the window's Effect runtime first, so layer finalizers run —
+        // a store's shutdown belongs to the window's close, not to luck. The
+        // call resolves immediately when no layer was ever provided.
+        void disposeWindowRuntime().finally(() => process.exit(0));
+        break;
 
       case "file_dialog_result": {
         // A file was chosen (or the dialog was cancelled). Update the FILE input's bound

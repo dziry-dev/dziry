@@ -18,6 +18,7 @@ import {
   stepValue,
 } from "./numerics.ts";
 import { applyIssues, formPayload, validatePayload, type Validated } from "./forms.ts";
+import { runDispatched } from "./effects.ts";
 import { batch, type Signal } from "./signal.ts";
 
 /**
@@ -64,6 +65,38 @@ export function applyTextBindings(ui: CompiledUi, changed?: number[]): Dirty {
 }
 
 /**
+ * Applies dynamic image sources: rewrites the string slot each `bind:src`
+ * points at when its signal has moved.
+ *
+ * Same incremental-string mechanism as `applyTextBindings` — a changed string
+ * means the loader picks the new path up on the next frame, so this is a
+ * `Dirty.LAYOUT` (the image's box may need re-measuring).
+ */
+export function applyImageBindings(ui: CompiledUi): Dirty {
+  let dirty: Dirty = Dirty.NONE;
+
+  for (const binding of ui.imageBindings) {
+    const next = String(binding.signal.value);
+    if (ui.strings[binding.slot] !== next) {
+      ui.strings[binding.slot] = next;
+      dirty = Dirty.LAYOUT;
+    }
+  }
+
+  return dirty;
+}
+
+/**
+ * Subscribes `onChange` to every signal any image binding reads.
+ */
+export function subscribeImageBindings(ui: CompiledUi, onChange: () => void): () => void {
+  const unsubscribes = ui.imageBindings.map((b) => b.signal.subscribe(onChange));
+  return () => {
+    for (const off of unsubscribes) off();
+  };
+}
+
+/**
  * Subscribes `onChange` to every signal any binding reads.
  *
  * Deliberately coarse: one callback for the whole document rather than per-node
@@ -90,6 +123,15 @@ export function subscribeBindings(ui: CompiledUi, onChange: () => void): () => v
 }
 
 export type EditableRef = { node: number; signal: Signal<string> };
+
+/**
+ * A dynamic `src` on an `<img>`, from `bind:src={sig}`.
+ *
+ * The slot is the string the image table points into; when the signal moves the
+ * worker rewrites `strings[slot]` and the loader picks the new path up on the
+ * next frame.
+ */
+export type ImageBinding = { node: number; slot: number; signal: Signal<string> };
 
 // The numeric bridge's pure half lives in `numerics.ts` (shared with
 // `forms.ts`, which this module already imports — a shared home is the only
@@ -296,12 +338,32 @@ export function editText(
   return chars.slice(0, from).join("") + inserted + chars.slice(to).join("");
 }
 
-/** The handler of a kind bound to a node, or null. */
+/**
+ * Wraps a handler so a returned Effect is run rather than dropped.
+ *
+ * The form path calls its handlers in five places across three branches; wrapping
+ * once at lookup is what keeps "a submit handler may return an Effect" true in
+ * all of them without five call-site edits.
+ */
+function effectful(
+  fn: ((value?: unknown) => unknown) | null,
+  label: string,
+): ((value?: unknown) => void) | null {
+  return fn && ((value?: unknown) => void runDispatched(fn(value), label));
+}
+
+/**
+ * The handler of a kind bound to a node, or null.
+ *
+ * Declared as returning `unknown` rather than `void`: a handler may return an
+ * Effect, and the dispatchers hand whatever came back to `runDispatched` — one
+ * structural check, and a non-Effect return is ignored exactly as before.
+ */
 export function handlerFor(
   ui: CompiledUi,
   node: number,
   kind: "click" | "change" | "focus" | "blur" | "submit" | "invalid" = "click",
-): ((value?: unknown) => void) | null {
+): ((value?: unknown) => unknown) | null {
   for (const h of ui.handlers) {
     if (h.node === node && h.kind === kind) return h.fn;
   }
@@ -323,7 +385,7 @@ export function dispatch(
 ): boolean {
   const fn = handlerFor(ui, node, kind);
   if (!fn) return false;
-  batch(fn);
+  runDispatched(batch(fn), `${kind} handler at node ${node}`);
   return true;
 }
 
@@ -383,7 +445,10 @@ export function dispatchChange(
           ? (rangeValue(ui, node, raw) ?? raw)
           : raw;
 
-  batch(() => fn(value));
+  runDispatched(
+    batch(() => fn(value)),
+    `change handler at node ${node}`,
+  );
   return true;
 }
 
@@ -497,9 +562,10 @@ export function submitForm(ui: CompiledUi, form: number, button: number): boolea
   if (button >= 0 && isDisabledNow(ui, button)) return false;
 
   const binding = ui.forms.find((f) => f.node === form);
-  const submit = handlerFor(ui, form, "submit");
-  const invalid = handlerFor(ui, form, "invalid");
-  const click = button >= 0 ? handlerFor(ui, button, "click") : null;
+  const submit = effectful(handlerFor(ui, form, "submit"), `submit handler at node ${form}`);
+  const invalid = effectful(handlerFor(ui, form, "invalid"), `invalid handler at node ${form}`);
+  const click =
+    button >= 0 ? effectful(handlerFor(ui, button, "click"), `click handler at node ${button}`) : null;
   if (!submit && !click) return false;
 
   // The button's own handler runs whether or not the payload validates, and before the

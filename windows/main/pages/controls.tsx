@@ -74,13 +74,91 @@
  * Scrolling outside does not dismiss it, `<optgroup>` labels do not render, and there is no
  * type-to-select.
  */
-import { signal, fileInfo } from "dziri";
+import { signal, fileInfo, readFile, readFileText } from "dziri";
 
 const CARD = "flex flex-col gap-3 rounded-xl bg-zinc-900 p-6";
 const H = "text-lg font-semibold text-zinc-50";
 const SUB = "muted text-xs text-zinc-400";
 const ROW = "flex flex-row items-center gap-2";
 const LABEL = "text-xs text-zinc-300";
+
+// Module-level, unlike this page's other signals, because `onFilePick` below has to
+// reach them. A handler that calls a package helper (`fileInfo`) must itself be a
+// module-level export: an *inline* handler's body is copied into the generated
+// artifact verbatim, where `fileInfo` would be a bare name with no import.
+export const filePath = signal("");
+export const fileName = signal("");
+export const fileSize = signal(0);
+export const fileType = signal("");
+
+/** Fills the metadata rows once the native picker returns a path. */
+export function onFilePick(): void {
+  const path = filePath.value;
+  if (!path) return;
+  void fileInfo(path).then((info) => {
+    fileName.set(info.name);
+    fileSize.set(info.size);
+    fileType.set(info.type);
+  });
+}
+
+// --- Example 1: image upload with preview ------------------------------------
+
+/** The image preview's `src`, driven by `bind:src` on the `<img>`. */
+export const previewSrc = signal("");
+export const previewName = signal("");
+export const savedTo = signal("");
+export const previewBytes = signal(0);
+
+/** When a file is picked, show its name and preview it. */
+export function onImagePick(): void {
+  const path = filePath.value;
+  if (!path) return;
+  previewSrc.set(path);
+  previewName.set(path.split("\\").pop() ?? path);
+  void readFile(path).then((bytes) => previewBytes.set(bytes.length));
+}
+
+/** Copies the picked file into `uploads/` beside the project. */
+export function saveToUploads(): void {
+  const path = filePath.value;
+  if (!path) return;
+  const name = previewName.value || "upload";
+  const dest = `uploads/${name}`;
+  void readFile(path).then((bytes) => {
+    Bun.write(dest, bytes);
+    savedTo.set(dest);
+  });
+}
+
+// --- Example 2: read the file as a buffer ------------------------------------
+
+export const bufferPath = signal("");
+export const bufferInfo = signal("");
+export const bufferPreview = signal("");
+
+/** Reads the picked file into memory and shows a hex preview. */
+export function onBufferPick(): void {
+  const path = bufferPath.value;
+  if (!path) return;
+  void fileInfo(path).then((info) => {
+    bufferInfo.set(`${info.name} — ${info.size} bytes — ${info.type}`);
+  });
+  void readFile(path).then((bytes) => {
+    // Show the first 16 bytes as hex, like a hex editor would.
+    const hex = [...bytes.slice(0, 16)].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+    bufferPreview.set(`first 16 bytes: ${hex}${bytes.length > 16 ? " …" : ""}`);
+  });
+}
+
+/** Reads the picked file as text, for `.txt` / `.json` / `.csv` picks. */
+export function onTextPick(): void {
+  const path = bufferPath.value;
+  if (!path) return;
+  void readFileText(path).then((text) => {
+    bufferPreview.set(text.slice(0, 200));
+  });
+}
 
 export default function Controls() {
   // Component-local, because the field belongs to this page and nothing else reads it.
@@ -115,10 +193,6 @@ export default function Controls() {
   const rangeVal = signal("50");
   const colorVal = signal("#6366f1");
   const numVal = signal("42");
-  const filePath = signal("");
-  const fileName = signal("");
-  const fileSize = signal(0);
-  const fileType = signal("");
 
   return (
     <div className="flex flex-col gap-5">
@@ -480,16 +554,7 @@ export default function Controls() {
               type='file'
               accept='image/*'
               bind:value={filePath}
-              onChange={() => {
-                const p = filePath.value;
-                if (p) {
-                  fileInfo(p).then((info) => {
-                    fileName.set(info.name);
-                    fileSize.set(info.size);
-                    fileType.set(info.type);
-                  });
-                }
-              }}
+              onChange={onFilePick}
             />
             <span className={LABEL}>accept=image/*, bound, shows metadata</span>
           </div>
@@ -510,6 +575,74 @@ export default function Controls() {
             <span className='text-xs text-zinc-200'>{fileSize}</span>
             <span className={LABEL}>type:</span>
             <span className='text-xs text-zinc-200'>{fileType}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className={CARD}>
+        <div className={H}>Example 1: image upload with preview</div>
+        <div className={SUB}>
+          pick an image, it previews immediately via bind:src · then click Save to copy it
+          into the uploads/ folder
+        </div>
+        <div className='flex flex-col gap-3'>
+          <div className={ROW}>
+            <input
+              type='file'
+              accept='image/*'
+              bind:value={filePath}
+              onChange={onImagePick}
+            />
+            <span className={LABEL}>pick an image</span>
+          </div>
+          <div className={ROW}>
+            <span className={LABEL}>preview:</span>
+            <span className='text-xs text-zinc-200'>{previewName}</span>
+            <span className='text-xs text-zinc-400'>(</span>
+            <span className='text-xs text-zinc-400'>{previewBytes}</span>
+            <span className='text-xs text-zinc-400'>bytes)</span>
+          </div>
+          <img bind:src={previewSrc} className='h-32 w-auto rounded-lg' />
+          <div className={ROW}>
+            <button
+              className='rounded-lg bg-sky-700 px-3 py-1 text-xs font-semibold text-zinc-50'
+              onClick={saveToUploads}
+            >
+              Save to uploads/
+            </button>
+            <span className='text-xs text-emerald-400'>{savedTo}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className={CARD}>
+        <div className={H}>Example 2: read the file as a buffer</div>
+        <div className={SUB}>
+          onChange receives the path - readFile loads the bytes - the hex preview shows
+          the first 16 bytes, like a hex editor
+        </div>
+        <div className='flex flex-col gap-3'>
+          <div className={ROW}>
+            <input
+              type='file'
+              bind:value={bufferPath}
+              onChange={onBufferPick}
+            />
+            <span className={LABEL}>pick any file</span>
+          </div>
+          <div className={ROW}>
+            <span className='text-xs text-zinc-200'>{bufferInfo}</span>
+          </div>
+          <div className={ROW}>
+            <span className='text-xs font-mono text-amber-300'>{bufferPreview}</span>
+          </div>
+          <div className={ROW}>
+            <button
+              className='rounded-lg bg-zinc-700 px-3 py-1 text-xs font-semibold text-zinc-50'
+              onClick={onTextPick}
+            >
+              Read as text instead
+            </button>
           </div>
         </div>
       </div>

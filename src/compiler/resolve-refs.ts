@@ -338,6 +338,10 @@ export function resolveRefs(
     editable.name = lookup(editable.ref, `the bind:value on node ${editable.node}`).name;
   }
 
+  for (const binding of result.imageBindings) {
+    binding.name = lookup(binding.ref, `the bind:src on node ${binding.node}`).name;
+  }
+
   for (const form of result.forms) {
     for (const field of form.fields) {
       // Already named: a cell the compiler declared. Nothing to name at all: a named submit

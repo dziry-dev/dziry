@@ -696,7 +696,7 @@ export function jsx(
   if (typeof type === "function") {
     const result = (type as Component)(props);
     if (result === null) {
-      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, onChange: null, onFocus: null, onBlur: null, onSubmit: null, classWhen: null, bindValue: null, style: null, attrs: EMPTY_ATTRS };
+      return { type: "element", tag: FRAGMENT_TAG, id: null, classes: [], children: [], onClick: null, onChange: null, onFocus: null, onBlur: null, onSubmit: null, classWhen: null, bindValue: null, bindSrc: null, style: null, attrs: EMPTY_ATTRS };
     }
     if (Array.isArray(result)) {
       return {
@@ -708,6 +708,7 @@ export function jsx(
         onClick: null, onChange: null, onFocus: null, onBlur: null, onSubmit: null,
         classWhen: null,
         bindValue: null,
+        bindSrc: null,
         style: null,
         attrs: EMPTY_ATTRS,
       };
@@ -792,6 +793,7 @@ export function jsx(
     ...(errorClassName === undefined ? {} : { errorClassName }),
     classWhen: names.classWhen,
     bindValue: bound ?? null,
+    bindSrc: props["bind:src"] ?? null,
     style: styleAttr(props.style, type),
     attrs,
   };
@@ -860,6 +862,7 @@ export function toDocument(exported: Node | Node[]): Element {
     onClick: null, onChange: null, onFocus: null, onBlur: null, onSubmit: null,
     classWhen: null,
     bindValue: null,
+    bindSrc: null,
     style: null,
     attrs: EMPTY_ATTRS,
   };
@@ -967,6 +970,22 @@ type ElementProps = Props & {
    * `bind:value` — rather than passing a signal here.
    */
   value?: string;
+  /**
+   * `<input type="range">` / `<input type="number">` — the bounds, and the distance
+   * between adjacent values. Strings, like every attribute: `min="0"`. Read at
+   * compile time into the numerics side table; a number input without a bound is
+   * unbounded, a range without one gets HTML's 0–100.
+   */
+  min?: string;
+  max?: string;
+  step?: string;
+  /**
+   * `<input type="file" accept=…>` — what the native picker offers, spelled as the
+   * HTML attribute: MIME types and `.ext` entries, comma-separated
+   * (`accept="image/*,.pdf"`). The host parses it into SDL dialog filters — see
+   * `parseAcceptToFilters` in `host/main.ts`.
+   */
+  accept?: string;
   /**
    * `<input form="login">` — the id of the form this control belongs to.
    *
