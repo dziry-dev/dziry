@@ -187,7 +187,7 @@ async function emitArtifacts(): Promise<string[]> {
       });
       await writeFile(
         join(into, `${name}.gen.ts`),
-        emit(result, { html: `characterize/cases/${f}`, css: `characterize/cases/${name}.css` }),
+        emit(result, { html: `characterize/cases/${f}`, css: `characterize/cases/${name}.css` }).source,
       );
       names.push(name);
     }

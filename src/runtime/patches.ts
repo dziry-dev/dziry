@@ -39,6 +39,19 @@ export type StylePatchRef = {
 /** Last applied state per patch, so only genuine changes cost writes. */
 const applied = new WeakMap<StylePatchRef, boolean>();
 
+/**
+ * Drops the applied-state memo, so the next {@link applyStylePatches} writes every
+ * patch regardless of whether its signal moved.
+ *
+ * Hot reload needs exactly this: a swap rewrites the style rows *under* an active
+ * patch, the patch's signal has not changed, and without a reset the memo would
+ * skip it — leaving the new base values showing where the patch should still be
+ * painting. Called once per swap, not on any per-frame path.
+ */
+export function resetAppliedPatches(patches: StylePatchRef[]): void {
+  for (const patch of patches) applied.delete(patch);
+}
+
 export function applyStylePatches(ui: CompiledUi, patches: StylePatchRef[]): Dirty {
   let dirty: Dirty = Dirty.NONE;
 

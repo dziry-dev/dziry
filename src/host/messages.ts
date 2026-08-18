@@ -19,6 +19,7 @@
 import type { Span } from "../engine/bind.ts";
 import type { EngineEvent } from "../engine/host.ts";
 import type { Capacities } from "../engine/upload.ts";
+import type { HotPayload } from "../hot.ts";
 
 /** What the app thread needs before the engine exists. */
 export type WindowRequest = {
@@ -70,4 +71,11 @@ export type ToWorker =
   | { t: "events"; events: EngineEvent[] }
   | { t: "quit" }
   /** Result of a file dialog opened via `{ t: "file_dialog" }`. */
-  | { t: "file_dialog_result"; node: number; paths: string[] };
+  | { t: "file_dialog_result"; node: number; paths: string[] }
+  /**
+   * Hot reload (ROADMAP D1, stage 1): a watched recompile whose structural
+   * fingerprint matched, so only style *values* moved. The worker writes them
+   * into the live tables and republishes; state, focus and scroll survive.
+   * Arrives via the CLI's IPC channel, forwarded by the engine thread.
+   */
+  | { t: "hot"; payload: HotPayload };

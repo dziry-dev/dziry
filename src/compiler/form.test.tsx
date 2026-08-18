@@ -91,7 +91,7 @@ async function artifact(
       .join("\n") || "export {};",
   );
 
-  const source = emit(result, { html: "test", css: "none", typesFrom: PACKAGE_ROOT }, imports, variants);
+  const source = emit(result, { html: "test", css: "none", typesFrom: PACKAGE_ROOT }, imports, variants).source;
   await writeFile(join(dir, "ui.gen.ts"), source);
 
   const module = (await import(join(dir, "ui.gen.ts"))) as unknown as Artifact;

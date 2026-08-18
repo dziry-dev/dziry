@@ -58,6 +58,7 @@ import { disposeWindowRuntime, provideWindowLayer, runLoader, startSources } fro
 import { applyFieldChange } from "../runtime/forms.ts";
 import { isRangeControl } from "../runtime/numerics.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
+import { applyHotPayload } from "../runtime/hot.ts";
 import { applyDisabled, subscribeDisabled } from "../runtime/controls.ts";
 import type { Signal } from "../runtime/signal.ts";
 import {
@@ -727,6 +728,30 @@ function start(
         // call resolves immediately when no layer was ever provided.
         void disposeWindowRuntime().finally(() => process.exit(0));
         break;
+
+      case "hot": {
+        // Hot reload (ROADMAP D1, stage 1): the watcher recompiled and only style
+        // values moved. Write them over the live tables and republish — state,
+        // focus and scroll all survive. The counts check is the fingerprint's
+        // contract asserted once more at the last moment; a stale payload from an
+        // out-of-order save is ignored rather than applied.
+        if (uploader === null || flags === null || growing) break;
+        if (!applyHotPayload(ui, stylePatches, message.payload)) {
+          console.error("  hot reload: a stale payload was ignored (shape did not match).");
+          break;
+        }
+        acquire(flags);
+        try {
+          uploader.uploadStyles();
+          uploader.uploadMedia();
+          uploader.uploadTweens();
+          publish(flags);
+        } finally {
+          release(flags);
+        }
+        post({ t: "published" });
+        break;
+      }
 
       case "file_dialog_result": {
         // A file was chosen (or the dialog was cancelled). Update the FILE input's bound

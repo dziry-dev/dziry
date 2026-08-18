@@ -21,7 +21,7 @@
 import { join, relative, dirname, isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { existsSync, readdirSync } from "node:fs";
-import { compileTree, emit, dump, PACKAGE, type EmittedRouting, type LoaderRef } from "./compile.ts";
+import { compileTree, emit, dump, hashText, PACKAGE, type EmittedRouting, type LoaderRef } from "./compile.ts";
 import { CssError } from "./diagnostics.ts";
 import { installCssGraph, stylesheetsFor } from "./css-imports.ts";
 import { loadStylesheet, SheetMap, StylesheetError, type CssSource } from "./stylesheet.ts";
@@ -39,6 +39,7 @@ import { installReactivePlugin, reactiveEnabled } from "./reactive-plugin.ts";
 import { resetLocals } from "./reactive-runtime.ts";
 import type { Element, Node } from "./html.ts";
 import { routeChain, type RouteNodes } from "../ir.ts";
+import type { HotManifestEntry } from "../hot.ts";
 
 /** Where the generated registry and entries land, relative to the project. */
 export const REGISTRY_FILE = "windows/windows.gen.ts";
@@ -73,6 +74,13 @@ export type CompileOptions = {
    * importing a module that was never regenerated.
    */
   outOverride?: string | null;
+  /**
+   * Set by the dev watcher: each window's hot-reload fingerprint and payload are
+   * put here as it compiles. The watcher writes the collected map to a manifest
+   * file, because a watched compile runs in a subprocess and this is how the
+   * data crosses back. See src/hot.ts.
+   */
+  hot?: Map<string, HotManifestEntry>;
 };
 
 export type Compiled = {
@@ -594,7 +602,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     loaders,
   };
 
-  const source = emit(
+  const emitted = emit(
     result,
     {
       html: rel(join(projectDir, window.entry)),
@@ -604,6 +612,14 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     variants,
     routing,
   );
+  const source = emitted.source;
+
+  // Hot reload's half of the compile: the fingerprint the watcher compares, and
+  // the style values it ships on a match. See src/hot.ts for the ruling.
+  options.hot?.set(window.id, {
+    fingerprint: hashText(emitted.structural),
+    payload: emitted.hot,
+  });
 
   await Bun.write(outPath, source);
 

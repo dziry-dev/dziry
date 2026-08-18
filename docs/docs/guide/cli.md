@@ -62,6 +62,26 @@ You can also write `--` explicitly to separate them:
 `--single` runs both halves in one thread — the pre-Worker path. It exists for
 debugging and comparison; see [Threads](../internals/threads.md) for what it gives up.
 
+### Hot reload
+
+`dziri dev` watches `windows/` while the app runs. What happens on save depends on
+what changed:
+
+- **A `.css` save that only moves style *values*** — a colour, a padding, an
+  animation's duration — swaps the new style table into the running window and
+  repaints. Signals, focus, scroll position and text all survive. The compiler
+  proves the swap is safe by hashing the artifact with the style values blanked;
+  an equal fingerprint means every row, slot and binding is where the running
+  window left it.
+- **Anything else** — markup, handlers, or a CSS change that alters the *shape* of
+  the interned style table (two rules merging into one row, a media condition
+  coming or going) — recompiles and restarts the app. A compile is tens of
+  milliseconds, so the fallback is a blink, not a build.
+- **A save that does not compile** prints the error and keeps the running app.
+
+Handler and markup changes that keep *application state* alive are stages 2 and 3
+of ROADMAP D1 — not implemented; markup reload is cut from v1 entirely.
+
 ## build
 
 ```bash

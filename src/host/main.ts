@@ -148,6 +148,20 @@ export async function runMain(options: MainOptions): Promise<void> {
   const worker = new Worker(workerOverride ?? options.worker, { preload } as WorkerOptions);
   const send = (message: ToWorker) => worker.postMessage(message);
 
+  /* Hot reload: `dziri dev` watches the project and, when a recompile moved only
+     style values, sends the new ones over the IPC channel it spawned this
+     process with. The engine thread holds no opinion about styles — it forwards.
+     Registered only under the watcher's env var: `process.on("message")` on a
+     process with no channel never fires, but some platforms keep the process
+     alive for it, which a packaged build cannot afford. */
+  if (process.env.DZIRI_HOT === "1") {
+    process.on("message", (message: unknown) => {
+      if (typeof message === "object" && message !== null && (message as { t?: unknown }).t === "hot") {
+        send(message as ToWorker);
+      }
+    });
+  }
+
   /**
    * The app thread reports what the window needs before the engine exists.
    *

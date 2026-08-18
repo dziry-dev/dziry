@@ -6,7 +6,7 @@
 // 0 text bindings, 0 handlers.
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
+import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
 import type { EditableRef, ImageBinding } from "dziri/runtime/bindings.ts";
 import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
 import type { StylePatchRef } from "dziri/runtime/patches.ts";
@@ -228,6 +228,21 @@ export const forms = [
 export const textBindings = [
 
 ] satisfies TextBinding[];
+
+/** Route-parameter text runs — literals interleaved with {args.x} reads. */
+export const paramBindings = [
+
+] satisfies ParamBinding[];
+
+/** Loader-data text runs — literals interleaved with {data.x} reads. */
+export const dataBindings = [
+
+] satisfies DataBinding[];
+
+/** Loader-error text runs — literals interleaved with {error.x} reads. */
+export const errorBindings = [
+
+] satisfies ErrorBinding[];
 
 /** Click and change handlers, as direct references to the app's exported functions. */
 export const handlers = [

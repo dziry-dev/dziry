@@ -234,7 +234,7 @@ const source = emit(
   { html: rel(inputPath), css: sheetNames },
   imports,
   variants,
-);
+).source;
 await Bun.write(outPath, source);
 
 if (flags.has("--dump")) {

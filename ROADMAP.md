@@ -1323,12 +1323,23 @@ accessibility — shipping the visuals while dropping the reason it exists will 
   from day one. The template is *derived* from `windows/` by `bun run template:sync`
   and `template:check` fails the build if they drift — a hand-maintained template
   rots into one that will not compile against the framework that scaffolded it.
-- **Hot reload: still not started.** The three stages below are unchanged.
+- **Hot reload: stage 1 landed 2026-08-18.** `dziri dev` watches `windows/`; a CSS save
+  whose structural fingerprint is unchanged (style *values* only) swaps the style,
+  media, tween, keyframe and patch tables into the running window over IPC and
+  repaints — state, focus and scroll survive. Anything else recompiles in a
+  subprocess (Bun's module cache makes an in-process recompile stale) and restarts
+  the app. The mechanism: `emit` composes the artifact twice, once with style
+  values blanked (`structural`), and the hash of that is the swap-or-restart
+  decision; `src/hot.ts` is the wire format, `src/runtime/hot.ts` the worker half.
+  Stage 2 below remains open.
 - **Hot reload in three stages, easiest first:**
   1. **CSS-only** — a stylesheet change alters the style table but not the tree, so swap tables
      and repaint. State, focus and scroll all survive. This is the demo that sells the thesis.
+     **Done**, with one refinement: the swap is keyed on a structural fingerprint, so a CSS
+     edit that changes the interned table's *shape* (two styles merging, a media condition
+     added) falls back to a restart rather than corrupting row pointers.
   2. **Module-level** — reload handlers and callbacks without rebuilding the IR. Covers most
-     development iteration.
+     development iteration. Not started; a non-CSS change restarts the app instead.
   3. **Markup reload — cut from v1.** Node ids change, so signal subscriptions, focus, scroll and
      list slot identity all need a stable identity key generalised from the list `key` concept.
      That's a research problem, and stages 1 and 2 already cover the large majority of iteration.

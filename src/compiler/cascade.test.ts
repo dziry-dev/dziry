@@ -1024,7 +1024,7 @@ test("a uniform style column is emitted as a fill, and a varying one is not", ()
   const html = `<body><div class="a"></div><div class="b"></div></body>`;
   // Nothing here sets a margin, so `marT` is uniform; `width` differs per slot.
   const css = `.a { width: 10px } .b { width: 20px }`;
-  const source = emit(compile(html, css), { html, css, typesFrom: "../src" });
+  const source = emit(compile(html, css), { html, css, typesFrom: "../src" }).source;
 
   // Zero needs no `fill`: a typed array is already zero-filled.
   expect(source).toMatch(/marT: new Float32Array\(\d+\),/);
