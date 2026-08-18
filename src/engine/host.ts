@@ -75,6 +75,7 @@ const SYMBOLS = {
   dziri_engine_drain_events: { args: [u32, PTR, u32, PTR], returns: i32 },
   dziri_engine_grow: { args: [u32, PTR], returns: i32 },
   dziri_engine_resize: { args: [u32, u32, u32], returns: i32 },
+  dziri_engine_reset: { args: [u32, u32], returns: i32 },
   dziri_engine_set_input_state: { args: [u32, i32, i32, i32], returns: i32 },
   dziri_engine_set_time_step: { args: [u32, f32], returns: i32 },
   dziri_engine_hit_test: { args: [u32, f32, f32, PTR], returns: i32 },
@@ -814,6 +815,17 @@ export class Engine {
 
   resize(width: number, height: number): void {
     check(engine.dziri_engine_resize(this.#handle, width, height), "dziri_engine_resize");
+  }
+
+  /**
+   * A new tree under the live window: dev hot reload swapped the app thread's
+   * module graph. The engine drops every reference to the old tree's node ids —
+   * hover, press, focus, an open picker, scroll offsets — and rebuilds from the
+   * tables on the next tick, which the reloaded worker is about to re-upload in
+   * full. The window, the surface and the user's place on the screen stay put.
+   */
+  reset(root: number): void {
+    check(engine.dziri_engine_reset(this.#handle, root), "dziri_engine_reset");
   }
 
   /** `[width, height, rowBytes, frames]`. */

@@ -73,14 +73,19 @@ what changed:
   proves the swap is safe by hashing the artifact with the style values blanked;
   an equal fingerprint means every row, slot and binding is where the running
   window left it.
-- **Anything else** — markup, handlers, or a CSS change that alters the *shape* of
-  the interned style table (two rules merging into one row, a media condition
-  coming or going) — recompiles and restarts the app. A compile is tens of
-  milliseconds, so the fallback is a blink, not a build.
+- **Anything else** — markup, handlers, state shape — swaps the *app thread*
+  under the live window: the old worker dumps its module-level signals and
+  current route, a fresh worker boots the recompiled artifact with them, and the
+  engine rebuilds its tree in place. The window never closes, and state whose
+  export names survived the edit survives the reload. (A renamed signal starts
+  fresh — there is no mapping to guess from. Class instances and functions are
+  not carried; they cannot cross a worker boundary as themselves.)
 - **A save that does not compile** prints the error and keeps the running app.
 
-Handler and markup changes that keep *application state* alive are stages 2 and 3
-of ROADMAP D1 — not implemented; markup reload is cut from v1 entirely.
+What still resets on a structural reload: focus, scroll position and text carets
+(engine state keyed by node id — meaningless against a new tree), and anything
+held outside module-level signals. A full process restart remains as the
+fallback when the IPC channel itself is gone.
 
 ## build
 

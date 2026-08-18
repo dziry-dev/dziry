@@ -1332,17 +1332,31 @@ accessibility — shipping the visuals while dropping the reason it exists will 
   values blanked (`structural`), and the hash of that is the swap-or-restart
   decision; `src/hot.ts` is the wire format, `src/runtime/hot.ts` the worker half.
   Stage 2 below remains open.
+- **Stage 2 landed the same day, shaped by who owns what.** Markup and handler
+  changes swap the *worker*, not the process: the engine owns the window, so the
+  old worker dumps its module-level signals and route (`__state` namespaces in the
+  artifact, keyed by export name — the one identity a recompile cannot move),
+  a fresh worker boots the recompiled artifact with them, and a new
+  `dziri_engine_reset` (protocol v44) drops the engine's references to the old
+  tree — hover, press, focus, picker, scroll — and rebuilds in place. The window
+  never closes. Focus and scroll reset deliberately: node ids belong to the old
+  tree. A full process restart remains the fallback for a dead IPC channel.
 - **Hot reload in three stages, easiest first:**
   1. **CSS-only** — a stylesheet change alters the style table but not the tree, so swap tables
      and repaint. State, focus and scroll all survive. This is the demo that sells the thesis.
      **Done**, with one refinement: the swap is keyed on a structural fingerprint, so a CSS
      edit that changes the interned table's *shape* (two styles merging, a media condition
-     added) falls back to a restart rather than corrupting row pointers.
-  2. **Module-level** — reload handlers and callbacks without rebuilding the IR. Covers most
-     development iteration. Not started; a non-CSS change restarts the app instead.
+     added) falls back to the worker swap rather than corrupting row pointers.
+  2. **Module-level** — reload handlers and callbacks without rebuilding the IR. **Done by
+     worker swap rather than by rebinding**: the IR is cheap to rebuild and re-upload, and a
+     swap needs no stable identity for nodes at all. The original stage-3 problem — markup
+     reload needing a generalised identity key — dissolved into it: the new tree is uploaded
+     wholesale and the engine rebuilds, so markup changes ride the same path.
   3. **Markup reload — cut from v1.** Node ids change, so signal subscriptions, focus, scroll and
      list slot identity all need a stable identity key generalised from the list `key` concept.
      That's a research problem, and stages 1 and 2 already cover the large majority of iteration.
+     *(Superseded by the worker swap's whole-tree upload; per-node identity remains unneeded
+     because the swap pays a full re-upload, which is milliseconds.)*
 
 ### D2 · Packaging and distribution
 Simpler than before: the engine is **one** statically linked artifact, not three fetched DLLs.

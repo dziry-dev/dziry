@@ -412,3 +412,10 @@ export const images = {
 } satisfies ImageTable;
 
 export const root: number = 0;
+
+/**
+ * The app modules this artifact references, as namespaces. Hot reload walks
+ * them to carry module-level signal state across a worker swap; nothing else
+ * reads them. Empty when the window referenced no app module.
+ */
+export const __state = [];

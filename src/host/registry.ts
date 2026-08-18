@@ -39,6 +39,13 @@ export type WindowArtifact = CompiledUi & {
    * `windowLayer` rather than `layer` so it cannot shadow the app's own export.
    */
   windowLayer: unknown;
+  /**
+   * The app modules the artifact referenced, as namespaces — hot reload's state
+   * manifest. Walked by the worker to dump signal values before a swap, and to
+   * find same-named signals to restore into after one. See
+   * `window-state.ts::dumpState`/`restoreState`.
+   */
+  __state: readonly unknown[];
 };
 
 /** Every window in the project, as `windows.gen.ts` exports them. */

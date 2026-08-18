@@ -1678,7 +1678,13 @@ export const ENUMS: EnumDef[] = [
  * window). Enum additions move no bytes; the table and column do, and the hash
  * sees both.
  */
-export const PROTOCOL_VERSION = 43;
+/*
+ * v44 — `dziri_engine_reset`. A new tree under a live window for dev hot
+ * reload: the engine drops hover/press/focus/picker/scroll state keyed to the
+ * old tree's node ids and rebuilds on the next tick. A new symbol, no layout
+ * change — the bump is so a host that calls it cannot load a binary without it.
+ */
+export const PROTOCOL_VERSION = 44;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {

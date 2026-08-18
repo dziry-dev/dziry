@@ -39,6 +39,12 @@ export type ToMain =
   | { t: "published" }
   /** The IR outgrew the tables. The engine thread must grow and re-describe. */
   | { t: "grow"; capacities: Capacities }
+  /**
+   * A state dump, in answer to `{ t: "dump_state" }` — hot reload moving the
+   * app's signals and route to its replacement worker. Values are plain data
+   * (structured-clone-safe); anything else was skipped at the source.
+   */
+  | { t: "state"; values: Record<string, unknown>; route: string | null }
   /** Headless overrides and Escape, which reach the engine through its handle. */
   | { t: "input"; hovered: number; pressed: number; focused: number }
   /**
@@ -63,13 +69,19 @@ export type ToWorker =
    * over there silently lost `--route`, `--patch` and `--window`, which the golden
    * harness caught as twelve scenarios rendering the default route.
    */
-  | { t: "init"; argv: string[] }
+  | { t: "init"; argv: string[]; restored?: { values: Record<string, unknown>; route: string | null } }
   /** Where the tables are, plus the lock. Sent once, after the engine is created. */
   | { t: "engine"; spans: Span[]; channel: SharedArrayBuffer }
   /** Where the tables are *now*. Sent after every grow. */
   | { t: "rebound"; spans: Span[] }
   | { t: "events"; events: EngineEvent[] }
   | { t: "quit" }
+  /**
+   * Hot reload asking for the app's state before this worker is replaced: the
+   * module-level signals' current values by export name, and the current route.
+   * The answer rides back as `{ t: "state" }`.
+   */
+  | { t: "dump_state" }
   /** Result of a file dialog opened via `{ t: "file_dialog" }`. */
   | { t: "file_dialog_result"; node: number; paths: string[] }
   /**

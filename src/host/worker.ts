@@ -71,7 +71,15 @@ import {
 } from "../runtime/list-runtime.ts";
 import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
-import { buildUi, indexOfRoute, matchRoute, requireRoute, showRoute } from "./window-state.ts";
+import {
+  buildUi,
+  dumpState,
+  indexOfRoute,
+  matchRoute,
+  requireRoute,
+  restoreState,
+  showRoute,
+} from "./window-state.ts";
 
 /**
  * SDL keycodes. A handful of constants is cheaper than binding the whole keysym table.
@@ -182,7 +190,7 @@ export function runWorker(registry: WindowRegistry): void {
   scope.onmessage = (event) => {
     const message = event.data;
     if (message.t === "init") {
-      next = start(registry, message.argv);
+      next = start(registry, message.argv, message.restored);
       return;
     }
     next?.(message);
@@ -192,11 +200,17 @@ export function runWorker(registry: WindowRegistry): void {
 function start(
   registry: WindowRegistry,
   argv: readonly string[],
+  restored?: { values: Record<string, unknown>; route: string | null },
 ): (message: ToWorker) => void {
   const post = (message: ToMain) => scope.postMessage(message);
 
   const generated = pickWindow(registry, argv);
   const ui = buildUi(generated);
+
+  /* Hot reload: a replacement worker starts with the signals its predecessor
+     dumped. Before any subscription exists, so no subscriber fires on the
+     restore — the first frame is computed from the carried state directly. */
+  if (restored) restoreState(generated, restored.values);
 
   const { stylePatches, listBindings, editables, disabledBindings } = generated;
   const { routeNodes, initialRoute, windowConfig, windowId } = generated;
@@ -247,7 +261,15 @@ function start(
   const requested = (() => {
     const i = argv.indexOf("--route");
     const wanted = i !== -1 ? argv[i + 1] : null;
-    return wanted ? requireRoute(routeNodes, wanted, windowId) : initialRoute;
+    if (wanted) return requireRoute(routeNodes, wanted, windowId);
+    /* A reload carries the route the user was on, behind the explicit flag. The
+       route table itself may have just changed, so a path that no longer matches
+       falls back to the initial route rather than dying on its own edit. */
+    if (restored?.route) {
+      const match = matchRoute(routeNodes, restored.route);
+      if (match !== null) return match.index;
+    }
+    return initialRoute;
   })();
 
   let active = requested;
@@ -750,6 +772,19 @@ function start(
           release(flags);
         }
         post({ t: "published" });
+        break;
+      }
+
+      case "dump_state": {
+        /* Hot reload's other half: this worker is about to be replaced. Dump the
+           signals first, then dispose the Effect runtime — a LiveStore's file
+           lock must be free before the replacement opens the same store — and
+           only then answer; the engine thread terminates this worker once the
+           answer lands. */
+        const carried = dumpState(generated, routeNodes[active]?.path ?? null);
+        void disposeWindowRuntime().finally(() => {
+          post({ t: "state", values: carried.values, route: carried.route });
+        });
         break;
       }
 

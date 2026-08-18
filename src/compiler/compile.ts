@@ -3787,6 +3787,21 @@ export function emit(
     ...(/\$m\(/.test(emitted) ? ["$m"] : []),
   ];
 
+  /**
+   * Hot reload's state manifest: every referenced app module again as a
+   * namespace import, so the host can walk exports by name when it carries
+   * signal state across a worker swap. Same module instances — a namespace
+   * import is another view, not another evaluation.
+   */
+  const stateSpecifiers = [
+    ...new Set([
+      ...[...imports.keys()].filter((s) => s.startsWith(".")),
+      ...(routing?.loaders ?? [])
+        .filter((l): l is Extract<LoaderRef, { kind: "default" }> => l !== null && l.kind === "default")
+        .map((l) => l.specifier),
+    ]),
+  ];
+
   const importLines = [
     ...(runtimeNames.length > 0
       ? [`import { ${runtimeNames.sort().join(", ")} } from "${typesFrom}/runtime/signal.ts";`]
@@ -3801,6 +3816,7 @@ export function emit(
     ...(routing?.loaders ?? [])
       .filter((l): l is Extract<LoaderRef, { kind: "default" }> => l !== null && l.kind === "default")
       .map((l) => `import { default as ${l.alias} } from ${JSON.stringify(l.specifier)};`),
+    ...stateSpecifiers.map((s, i) => `import * as __state_${i} from ${JSON.stringify(s)};`),
   ].join("\n");
 
   /**
@@ -4399,6 +4415,13 @@ export const images = {
 } satisfies ImageTable;
 
 export const root: number = ${root};
+
+/**
+ * The app modules this artifact references, as namespaces. Hot reload walks
+ * them to carry module-level signal state across a worker swap; nothing else
+ * reads them. Empty when the window referenced no app module.
+ */
+export const __state = [${stateSpecifiers.map((_, i) => `__state_${i}`).join(", ")}];
 ${routing ? routingSource(routing) : ""}`;
 
   const patches = (variants?.patches ?? []).map((p) => ({

@@ -14,7 +14,7 @@
  * `dziri dev --route products/new --size 400x600` mean what it looks like. The
  * host's own flags are documented in `host/main.ts` and `host/worker.ts`.
  */
-import { existsSync, mkdirSync, readdirSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { compileProject, describe, formatBuildError, ENTRY_FILE } from "../compiler/build.ts";
 import { PACKAGE } from "../compiler/compile.ts";
@@ -251,8 +251,12 @@ async function dev(theirs: string[], only?: string): Promise<void> {
         cwd: projectDir,
         // The `ipc` callback is what opens the IPC channel a hot payload crosses
         // (measured: without it, Subprocess.send throws ERR_IPC_CHANNEL_CLOSED).
+        // Incoming: the app asks for a process restart when a reloaded module
+        // graph cannot boot — the one failure a worker swap cannot absorb.
         stdio: ["inherit", "inherit", "inherit"],
-        ipc() {},
+        ipc(message) {
+          if ((message as { t?: unknown } | null)?.t === "restart") void restart();
+        },
         env: { ...process.env, DZIRI_HOT: "1" },
       },
     );
@@ -273,9 +277,28 @@ async function dev(theirs: string[], only?: string): Promise<void> {
   const isSource = (f: string) =>
     /\.(css|tsx?|jsx?)$/.test(f) && !f.endsWith(".gen.ts") && !f.endsWith(".gen.tsx");
 
+  /**
+   * Last handled mtime per file. Windows reports one save as several events —
+   * and with a Tailwind compile taking seconds, the extras arrive after the
+   * debounce window and would each buy a full recompile of the same bytes
+   * (measured: one Set-Content ran three reloads). Deduplicate on content time,
+   * not on arrival.
+   */
+  const handled = new Map<string, number>();
+
   const onChanged = (files: Set<string>): void => {
-    const cssOnly = [...files].every((f) => f.endsWith(".css"));
-    void reload(cssOnly);
+    const fresh = [...files].filter((f) => {
+      try {
+        const m = statSync(join(projectDir, "windows", f)).mtimeMs;
+        if (handled.get(f) === m) return false;
+        handled.set(f, m);
+        return true;
+      } catch {
+        return false; // deleted between event and stat
+      }
+    });
+    if (fresh.length === 0) return;
+    void reload(fresh.every((f) => f.endsWith(".css")));
   };
 
   let reloading = false;
@@ -317,6 +340,16 @@ async function dev(theirs: string[], only?: string): Promise<void> {
 
       hot.clear();
       for (const [k, v] of Object.entries(manifest)) hot.set(k, v);
+
+      /* Stage 2: swap the app thread under the live window. The engine keeps
+         the window, SDL state and the screen; the worker — a fresh module graph
+         over the new artifacts — starts with the old one's signals and route.
+         The process restart below remains as the fallback for a dead channel. */
+      if (proc.exitCode === null) {
+        proc.send({ t: "reload" });
+        console.log("  reloaded — window stayed open, state carried over");
+        return;
+      }
       await restart();
     } finally {
       reloading = false;

@@ -145,20 +145,27 @@ export async function runMain(options: MainOptions): Promise<void> {
   };
 
   const preload = standalone() ? undefined : options.preload;
-  const worker = new Worker(workerOverride ?? options.worker, { preload } as WorkerOptions);
+
+  /**
+   * The app thread, replaceable. Hot reload terminates it and spawns a fresh one
+   * — a new module graph over the recompiled artifacts — while the engine, its
+   * window and this process stay put. `send` always targets the current one.
+   */
+  let worker = new Worker(workerOverride ?? options.worker, { preload } as WorkerOptions);
   const send = (message: ToWorker) => worker.postMessage(message);
 
-  /* Hot reload: `dziri dev` watches the project and, when a recompile moved only
-     style values, sends the new ones over the IPC channel it spawned this
-     process with. The engine thread holds no opinion about styles — it forwards.
+  /* Hot reload: `dziri dev` watches the project. A recompile that moved only
+     style values arrives as "hot" and is forwarded to the worker; anything else
+     arrives as "reload" and swaps the worker outright (see reloadApp below).
      Registered only under the watcher's env var: `process.on("message")` on a
      process with no channel never fires, but some platforms keep the process
      alive for it, which a packaged build cannot afford. */
+  let reloadApp: () => void = () => {};
   if (process.env.DZIRI_HOT === "1") {
     process.on("message", (message: unknown) => {
-      if (typeof message === "object" && message !== null && (message as { t?: unknown }).t === "hot") {
-        send(message as ToWorker);
-      }
+      const t = (message as { t?: unknown } | null)?.t;
+      if (t === "hot") send(message as ToWorker);
+      else if (t === "reload") reloadApp();
     });
   }
 
@@ -169,24 +176,32 @@ export async function runMain(options: MainOptions): Promise<void> {
    * size and title all come out of the compiled IR, and the IR is loaded over
    * there. One round trip at startup buys a main thread whose module graph is the
    * engine and this file.
+   *
+   * A function rather than inline, because hot reload runs the same handshake for
+   * the replacement worker — with the engine already running.
    */
-  const request = await new Promise<WindowRequest>((resolve, reject) => {
-    const onMessage = (event: MessageEvent<ToMain>) => {
-      if (event.data.t === "ready") {
-        worker.removeEventListener("message", onMessage as EventListener);
-        resolve(event.data.window);
-      } else if (event.data.t === "error") {
-        reject(new Error(event.data.message));
-      }
-    };
-    worker.addEventListener("message", onMessage as EventListener);
-    worker.addEventListener("error", (e) => reject(asError(e)));
+  const awaitReady = (
+    restored?: { values: Record<string, unknown>; route: string | null },
+  ): Promise<WindowRequest> =>
+    new Promise<WindowRequest>((resolve, reject) => {
+      const onMessage = (event: MessageEvent<ToMain>) => {
+        if (event.data.t === "ready") {
+          worker.removeEventListener("message", onMessage as EventListener);
+          resolve(event.data.window);
+        } else if (event.data.t === "error") {
+          reject(new Error(event.data.message));
+        }
+      };
+      worker.addEventListener("message", onMessage as EventListener);
+      worker.addEventListener("error", (e) => reject(asError(e)));
 
-    /* The command line, because a Worker does not inherit `process.argv`. The
-       app thread's whole startup depends on it — which route, which window,
-       which conditional classes — so nothing over there runs until this lands. */
-    send({ t: "init", argv: [...argv] });
-  });
+      /* The command line, because a Worker does not inherit `process.argv`. The
+         app thread's whole startup depends on it — which route, which window,
+         which conditional classes — so nothing over there runs until this lands. */
+      send({ t: "init", argv: [...argv], restored });
+    });
+
+  const request = await awaitReady();
 
   applyMinSize(argv);
   const [width, height] = sizeFrom(argv, { width: request.width, height: request.height });
@@ -212,7 +227,12 @@ export async function runMain(options: MainOptions): Promise<void> {
   let failure: Error | null = null;
   let running = true;
 
-  worker.addEventListener("message", (event: MessageEvent<ToMain>) => {
+  /**
+   * The persistent listener, attached per worker — hot reload replaces the
+   * worker, and the replacement's grow/alert/error traffic needs the same ears.
+   */
+  const attachWorkerEvents = (w: Worker): void => {
+    w.addEventListener("message", (event: MessageEvent<ToMain>) => {
     const message = event.data;
 
     switch (message.t) {
@@ -272,12 +292,81 @@ export async function runMain(options: MainOptions): Promise<void> {
       case "ready":
         break;
     }
-  });
+    });
 
-  worker.addEventListener("error", (event) => {
-    failure = asError(event);
-    running = false;
-  });
+    w.addEventListener("error", (event) => {
+      failure = asError(event);
+      running = false;
+    });
+  };
+  attachWorkerEvents(worker);
+
+  /**
+   * Hot reload, stage 2 by worker swap (ROADMAP D1): the watcher recompiled and
+   * structure moved, so the app thread is replaced wholesale — a fresh module
+   * graph over the new artifacts — while the engine, the window, and everything
+   * SDL-side stay put. The old worker dumps its signals and route first; the new
+   * one starts with them, so a markup or handler edit keeps application state.
+   *
+   * The engine hears about it as `reset`: the next commit's node ids belong to a
+   * new tree, and hover/focus/scroll keyed to the old one are dropped there.
+   */
+  let reloading = false;
+  reloadApp = () => {
+    if (reloading) return;
+    reloading = true;
+    void (async () => {
+      try {
+        /* The old worker holds the state, and a wedged one must not hang the
+           reload — a second and a half, then the swap carries nothing. */
+        const carried = await Promise.race([
+          new Promise<{ values: Record<string, unknown>; route: string | null }>((resolve) => {
+            const onState = (event: MessageEvent<ToMain>) => {
+              if (event.data.t !== "state") return;
+              worker.removeEventListener("message", onState as EventListener);
+              resolve({ values: event.data.values, route: event.data.route });
+            };
+            worker.addEventListener("message", onState as EventListener);
+            send({ t: "dump_state" });
+          }),
+          new Promise<{ values: Record<string, unknown>; route: string | null }>((resolve) =>
+            setTimeout(() => resolve({ values: {}, route: null }), 1500),
+          ),
+        ]);
+
+        worker.terminate();
+        /* A terminated worker releases nothing: if it died mid-batch, the lock is
+           HELD by a thread that no longer exists, and the replacement's first
+           `acquire` would wait on it forever. Freeing a FREE lock is a no-op, so
+           this is safe rather than conditional. */
+        release(flags);
+        worker = new Worker(workerOverride ?? options.worker, { preload } as WorkerOptions);
+        attachWorkerEvents(worker);
+
+        let next: WindowRequest;
+        try {
+          next = await awaitReady(carried);
+        } catch (e) {
+          /* The freshly compiled app does not start. The window outlived its app;
+             the honest exit is to ask the watcher for a process restart, where a
+             clean boot can report the error. */
+          console.error(
+            `  hot reload: the recompiled app failed to start —\n  ${e instanceof Error ? e.message : String(e)}`,
+          );
+          (process as unknown as { send?: (m: unknown) => void }).send?.({ t: "restart" });
+          return;
+        }
+
+        engine.grow(next.capacities);
+        const [nextW, nextH] = sizeFrom(argv, { width: next.width, height: next.height });
+        if (nextW !== width || nextH !== height) engine.resize(nextW, nextH);
+        engine.reset(next.root);
+        send({ t: "engine", spans: engine.describe(), channel });
+      } finally {
+        reloading = false;
+      }
+    })();
+  };
 
   send({ t: "engine", spans: engine.describe(), channel });
 

@@ -559,6 +559,17 @@ pub extern "C" fn dziri_engine_resize(handle: Handle, width: u32, height: u32) -
     })
 }
 
+/// A new tree under a live window: dev hot reload swapped the app. The next
+/// commit's node ids belong to the new tree; the engine drops every reference to
+/// the old one and rebuilds on the next tick. See `Engine::reset`.
+#[no_mangle]
+pub extern "C" fn dziri_engine_reset(handle: Handle, root: u32) -> i32 {
+    with(handle, |engine| {
+        engine.reset(root);
+        status::OK
+    })
+}
+
 /// Overrides hover/press/focus without a mouse, so interaction styles can be
 /// rendered headlessly — the engine-side `--hover` and `--focus`.
 #[no_mangle]

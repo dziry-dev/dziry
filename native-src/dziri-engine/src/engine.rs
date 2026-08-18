@@ -1308,6 +1308,41 @@ impl Engine {
         self.needs_paint = true;
     }
 
+    /// A whole new tree is coming under this window: dev hot reload swapped the
+    /// app's module graph, and the next commit's node ids belong to the *new*
+    /// tree. Every reference to the old one — hover, press, focus, an open
+    /// picker, a scrollbar drag, where a box was scrolled to — is dropped rather
+    /// than re-interpreted against ids that now mean something else, and the
+    /// tree is rebuilt from scratch on the next tick (`fresh`).
+    ///
+    /// Pending events go too: a FOCUS_OUT queued against the old tree would
+    /// dispatch on whichever node inherited its id. And `autofocus_done` resets
+    /// with the rest — a reload is a fresh document, the same rule a browser's
+    /// refresh follows.
+    pub fn reset(&mut self, root: u32) {
+        self.root = root as usize;
+        self.state = InputState {
+            hovered: -1,
+            pressed: -1,
+            focused: -1,
+            open: -1,
+            bar: None,
+            focus_visible: false,
+        };
+        self.drag = None;
+        self.events.clear();
+        for s in &mut self.scroll {
+            *s = [0.0, 0.0];
+        }
+        for s in &mut self.scroll_target {
+            *s = [0.0, 0.0];
+        }
+        self.scroll_animating = false;
+        self.autofocus_done = false;
+        self.fresh = true;
+        self.needs_paint = true;
+    }
+
     /// The topmost node at `(x, y)`, overlay included, or -1.
     ///
     /// What "under the pointer" means to a caller who is not deciding what a press does —

@@ -34,7 +34,84 @@
  * take the choice away from a caller that has a reason to make it.
  */
 import { routeChain, type CompiledUi, type RouteNodes } from "../ir.ts";
+import { isSignal, type Signal } from "../runtime/signal.ts";
 import type { WindowArtifact } from "./registry.ts";
+
+/**
+ * Hot reload's state transfer, both halves.
+ *
+ * The compiler cannot know which exports are signals worth keeping — only the
+ * runtime can recognise one — so the artifact carries the referenced modules as
+ * namespaces (`__state`) and these two functions do the walking. The key is the
+ * export name: the one identity a recompile cannot move. A renamed or deleted
+ * signal silently starts fresh, which is the honest answer — there is no
+ * mapping to guess from.
+ */
+
+/** What survives a worker swap: signal values by export name, and the route. */
+export type CarriedState = { values: Record<string, unknown>; route: string | null };
+
+/**
+ * A value that survives the worker boundary *as itself*. structuredClone
+ * answers most of it, but it silently declasses — `clone(new Foo())` is a plain
+ * object with Foo's fields and none of its methods — so class instances are
+ * refused rather than resurrected wrong. Primitives, plain objects, arrays, and
+ * the built-ins clone owns (Date, Map, Set, typed arrays) transfer.
+ */
+function clonable(value: unknown): boolean {
+  try {
+    structuredClone(value);
+  } catch {
+    return false;
+  }
+  return isPlain(value);
+}
+
+function isPlain(value: unknown): boolean {
+  if (value === null || typeof value !== "object") return true;
+  if (Array.isArray(value)) return value.every(isPlain);
+  if (ArrayBuffer.isView(value) || value instanceof Date || value instanceof Map || value instanceof Set) {
+    return true;
+  }
+  const proto = Object.getPrototypeOf(value) as unknown;
+  return (
+    (proto === Object.prototype || proto === null) &&
+    Object.values(value).every(isPlain)
+  );
+}
+
+/**
+ * The current values of every writable signal the window's modules export.
+ * Functions, class instances and read-only computeds are skipped — none survive
+ * a worker boundary, and pretending otherwise is how a reload resurrects a half-
+ * state.
+ */
+export function dumpState(artifact: WindowArtifact, route: string | null): CarriedState {
+  const values: Record<string, unknown> = {};
+  for (const ns of artifact.__state) {
+    for (const [name, value] of Object.entries(ns as Record<string, unknown>)) {
+      if (!isSignal(value) || typeof (value as Signal<unknown>).set !== "function") continue;
+      const current = value.value;
+      if (clonable(current)) values[name] = structuredClone(current);
+    }
+  }
+  return { values, route };
+}
+
+/**
+ * Writes dumped values into the new module graph's same-named signals. Runs
+ * before subscriptions exist, so no subscriber fires on the restore — the first
+ * frame is computed from the restored state directly.
+ */
+export function restoreState(artifact: WindowArtifact, values: Record<string, unknown>): void {
+  for (const ns of artifact.__state) {
+    for (const [name, value] of Object.entries(ns as Record<string, unknown>)) {
+      if (!(name in values)) continue;
+      if (!isSignal(value) || typeof (value as Signal<unknown>).set !== "function") continue;
+      (value as Signal<unknown>).set(values[name]);
+    }
+  }
+}
 
 /**
  * The IR, ready to be written to.

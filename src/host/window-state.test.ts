@@ -87,3 +87,42 @@ test("an error bubbles to the nearest ancestor with an error view", () => {
   expect(u.nodes.hidden[0]).toBe(1); // the parent's layout hidden
   expect(u.nodes.hidden[1]).toBe(1); // the leaf hidden
 });
+
+// --- hot reload state transfer -------------------------------------------------
+
+test("dumpState carries writable signals by export name and skips the rest", async () => {
+  const { dumpState } = await import("./window-state.ts");
+  const { signal, computed } = await import("../runtime/signal.ts");
+
+  const count = signal(41);
+  const rows = signal([{ id: "a" }]);
+  const doubled = computed(() => 0); // read-only: no set, never dumped
+  class Model { x = 1; m() { return this.x; } }
+  const model = signal(new Model()); // class instance: would declass, so skipped
+
+  const artifact = {
+    __state: [{ count, rows, doubled, model, helper: () => 1, plain: 7 }],
+  } as never;
+
+  const dump = dumpState(artifact, "products/1");
+  expect(dump.route).toBe("products/1");
+  expect(Object.keys(dump.values).sort()).toEqual(["count", "rows"]);
+  expect(dump.values.count).toBe(41);
+  expect(dump.values.rows).toEqual([{ id: "a" }]);
+  // A dump is a copy: mutating the live signal's rows must not move it.
+  rows.value.push({ id: "b" });
+  expect(dump.values.rows).toEqual([{ id: "a" }]);
+});
+
+test("restoreState writes same-named signals and ignores what changed names", async () => {
+  const { restoreState } = await import("./window-state.ts");
+  const { signal } = await import("../runtime/signal.ts");
+
+  const count = signal(0);
+  const added = signal("fresh"); // no dumped value: keeps its initial
+  const artifact = { __state: [{ count, added }] } as never;
+
+  restoreState(artifact, { count: 41, renamed: "gone" });
+  expect(count.value).toBe(41);
+  expect(added.value).toBe("fresh");
+});

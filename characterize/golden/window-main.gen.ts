@@ -12,6 +12,12 @@ import { accepted, addJob, cannotSubmit, checkSignUp, jobs, lastPayload, onSignU
 import { goAnimations, goBorders, goColors, goControls, goFeatures, goForms, goLayout, goNewProduct, goOverview, goProductDetail, goProducts, goReactivity, goSpacing, goTransforms, goTypography, onNewProduct, onProductDetail, route } from "./../../../workspace/skia-proto/windows/main/router.ts";
 import { addLang, bump, doubled, drop, dropLang, isBig, isThree, langCount, langRows, note, parity, reset, shout, tick } from "./../../../workspace/skia-proto/windows/main/reactivity.ts";
 import { default as route_14 } from "./../../../workspace/skia-proto/windows/main/pages/products/$id.tsx";
+import * as __state_0 from "./../../../workspace/skia-proto/windows/main/pages/controls.tsx";
+import * as __state_1 from "./../../../workspace/skia-proto/windows/main/state.ts";
+import * as __state_2 from "./../../../workspace/skia-proto/windows/main/pages/forms.tsx";
+import * as __state_3 from "./../../../workspace/skia-proto/windows/main/router.ts";
+import * as __state_4 from "./../../../workspace/skia-proto/windows/main/reactivity.ts";
+import * as __state_5 from "./../../../workspace/skia-proto/windows/main/pages/products/$id.tsx";
 
 // Types, so this artifact is checked rather than asserted at the far end.
 import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable, RouteNodes, WindowConfig } from "dziri/ir.ts";
@@ -937,6 +943,13 @@ export const images = {
 } satisfies ImageTable;
 
 export const root: number = 0;
+
+/**
+ * The app modules this artifact references, as namespaces. Hot reload walks
+ * them to carry module-level signal state across a worker swap; nothing else
+ * reads them. Empty when the window referenced no app module.
+ */
+export const __state = [__state_0, __state_1, __state_2, __state_3, __state_4, __state_5];
 
 /** The window this artifact is, as `<Window>` declared it. */
 export const windowConfig = {
