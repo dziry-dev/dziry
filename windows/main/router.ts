@@ -42,7 +42,7 @@ export const route = signal("/");
  * "First" is not.
  */
 export const onNewProduct = computed(() => route === "products/new");
-export const onProductDetail = computed(() => route === "products/$id");
+export const onProductDetail = computed(() => route === "products/1");
 
 /** The previous route, for `back()`. History is one entry deep, by decision. */
 let previous: Href = "/";
@@ -85,6 +85,6 @@ export const goForms = () => go("forms");
 export const goReactivity = () => go("reactivity");
 export const goProducts = () => go("products/new");
 export const goNewProduct = () => go("products/new");
-export const goProductDetail = () => go("products/$id");
+export const goProductDetail = () => go("products/1");
 
 export const back = () => go(previous);

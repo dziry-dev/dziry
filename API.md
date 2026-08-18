@@ -104,7 +104,7 @@ Anything that trades robustness for capability stays a proposal.
 | `confirm()` / `prompt()` | planned — the same call with an answer, which needs a reply message rather than a return value: the thread that would answer is the one the dialog is blocking | — |
 | `effect` `untrack` `peek` cleanup, disposal scopes | planned | M6 |
 | `Show` | planned | M3 |
-| `source` | planned | M8 |
+| `source` | **done** — `source(subscribe, initial)`: a signal fed from outside. The subscribe is handed `set`, and what it returns decides the shape — an unsubscribe (callback, no `effect`), or an Effect `Stream` run with `Stream.runForEach` after a lazy import. `src/runtime/source.ts` | — |
 | `resource` / Suspense / error boundaries | planned | M8 |
 | `token()` (context) | planned | — |
 | `onFrame(dt)` | planned | — |
@@ -155,13 +155,15 @@ effect(fn: () => void | (() => void)): void            // no dep array; cleanup 
 batch<T>(fn: () => T): T
 untrack<T>(fn: () => T): T
 
-source<T>(subscribe: (set: (v: T) => void) => () => void, initial: T): Cell<T>
+source<T>(subscribe: (set: (v: T) => void) => unknown, initial: T): Cell<T>
 ref(): Ref                                             // .node .bounds() .focus() .on()
 token<T>(defaultValue: T): Token<T>                    // build-time lexical scope, no runtime
 onFrame(fn: (dt: number) => void): void
 ```
 
 `source` = push, from outside the process. `resource` = pull, async, drives a boundary.
+The subscribe's return decides the shape: an unsubscribe, or an Effect `Stream` (recognised
+structurally and run with `Stream.runForEach` — the one place `source` touches `effect`).
 
 OS/window state (theme, focus, DPI) ships as **built-in cells** — it arrives via the engine
 event ring, not a user `source`. `source` is for Bun-side externals:

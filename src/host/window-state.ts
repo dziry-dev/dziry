@@ -73,6 +73,9 @@ export function buildUi(artifact: WindowArtifact): CompiledUi {
     forms: artifact.forms,
     disabledBindings: artifact.disabledBindings,
     textBindings: artifact.textBindings,
+    paramBindings: artifact.paramBindings,
+    dataBindings: artifact.dataBindings,
+    errorBindings: artifact.errorBindings,
     imageBindings: artifact.imageBindings,
     handlers: artifact.handlers,
     lists: artifact.lists,
@@ -144,14 +147,112 @@ export function requireRoute(
  * route index and binding its parameters, and the one-entry history `back()`
  * returns to.
  */
+/** Which of a route's three views is showing. */
+export type RouteView = "loading" | "success" | "error";
+
+/**
+ * The route whose error view shows for a failing leaf — the first route up the
+ * chain with non-empty `error` roots. Never -1 at runtime, because the compiler
+ * synthesizes a default error view for a leaf with no error boundary anywhere.
+ */
+function errorOwnerFor(routeNodes: readonly RouteNodes[], index: number): number {
+  for (let i = index; i !== -1; i = routeNodes[i]?.parent ?? -1) {
+    if (routeNodes[i]!.error.length > 0) return i;
+  }
+  return -1;
+}
+
 export function showRoute(
   ui: CompiledUi,
   routeNodes: readonly RouteNodes[],
   index: number,
+  view: RouteView = "success",
 ): void {
-  const chain = routeChain(routeNodes, index);
-  for (const [i, route] of routeNodes.entries()) {
-    const hide = chain.has(i) ? 0 : 1;
-    for (const node of route.roots) ui.nodes.hidden[node] = hide;
+  // The chain leaf-first, so a position in it says "below" vs "above" a boundary.
+  const chain: number[] = [];
+  for (let i = index; i !== -1; i = routeNodes[i]?.parent ?? -1) {
+    if (chain.includes(i)) break;
+    chain.push(i);
   }
+  const inChain = new Set(chain);
+  const errorPos = view === "error" ? chain.indexOf(errorOwnerFor(routeNodes, index)) : -1;
+
+  for (const [i, route] of routeNodes.entries()) {
+    let showSuccess = inChain.has(i);
+    let showLoading = false;
+    let showError = false;
+
+    if (inChain.has(i)) {
+      if (view === "loading" && i === index && route.loading.length > 0) {
+        // The leaf is in flight: its skeleton if it has one, else success (empty data).
+        showSuccess = false;
+        showLoading = true;
+      } else if (view === "error") {
+        const pos = chain.indexOf(i);
+        if (pos < errorPos) showSuccess = false;
+        else if (pos === errorPos) {
+          showSuccess = false;
+          showError = true;
+        }
+        // pos > errorPos: an ancestor above the boundary stays as the layout.
+      }
+    }
+
+    for (const node of route.roots) ui.nodes.hidden[node] = showSuccess ? 0 : 1;
+    for (const node of route.loading) ui.nodes.hidden[node] = showLoading ? 0 : 1;
+    for (const node of route.error) ui.nodes.hidden[node] = showError ? 0 : 1;
+  }
+}
+
+/**
+ * A concrete path matched against a route pattern, and the parameters it bound.
+ *
+ * The matcher was slated for the engine (next to the media-query evaluator, which
+ * needs the route table on the wire), but the host already holds `routeNodes` and
+ * every consumer of parameters — loaders, `args.id` — lives on this side. Until
+ * the wire version lands, this host-side matcher is the binding step navigation
+ * runs through, and it is written so moving it to the engine means moving a pure
+ * function, not re-deriving its rules.
+ */
+export type RouteMatch = { index: number; params: Record<string, string> };
+
+/**
+ * Matches a concrete path against the window's routes.
+ *
+ * Exact paths win, then patterns: `products/$id` binds `products/1` to
+ * `{ id: "1" }`. A `$` segment binds whatever is in that position (URL-decoded);
+ * a literal segment must match exactly. Segment counts must match, so `products`
+ * does not match `products/$id` and neither does `products/$id/reviews`. Returns
+ * `null` when nothing matches, so navigation can ignore an unknown path rather
+ * than blank the window — the same rule `indexOfRoute` already follows.
+ */
+export function matchRoute(routeNodes: readonly RouteNodes[], path: string): RouteMatch | null {
+  const split = (p: string): string[] =>
+    p === "/" ? [] : p.split("/").filter((s) => s !== "");
+
+  // Exact first — cheap, and preserves the order indexOfRoute reports.
+  for (const [i, route] of routeNodes.entries()) {
+    if (route.path === path) return { index: i, params: {} };
+  }
+
+  const want = split(path);
+  for (const [i, route] of routeNodes.entries()) {
+    const have = split(route.path);
+    if (have.length !== want.length) continue;
+
+    const params: Record<string, string> = {};
+    let ok = true;
+    for (let k = 0; k < have.length; k++) {
+      const h = have[k]!;
+      if (h.startsWith("$")) {
+        params[h.slice(1)] = decodeURIComponent(want[k]!);
+      } else if (h !== want[k]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return { index: i, params };
+  }
+
+  return null;
 }

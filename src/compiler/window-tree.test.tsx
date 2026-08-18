@@ -34,6 +34,8 @@ const page = (path: string, parent: number, nodes: Node | Node[]): PageTree => (
   file: `windows/main/pages/${path === "/" ? "index" : path}.tsx`,
   parent,
   nodes: Array.isArray(nodes) ? nodes : [nodes],
+  loadingNodes: [],
+  errorNodes: [],
 });
 
 test("a route's page replaces the shell's outlet, wherever the outlet is nested", () => {

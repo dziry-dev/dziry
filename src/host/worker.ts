@@ -34,7 +34,10 @@ import { findRow } from "../find-row.ts";
 import { acquire, publish, release } from "./channel.ts";
 import type { ToMain, ToWorker } from "./messages.ts";
 import {
+  applyDataBindings,
+  applyErrorBindings,
   applyImageBindings,
+  applyParamBindings,
   applyRangeChange,
   applyTextBindings,
   Dirty,
@@ -51,7 +54,7 @@ import {
   writeRangeValue,
 } from "../runtime/bindings.ts";
 import { setAlertSink, type AlertRequest } from "../runtime/alert.ts";
-import { disposeWindowRuntime, provideWindowLayer } from "../runtime/effects.ts";
+import { disposeWindowRuntime, provideWindowLayer, runLoader, startSources } from "../runtime/effects.ts";
 import { applyFieldChange } from "../runtime/forms.ts";
 import { isRangeControl } from "../runtime/numerics.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
@@ -67,7 +70,7 @@ import {
 } from "../runtime/list-runtime.ts";
 import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
-import { buildUi, indexOfRoute, requireRoute, showRoute } from "./window-state.ts";
+import { buildUi, indexOfRoute, matchRoute, requireRoute, showRoute } from "./window-state.ts";
 
 /**
  * SDL keycodes. A handful of constants is cheaper than binding the whole keysym table.
@@ -204,6 +207,13 @@ function start(
     provideWindowLayer(generated.windowLayer);
   }
 
+  // Stream sources start at launch too, whether or not there is a layer — a
+  // layerless `R = never` stream is its own complete program. `startSources`
+  // is a no-op when the artifact declared none.
+  void startSources().catch((e) => {
+    console.error(`  stream sources failed to start:\n  ${e instanceof Error ? e.message : String(e)}`);
+  });
+
   /**
    * `alert()` reaches the engine thread from here, and nowhere else.
    *
@@ -272,13 +282,62 @@ function start(
   // grown the node arrays by now.
   const changedNodes: number[] = [];
   applyTextBindings(ui, changedNodes);
+  applyParamBindings(ui, {}, changedNodes);
   applyImageBindings(ui);
   updateLists(ui, listBindings);
   applyStylePatches(ui, stylePatches);
   // Before the first upload, so a control authored `disabled={sig}` with the signal
   // already true is disabled in the first frame rather than one frame later.
   applyDisabled(ui, disabledBindings);
-  showRoute(ui, routeNodes, active);
+
+  // A navigation superseded by the next is ignored by token: the older loader's
+  // exit must not write data/error into the route that replaced it.
+  let navToken = 0;
+
+  /**
+   * Show a route and run its loader: bind params, clear the previous data/error,
+   * show loading (or success) while in flight, then success/error on settle.
+   *
+   * Called for the initial route too, not only on navigation — a single-route app
+   * never navigates, so its loader would otherwise never run. The loader's exit is
+   * handled asynchronously, so `dirty`/`schedule` are touched only once the top
+   * level (and their declarations) have run.
+   */
+  function navigate(index: number, params: Record<string, string>): void {
+    active = index;
+    const token = ++navToken;
+    applyParamBindings(ui, params, changedNodes);
+    applyDataBindings(ui, undefined, changedNodes);
+    applyErrorBindings(ui, undefined, changedNodes);
+
+    const loader = generated.loaders[index];
+    if (!loader) {
+      showRoute(ui, routeNodes, index, "success");
+      return;
+    }
+
+    showRoute(ui, routeNodes, index, "loading");
+    void runLoader(loader, params).then((exit) => {
+      if (token !== navToken) return; // superseded by a newer navigation
+      if (exit.kind === "redirect") {
+        if (routeSignal) (routeSignal as Signal<string>).value = exit.to;
+        return;
+      }
+      if (exit.kind === "success") {
+        applyDataBindings(ui, exit.value, changedNodes);
+        showRoute(ui, routeNodes, index, "success");
+      } else if (exit.kind === "failure") {
+        applyErrorBindings(ui, exit.value, changedNodes);
+        showRoute(ui, routeNodes, index, "error");
+      } else {
+        showRoute(ui, routeNodes, index, "success"); // cancel: landed, no data
+      }
+      dirty = true;
+      schedule();
+    });
+  }
+
+  navigate(active, {});
 
   post({
     t: "ready",
@@ -362,10 +421,9 @@ function start(
 
   if (routeSignal) {
     routeSignal.subscribe(() => {
-      const next = indexOfRoute(routeNodes, routeSignal.value);
-      if (next === -1 || next === active) return;
-      active = next;
-      showRoute(ui, routeNodes, active);
+      const match = matchRoute(routeNodes, routeSignal.value);
+      if (match === null || match.index === active) return;
+      navigate(match.index, match.params);
       dirty = true;
       schedule();
     });

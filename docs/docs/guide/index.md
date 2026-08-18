@@ -78,5 +78,7 @@ own modules — that is where `$` is defined — which is why you may see `.valu
 - **[Reactivity](./reactivity.md)** — signals, computeds, writes, and the rules above in detail.
 - **[Styling](./styling.md)** — Tailwind, `cn`, conditional classes, inline styles.
 - **[Lists](./lists.md)** — `.map` with keys, and why item templates are restricted.
+- **[Forms](./forms.md)** — `bind:value`, validation, and named fields.
+- **[Effect](./effect.md)** — handlers, the window layer, Effect schemas, and `source()`.
 - **[Routing](./routing.md)** — file-based routes, `useRoute`, `useRouter`.
 - **[The CLI](./cli.md)** — `compile`, `dev`, and shipping one executable.

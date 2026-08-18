@@ -21,15 +21,17 @@
 import { join, relative, dirname, isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
 import { existsSync, readdirSync } from "node:fs";
-import { compileTree, emit, dump, PACKAGE, type EmittedRouting } from "./compile.ts";
+import { compileTree, emit, dump, PACKAGE, type EmittedRouting, type LoaderRef } from "./compile.ts";
 import { CssError } from "./diagnostics.ts";
 import { installCssGraph, stylesheetsFor } from "./css-imports.ts";
 import { loadStylesheet, SheetMap, StylesheetError, type CssSource } from "./stylesheet.ts";
 import { buildRefIndex, resolveRefs, RefError, type RefSource } from "./resolve-refs.ts";
 import { compileVariants, findToggles, type VariantCompiled } from "./variant-compile.ts";
-import { toDocument } from "./jsx-runtime.ts";
+import { jsx, toDocument } from "./jsx-runtime.ts";
 import { emitRoutes, RouteError, scanWindows, type WindowDef } from "./routes.ts";
 import { withPage, withWindowRoute } from "./route.ts";
+import { routeArgs } from "./route-args.ts";
+import { dataRecorder, errorRecorder } from "./route-data.ts";
 import { configOf, layerOf, routeSignalOf, WindowError } from "./window.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./window-tree.ts";
 import { setCompiling, signal } from "../runtime/signal.ts";
@@ -129,6 +131,99 @@ async function defaultComponent(
 }
 
 /**
+ * A page's exports, normalised to the parts the compiler calls.
+ *
+ * A page may export a bare component (the original form, where `export const
+ * loader` carries the loader) or a route object built by defineRoute (where the
+ * loader is a property of the default export). Both reach the compiler as the
+ * same four pieces; `loaderFromObject` records which form, because the loader
+ * survives into the artifact differently — a named export is imported by name, a
+ * route object's default is imported under an alias and the property read off it.
+ */
+type PageModule = {
+  component: (props: Record<string, unknown>) => unknown;
+  loader: unknown;
+  errorComponent: ((props: Record<string, unknown>) => unknown) | undefined;
+  loadingComponent: ((props: Record<string, unknown>) => unknown) | undefined;
+  loaderFromObject: boolean;
+};
+
+/**
+ * Imports a page module and reads it as either a bare component or a route object.
+ *
+ * The route-object check is by shape — a default export that is an object with a
+ * `component` function — rather than by an import, for the same reason Effect is
+ * recognised structurally: nothing here should require the author to name dziri.
+ */
+async function pageModule(
+  file: string,
+  rel: (p: string) => string,
+  expectedPath: string,
+): Promise<PageModule> {
+  const mod = (await import(pathToFileURL(file).href)) as {
+    default?: unknown;
+    loader?: unknown;
+  };
+  const def = mod.default;
+
+  if (typeof def === "function") {
+    return {
+      component: def as (props: Record<string, unknown>) => unknown,
+      loader: mod.loader,
+      errorComponent: undefined,
+      loadingComponent: undefined,
+      loaderFromObject: false,
+    };
+  }
+
+  if (typeof def === "object" && def !== null) {
+    const route = def as {
+      path?: unknown;
+      loader?: unknown;
+      component?: unknown;
+      errorComponent?: unknown;
+      loadingComponent?: unknown;
+    };
+    if (typeof route.component === "function") {
+      // The string defineRoute took is checked here rather than in defineRoute,
+      // because defineRoute runs at module scope (before the compiler knows which
+      // file it is importing). This is the useRoute path check, moved one frame up.
+      if (route.path !== expectedPath) {
+        throw new WindowError(
+          `defineRoute(${JSON.stringify(String(route.path))}) is in ${rel(file)}, whose route is ${JSON.stringify(expectedPath)}.\n` +
+            `  The string has to match the file's own path under pages/, because it is what types\n` +
+            `  the generated ComponentProps and nothing else verifies it. Either the file moved\n` +
+            `  and the string did not, or the route object was written by hand without\n` +
+            `  defineRoute and so carries no path.`,
+        );
+      }
+      return {
+        component: route.component as (props: Record<string, unknown>) => unknown,
+        loader: route.loader,
+        errorComponent:
+          typeof route.errorComponent === "function"
+            ? (route.errorComponent as (props: Record<string, unknown>) => unknown)
+            : undefined,
+        loadingComponent:
+          typeof route.loadingComponent === "function"
+            ? (route.loadingComponent as (props: Record<string, unknown>) => unknown)
+            : undefined,
+        loaderFromObject: true,
+      };
+    }
+  }
+
+  throw new WindowError(
+    `${rel(file)} must export a component as its default, or a route object.\n` +
+      `  A route is either a bare component — \`export default function Page() { … }\` — or\n` +
+      `  a route object — \`export default defineRoute("path")({ component, loader, … })\`.\n` +
+      `  The compiler calls the component while it knows which route it is compiling, which\n` +
+      `  is what makes useRoute/defineRoute checkable. An element built at module scope has\n` +
+      `  already run before anything knows where it is.`,
+  );
+}
+
+/**
  * Warnings, deduplicated with a count.
  *
  * One unsupported property in a stylesheet is not one warning — it is one per node
@@ -169,6 +264,15 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
   const sources: RefSource[] = [];
   /** Page modules, in route order — the other roots of the window's import graph. */
   const pageFiles: string[] = [];
+  /** Per-route build products, in route order, assembled before the splice. */
+  const pageBuilds: {
+    successNodes: Node[];
+    loadingNodes: Node[];
+    /** The errorComponent's nodes, or null when the route declares none. */
+    errorNodes: Node[] | null;
+    loader: unknown;
+    loaderFromObject: boolean;
+  }[] = [];
 
   /** Where the generated module will sit, so import specifiers are relative to it. */
   const outPath = options.outOverride ?? join(dir, "ui.gen.ts");
@@ -241,35 +345,85 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
       exports: (await import(pathToFileURL(entryPath).href)) as Record<string, unknown>,
     });
 
-    pages = [];
     for (const route of window.routes) {
       const file = join(projectDir, route.file);
       pageFiles.push(file);
-      const component = await defaultComponent(file, "page", rel);
+      const mod = await pageModule(file, rel, route.path);
+
       // Two scopes, with different lifetimes. `withPage` is the cursor that makes
-      // `useRoute("products/$id")` verifiable — inside it the hook knows the file it
-      // is in and refuses a string that disagrees. `withWindowRoute` is the window's
-      // own route signal, which `useRouter()` reads and which is the same for every
-      // page here. The import already happened, so nothing awaits inside either.
-      const value = withWindowRoute(routeSignalOf(shell) ?? null, () =>
-        withPage({ path: route.path, file: route.file }, component),
-      );
-      pages.push({
-        path: route.path,
-        file: route.file,
-        parent: route.parent,
-        nodes: asNodes(value),
+      // `useRoute("products/$id")`/`defineRoute("products/$id")` verifiable — inside
+      // it the hook knows the file it is in and refuses a string that disagrees.
+      // `withWindowRoute` is the window's own route signal, which `useRouter()` reads
+      // and which is the same for every page here. The import already happened, so
+      // nothing awaits inside either.
+      const call = (fn: (props: Record<string, unknown>) => unknown, props: Record<string, unknown>) =>
+        withWindowRoute(routeSignalOf(shell) ?? null, () =>
+          withPage({ path: route.path, file: route.file }, () => fn(props)),
+        );
+
+      const params = routeArgs(route.path, route.params);
+      const successNodes = asNodes(call(mod.component, { ...params, data: dataRecorder() }));
+      const loadingNodes = mod.loadingComponent
+        ? asNodes(call(mod.loadingComponent, { ...params }))
+        : [];
+      const errorNodes = mod.errorComponent
+        ? asNodes(call(mod.errorComponent, { ...params, error: errorRecorder() }))
+        : null;
+
+      pageBuilds.push({
+        successNodes,
+        loadingNodes,
+        errorNodes,
+        loader: mod.loader,
+        loaderFromObject: mod.loaderFromObject,
       });
+
       sources.push({
         specifier: specifierFor(file),
         exports: (await import(pathToFileURL(file).href)) as Record<string, unknown>,
       });
     }
+
+    // Error boundary: a route without an explicit errorComponent bubbles to its
+    // nearest ancestor that has one; with none anywhere on the chain, it gets the
+    // built-in default view. A route with no loader cannot fail, so it needs no
+    // default view of its own — it is only a bubble-through node. Runs after the
+    // loop because deciding "none anywhere" needs every errorComponent known.
+    const defaultErrorView = (): Node =>
+      jsx("div", {
+        className: "route-error",
+        children: ["Something went wrong: ", errorRecorder()],
+      });
+    const hasExplicitError = pageBuilds.map((b) => b.errorNodes !== null);
+    for (const [i, build] of pageBuilds.entries()) {
+      if (build.errorNodes !== null) continue;
+      if (build.loader === undefined) {
+        build.errorNodes = [];
+        continue;
+      }
+      let bubble = false;
+      for (let p = window.routes[i]!.parent; p !== -1; p = window.routes[p]!.parent) {
+        if (hasExplicitError[p]) {
+          bubble = true;
+          break;
+        }
+      }
+      build.errorNodes = bubble ? [] : asNodes(defaultErrorView());
+    }
+
+    pages = pageBuilds.map((build, i) => ({
+      path: window.routes[i]!.path,
+      file: window.routes[i]!.file,
+      parent: window.routes[i]!.parent,
+      nodes: build.successNodes,
+      loadingNodes: build.loadingNodes,
+      errorNodes: build.errorNodes!,
+    }));
   } finally {
     setCompiling(false);
   }
 
-  const { root, roots } = spliceWindow(shell, pages);
+  const { root, roots, loadingRoots, errorRoots } = spliceWindow(shell, pages);
 
   const nodeOf = new Map<Element, number>();
   const doc = toDocument(root);
@@ -376,6 +530,37 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
   }
 
   /**
+   * Each route's loader, resolved to how the artifact references it. A bare page's
+   * `export const loader` is a named export; a route object's loader is a property
+   * of its default export, which the artifact imports under a synthetic alias. A
+   * route with no loader contributes null.
+   */
+  const loaders: (LoaderRef | null)[] = pageBuilds.map((build, i) => {
+    if (build.loader === undefined) return null;
+    if (!build.loaderFromObject) {
+      const ref = index.get(build.loader);
+      if (!ref) {
+        throw new WindowError(
+          `a route's \`loader\` is not a module-level export.\n` +
+            `  The artifact imports it by name, so it has to be exported — \`export const\n` +
+            `  loader = …\` beside the page's default export. A loader built inside a\n` +
+            `  component has nowhere to live, because components are erased at build time.`,
+        );
+      }
+      const names = imports.get(ref.specifier) ?? new Set<string>();
+      names.add(ref.name);
+      imports.set(ref.specifier, names);
+      return { kind: "name", name: ref.name } satisfies LoaderRef;
+    }
+    return {
+      kind: "default",
+      alias: `route_${i}`,
+      specifier: specifierFor(join(projectDir, window.routes[i]!.file)),
+      prop: "loader",
+    } satisfies LoaderRef;
+  });
+
+  /**
    * A route's roots as node ids.
    *
    * An element that produced no node is dropped rather than emitted as -1: the
@@ -383,9 +568,14 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
    * nothing, which is already a legitimate state — a layout that is nothing but an
    * outlet is in it by design.
    */
+  const nodeIds = (els: readonly Element[]): number[] =>
+    els.map((el) => nodeOf.get(el)).filter((n): n is number => n !== undefined);
+
   const routeNodes: RouteNodes[] = window.routes.map((route, i) => ({
     path: route.path,
-    roots: roots[i]!.map((el) => nodeOf.get(el)).filter((n): n is number => n !== undefined),
+    roots: nodeIds(roots[i]!),
+    loading: nodeIds(loadingRoots[i]!),
+    error: nodeIds(errorRoots[i]!),
     parent: route.parent,
   }));
 
@@ -401,6 +591,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     initial,
     routeSignal: routeSignalName,
     layer: layerName,
+    loaders,
   };
 
   const source = emit(

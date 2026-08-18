@@ -11,6 +11,7 @@
 import { expect, test } from "bun:test";
 import {
   RouteHookError,
+  defineRoute,
   useRoute,
   useRouter,
   withPage,
@@ -108,6 +109,29 @@ test("useRoute with no page being compiled says so, rather than guessing", () =>
   expect(run).toThrow(RouteHookError);
   expect(run).toThrow(/no page was being compiled/);
   expect(run).toThrow(/module scope/);
+});
+
+// ---------------------------------------------------------------------------
+// defineRoute — the route-object form, and the path it stamps
+// ---------------------------------------------------------------------------
+
+test("defineRoute stamps the path on the route object, so typeof route carries it", () => {
+  const route = defineRoute("products/$id")({
+    loader: ({ id }) => id,
+    component: () => null,
+  });
+  expect(route.path).toBe("products/$id");
+  expect(typeof route.loader).toBe("function");
+  expect(typeof route.component).toBe("function");
+});
+
+test("defineRoute runs at module scope, with no page cursor", () => {
+  // No page cursor is set here — defineRoute must not need one, because it runs when
+  // the compiler imports the module, before withPage has opened. The path *check* is
+  // the compiler's (build.ts::pageModule), not this helper's.
+  const route = defineRoute("about")({ component: () => null });
+  expect(route.path).toBe("about");
+  expect(typeof route.component).toBe("function");
 });
 
 // ---------------------------------------------------------------------------

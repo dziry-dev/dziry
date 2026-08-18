@@ -36,12 +36,24 @@ export type {
 export { Window, Outlet } from "./compiler/window.ts";
 export type { WindowConfig, WindowProps } from "./compiler/window.ts";
 
-export { useRoute, useRouter } from "./compiler/route.ts";
-export type { Args, Route, Router } from "./compiler/route.ts";
+export { defineRoute, useRoute, useRouter } from "./compiler/route.ts";
+export type {
+  Args,
+  ComponentProps,
+  ErrorComponentProps,
+  LoaderData,
+  LoaderError,
+  Route,
+  RouteDefinition,
+  Router,
+} from "./compiler/route.ts";
 
 // --- state, the part that survives the compiler ------------------------------
 export { $, batch, computed, isSignal, signal } from "./runtime/signal.ts";
 export type { MapOptions, ReadonlySignal, Signal } from "./runtime/signal.ts";
+
+/** A stream-backed signal — Effect's `Stream` feeding a dziri signal. */
+export { source } from "./runtime/source.ts";
 
 /**
  * The platform's own modal message box.

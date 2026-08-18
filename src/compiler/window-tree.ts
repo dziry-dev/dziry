@@ -43,6 +43,10 @@ export type PageTree = {
    * hiding N roots is N byte writes, which is not a cost worth a node for.
    */
   nodes: Node[];
+  /** The loadingComponent's tree, or [] when the route declares none. */
+  loadingNodes: Node[];
+  /** The errorComponent's tree, or [] when the route declares none. */
+  errorNodes: Node[];
 };
 
 export type SplicedWindow = {
@@ -57,6 +61,10 @@ export type SplicedWindow = {
    * too, so it is kept, but anything the walk drops is not.
    */
   roots: Element[][];
+  /** Per route: the loadingComponent's top-level elements, or []. */
+  loadingRoots: Element[][];
+  /** Per route: the errorComponent's top-level elements, or []. */
+  errorRoots: Element[][];
 };
 
 /**
@@ -80,6 +88,8 @@ export function spliceWindow(shell: Element, pages: readonly PageTree[]): Splice
   }
 
   const roots: Element[][] = pages.map(() => []);
+  const loadingRoots: Element[][] = pages.map(() => []);
+  const errorRoots: Element[][] = pages.map(() => []);
 
   /**
    * The nodes for a route, with its own child routes already spliced into it.
@@ -101,6 +111,8 @@ export function spliceWindow(shell: Element, pages: readonly PageTree[]): Splice
     // given that layout its children's roots and made hiding one of them look like
     // hiding the layout.
     roots[index] = page.nodes.filter((n): n is Element => n.type === "element" && !isOutlet(n));
+    loadingRoots[index] = page.loadingNodes.filter((n): n is Element => n.type === "element");
+    errorRoots[index] = page.errorNodes.filter((n): n is Element => n.type === "element");
 
     const nested = children.flatMap(resolve);
 
@@ -133,7 +145,11 @@ export function spliceWindow(shell: Element, pages: readonly PageTree[]): Splice
       );
     }
 
-    return page.nodes;
+    // Success, then loading, then error — three alternatives at this route's own
+    // position. The parent splices all of them into its outlet, and navigation
+    // shows exactly one by writing `hidden`. Order is irrelevant while hidden, since
+    // a hidden node is excluded from layout.
+    return [...page.nodes, ...page.loadingNodes, ...page.errorNodes];
   };
 
   const spliced = topLevel.flatMap(resolve);
@@ -153,7 +169,7 @@ export function spliceWindow(shell: Element, pages: readonly PageTree[]): Splice
     );
   }
 
-  return { root: shell, roots };
+  return { root: shell, roots, loadingRoots, errorRoots };
 }
 
 /**

@@ -19,7 +19,8 @@ import {
   type Signal,
 } from "../runtime/signal.ts";
 import { isRecorder, pathOf, recorder } from "./item-path.ts";
-import { isRouteParam, ParamNotEmittedError, paramNameOf } from "./route-args.ts";
+import { isRouteParam, paramNameOf } from "./route-args.ts";
+import { isRouteData, isRouteError, routeDataPath, routeErrorPath } from "./route-data.ts";
 import type { DynList, DynText, Element, Node, TextPart } from "./html.ts";
 
 export class ListError extends Error {}
@@ -367,6 +368,13 @@ export type Props = {
    */
   "bind:value"?: Signal<string> | string;
   /**
+   * `<img bind:src={sig}>` — a dynamic image source. The signal's value is
+   * interned as the initial string, and the worker rewrites the slot when the
+   * signal moves; the loader picks the new path up on the next frame. The
+   * `string` arm is the same list-row story as `bind:value` above.
+   */
+  "bind:src"?: Signal<string> | string;
+  /**
    * Inline declarations, applied after the cascade and beating every selector —
    * the same precedence a browser gives them.
    *
@@ -586,7 +594,20 @@ function flatten(child: Child, out: Node[]): void {
   // Checked here rather than left to the proxy's own trap, which would fire on the
   // `.type` read below and report a computed expression that nobody wrote.
   if (isRouteParam(child)) {
-    throw new ParamNotEmittedError(paramNameOf(child));
+    out.push({ type: "dyntext", parts: [{ param: paramNameOf(child) }] });
+    return;
+  }
+
+  // `{data.title}` and `{error.message}` inside a route object's component — a
+  // recorded path into the loader's exit, not a value. Checked after the list-item
+  // and param recorders, since each answers only to its own brand.
+  if (isRouteData(child)) {
+    out.push({ type: "dyntext", parts: [{ data: routeDataPath(child) }] });
+    return;
+  }
+  if (isRouteError(child)) {
+    out.push({ type: "dyntext", parts: [{ error: routeErrorPath(child) }] });
+    return;
   }
 
   // `{count}` — a signal reached the tree as an object, so it is a binding.

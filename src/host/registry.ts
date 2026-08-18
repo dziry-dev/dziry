@@ -30,6 +30,8 @@ export type WindowArtifact = CompiledUi & {
   initialRoute: number;
   windowConfig: WindowConfig;
   windowId: string;
+  /** Route loaders, indexed by route — the function to run on navigation, or null. */
+  loaders: (((args: Record<string, string>) => unknown) | null)[];
   routeSignal: ReadonlySignal<string> | null;
   /**
    * The window's Effect layer — `<Window layer={…}>` — or null. The worker

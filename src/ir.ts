@@ -7,6 +7,7 @@
  */
 
 import type { ReadonlySignal, Signal } from "./runtime/signal.ts";
+import type { ItemPath } from "./compiler/item-path.ts";
 import {
   Align as SchemaAlign,
   Display as SchemaDisplay,
@@ -669,6 +670,46 @@ export type TextBinding = {
 };
 
 /**
+ * A route-parameter text run: literals interleaved with `{args.x}` reads.
+ *
+ * Kept apart from `TextBinding` because its value is not a signal — it is the
+ * active route's bound parameters, known only at navigation. The worker resolves
+ * these with `matchRoute`'s output rather than through `applyTextBindings`.
+ */
+export type ParamBinding = {
+  node: number;
+  slot: number;
+  parts: ({ literal: string } | { param: string })[];
+};
+
+/**
+ * A route-loader text run: literals interleaved with `{data.x}` reads.
+ *
+ * The success half of a route object. Kept apart from `TextBinding` because its
+ * value is not a signal — it is the loader's success value, known only after the
+ * loader settles. The worker resolves these with `applyDataBindings`, reading the
+ * recorded path out of the success value.
+ */
+export type DataBinding = {
+  node: number;
+  slot: number;
+  parts: ({ literal: string } | { data: ItemPath })[];
+};
+
+/**
+ * A route-loader error run: literals interleaved with `{error.x}` reads.
+ *
+ * The failure half of a route object, resolved by `applyErrorBindings` against the
+ * loader's failure value. Kept apart from `DataBinding` for the same reason the two
+ * recorder brands are: a loader that fails does not write success, and vice versa.
+ */
+export type ErrorBinding = {
+  node: number;
+  slot: number;
+  parts: ({ literal: string } | { error: ItemPath })[];
+};
+
+/**
  * A dynamic `src` on an `<img>`, from `bind:src={sig}`.
  *
  * The slot is the string the image table points into; when the signal moves
@@ -1018,6 +1059,9 @@ export type CompiledUi = {
   nodes: NodeTable;
   variants: VariantTable;
   textBindings: TextBinding[];
+  paramBindings: ParamBinding[];
+  dataBindings: DataBinding[];
+  errorBindings: ErrorBinding[];
   imageBindings: ImageBinding[];
   handlers: HandlerBinding[];
   /** Every `<form>`, with Enter's outcome resolved. See [`FormBinding`]. */
@@ -1183,7 +1227,12 @@ export type WindowConfig = {
 export type RouteNodes = {
   /** Route path, as the file path under `pages/` gave it. */
   path: string;
+  /** The route's success view — its component's own top-level nodes. */
   roots: readonly number[];
+  /** The loadingComponent's top-level nodes, empty when the route declares none. */
+  loading: readonly number[];
+  /** The errorComponent's top-level nodes, empty when the route declares none. */
+  error: readonly number[];
   /** Nearest prefix route in this window's list, or -1. Visible when this one is. */
   parent: number;
 };

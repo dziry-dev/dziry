@@ -1,4 +1,4 @@
-﻿/**
+/**
  * A small, strict HTML parser.
  *
  * Deliberately *not* an error-recovering browser parser: unbalanced tags are a
@@ -159,8 +159,14 @@ export type TextPart =
   | { literal: string }
   | { source: unknown }
   | { export: string }
+  /** A route parameter read — `{args.id}` -> `"id"`. Resolved at navigation. */
+  | { param: string }
   /** A path recorded from a list item callback, e.g. `t.text` -> `["text"]`. */
   | { item: (string | number)[] }
+  /** A path recorded from a route object's `component` read of `data`. */
+  | { data: (string | number)[] }
+  /** A path recorded from a route object's `errorComponent` read of `error`. */
+  | { error: (string | number)[] }
   /**
    * The validation message for *this row*, in a `<span error />` inside a list template.
    *

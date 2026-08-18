@@ -26,6 +26,7 @@
  */
 import { paramsOfPath, routeArgs } from "./route-args.ts";
 import { computed, type ReadonlySignal } from "../runtime/signal.ts";
+import type { Effect } from "../effect.ts";
 
 /**
  * The parameter names in a route path.
@@ -42,6 +43,34 @@ type ParamNames<P extends string> = P extends `${string}$${infer Rest}`
 
 /** What `useRoute("products/$id").args` is: `{ id: string }`. */
 export type Args<P extends string> = { [K in ParamNames<P>]: string };
+
+/** A function's return type, or never when it is not a function. */
+type ReturnOf<F> = F extends (...args: never[]) => infer Ret ? Ret : never;
+
+/** A loader's return type, unwrapped: A | Promise<A> | Effect<A, E, R> -> A. */
+export type LoaderData<F> =
+  ReturnOf<F> extends Effect.Effect<infer A, any, any> ? A : Awaited<ReturnOf<F>>;
+
+/** A loader's failure type: Effect<A, E, R> -> E; otherwise unknown (a thrown value). */
+export type LoaderError<F> =
+  ReturnOf<F> extends Effect.Effect<any, infer E, any> ? E : unknown;
+
+/**
+ * A route object's component props: the loader's data, plus the route's params.
+ *
+ * Lives here rather than in the generated routes.gen.ts so a page imports it from
+ * `dziri` — a stable specifier — instead of a generated file that does not exist
+ * until the first compile. The params come from the path literal itself (`Args`),
+ * which is why nothing generated is needed.
+ */
+export type ComponentProps<R extends { path: string; loader?: (...args: never[]) => unknown }> = {
+  data: LoaderData<R["loader"]>;
+} & Args<R["path"]>;
+
+/** A route object's error-component props: the loader's failure value. */
+export type ErrorComponentProps<R extends { loader: (...args: never[]) => unknown }> = {
+  error: LoaderError<R["loader"]>;
+};
 
 export type Route<P extends string> = {
   /** The path as written — the same string, so it can be passed on. */
@@ -242,4 +271,71 @@ export function useRoute<const P extends string>(path: P): Route<P> {
     path,
     args: routeArgs(path, paramsOfPath(path)) as Args<P>,
   };
+}
+
+/**
+ * The shape of a route object, as defineRoute accepts it.
+ *
+ * A route file may export either a bare component (the original form) or an object
+ * built by defineRoute. The object is the TanStack-style surface: a loader that runs
+ * on navigation, a component that reads its data, and optional error/loading views.
+ * The compiler calls component/errorComponent/loadingComponent at build time with
+ * recording proxies, so their exact parameter types are the `ComponentProps`/
+ * `ErrorComponentProps` types defined in this module — here each is just 'a function',
+ * because the compiler calls it, not TypeScript.
+ */
+export type RouteDefinition = {
+  /**
+   * Runs on navigation with the route's params. A | Promise<A> | Effect<A, E, R>.
+   *
+   * The parameter type is `Record<string, string>` rather than `never[]`, because a
+   * loader is usually destructured inline — `({ id }) => …` — and a `never` contextual
+   * type would give every destructured name `never`. The runtime passes the matcher's
+   * params, which are exactly a string record.
+   */
+  loader?: (args: Record<string, string>) => unknown;
+  /** Called at build time with { data, ...params }; its tree is the success view. */
+  component: (...args: never[]) => unknown;
+  /** Called at build time with { error, ...params }; shown when the loader fails. */
+  errorComponent?: (...args: never[]) => unknown;
+  /** Called at build time with { ...params }; shown while the loader is in flight. */
+  loadingComponent?: (...args: never[]) => unknown;
+};
+
+/**
+ * Declares a route as an object instead of a bare component.
+ *
+ * ```tsx
+ * // windows/main/pages/products/$id.tsx
+ * const route = defineRoute("products/$id")({
+ *   loader: ({ id }) => fetchProduct(id),
+ *   component: Product,
+ *   errorComponent: ProductError,       // optional
+ *   loadingComponent: ProductSkeleton,  // optional
+ * });
+ * export default route;
+ * ```
+ *
+ * The string repeats the filename for the same reason useRoute's does: TypeScript
+ * cannot know which file a call is in, so the repetition is what lets the generated
+ * ComponentProps<typeof route> resolve data and params from the path. The compiler
+ * checks the string against the file, so a rename that is not mirrored fails the
+ * build rather than drifting.
+ *
+ * defineRoute returns the object with path stamped on, so typeof route carries the
+ * literal path that `Args` and `ComponentProps` derive the params from. There is no
+ * runtime half — the components are erased into nodes and the loader survives as an
+ * exported name.
+ */
+export function defineRoute<const P extends string>(
+  path: P,
+): <const D extends RouteDefinition>(def: D) => D & { path: P } {
+  // No validation here. defineRoute runs at module scope — when the compiler
+  // imports the page — which is *before* `withPage` has set the current route, so
+  // `currentPage` is null and cannot check anything. The check lives in the
+  // compiler (build.ts::pageModule), which knows both the string and the file's own
+  // scanned route and compares them. This helper is pure: stamp the path, return the
+  // object, and let the compiler refuse a string that disagrees with the file.
+  return <const D extends RouteDefinition>(def: D): D & { path: P } =>
+    ({ ...def, path }) as D & { path: P };
 }

@@ -202,6 +202,9 @@ const partText = (p: TextPart): string => {
   if ("export" in p) return `export(${p.export})`;
   // A row's validation message, which names a box the artifact declares rather than a signal.
   if ("rowError" in p) return `rowError(${p.rowError.cell})`;
+  if ("param" in p) return `param(${p.param})`;
+  if ("data" in p) return `data(${p.data.join(".")})`;
+  if ("error" in p) return `error(${p.error.join(".")})`;
   // Identity is what resolves to an import name. `router.path` arrives wrapped, so
   // unwrap for display — otherwise the row shows the marker its `.value` returns
   // and reads as though the route were bound to a literal.

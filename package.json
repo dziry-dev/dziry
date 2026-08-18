@@ -32,7 +32,12 @@
     "./engine/*": "./src/engine/*",
     "./protocol/*": "./src/protocol/*",
     "./host/*": "./src/host/*",
+    "./effect": "./src/effect.ts",
+    "./livestore": "./src/livestore.ts",
     "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "effect": "^3.22.1"
   },
   "scripts": {
     "test": "bun test && bun run engine:test",
@@ -84,13 +89,13 @@
     "docs-check": "bun run scripts/docs-check.ts"
   },
   "devDependencies": {
+    "@livestore/livestore": "^0.4.0",
     "@tailwindcss/cli": "^4.3.3",
     "@tailwindcss/node": "4.3.3",
     "@tailwindcss/oxide": "4.3.3",
     "@types/bun": "latest",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "effect": "^3.22.1",
     "magic-string": "^1.1.0",
     "mdn-data": "^2.29.0",
     "oxc-parser": "^0.142.0",

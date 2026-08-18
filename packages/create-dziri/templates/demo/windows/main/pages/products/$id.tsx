@@ -1,29 +1,56 @@
 /**
- * The route at `"products/$id"`, nested inside the `products` layout.
+ * The route at "products/$id", as a route object.
  *
- * `useRoute` is called for real: the string is checked against this file's own path
- * during compilation, so renaming the file without changing the string fails the
- * build. Try it — change either one.
+ * defineRoute stamps the path on the object, which is what lets the generated
+ * ComponentProps<typeof route> resolve `data` and `id` — from the loader's return
+ * and the route's parameters, respectively. The string is checked against the file
+ * during compilation, so a rename that is not mirrored fails the build.
  *
- * `args.id` is deliberately not rendered. The recorder is correct and reaches the
- * tree correctly; what is missing is the emitter turning that read into a text
- * binding, which is the next piece of the router. Writing `{args.id}` here today
- * gets a `ParamNotEmittedError` saying exactly that, rather than a wrong answer.
+ * `loader` runs on navigation (here synchronous; it may also be async or an
+ * Effect). Its success value is the `data` the component reads — `{data.title}` is
+ * a data-cell binding the router writes when the loader settles. `errorComponent`
+ * is shown on failure, and `loadingComponent` while the loader is in flight.
  */
-import { useRoute, useRouter } from "dziri";
+import { defineRoute } from "dziri";
+import type { ComponentProps, ErrorComponentProps } from "dziri";
 
-export default function Product() {
-  const { path } = useRoute("products/$id");
-  const router = useRouter();
+type Product = { title: string; price: string };
 
+const route = defineRoute("products/$id")({
+  loader: ({ id }): Product => ({ title: `Product #${id}`, price: "$12.00" }),
+  component: ProductDetail,
+  errorComponent: ProductError,
+  loadingComponent: ProductSkeleton,
+});
+
+export default route;
+
+function ProductDetail({ data, id }: ComponentProps<typeof route>) {
   return (
     <div className="sunken flex flex-col gap-2 rounded-lg bg-zinc-950 p-4">
-      <div className="heading text-sm font-semibold text-zinc-100">Product detail</div>
-      <div className="muted text-xs text-zinc-400">
-        A parameter route. Its pattern is {path}, and the window is at {router.path}. The two are
-        the same string today because nothing binds a concrete id yet — the matcher is what turns
-        `products/1` into this route with `id = "1"`.
+      <div className="heading text-sm font-semibold text-zinc-100">
+        {data.title} <span className="muted text-zinc-500">#{id}</span>
       </div>
+      <div className="muted text-xs text-zinc-400">
+        {data.price} — the loader's success value, read through a data-cell binding.
+      </div>
+    </div>
+  );
+}
+
+function ProductSkeleton() {
+  return (
+    <div className="sunken flex flex-col gap-2 rounded-lg bg-zinc-950 p-4">
+      <div className="heading text-sm font-semibold text-zinc-100">Loading product…</div>
+    </div>
+  );
+}
+
+function ProductError({ error }: ErrorComponentProps<typeof route>) {
+  return (
+    <div className="sunken flex flex-col gap-2 rounded-lg bg-zinc-950 p-4">
+      <div className="heading text-sm font-semibold text-red-400">Failed to load</div>
+      <div className="muted text-xs text-zinc-400">{error as string}</div>
     </div>
   );
 }

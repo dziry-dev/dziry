@@ -1,4 +1,4 @@
-﻿/**
+/**
  * The compiler: HTML + CSS in, IR out.
  *
  * Everything expensive and static happens here — tokenizing, selector matching,
@@ -236,6 +236,27 @@ export type BuiltTextBinding = {
   node: number;
   slot: number;
   parts: TextPart[];
+};
+
+/** A text run whose dynamic part is a route parameter, not a signal. */
+export type BuiltParamBinding = {
+  node: number;
+  slot: number;
+  parts: ({ literal: string } | { param: string })[];
+};
+
+/** A text run whose dynamic part reads the loader's success value — `{data.x}`. */
+export type BuiltDataBinding = {
+  node: number;
+  slot: number;
+  parts: ({ literal: string } | { data: (string | number)[] })[];
+};
+
+/** A text run whose dynamic part reads the loader's failure value — `{error.x}`. */
+export type BuiltErrorBinding = {
+  node: number;
+  slot: number;
+  parts: ({ literal: string } | { error: (string | number)[] })[];
 };
 
 /**
@@ -904,6 +925,9 @@ export type CompileResult = {
   nodes: BuiltNode[];
   root: number;
   textBindings: BuiltTextBinding[];
+  paramBindings: BuiltParamBinding[];
+  dataBindings: BuiltDataBinding[];
+  errorBindings: BuiltErrorBinding[];
   imageBindings: BuiltImageBinding[];
   handlers: BuiltHandler[];
   editables: BuiltEditable[];
@@ -961,7 +985,24 @@ export type EmittedRouting = {
    * a ManagedRuntime from it at launch; absent, no effect machinery ever loads.
    */
   layer: string | null;
+  /**
+   * Route loaders, indexed by route — how to reference the function to run on
+   * navigation, or null where the route has none. Same rule as the layer: a
+   * function survives the compiler/runtime boundary only as a name.
+   */
+  loaders: (LoaderRef | null)[];
 };
+
+/**
+ * A route loader, as the artifact references it.
+ *
+ * A bare page's `export const loader` is a named export, referenced by name. A
+ * route object's loader is a property of its default export, which the artifact
+ * imports under a synthetic alias and reads the property off.
+ */
+export type LoaderRef =
+  | { kind: "name"; name: string }
+  | { kind: "default"; alias: string; specifier: string; prop: string };
 
 /**
  * Nodes hidden on the first frame: everything off the initial route's chain.
@@ -1054,6 +1095,9 @@ export function compileTree(
     },
   };
   const textBindings: BuiltTextBinding[] = [];
+  const paramBindings: BuiltParamBinding[] = [];
+  const dataBindings: BuiltDataBinding[] = [];
+  const errorBindings: BuiltErrorBinding[] = [];
   const imageBindings: BuiltImageBinding[] = [];
   const handlers: BuiltHandler[] = [];
   const lists: BuiltList[] = [];
@@ -2453,7 +2497,51 @@ export function compileTree(
       });
 
       if (node.type === "dyntext") {
-        textBindings.push({ node: self, slot, parts: node.parts });
+        // Route reads, each resolved against a different runtime source, are kept
+        // apart rather than pooled into `textBindings`: a parameter is bound by the
+        // matcher, data by the loader's success, error by its failure. A run mixing
+        // two kinds (or a kind with a signal) is refused, because the emitter has no
+        // single place to resolve it.
+        const kind = node.parts.some((p) => "param" in p)
+          ? "param"
+          : node.parts.some((p) => "data" in p)
+            ? "data"
+            : node.parts.some((p) => "error" in p)
+              ? "error"
+              : "signal";
+
+        if (kind === "signal") {
+          textBindings.push({ node: self, slot, parts: node.parts });
+        } else {
+          const parts = node.parts.map((p) => {
+            if ("literal" in p) return { literal: p.literal };
+            if (kind === "param" && "param" in p) return { param: p.param };
+            if (kind === "data" && "data" in p) return { data: p.data };
+            if (kind === "error" && "error" in p) return { error: p.error };
+            throw new Error(
+              `a route ${kind} cannot share a text run with a signal or another route read (node ${self}). ` +
+                `Render it as its own text run, or derive the value in a computed().`,
+            );
+          });
+          if (kind === "param")
+            paramBindings.push({
+              node: self,
+              slot,
+              parts: parts as ({ literal: string } | { param: string })[],
+            });
+          else if (kind === "data")
+            dataBindings.push({
+              node: self,
+              slot,
+              parts: parts as ({ literal: string } | { data: (string | number)[] })[],
+            });
+          else
+            errorBindings.push({
+              node: self,
+              slot,
+              parts: parts as ({ literal: string } | { error: (string | number)[] })[],
+            });
+        }
       }
       return self;
     }
@@ -2513,6 +2601,9 @@ export function compileTree(
     nodes,
     root: rootIndex,
     textBindings,
+    paramBindings,
+    dataBindings,
+    errorBindings,
     imageBindings,
     handlers,
     editables,
@@ -3390,6 +3481,9 @@ export function toCompiledUi(result: CompileResult): CompiledUi {
     // Bindings are resolved and emitted only on the generated-module path; the
     // in-memory IR is used by tests and the variant probe, which are static.
     textBindings: [],
+    paramBindings: [],
+    dataBindings: [],
+    errorBindings: [],
     imageBindings: [],
     handlers: [],
     // The *table* needs no resolution — it is where each arena is and where it
@@ -3674,6 +3768,12 @@ export function emit(
       ([specifier, names]) =>
         `import { ${[...names].sort().join(", ")} } from ${JSON.stringify(specifier)};`,
     ),
+    // A route object's loader is read off its default export, so the artifact
+    // imports the default under a synthetic alias rather than a named import —
+    // `default` cannot be imported by bare name.
+    ...(routing?.loaders ?? [])
+      .filter((l): l is Extract<LoaderRef, { kind: "default" }> => l !== null && l.kind === "default")
+      .map((l) => `import { default as ${l.alias} } from ${JSON.stringify(l.specifier)};`),
   ].join("\n");
 
   /**
@@ -3734,6 +3834,42 @@ export function emit(
     .map(
       (b) =>
         `  { node: ${b.node}, slot: ${b.slot}, parts: [${b.parts.map(partSource).join(", ")}] },`,
+    )
+    .join("\n");
+
+  const paramPartSource = (part: BuiltParamBinding["parts"][number]): string =>
+    "literal" in part
+      ? `{ literal: ${JSON.stringify(part.literal)} }`
+      : `{ param: ${JSON.stringify(part.param)} }`;
+
+  const paramBindingSource = result.paramBindings
+    .map(
+      (b) =>
+        `  { node: ${b.node}, slot: ${b.slot}, parts: [${b.parts.map(paramPartSource).join(", ")}] },`,
+    )
+    .join("\n");
+
+  const dataPartSource = (part: BuiltDataBinding["parts"][number]): string =>
+    "literal" in part
+      ? `{ literal: ${JSON.stringify(part.literal)} }`
+      : `{ data: ${JSON.stringify(part.data)} }`;
+
+  const dataBindingSource = result.dataBindings
+    .map(
+      (b) =>
+        `  { node: ${b.node}, slot: ${b.slot}, parts: [${b.parts.map(dataPartSource).join(", ")}] },`,
+    )
+    .join("\n");
+
+  const errorPartSource = (part: BuiltErrorBinding["parts"][number]): string =>
+    "literal" in part
+      ? `{ literal: ${JSON.stringify(part.literal)} }`
+      : `{ error: ${JSON.stringify(part.error)} }`;
+
+  const errorBindingSource = result.errorBindings
+    .map(
+      (b) =>
+        `  { node: ${b.node}, slot: ${b.slot}, parts: [${b.parts.map(errorPartSource).join(", ")}] },`,
     )
     .join("\n");
 
@@ -3957,7 +4093,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DisabledBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef, ImageBinding } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -4032,6 +4168,21 @@ ${formSource}
 export const textBindings = [
 ${textBindingSource}
 ] satisfies TextBinding[];
+
+/** Route-parameter text runs — literals interleaved with {args.x} reads. */
+export const paramBindings = [
+${paramBindingSource}
+] satisfies ParamBinding[];
+
+/** Loader-data text runs — literals interleaved with {data.x} reads. */
+export const dataBindings = [
+${dataBindingSource}
+] satisfies DataBinding[];
+
+/** Loader-error text runs — literals interleaved with {error.x} reads. */
+export const errorBindings = [
+${errorBindingSource}
+] satisfies ErrorBinding[];
 
 /** Click and change handlers, as direct references to the app's exported functions. */
 export const handlers = [
@@ -4221,6 +4372,7 @@ function routingSource(routing: EmittedRouting): string {
     .map(
       (r) =>
         `  { path: ${JSON.stringify(r.path)}, roots: [${r.roots.join(", ")}],` +
+        ` loading: [${r.loading.join(", ")}], error: [${r.error.join(", ")}],` +
         ` parent: ${r.parent} },`,
     )
     .join("\n");
@@ -4269,6 +4421,22 @@ export const routeSignal: ReadonlySignal<string> | null = ${routing.routeSignal 
  * \`export const layer = layer\` is a TDZ self-reference, found by the smoke run.
  */
 export const windowLayer: unknown = ${routing.layer ?? "null"};
+
+/**
+ * Route loaders, indexed by route — the function to run on navigation, or null.
+ * Loosely typed for the same reason windowLayer is:
+ * dziri does not depend on effect, and the returned value's shape is decided at
+ * run time (runtime/effects.ts::runLoader).
+ */
+export const loaders: (((args: Record<string, string>) => unknown) | null)[] = [
+${routing.loaders
+  .map((l) => {
+    if (l === null) return "  null,";
+    if (l.kind === "name") return `  ${l.name},`;
+    return `  ${l.alias}.${l.prop},`;
+  })
+  .join("\n")}
+];
 
 /** Folder name of the window, for diagnostics and multi-window dispatch later. */
 export const windowId: string = ${JSON.stringify(routing.window)};

@@ -19,6 +19,7 @@ import {
 } from "./numerics.ts";
 import { applyIssues, formPayload, validatePayload, type Validated } from "./forms.ts";
 import { runDispatched } from "./effects.ts";
+import { readPath } from "./read-path.ts";
 import { batch, type Signal } from "./signal.ts";
 
 /**
@@ -52,6 +53,89 @@ export function applyTextBindings(ui: CompiledUi, changed?: number[]): Dirty {
     let next = "";
     for (const part of binding.parts) {
       next += "literal" in part ? part.literal : String(part.signal.value);
+    }
+
+    if (ui.strings[binding.slot] !== next) {
+      ui.strings[binding.slot] = next;
+      changed?.push(binding.node);
+      dirty = Dirty.LAYOUT;
+    }
+  }
+
+  return dirty;
+}
+
+/**
+ * Recomputes every route-parameter text run from the active route's bound params.
+ *
+ * The signal half is `applyTextBindings`; this is its navigation counterpart. A
+ * `{param}` part resolves against `params` (the output of `matchRoute`), and an
+ * absent parameter renders empty — which is correct for a route that is not active,
+ * since its nodes are hidden. Same incremental-string mechanism, so a changed width
+ * is reported the same way and re-measured by the same caller.
+ */
+export function applyParamBindings(
+  ui: CompiledUi,
+  params: Record<string, string>,
+  changed?: number[],
+): Dirty {
+  let dirty: Dirty = Dirty.NONE;
+
+  for (const binding of ui.paramBindings) {
+    let next = "";
+    for (const part of binding.parts) {
+      next += "literal" in part ? part.literal : (params[part.param] ?? "");
+    }
+
+    if (ui.strings[binding.slot] !== next) {
+      ui.strings[binding.slot] = next;
+      changed?.push(binding.node);
+      dirty = Dirty.LAYOUT;
+    }
+  }
+
+  return dirty;
+}
+
+/**
+ * Recomputes every loader-data text run from the loader's success value.
+ *
+ * The success half of a route object. A `{data.x}` part resolves against the
+ * value `runLoader` reported, by the path the recorder captured; an absent value
+ * renders empty, which is correct before the loader has settled (the route's nodes
+ * may already be showing while it is in flight).
+ */
+export function applyDataBindings(ui: CompiledUi, data: unknown, changed?: number[]): Dirty {
+  let dirty: Dirty = Dirty.NONE;
+
+  for (const binding of ui.dataBindings) {
+    let next = "";
+    for (const part of binding.parts) {
+      next += "literal" in part ? part.literal : String(readPath(data, part.data) ?? "");
+    }
+
+    if (ui.strings[binding.slot] !== next) {
+      ui.strings[binding.slot] = next;
+      changed?.push(binding.node);
+      dirty = Dirty.LAYOUT;
+    }
+  }
+
+  return dirty;
+}
+
+/**
+ * Recomputes every loader-error text run from the loader's failure value.
+ *
+ * The failure half of a route object, the same walk against `ui.errorBindings`.
+ */
+export function applyErrorBindings(ui: CompiledUi, error: unknown, changed?: number[]): Dirty {
+  let dirty: Dirty = Dirty.NONE;
+
+  for (const binding of ui.errorBindings) {
+    let next = "";
+    for (const part of binding.parts) {
+      next += "literal" in part ? part.literal : String(readPath(error, part.error) ?? "");
     }
 
     if (ui.strings[binding.slot] !== next) {

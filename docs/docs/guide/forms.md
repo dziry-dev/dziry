@@ -379,6 +379,32 @@ export const onSignUp = (data: unknown) => {
 `alert()` opens the platform's own modal — see [alert](../api/signals.mdx#alert). Import it: Bun
 has a global `alert()` that reads stdin.
 
+## Reading a picked file
+
+`<input type="file">` opens the platform's open-file dialog (SDL's). The chosen path lands
+in the input's bound signal and `onChange` fires — the value is the **path**, not the file,
+because no engine thread should block a frame on disk.
+
+```tsx no-check
+export const picked = signal("");
+
+<input type="file" accept="image/*,.png" multiple bind:value={picked} />;
+```
+
+`accept` narrows the dialog's filter and `multiple` allows several picks, whose paths are
+newline-joined. Three helpers turn the path into something useful:
+
+```ts no-check
+import { fileInfo, readFile, readFileText } from "dziri";
+
+const info = await fileInfo(picked);      // { path, name, size, type }
+const bytes = await readFile(picked);     // Uint8Array — what <img src> needs
+const text = await readFileText(picked);  // string — for .txt, .json, .csv
+```
+
+`fileInfo` reads the size from disk and guesses the MIME type from the extension;
+`readFile` and `readFileText` load the whole file.
+
 ## What is not built
 
 - **A *named* control inside a `map()` row is still not collected.** Rows reach the payload as
@@ -386,7 +412,9 @@ has a global `alert()` that reads stdin.
   would be the same string in every row, so it stays out. The build says so.
 - **`errorClassName` on a wrapper *inside* a row does nothing.** A class is a style row, and
   replicas share one. Style the row's controls with `:invalid` instead, which is per node.
-- **No `<input type="file">`.** There is no file picker, so there would be nothing to submit.
+- **A file input contributes nothing to the payload.** `<input type="file">` opens the
+  picker and the chosen *path* lands in its bound signal, but there is no `File` object here,
+  so it is not a form field. Read it with `fileInfo`/`readFile`/`readFileText` (above).
 - **A named submit button adds no entry of its own** — a browser includes `name=value` for the
   button that submitted, and dziri does not. In a two-button form, use two `onClick`s.
 

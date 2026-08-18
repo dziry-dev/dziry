@@ -125,6 +125,36 @@ isSignal(0); // false
 A brand check. Mostly used by framework code and by anything writing a helper that
 takes "a signal or a plain value".
 
+## source
+
+<Status of="source" />
+```ts no-check
+const config = source<Config>(
+  (set) => {
+    const watcher = fs.watch("config.json", async () => set(await readConfig()));
+    return () => watcher.close();
+  },
+  readConfigSync(),
+);
+```
+
+A signal fed from outside the process. The first argument is "how to subscribe" — a
+function that receives `set` and returns an unsubscribe — and the second is the
+initial value. The subscribe runs once at launch (never while the compiler imports
+the module), and the unsubscribe runs on window close.
+
+What the subscribe **returns** decides the shape. Return an unsubscribe and it is a
+callback source that needs nothing. Return an Effect `Stream` and dziri runs it
+with `Stream.runForEach`, importing `effect` lazily — see
+[Effect](../guide/effect.md#source--a-signal-from-a-stream).
+
+```ts no-check
+export const todos = source<Todo[]>(() => liveTodos(), []);
+```
+
+A zero-argument `() => Stream` is assignable to the one-argument subscribe because
+a function may ignore arguments it does not declare.
+
 ## alert
 
 <Status of="alert" />
@@ -196,6 +226,6 @@ import type { MapOptions, ReadonlySignal, Signal } from "dziri";
 ## Not built yet
 
 `effect` <Status of="effect" />, `untrack` <Status of="untrack" />,
-`peek` <Status of="peek" />, `source` <Status of="source" /> and
-`resource` <Status of="resource" /> are designed but not implemented. They are
-described in `API.md`; nothing on this page depends on them.
+`peek` <Status of="peek" /> and `resource` <Status of="resource" /> are designed
+but not implemented. They are described in `API.md`; nothing on this page depends
+on them.

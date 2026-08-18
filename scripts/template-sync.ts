@@ -26,7 +26,7 @@ import { dirname, join, relative } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const SOURCE = join(ROOT, "windows");
-const TARGET = join(ROOT, "packages", "create-dziri", "template", "windows");
+const TARGET = join(ROOT, "packages", "create-dziri", "templates", "demo", "windows");
 
 const check = process.argv.includes("--check");
 
