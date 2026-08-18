@@ -6,7 +6,7 @@
   "bin": {
     "create-dziri": "./index.ts"
   },
-  "files": ["index.ts", "template"],
+  "files": ["index.ts", "templates"],
   "keywords": ["dziri", "desktop", "ui", "bun", "skia"],
   "license": "MIT"
 }

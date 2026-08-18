@@ -1,0 +1,16 @@
+/*
+ * The app's stylesheet. `windows/main/index.tsx` imports it, and the compiler
+ * runs the project's own Tailwind over it during the build.
+ *
+ * Theme + utilities only, no preflight — dziri ships its own UA sheet, which is
+ * the same job done at the right origin. `source(none)` plus explicit `@source`
+ * keeps Tailwind from scanning node_modules for class-shaped strings.
+ */
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css" source(none);
+@source "./index.tsx";
+@source "./pages/**/*.tsx";
+
+body {
+  background-color: #09090b;
+}

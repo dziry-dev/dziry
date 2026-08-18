@@ -11,12 +11,13 @@
  * the sharp edges here (signals must be module-level exports; CSS resolves at build
  * time) are exactly what a new project trips over.
  *
- * The window sources are copied from `windows/` by `scripts/template-sync.ts`
- * rather than maintained here, and `bun run template:check` fails if the two have
- * drifted.
+ * The demo template's window sources are copied from `windows/` by
+ * `scripts/template-sync.ts` rather than maintained here, and `bun run
+ * template:check` fails if the two have drifted. Other templates — `todo` — are
+ * authored: they are apps, not mirrors of this repository's demo.
  */
 import { Glob } from "bun";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 const HELP = `create-dziri — scaffold a dziri app
@@ -25,6 +26,12 @@ usage
   bun create dziri <directory>
 
 options
+  --template <name>  which template (default: demo)
+                       demo   the framework's own demo — every route is one
+                              family of CSS or one feature, derived from the
+                              repo it develops against
+                       todo   a small real app — Tailwind, a LiveStore store
+                              on disk, held in an Effect layer
   --local <path>     depend on a dziri checkout instead of the published package
   --no-install       write the files and stop
   -h, --help         this
@@ -43,10 +50,21 @@ const valueOf = (name: string): string | undefined => {
 };
 
 const local = valueOf("--local");
+// `--local` with nothing after it (or the next flag after it) silently fell back to
+// the published `dziri@^0.0.0`, which 404s and reads as a broken checkout. Say so.
+if (argv.includes("--local") && (local === undefined || local.startsWith("-"))) {
+  console.error(
+    `  error: --local takes a path to a dziri checkout, e.g. --local .\n` +
+      `  Point it at a checkout with a package.json so the scaffold depends on\n` +
+      `  file:... rather than the published dziri.`,
+  );
+  process.exit(1);
+}
 const noInstall = argv.includes("--no-install");
+const template = valueOf("--template") ?? "demo";
 
 const positional = argv.filter(
-  (a, i) => !a.startsWith("-") && argv[i - 1] !== "--local",
+  (a, i) => !a.startsWith("-") && argv[i - 1] !== "--local" && argv[i - 1] !== "--template",
 );
 
 const target = resolve(positional[0] ?? "my-dziri-app");
@@ -73,15 +91,21 @@ if (existsSync(target) && readdirSync(target).length > 0) {
   process.exit(1);
 }
 
-const TEMPLATE = new URL("./template", import.meta.url).pathname.replace(
+const TEMPLATES = new URL("./templates", import.meta.url).pathname.replace(
   /^\/([A-Za-z]:)/,
   "$1",
 );
+const TEMPLATE = join(TEMPLATES, template);
 
 if (!existsSync(TEMPLATE)) {
+  const known = existsSync(TEMPLATES)
+    ? readdirSync(TEMPLATES).filter((d) => existsSync(join(TEMPLATES, d, "package.json")))
+    : [];
   console.error(
-    `  error: this copy of create-dziri has no template directory.\n` +
-      `  Expected it at ${TEMPLATE}. In a checkout, run \`bun run template:sync\`.`,
+    known.length
+      ? `  error: no template "${template}". Available: ${known.join(", ")}.`
+      : `  error: this copy of create-dziri has no templates directory.\n` +
+          `  Expected it at ${TEMPLATES}. In a checkout, run \`bun run template:sync\`.`,
   );
   process.exit(1);
 }
@@ -89,20 +113,27 @@ if (!existsSync(TEMPLATE)) {
 /**
  * What `dziri` the scaffolded project should depend on.
  *
- * `--local` points at a checkout, which is how this is tested and how anyone
- * working on the framework tries a change against a fresh app. Bun resolves
- * `file:` against the project directory, so the path has to be made relative to
- * the *target*, not to the caller's cwd.
+ * `--local` points at a checkout. In Bun, `link:` links a *globally-linked*
+ * package by name — not a path — so the checkout is `bun link`ed first (see the
+ * install step below), and this returns that name. A link rather than a copy is
+ * required: the engine is found at `../../native-src/...` relative to src/, which
+ * only a symlink into the checkout preserves.
  */
 function dependency(): string {
   if (local === undefined) return "^0.0.0";
 
   const from = resolve(local);
-  if (!existsSync(join(from, "package.json"))) {
+  const pkgPath = join(from, "package.json");
+  if (!existsSync(pkgPath)) {
     console.error(`  error: --local ${local} has no package.json`);
     process.exit(1);
   }
-  return `file:${relative(target, from).replaceAll("\\", "/")}`;
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { name?: string };
+  if (typeof pkg.name !== "string" || pkg.name === "") {
+    console.error(`  error: --local ${local} has no package name`);
+    process.exit(1);
+  }
+  return `link:${pkg.name}`;
 }
 
 const substitutions: Record<string, string> = {
@@ -144,6 +175,19 @@ const shown = relative(process.cwd(), target) || ".";
 console.log(`created ${shown} — ${written} files`);
 
 if (!noInstall) {
+  // `link:` resolves a globally-linked package by name, so register the checkout
+  // first: `bun link` in the checkout maps its package name to its directory.
+  if (local !== undefined) {
+    const link = Bun.spawn(["bun", "link"], {
+      cwd: resolve(local),
+      stdio: ["inherit", "inherit", "inherit"],
+    });
+    if ((await link.exited) !== 0) {
+      console.error(`\n  bun link failed in ${resolve(local)}.`);
+      process.exit(1);
+    }
+  }
+
   const proc = Bun.spawn(["bun", "install"], {
     cwd: target,
     stdio: ["inherit", "inherit", "inherit"],

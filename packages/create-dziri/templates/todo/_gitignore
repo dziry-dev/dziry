@@ -1,0 +1,10 @@
+node_modules/
+
+# Compiler output. `dziri compile` writes these; none of them is source.
+windows/**/*.gen.ts
+
+# `dziri build` output.
+dist/
+
+# The LiveStore database on disk — written by the app at run time, not source.
+.livestore/
