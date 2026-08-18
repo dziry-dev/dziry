@@ -781,7 +781,7 @@ test("a pseudo-element rule does not style its originating element", () => {
   expect(styles.fg[ui.nodes.style[box]!]!).toBe(0xffff0000);
 });
 
-test("hover and focus still merge when a conditional class is present", () => {
+test("hover and focus still merge when a conditional class is present", async () => {
   // The gap this closes. `compileVariants` re-interns every style over the
   // vector of its values across variants, so with a toggle in the document the
   // run had to be rebuilt from its output — and its output was three named
@@ -810,7 +810,7 @@ test("hover and focus still merge when a conditional class is present", () => {
   expect(toggles.length).toBe(1);
 
   const baseline = compileTree(doc, css);
-  const compiled = compileVariants(doc, css, baseline, toggles);
+  const compiled = await compileVariants(doc, css, baseline, toggles);
 
   // The button is the only conditional node.
   const node = compiled.masks.findIndex((m) => m !== 0);

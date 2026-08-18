@@ -2297,6 +2297,21 @@ export const PROPERTIES: Record<string, PropertyRule> = {
  * than absent, because they *are* supported; the caller expands them. See
  * {@link handledByCaller}.
  */
+/**
+ * Parsed declarations, memoized. `expandDeclaration` is pure — property and
+ * concrete value in, field writes out (every rule writes `out`, none reads it) —
+ * and without this the same pair is parsed once per node per state combination
+ * per variant compile: the demo's cascade expanded Tailwind's `text-xl` tens of
+ * thousands of times. This cache is the single biggest compile-time lever found
+ * by the DZIRI_TIMING breakdown.
+ *
+ * Unbounded growth is not a concern a Map can silently become, so it is capped:
+ * past the limit it resets — a dev session's distinct declarations are bounded
+ * by the authored CSS, and the cap exists for pathological generated sheets.
+ */
+const expansionCache = new Map<string, [StyleField, number][]>();
+const EXPANSION_CACHE_LIMIT = 100_000;
+
 export function expandDeclaration(
   prop: string,
   raw: string,
@@ -2308,13 +2323,24 @@ export function expandDeclaration(
     return;
   }
 
-  const value = raw.trim();
-  if (typeof rule === "function") {
-    rule(value, out, prop);
+  const key = `${prop}\n${raw.trim()}`;
+  const cached = expansionCache.get(key);
+  if (cached !== undefined) {
+    for (const [field, value] of cached) out[field] = value;
     return;
   }
 
-  out[rule.field] = rule.parse(value);
+  const scratch: Partial<Record<StyleField, number>> = {};
+  if (typeof rule === "function") {
+    rule(key.slice(key.indexOf("\n") + 1), scratch, prop);
+  } else {
+    scratch[rule.field] = rule.parse(key.slice(key.indexOf("\n") + 1));
+  }
+
+  const entries = Object.entries(scratch) as [StyleField, number][];
+  if (expansionCache.size >= EXPANSION_CACHE_LIMIT) expansionCache.clear();
+  expansionCache.set(key, entries);
+  for (const [field, value] of entries) out[field] = value;
 }
 
 /**

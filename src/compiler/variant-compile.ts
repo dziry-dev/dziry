@@ -29,6 +29,7 @@ import {
 import { compileTree, type CompileResult } from "./compile.ts";
 import type { BuiltKeyframe, BuiltTween } from "./computed.ts";
 import type { Element, Node } from "./html.ts";
+import type { VariantRunResult } from "./variant-worker.ts";
 
 /** A conditional class discovered in the tree. */
 export type Toggle = {
@@ -173,6 +174,96 @@ function sameValue(a: number, b: number): boolean {
   return (Number.isNaN(a) && Number.isNaN(b)) || a === b;
 }
 
+/** One toggle's compile, reduced to the fields `compileVariants` reads. */
+function compileToggle(doc: Element, css: string, toggle: Toggle): VariantRunResult {
+  const tree = cloneTree(doc) as Element;
+  applyToggle(tree, toggle);
+  const result = compileTree(tree, css);
+  return {
+    nodes: result.nodes.map((n) => ({ mask: n.mask, run: n.run })),
+    styles: result.styles,
+    tweens: result.tweens,
+    keyframes: result.keyframes,
+  };
+}
+
+/**
+ * A deep clone that crosses the worker boundary. The document tree references
+ * live signals (a dyntext's parts, a dynlist's source, a classWhen's) and
+ * handlers, none of which structured-clone — and none of which the cascade
+ * reads: matching looks at tags, classes, attributes and structure, and of the
+ * result only the style rows are consumed. They cross as `undefined`; the
+ * toggle's classes are applied before the crossing, so nothing semantic is lost.
+ */
+function transportClone<T>(value: T): T {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "function") return undefined as T;
+  if (typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(transportClone) as T;
+  // Structured clone owns these — a Map is how an element's attrs travel.
+  if (value instanceof Map) {
+    return new Map([...value].map(([k, v]) => [k, transportClone(v)])) as T;
+  }
+  if (value instanceof Set) return new Set([...value].map(transportClone)) as T;
+  if (ArrayBuffer.isView(value) || value instanceof Date) return value;
+  if (Object.getPrototypeOf(value) !== Object.prototype) return undefined as T;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value)) out[k] = transportClone(v);
+  return out as T;
+}
+
+/**
+ * The toggle compiles, on a worker pool. Each is a full cascade over a cloned
+ * tree and they share nothing, so they distribute exactly; the pool is sized to
+ * the smaller of the toggle count and the machine, made fresh per compile and
+ * torn down after — a dev compile is a subprocess, so a pool cannot outlive it
+ * anyway.
+ */
+async function compileTogglesParallel(
+  doc: Element,
+  css: string,
+  toggles: Toggle[],
+): Promise<VariantRunResult[]> {
+  // Capped well below the core count on purpose: 16 concurrent compiler workers
+  // segfaulted Bun 1.3.14 on Windows (workers_spawned/terminated churn — a
+  // runtime bug, not ours), and past ~6 the toggle compiles are memory-bound
+  // anyway. Four is the stability/speed knee.
+  const size = Math.min(toggles.length, 4);
+  const queue = toggles.map((toggle, i) => ({ toggle, i }));
+  const out: VariantRunResult[] = new Array(toggles.length);
+
+  await Promise.all(
+    Array.from({ length: size }, async () => {
+      const worker = new Worker(new URL("./variant-worker.ts", import.meta.url).href);
+      try {
+        while (queue.length > 0) {
+          const job = queue.shift()!;
+          // Apply before the transport clone: matching a toggle's sites needs the
+          // live signal objects, and sanitizing first erases them — the class
+          // would land nowhere and the variant would silently be the baseline
+          // (measured: the pooled `.light` painted the dark theme).
+          const tree = cloneTree(doc) as Element;
+          applyToggle(tree, job.toggle);
+          const transport = transportClone(tree);
+          out[job.i] = await new Promise<VariantRunResult>((resolve, reject) => {
+            worker.onmessage = (
+              event: MessageEvent<{ ok: true; result: VariantRunResult } | { ok: false; error: string }>,
+            ) =>
+              event.data.ok
+                ? resolve(event.data.result)
+                : reject(new Error(`a variant compile failed in its worker:\n${event.data.error}`));
+            worker.onerror = (e) =>
+              reject(e instanceof Error ? e : new Error("message" in e ? String(e.message) : String(e)));
+            worker.postMessage({ tree: transport, css });
+          });
+        }
+      } finally {
+        worker.terminate();
+      }
+    }),
+  );
+  return out;
+}
 function changedFields(a: ComputedStyle, b: ComputedStyle): StyleField[] {
   const out: StyleField[] = [];
   for (const [field] of STYLE_FIELDS) {
@@ -194,15 +285,14 @@ function changedFields(a: ComputedStyle, b: ComputedStyle): StyleField[] {
  * `walk` already resolves every combination as a full cascade, so this just reads
  * what the node was compiled with.
  */
-type Run = { mask: number; styles: ComputedStyle[] };
+type Run = { mask: number; run: number[] };
 
-function runOf(result: CompileResult, node: number): Run {
-  const n = result.nodes[node]!;
-  return { mask: n.mask, styles: n.run.map((id) => result.styles[id]!) };
+function runOf(result: VariantRunResult, node: number): Run {
+  return result.nodes[node]!;
 }
 
 /**
- * A run re-indexed against a wider mask.
+ * A run re-indexed against a wider mask — the style *row id* for a combination.
  *
  * The masks are not the same across variants: a toggle can *introduce* a state
  * the baseline lacks (`body.light .todo:hover`), so the node's real mask is the
@@ -210,12 +300,12 @@ function runOf(result: CompileResult, node: number): Run {
  * It answers by ignoring the bits it has no rules for — which is exactly what
  * intersecting with its own mask does.
  */
-function expand(run: Run, combo: number, unionBits: number[]): ComputedStyle {
+function expand(run: Run, combo: number, unionBits: number[]): number {
   let live = 0;
   for (let b = 0; b < unionBits.length; b++) {
     if ((combo & (1 << b)) !== 0) live |= unionBits[b]!;
   }
-  return run.styles[compactBits(live & run.mask, run.mask)] ?? run.styles[0]!;
+  return run.run[compactBits(live & run.mask, run.mask)] ?? run.run[0]!;
 }
 
 // ---------------------------------------------------------------------------
@@ -224,48 +314,74 @@ function expand(run: Run, combo: number, unionBits: number[]): ComputedStyle {
  * `baseline` must be the result of compiling `doc` unchanged — it is passed in
  * rather than recompiled so node ids are guaranteed to match.
  */
-export function compileVariants(
+export async function compileVariants(
   doc: Element,
   css: string,
   baseline: CompileResult,
   toggles: Toggle[],
-): VariantCompiled {
+): Promise<VariantCompiled> {
+  const t0 = performance.now();
   const nodeCount = baseline.nodes.length;
   const warnings: string[] = [];
 
   // One compile per toggle. Only k+1 compiles, not 2^k: patches are per-toggle,
   // and combinations are only needed where two toggles collide.
-  const variants: CompileResult[] = [baseline];
-  for (const toggle of toggles) {
-    const tree = cloneTree(doc) as Element;
-    applyToggle(tree, toggle);
-    const result = compileTree(tree, css);
-    if (result.nodes.length !== nodeCount) {
+  //
+  // Independent, so parallel: past a couple of toggles the compiles go to a
+  // worker pool (each is a full cascade, and they were the whole compile time —
+  // measured: 18 toggles took 10.4s of an 11.4s compile). Under three, the
+  // pool's startup costs more than it saves.
+  const variants: VariantRunResult[] = [baseline];
+  if (toggles.length < 3 || process.env.DZIRI_VARIANTS === "seq") {
+    // `seq` is a debugging escape hatch: the pool is the shipping path, and when
+    // one diverges you want the other to diff against.
+    for (const toggle of toggles) {
+      variants.push(compileToggle(doc, css, toggle));
+    }
+  } else {
+    variants.push(...(await compileTogglesParallel(doc, css, toggles)));
+  }
+  const compiledAt = performance.now();
+  if (process.env.DZIRI_TIMING) {
+    console.error(`  [timing] variants toggle compiles: ${(compiledAt - t0).toFixed(0)}ms`);
+  }
+  for (const v of variants) {
+    if (v.nodes.length !== nodeCount) {
       throw new Error(
-        `applying .${toggle.className} changed the node count — conditional classes must not ` +
+        `applying a conditional class changed the node count — conditional classes must not ` +
           `alter structure`,
       );
     }
-    variants.push(result);
   }
 
   // A slot is a distinct vector of computed styles across all variants.
+  //
+  // Interned over the vector of style *row ids*, not field values. Within one
+  // compile the interner dedupes by content, so a row id is a content identity
+  // *for that compile* — and two id-vectors are equal iff their styles are equal
+  // in every variant, which is exactly slot equality. This replaces spelling 149
+  // fields × k variants into a string per node per state combination: measured,
+  // that string building (and the hashing that briefly replaced it) was the
+  // largest single block of compile time on the demo — about half of the variant
+  // pass. An integer vector is exact and cheap.
+  //
+  // Each entry is packed `v * rowSpace + row`: a keyframe can fall back to the
+  // baseline's table when its variant lacks the row, so the variant index is
+  // part of the identity, not implied by position.
+  const rowSpace = Math.max(...variants.map((v) => v.styles.length)) + 1;
   const slotByKey = new Map<string, number>();
   const slotStyles: ComputedStyle[][] = []; // [slot][variant]
 
-  const internSlot = (perVariant: ComputedStyle[]): number => {
-    let key = "";
-    for (const style of perVariant) {
-      for (const [field] of STYLE_FIELDS) key += style[field] + ",";
-      key += "|";
-    }
-
+  const internSlot = (packed: number[]): number => {
+    const key = packed.join(",");
     const existing = slotByKey.get(key);
     if (existing !== undefined) return existing;
 
     const id = slotStyles.length;
     slotByKey.set(key, id);
-    slotStyles.push(perVariant);
+    slotStyles.push(
+      packed.map((code) => variants[Math.floor(code / rowSpace)]!.styles[code % rowSpace]!),
+    );
     return id;
   };
 
@@ -288,7 +404,9 @@ export function compileVariants(
       // Interned over the vector across variants, exactly as before — two nodes
       // share a slot only if they agree in every variant. That is what lets a
       // toggle rewrite the style *table* instead of node pointers.
-      run[combo] = internSlot(perVariant.map((r) => expand(r, combo, unionBits)));
+      run[combo] = internSlot(
+        perVariant.map((r, v) => v * rowSpace + expand(r, combo, unionBits)),
+      );
     }
 
     base[n] = run[0]!;
@@ -320,11 +438,12 @@ export function compileVariants(
   const keyframes: BuiltKeyframe[] = baseline.keyframes.map((row, k) => ({
     ...row,
     style: internSlot(
-      variants.map((v) => {
+      variants.map((v, vi) => {
         const inVariant = v.keyframes[k];
-        const source = inVariant === undefined ? baseline : v;
-        const styleId = inVariant?.style ?? row.style;
-        return source.styles[styleId] ?? baseline.styles[row.style]!;
+        // A variant that lacks this row (shape mismatch, warned above) answers
+        // with the baseline's — pinned to variant 0, since row ids are only
+        // content identities within their own compile.
+        return inVariant === undefined ? row.style : vi * rowSpace + inVariant.style;
       }),
     ),
   }));
@@ -451,13 +570,13 @@ export type ComposeMismatch = {
  *
  * Cost is 2^k compiles, so this belongs in a test rather than in a build.
  */
-export function verifyCompose(
+export async function verifyCompose(
   doc: Element,
   css: string,
   baseline: CompileResult,
   toggles: Toggle[],
-): ComposeMismatch[] {
-  const compiled = compileVariants(doc, css, baseline, toggles);
+): Promise<ComposeMismatch[]> {
+  const compiled = await compileVariants(doc, css, baseline, toggles);
   const mismatches: ComposeMismatch[] = [];
 
   if (toggles.length === 0 || toggles.length > 12) {

@@ -71,7 +71,7 @@ async function artifact(
     // class — so without this the error patches would not exist and the styling half of the
     // feature would be untested.
     const toggles = findToggles(doc);
-    if (toggles.length > 0) variants = compileVariants(doc, css, result, toggles);
+    if (toggles.length > 0) variants = await compileVariants(doc, css, result, toggles);
   } finally {
     setCompiling(false);
   }

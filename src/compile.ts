@@ -162,7 +162,7 @@ if (isJsx) {
   // becomes a list of style-table writes rather than a class the runtime resolves.
   const toggles = findToggles(doc);
   if (toggles.length > 0) {
-    variants = compileVariants(doc, css, result, toggles);
+    variants = await compileVariants(doc, css, result, toggles);
 
     // A variant warning is not advisory. Each one means two toggles write the
     // same (field, slot), so the style table's value depends on which patch was

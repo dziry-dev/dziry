@@ -254,6 +254,13 @@ export function reportWarnings(warnings: readonly string[]): void {
 
 async function compileWindow(window: WindowDef, options: CompileOptions): Promise<Compiled> {
   const started = performance.now();
+  /* Coarse phase timings, printed when DZIRI_TIMING is set. Exists because "the
+     compile is slow" was unanswerable without them — the answer was not the
+     phase everyone suspected (Tailwind is a quarter of a second). */
+  const marks: [string, number][] = [];
+  const mark = (label: string): void => {
+    marks.push([label, performance.now()]);
+  };
   const { projectDir } = options;
   const rel = (p: string) => relative(projectDir, p).replaceAll("\\", "/");
 
@@ -430,6 +437,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
   } finally {
     setCompiling(false);
   }
+  mark("pages");
 
   const { root, roots, loadingRoots, errorRoots } = spliceWindow(shell, pages);
 
@@ -455,6 +463,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
 
   const sheet = new SheetMap(sheets);
   const css = sheet.text;
+  mark("css");
 
   /**
    * A parse failure is turned into an author-facing message here, where the map
@@ -472,12 +481,14 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
 
   try {
     result = compileTree(doc, css, { nodeOf });
+    mark("compileTree");
     const toggles = findToggles(doc);
-    if (toggles.length > 0) variants = compileVariants(doc, css, result, toggles);
+    if (toggles.length > 0) variants = await compileVariants(doc, css, result, toggles);
   } catch (e) {
     if (e instanceof CssError) throw new BuildError(sheet.formatError(e, label));
     throw e;
   }
+  mark("cascade");
 
   if (variants && variants.warnings.length > 0) {
     throw new BuildError(
@@ -622,6 +633,15 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
   });
 
   await Bun.write(outPath, source);
+  mark("emit");
+
+  if (process.env.DZIRI_TIMING) {
+    let prev = started;
+    for (const [label, at] of marks) {
+      console.error(`  [timing] ${window.id} ${label}: ${(at - prev).toFixed(0)}ms`);
+      prev = at;
+    }
+  }
 
   reportWarnings(result.warnings);
   if (options.dump) console.log(`\n${dump(result)}\n`);
