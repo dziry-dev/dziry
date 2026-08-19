@@ -19,9 +19,9 @@
  * style rows.
  */
 import { join, relative, dirname, isAbsolute } from "node:path";
-import { pathToFileURL } from "node:url";
 import { existsSync, readdirSync } from "node:fs";
 import { compileTree, emit, dump, hashText, PACKAGE, type EmittedRouting, type LoaderRef } from "./compile.ts";
+import { versionedHref } from "./module-cache.ts";
 import { CssError } from "./diagnostics.ts";
 import { installCssGraph, stylesheetsFor } from "./css-imports.ts";
 import { loadStylesheet, SheetMap, StylesheetError, type CssSource } from "./stylesheet.ts";
@@ -123,7 +123,7 @@ async function defaultComponent(
   what: string,
   rel: (p: string) => string,
 ): Promise<() => unknown> {
-  const mod = (await import(pathToFileURL(file).href)) as { default?: unknown };
+  const mod = (await import(versionedHref(file))) as { default?: unknown };
 
   if (typeof mod.default !== "function") {
     throw new WindowError(
@@ -168,7 +168,7 @@ async function pageModule(
   rel: (p: string) => string,
   expectedPath: string,
 ): Promise<PageModule> {
-  const mod = (await import(pathToFileURL(file).href)) as {
+  const mod = (await import(versionedHref(file))) as {
     default?: unknown;
     loader?: unknown;
   };
@@ -352,12 +352,12 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
       const path = join(dir, name);
       sources.push({
         specifier: specifierFor(path),
-        exports: (await import(pathToFileURL(path).href)) as Record<string, unknown>,
+        exports: (await import(versionedHref(path))) as Record<string, unknown>,
       });
     }
     sources.push({
       specifier: specifierFor(entryPath),
-      exports: (await import(pathToFileURL(entryPath).href)) as Record<string, unknown>,
+      exports: (await import(versionedHref(entryPath))) as Record<string, unknown>,
     });
 
     for (const route of window.routes) {
@@ -395,7 +395,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
 
       sources.push({
         specifier: specifierFor(file),
-        exports: (await import(pathToFileURL(file).href)) as Record<string, unknown>,
+        exports: (await import(versionedHref(file))) as Record<string, unknown>,
       });
     }
 

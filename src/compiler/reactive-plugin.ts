@@ -61,25 +61,15 @@ export function reactiveEnabled(): boolean {
  * The lesson generalises. This transform is for code shaped like a component, and a
  * file that manipulates signals as *data* is not that. The rewrite is covered by
  * `reactive-transform.test.ts` and end-to-end by the `reactivity` golden.
+ *
+ * Exported for the compile server's invalidation plugin, which answers the same
+ * question for version-stamped module paths.
  */
-function isAuthored(file: string): boolean {
+export function isAuthored(file: string): boolean {
   const path = resolve(file);
   return path.startsWith(WINDOWS + sep) && !path.endsWith(".gen.ts");
 }
 
-/**
- * The rewrite as a plugin object, usable by the runtime *and* by the bundler.
- *
- * It has to be both, and for a while it was only one. `plugin(...)` registers with
- * the module loader, which covers `bun run` and `bun test`; `bun build` never sees
- * it, and a `bunfig.toml` preload does not change that — measured, the bundled
- * output contained a raw `todos.filter(…)`, which is a method on a signal object
- * and does not exist. A packaged app therefore threw on its first frame while
- * `dziri dev` was fine, and the two differed by whether the transform had run.
- *
- * So `dziri build` passes this to `Bun.build({ plugins })` instead, and both paths
- * now load the same object.
- */
 export const reactivePlugin: BunPlugin = {
   name: "dziri-reactive",
   setup(build) {

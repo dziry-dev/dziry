@@ -1332,6 +1332,10 @@ accessibility — shipping the visuals while dropping the reason it exists will 
   values blanked (`structural`), and the hash of that is the swap-or-restart
   decision; `src/hot.ts` is the wire format, `src/runtime/hot.ts` the worker half.
   Stage 2 below remains open.
+  *(2026-08-19: the subprocess-per-save became a warm compile server —
+  `src/cli/compile-server.ts` + `src/compiler/module-cache.ts` — after measuring
+  that a small app's recompile was ~96% module loading. A save now re-imports the
+  changed files and their importers only: 2.8s cold → ~50ms warm on that app.)*
 - **Stage 2 landed the same day, shaped by who owns what.** Markup and handler
   changes swap the *worker*, not the process: the engine owns the window, so the
   old worker dumps its module-level signals and route (`__state` namespaces in the

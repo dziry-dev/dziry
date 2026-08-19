@@ -14,12 +14,12 @@
  * `dziri dev --route products/new --size 400x600` mean what it looks like. The
  * host's own flags are documented in `host/main.ts` and `host/worker.ts`.
  */
-import { existsSync, mkdirSync, readdirSync, statSync, watch, type FSWatcher } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { compileProject, describe, formatBuildError, ENTRY_FILE } from "../compiler/build.ts";
 import { PACKAGE } from "../compiler/compile.ts";
 import { buildApp } from "./build.ts";
-import type { HotManifest, HotManifestEntry, HotPayload } from "../hot.ts";
+import type { HotManifestEntry } from "../hot.ts";
 
 const HELP = `dziri — compiled UI on a native engine
 
@@ -140,28 +140,9 @@ if (!existsSync(join(projectDir, "windows"))) {
 /** Compile, reporting an author-facing error rather than a stack trace. */
 async function compile(only?: string): Promise<void> {
   try {
-    // DZIRI_HOT_MANIFEST is set by the dev watcher's subprocess compiles: collect
-    // each window's fingerprint and style payload and write them there, so the
-    // watcher (a different process, by module-cache necessity) can read them.
-    const manifestPath = process.env.DZIRI_HOT_MANIFEST;
-    const hot = manifestPath ? new Map<string, HotManifestEntry>() : undefined;
-    const compiled = await compileProject({ projectDir, only, dump: flags.has("--dump"), hot });
+    const compiled = await compileProject({ projectDir, only, dump: flags.has("--dump") });
     for (const one of compiled) {
       console.log(describe(one, projectDir));
-    }
-    if (manifestPath && hot) {
-      mkdirSync(dirname(manifestPath), { recursive: true });
-      // Typed arrays do not survive JSON — they become {"0": …} objects — so they
-      // are written as plain arrays. The worker's `.set()` accepts ArrayLike, and
-      // the IPC leg re-constitutes nothing: arrays cross structured clone as-is.
-      await Bun.write(
-        manifestPath,
-        JSON.stringify(Object.fromEntries(hot), (_key, value: unknown) =>
-          ArrayBuffer.isView(value) && !(value instanceof DataView)
-            ? Array.from(value as unknown as ArrayLike<number>)
-            : value,
-        ),
-      );
     }
   } catch (e) {
     const message = await formatBuildError(e, projectDir);
@@ -172,62 +153,45 @@ async function compile(only?: string): Promise<void> {
 }
 
 /**
- * Where a watched compile's manifest goes. A file rather than the return value,
- * because the watched compile runs in a *subprocess* — Bun caches modules
- * in-process, and a recompile in this one would read the app modules the first
- * compile already loaded. See src/hot.ts for the format.
- */
-const HOT_DIR = join(projectDir, "node_modules", ".cache", "dziri");
-const HOT_MANIFEST = join(HOT_DIR, "hot.json");
-
 /**
- * One watched compile. In-process when `hot` is passed (the first compile —
- * nothing is cached yet), a subprocess on every later one.
- */
-async function compileWatched(only?: string, hot?: Map<string, HotManifestEntry>): Promise<boolean> {
-  if (hot !== undefined) {
-    try {
-      for (const one of await compileProject({ projectDir, only, hot })) {
-        console.log(describe(one, projectDir));
-      }
-      return true;
-    } catch (e) {
-      const message = await formatBuildError(e, projectDir);
-      console.error(message ?? `  error: ${e instanceof Error ? e.message : String(e)}`);
-      return false;
-    }
-  }
-
-  mkdirSync(HOT_DIR, { recursive: true });
-  const proc = Bun.spawn(
-    [process.execPath, process.argv[1]!, "compile", ...(only ? [only] : [])],
-    {
-      cwd: projectDir,
-      stdio: ["inherit", "inherit", "inherit"],
-      env: { ...process.env, DZIRI_HOT_MANIFEST: HOT_MANIFEST },
-    },
-  );
-  return (await proc.exited) === 0;
-}
-
-/**
- * The watch half of `dziri dev` (ROADMAP D1, stages 1 and the fallback for 2–3).
+ * The watch half of `dziri dev` (ROADMAP D1).
  *
- * A `.css`-only save tries stage 1: recompile, compare the structural
- * fingerprint, and if nothing but style values moved, ship the new numbers to
- * the running app over IPC — state, focus and scroll survive. Any other change
- * (markup, handlers, a rule that mints a new interned style row) restarts the
- * app: a compile is ~30 ms, so the fallback is a blink, not a build.
+ * Two children, with different lifetimes. The **compile server** is warm: it
+ * loads the compiler and the app's module graph once, and a save re-imports
+ * only the changed files and their importers (compiler/module-cache.ts) — a
+ * LiveStore app's recompile drops from ~2.8s of module loading to the cascade's
+ * own milliseconds. The **app** reads the artifacts from disk; the manifest
+ * crosses as a message, so there is no manifest file and no cold compile per
+ * save.
+ *
+ * Per `compiled` message: a CSS-only save whose structural fingerprint is
+ * unchanged swaps style values into the running window (state, focus, scroll
+ * survive); anything else swaps the app's worker under the live window; a dead
+ * channel falls back to a process restart.
  */
 async function dev(theirs: string[], only?: string): Promise<void> {
   /** The fingerprints and payloads from the last successful compile. */
   const hot = new Map<string, HotManifestEntry>();
 
-  if (!(await compileWatched(only, hot))) process.exit(1);
+  let proc: ReturnType<typeof Bun.spawn> | null = null;
+  /** Resolves when the first successful compile has spawned the app. */
+  let firstSpawn!: () => void;
+  const firstApp = new Promise<void>((resolve) => {
+    firstSpawn = resolve;
+  });
+  /**
+   * Set while a restart is killing the child — the supervisor loop below is the
+   * *only* awaiter of `proc.exited`, and this flag is how it tells "killed by a
+   * restart, respawn" from "the app quit, exit". Two awaiters was the bug: a
+   * resolved promise re-settles instantly, so a second waiter could lap around
+   * and re-read the dead process's exit as the live one's (measured: the CLI
+   * exited 143 on every restart, having adopted the killed child's code).
+   */
+  let restarting = false;
 
   /* A child process rather than an `import()`, so the app gets a clean argv and
-     so the CLI's own module graph — the compiler, oxc, Tailwind — is not sharing
-     a heap with the running app. It also means Ctrl-C reaches the app directly.
+     so the CLI's own module graph is not sharing a heap with the running app.
+     It also means Ctrl-C reaches the app directly.
 
      `--preload` rather than a `bunfig.toml` entry in the project. Running from
      source, the app imports `state.ts` and friends for real, so the rewrite has
@@ -261,161 +225,95 @@ async function dev(theirs: string[], only?: string): Promise<void> {
       },
     );
 
-  let proc = spawnApp();
-  /**
-   * Set while a reload is killing the child — the supervisor loop below is the
-   * *only* awaiter of `proc.exited`, and this flag is how it tells "killed by a
-   * reload, respawn" from "the app quit, exit". Two awaiters was the bug: a
-   * resolved promise re-settles instantly, so a second waiter could lap around
-   * and re-read the dead process's exit as the live one's (measured: the CLI
-   * exited 143 on every restart, having adopted the killed child's code).
-   */
-  let restarting = false;
-
-  /** The windows/ tree, watched. Generated files are ignored — we wrote those. */
-  const pending = new Map<string, NodeJS.Timeout>();
-  const isSource = (f: string) =>
-    /\.(css|tsx?|jsx?)$/.test(f) && !f.endsWith(".gen.ts") && !f.endsWith(".gen.tsx");
-
-  /**
-   * Last handled mtime per file. Windows reports one save as several events —
-   * and with a Tailwind compile taking seconds, the extras arrive after the
-   * debounce window and would each buy a full recompile of the same bytes
-   * (measured: one Set-Content ran three reloads). Deduplicate on content time,
-   * not on arrival.
-   */
-  const handled = new Map<string, number>();
-
-  const onChanged = (files: Set<string>): void => {
-    const fresh = [...files].filter((f) => {
-      try {
-        const m = statSync(join(projectDir, "windows", f)).mtimeMs;
-        if (handled.get(f) === m) return false;
-        handled.set(f, m);
-        return true;
-      } catch {
-        return false; // deleted between event and stat
-      }
-    });
-    if (fresh.length === 0) return;
-    void reload(fresh.every((f) => f.endsWith(".css")));
-  };
-
-  let reloading = false;
-  let queuedCssOnly: boolean | null = null;
-
-  async function reload(cssOnly: boolean): Promise<void> {
-    // One reload at a time; a save landing mid-reload is queued, and its
-    // classification wins conservatively (any code change makes it a restart).
-    if (reloading) {
-      queuedCssOnly = queuedCssOnly === null ? cssOnly : queuedCssOnly && cssOnly;
-      return;
-    }
-    reloading = true;
-    try {
-      if (!(await compileWatched(only))) return;
-
-      let manifest: HotManifest;
-      try {
-        manifest = (await Bun.file(HOT_MANIFEST).json()) as HotManifest;
-      } catch {
-        console.error("  hot reload: the watched compile wrote no manifest; restarting.");
-        await restart();
-        return;
-      }
-
-      // One window per process — the one the command line named, or the first.
-      const windowIndex = theirs.indexOf("--window");
-      const wanted = windowIndex !== -1 ? theirs[windowIndex + 1] : undefined;
-      const id = wanted ?? Object.keys(manifest)[0]!;
-      const entry = manifest[id];
-      const current = hot.get(id);
-
-      if (cssOnly && entry !== undefined && current?.fingerprint === entry.fingerprint) {
-        hot.set(id, entry);
-        proc.send({ t: "hot", payload: entry.payload } satisfies { t: "hot"; payload: HotPayload });
-        console.log("  hot: styles swapped, state kept");
-        return;
-      }
-
-      hot.clear();
-      for (const [k, v] of Object.entries(manifest)) hot.set(k, v);
-
-      /* Stage 2: swap the app thread under the live window. The engine keeps
-         the window, SDL state and the screen; the worker — a fresh module graph
-         over the new artifacts — starts with the old one's signals and route.
-         The process restart below remains as the fallback for a dead channel. */
-      if (proc.exitCode === null) {
-        proc.send({ t: "reload" });
-        console.log("  reloaded — window stayed open, state carried over");
-        return;
-      }
-      await restart();
-    } finally {
-      reloading = false;
-      if (queuedCssOnly !== null) {
-        const next = queuedCssOnly;
-        queuedCssOnly = null;
-        await reload(next);
-      }
-    }
-  }
-
   async function restart(): Promise<void> {
     // Flag first, then kill: the supervisor loop owns the respawn.
     restarting = true;
-    proc.kill();
-    await proc.exited;
+    proc!.kill();
+    await proc!.exited;
   }
 
-  const watchers: FSWatcher[] = [];
-  const watchDir = (dir: string, recursive: boolean): void => {
-    try {
-      const w = watch(dir, { recursive }, (_event, file) => {
-        if (file === null || !isSource(file)) return;
-        const existing = pending.get(file);
-        if (existing) clearTimeout(existing);
-        pending.set(
-          file,
-          setTimeout(() => {
-            const files = new Set(pending.keys());
-            pending.clear();
-            onChanged(files);
-          }, 60),
-        );
-      });
-      watchers.push(w);
-    } catch {
-      // A directory that vanishes mid-watch (a deleted window) is not fatal.
+  function onCompiled(cssOnly: boolean, manifest: Record<string, HotManifestEntry>): void {
+    if (proc === null) {
+      hot.clear();
+      for (const [k, v] of Object.entries(manifest)) hot.set(k, v);
+      proc = spawnApp();
+      firstSpawn();
+      console.log("  watching windows/ — CSS saves swap live, code swaps the worker under it");
+      return;
     }
-  };
 
-  // fs.watch's recursive mode works on Windows and macOS. On Linux it throws,
-  // so each directory under windows/ gets its own watcher instead.
-  try {
-    watchDir(join(projectDir, "windows"), true);
-  } catch {
-    const walk = (dir: string): void => {
-      watchDir(dir, false);
-      for (const e of readdirSync(dir, { withFileTypes: true })) {
-        if (e.isDirectory()) walk(join(dir, e.name));
-      }
-    };
-    walk(join(projectDir, "windows"));
+    // One window per process — the one the command line named, or the first.
+    const windowIndex = theirs.indexOf("--window");
+    const wanted = windowIndex !== -1 ? theirs[windowIndex + 1] : undefined;
+    const id = wanted ?? Object.keys(manifest)[0]!;
+    const entry = manifest[id];
+    const current = hot.get(id);
+
+    if (cssOnly && entry !== undefined && current?.fingerprint === entry.fingerprint) {
+      hot.set(id, entry);
+      proc.send({ t: "hot", payload: entry.payload });
+      console.log("  hot: styles swapped, state kept");
+      return;
+    }
+
+    hot.clear();
+    for (const [k, v] of Object.entries(manifest)) hot.set(k, v);
+
+    /* Stage 2: swap the app thread under the live window. The engine keeps the
+       window; the new worker — a fresh module graph over the new artifacts —
+       starts with the old one's signals and route. */
+    if (proc.exitCode === null) {
+      proc.send({ t: "reload" });
+      console.log("  reloaded — window stayed open, state carried over");
+      return;
+    }
+    void restart();
   }
-  console.log("  watching windows/ — CSS saves swap live, everything else restarts");
+
+  /* The compile server: watches, invalidates, compiles, reports. Its module
+     graph stays warm across every save — and across app restarts. */
+  const serverPath = new URL("./compile-server.ts", import.meta.url).pathname.replace(
+    /^\/([A-Za-z]:)/,
+    "$1",
+  );
+  const server = Bun.spawn([process.execPath, serverPath, projectDir, ...(only ? [only] : [])], {
+    cwd: projectDir,
+    stdio: ["inherit", "inherit", "inherit"],
+    ipc(message) {
+      const m = message as
+        | { t: "compiled"; cssOnly: boolean; manifest: Record<string, HotManifestEntry> }
+        | { t: "failed" };
+      if (m.t === "compiled") onCompiled(m.cssOnly, m.manifest);
+      // `failed` needs no handling: the server printed the error, and the
+      // running app keeps its last good artifacts.
+    },
+  });
+
+  /* If the server dies before the first compile there is nothing to run; after
+     it, the running app keeps its artifacts and saves no longer reload — said
+     out loud rather than silently stale. */
+  void server.exited.then((code) => {
+    if (proc === null) {
+      console.error("  the compile server exited before the first compile finished.");
+      process.exit(code ?? 1);
+    }
+    console.error("  the compile server died; the app keeps running but saves no longer reload.");
+  });
 
   // The supervisor: the only place `proc.exited` is awaited, so an exit is
-  // attributed to exactly one decision.
-  while (true) {
-    const code = await proc.exited;
+  // attributed to exactly one decision. Waits for the first compile to spawn
+  // the app — a project whose first compile fails gets its window the moment
+  // the fix lands, without restarting dev.
+  await firstApp;
+  for (;;) {
+    const code = await proc!.exited;
     if (restarting) {
       restarting = false;
       proc = spawnApp();
-      console.log("  restarted (structure changed)");
+      console.log("  restarted (the app asked, or the channel was gone)");
       continue;
     }
-    for (const w of watchers) w.close();
+    server.kill();
     process.exit(code);
   }
 }

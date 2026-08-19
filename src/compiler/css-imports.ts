@@ -39,6 +39,10 @@ const EDGES = new Map<string, string[]>();
 let installed = false;
 
 function record(importer: string, target: string): void {
+  // The invalidation plugin versions busted paths (`x.ts?v=2`); the graph is
+  // about real files, so it is recorded unversioned.
+  importer = importer.replace(/\?v=\d+$/, "");
+  target = target.replace(/\?v=\d+$/, "");
   let targets = EDGES.get(importer);
   if (targets === undefined) {
     targets = [];

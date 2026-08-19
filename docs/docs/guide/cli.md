@@ -82,6 +82,12 @@ what changed:
   not carried; they cannot cross a worker boundary as themselves.)
 - **A save that does not compile** prints the error and keeps the running app.
 
+Compiles are warm. `dziri dev` runs the compiler as a persistent process, so a
+save re-imports only the files that changed and whatever imports them — the rest
+of the module graph (the compiler itself, Tailwind, Effect, LiveStore, your
+untouched modules) stays loaded. Measured on a small LiveStore app: 2.8s cold,
+**~50ms per save** after.
+
 What still resets on a structural reload: focus, scroll position and text carets
 (engine state keyed by node id — meaningless against a new tree), and anything
 held outside module-level signals. A full process restart remains as the
