@@ -164,8 +164,17 @@ export async function runMain(options: MainOptions): Promise<void> {
   if (process.env.DZIRI_HOT === "1") {
     process.on("message", (message: unknown) => {
       const t = (message as { t?: unknown } | null)?.t;
-      if (t === "hot") send(message as ToWorker);
-      else if (t === "reload") reloadApp();
+      /* A message that lands while the window is closing finds a terminated
+         worker, and postMessage on one throws (measured: closing the window as
+         a compile landed crashed the process with InvalidStateError). Quitting
+         is the whole answer — the reload is moot on a process that is leaving. */
+      if (!running) return;
+      try {
+        if (t === "hot") send(message as ToWorker);
+        else if (t === "reload") reloadApp();
+      } catch {
+        // Terminated mid-flight: the process is on its way out.
+      }
     });
   }
 
@@ -313,7 +322,7 @@ export async function runMain(options: MainOptions): Promise<void> {
    */
   let reloading = false;
   reloadApp = () => {
-    if (reloading) return;
+    if (reloading || !running) return;
     reloading = true;
     void (async () => {
       try {

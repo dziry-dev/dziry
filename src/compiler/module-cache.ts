@@ -111,14 +111,19 @@ export function installInvalidation(): void {
 }
 
 /**
- * The specifier the compiler's own dynamic imports should use. Absolute paths
- * cannot go through the plugin (see installInvalidation), so build.ts appends
- * the version itself.
+ * The specifier the compiler's own dynamic imports should use. The versioned
+ * form is a plain absolute path with a query — NOT a `file:` URL with one:
+ * Bun normalizes the query away on file: URLs, which both misses the versioned
+ * onLoad and, worse, resolves to the *unversioned* cached module (measured:
+ * `import("file:///x.ts?v=2")` returned the stale module; `import("C:\x.ts?v=2")`
+ * re-read the file). Absolute imports cannot go through the onResolve redirect
+ * at all (Bun 1.3.14 on Windows mangles plugin-returned absolute paths), so
+ * build.ts appends the version itself.
  */
 export function versionedHref(path: string): string {
-  const href = pathToFileURL(resolve(path)).href;
-  const v = versions.get(resolve(path));
-  return v === undefined ? href : `${href}?v=${v}`;
+  const abs = resolve(path);
+  const v = versions.get(abs);
+  return v === undefined ? pathToFileURL(abs).href : `${abs}?v=${v}`;
 }
 
 /**
