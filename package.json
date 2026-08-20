@@ -10,6 +10,9 @@
   "bin": {
     "dziri": "./src/cli/index.ts"
   },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
   "//exports": [
     "The package's own name is how the demo under windows/ imports it, and it is what",
     "a scaffolded project imports too — the same specifiers either way, so windows/main",

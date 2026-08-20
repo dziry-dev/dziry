@@ -209,6 +209,9 @@ export async function buildApp(options: BuildOptions): Promise<BuildResult> {
     minify: !options.noMinify,
     outdir: scratch,
     naming: "worker.js",
+    // Bun 1.4: esbuild-compatible bundle metadata. Written beside the bundle so
+    // "the binary grew — which module did it" has an answer instead of a guess.
+    metafile: true,
   });
 
   if (!workerBuild.success) {
@@ -216,6 +219,11 @@ export async function buildApp(options: BuildOptions): Promise<BuildResult> {
       `bundling the app thread failed.\n\n` +
         workerBuild.logs.map((l) => `  ${String(l)}`).join("\n"),
     );
+  }
+
+  const workerMeta = (workerBuild as { metafile?: unknown }).metafile;
+  if (workerMeta !== undefined) {
+    await Bun.write(join(scratch, "worker-meta.json"), JSON.stringify(workerMeta, null, 2));
   }
 
   const wrapper = join(scratch, "entry.ts");
@@ -241,6 +249,15 @@ export async function buildApp(options: BuildOptions): Promise<BuildResult> {
     entrypoints: [wrapper],
     plugins: reactiveEnabled() ? [reactivePlugin] : [],
     minify: !options.noMinify,
+    metafile: true,
+    /* Bytecode needs the format said out loud: ESM bytecode is new in Bun 1.4,
+       and without `format` the bundler falls back to CJS and rejects the
+       wrapper's top-level `await`. The binary starts without a parse step for
+       the entry graph — on the demo that is noise (~10ms of a ~240ms boot,
+       which is mostly SDL and Skia), but it scales with the app's JS while the
+       size cost stays ~0.2% — and the first frame is byte-identical. */
+    format: "esm",
+    bytecode: true,
     compile: { outfile: outFile },
   } as Parameters<typeof Bun.build>[0]);
 
@@ -248,6 +265,11 @@ export async function buildApp(options: BuildOptions): Promise<BuildResult> {
     throw new Error(
       `bundling failed.\n\n${result.logs.map((l) => `  ${String(l)}`).join("\n")}`,
     );
+  }
+
+  const appMeta = (result as { metafile?: unknown }).metafile;
+  if (appMeta !== undefined) {
+    await Bun.write(join(scratch, "app-meta.json"), JSON.stringify(appMeta, null, 2));
   }
 
   if (process.platform === "win32" && !options.console) await hideConsole(outFile);

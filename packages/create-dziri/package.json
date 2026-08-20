@@ -6,6 +6,9 @@
   "bin": {
     "create-dziri": "./index.ts"
   },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
   "files": ["index.ts", "templates"],
   "keywords": ["dziri", "desktop", "ui", "bun", "skia"],
   "license": "MIT"

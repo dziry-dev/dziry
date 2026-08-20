@@ -171,7 +171,8 @@ function applyToggle(root: Element, toggle: Toggle): void {
 }
 
 function sameValue(a: number, b: number): boolean {
-  return (Number.isNaN(a) && Number.isNaN(b)) || a === b;
+  // Equal values take a single comparison; the NaN check only pays when unequal.
+  return a === b || (a !== a && b !== b);
 }
 
 /** One toggle's compile, reduced to the fields `compileVariants` reads. */
@@ -193,7 +194,8 @@ function compileToggle(doc: Element, css: string, toggle: Toggle): VariantRunRes
  * handlers, none of which structured-clone — and none of which the cascade
  * reads: matching looks at tags, classes, attributes and structure, and of the
  * result only the style rows are consumed. They cross as `undefined`; the
- * toggle's classes are applied before the crossing, so nothing semantic is lost.
+ * toggle sites are annotated as indices before the crossing, so nothing
+ * semantic is lost.
  */
 function transportClone<T>(value: T): T {
   if (value === null || value === undefined) return value;
@@ -213,11 +215,105 @@ function transportClone<T>(value: T): T {
 }
 
 /**
- * The toggle compiles, on a worker pool. Each is a full cascade over a cloned
- * tree and they share nothing, so they distribute exactly; the pool is sized to
- * the smaller of the toggle count and the machine, made fresh per compile and
- * torn down after — a dev compile is a subprocess, so a pool cannot outlive it
- * anyway.
+ * A toggle site as it crosses to a worker: the class name and the index of the
+ * toggle that owns it. `applyToggle` matches sites by signal *identity*, and
+ * identity is exactly what a structured clone cannot carry — so before the tree
+ * is transported, every `classWhen` entry is rewritten as one of these on the
+ * transported element, and the worker applies a toggle by index instead.
+ */
+export type ToggleSite = [className: string, toggle: number];
+
+/**
+ * Rewrites toggle sites as indices onto the transported tree, walking it in
+ * lockstep with the live one — same shape by construction, `transportClone`
+ * preserves structure and only erases what cannot cross.
+ */
+function annotateToggleSites(
+  live: Element,
+  transported: Element,
+  indexOf: Map<unknown, number>,
+): void {
+  if (live.classWhen) {
+    const sites: ToggleSite[] = [];
+    for (const [className, source] of Object.entries(live.classWhen)) {
+      const i = indexOf.get(source);
+      if (i !== undefined) sites.push([className, i]);
+    }
+    (transported as Element & { toggleSites?: ToggleSite[] }).toggleSites = sites;
+  }
+  for (let c = 0; c < live.children.length; c++) {
+    const child = live.children[c]!;
+    const other = transported.children[c]!;
+    if (child.type === "element") {
+      annotateToggleSites(child, other as Element, indexOf);
+    } else if (child.type === "dynlist" && child.template.type === "element") {
+      // Item templates are part of the document for styling purposes.
+      annotateToggleSites(
+        child.template,
+        (other as { template: Element }).template,
+        indexOf,
+      );
+    }
+  }
+}
+
+/**
+ * Idle compiler workers, kept warm across compiles.
+ *
+ * A worker's real cost is startup: it cold-imports the whole compiler graph
+ * (measured: that is why 8 workers lose to 4 — the extra lanes never pay for
+ * the extra imports). In `dziri dev` the compiles run inside the warm compile
+ * server, one process for the whole session, so the pool outlives a compile the
+ * same way the server's own module graph does — and it is exactly as stale,
+ * since the server never re-imports compiler code either.
+ *
+ * Idle workers are `unref`ed so a one-shot compile (the CLI, a test, `bun run
+ * window`) still exits when its main thread is done; `ref` is restored while a
+ * job is in flight so the event loop cannot drain under an awaited reply.
+ */
+const idleWorkers: Worker[] = [];
+
+type Refable = Worker & { ref?: () => void; unref?: () => void };
+
+function acquireWorker(): Worker {
+  const worker = idleWorkers.pop();
+  if (worker !== undefined) {
+    worker.onerror = null;
+    (worker as Refable).ref?.();
+    return worker;
+  }
+  return new Worker(new URL("./variant-worker.ts", import.meta.url).href);
+}
+
+/**
+ * Only for a worker whose last reply has been awaited — releasing one mid-job
+ * would hand its late response to the next compile's first listener.
+ */
+function releaseWorker(worker: Worker): void {
+  worker.onmessage = null;
+  // An idle worker that dies must not be handed out later as if healthy.
+  worker.onerror = () => {
+    const at = idleWorkers.indexOf(worker);
+    if (at > -1) idleWorkers.splice(at, 1);
+    worker.terminate();
+  };
+  (worker as Refable).unref?.();
+  idleWorkers.push(worker);
+}
+
+/**
+ * The toggle compiles, on a worker pool. Each is a full cascade and they share
+ * nothing, so they distribute exactly; the pool is sized to the smaller of the
+ * toggle count and the machine, and its members are returned to `idleWorkers`
+ * rather than torn down — the next compile re-inits them with a fresh tree and
+ * skips the startup entirely (measured: ~25% off a warm-server recompile).
+ *
+ * The document crosses **once per worker**, not once per toggle. It used to be
+ * cloned three times per toggle — `cloneTree`, `transportClone`, and the
+ * structured clone inside `postMessage` — and a CPU profile of the demo compile
+ * showed that transport at ~52% of the whole compile, more than the cascades it
+ * was feeding. Now a job is just a toggle index; the worker holds the tree and
+ * clones locally, which also moves that cloning off this thread.
  */
 async function compileTogglesParallel(
   doc: Element,
@@ -227,25 +323,27 @@ async function compileTogglesParallel(
   // Capped well below the core count on purpose: 16 concurrent compiler workers
   // segfaulted Bun 1.3.14 on Windows (workers_spawned/terminated churn — a
   // runtime bug, not ours), and past ~6 the toggle compiles are memory-bound
-  // anyway. Four is the stability/speed knee.
+  // anyway. Four is the stability/speed knee — re-measured on Bun 1.4.0 with the
+  // init-once transport: 8 workers is ~10% slower, because each worker cold-
+  // imports the whole compiler graph and the startup outweighs the extra lanes.
   const size = Math.min(toggles.length, 4);
-  const queue = toggles.map((toggle, i) => ({ toggle, i }));
+  const indexOf = new Map(toggles.map((t, i) => [t.source, i]));
+  const transport = transportClone(doc);
+  annotateToggleSites(doc, transport, indexOf);
+
+  const queue = toggles.map((_, i) => i);
   const out: VariantRunResult[] = new Array(toggles.length);
 
   await Promise.all(
     Array.from({ length: size }, async () => {
-      const worker = new Worker(new URL("./variant-worker.ts", import.meta.url).href);
+      const worker = acquireWorker();
       try {
+        // The init message has no reply; the first job's response is the first
+        // message back, so per-job listeners below cannot race with it.
+        worker.postMessage({ tree: transport, css });
         while (queue.length > 0) {
-          const job = queue.shift()!;
-          // Apply before the transport clone: matching a toggle's sites needs the
-          // live signal objects, and sanitizing first erases them — the class
-          // would land nowhere and the variant would silently be the baseline
-          // (measured: the pooled `.light` painted the dark theme).
-          const tree = cloneTree(doc) as Element;
-          applyToggle(tree, job.toggle);
-          const transport = transportClone(tree);
-          out[job.i] = await new Promise<VariantRunResult>((resolve, reject) => {
+          const toggle = queue.shift()!;
+          out[toggle] = await new Promise<VariantRunResult>((resolve, reject) => {
             worker.onmessage = (
               event: MessageEvent<{ ok: true; result: VariantRunResult } | { ok: false; error: string }>,
             ) =>
@@ -254,19 +352,32 @@ async function compileTogglesParallel(
                 : reject(new Error(`a variant compile failed in its worker:\n${event.data.error}`));
             worker.onerror = (e) =>
               reject(e instanceof Error ? e : new Error("message" in e ? String(e.message) : String(e)));
-            worker.postMessage({ tree: transport, css });
+            worker.postMessage({ toggle });
           });
         }
-      } finally {
+      } catch (e) {
+        // The failed lane's worker may still be mid-job; a terminated worker
+        // cannot leak a late reply into the next compile the way a pooled one
+        // could. The healthy lanes still release theirs in the line below.
         worker.terminate();
+        throw e;
       }
+      releaseWorker(worker);
     }),
   );
   return out;
 }
+/**
+ * `STYLE_FIELDS` flattened once. `changedFields` runs slots × toggles times —
+ * ~1.7M field compares on the demo — and re-destructuring the tuple per field
+ * per call was visible in a CPU profile.
+ */
+const FIELD_LIST: StyleField[] = STYLE_FIELDS.map(([field]) => field);
+
 function changedFields(a: ComputedStyle, b: ComputedStyle): StyleField[] {
   const out: StyleField[] = [];
-  for (const [field] of STYLE_FIELDS) {
+  for (let i = 0; i < FIELD_LIST.length; i++) {
+    const field = FIELD_LIST[i]!;
     if (!sameValue(a[field], b[field])) out.push(field);
   }
   return out;
@@ -452,7 +563,7 @@ export async function compileVariants(
 
   // Baseline table: variant 0 of each slot.
   const table = {} as Record<StyleField, number[]>;
-  for (const [field] of STYLE_FIELDS) {
+  for (const field of FIELD_LIST) {
     table[field] = slotStyles.map((s) => s[0]![field]);
   }
 
