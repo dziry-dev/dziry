@@ -28,7 +28,7 @@ import { loadStylesheet, SheetMap, StylesheetError, type CssSource } from "./sty
 import { buildRefIndex, resolveRefs, RefError, type RefSource } from "./resolve-refs.ts";
 import { compileVariants, findToggles, type VariantCompiled } from "./variant-compile.ts";
 import { jsx, toDocument } from "./jsx-runtime.ts";
-import { emitRoutes, RouteError, scanWindows, type WindowDef } from "./routes.ts";
+import { emitRoutes, matchHref, RouteError, scanWindows, type Route, type WindowDef } from "./routes.ts";
 import { withPage, withWindowRoute } from "./route.ts";
 import { routeArgs } from "./route-args.ts";
 import { dataRecorder, errorRecorder } from "./route-data.ts";
@@ -250,6 +250,69 @@ export function reportWarnings(warnings: readonly string[]): void {
   for (const [message, n] of counts) {
     console.warn(`  warn: ${message}${n > 1 ? `  (x${n})` : ""}`);
   }
+}
+
+/** A link found in the spliced tree, located precisely enough to wire or refuse. */
+export type FoundLink = { el: Element; href: string; inTemplate: boolean };
+
+/**
+ * Every `<a href>` in the window, each either checkable-and-checked or refused
+ * by name. Pure — the caller decides what a non-empty `errors` costs — and over
+ * the *spliced* tree, so a link is checked against the table of the window it
+ * actually renders in.
+ *
+ * Three refusals, none silent:
+ *  - an interpolated href (`` href={`products/${p.id}`} ``) carries a recorder
+ *    marker; matching its static parts is designed but not built, so it is
+ *    named rather than half-checked;
+ *  - a path no route answers for — the reason this function exists;
+ *  - a link inside a list template with no authored `onClick`: a synthesized
+ *    handler there would need the per-row argument machinery, so until that is
+ *    built the author writes the handler and the href stays a style/focus fact.
+ */
+export function auditLinks(
+  root: Element,
+  routes: readonly Route[],
+): { links: FoundLink[]; errors: string[] } {
+  const links: FoundLink[] = [];
+  const errors: string[] = [];
+  const table = () =>
+    routes.length === 0 ? "(this window has no routes)" : routes.map((r) => r.path).join(", ");
+
+  const visit = (el: Element, inTemplate: boolean): void => {
+    if (el.tag === "a") {
+      const href = el.attrs.get("href");
+      if (href !== undefined) {
+        // A recorder read stringified into the attribute carries a NUL-delimited
+        // marker no author can type — see sentinel.ts.
+        if (href.includes("\0")) {
+          errors.push(
+            `an <a href> interpolates a recorded value, which cannot be checked or followed yet. ` +
+              `Write a concrete path, or navigate from an onClick handler.`,
+          );
+        } else if (matchHref(routes, href) === null) {
+          errors.push(`"${href}" is not a route of this window. Routes: ${table()}`);
+        } else if (inTemplate && !el.onClick) {
+          errors.push(
+            `the link to "${href}" sits inside a list template, where a navigation handler ` +
+              `cannot be synthesized yet. Give it an onClick that navigates.`,
+          );
+        } else {
+          links.push({ el, href, inTemplate });
+        }
+      }
+    }
+    for (const child of el.children) {
+      if (child.type === "element") visit(child, inTemplate);
+      // Item templates are part of the document, for links as for styling.
+      else if (child.type === "dynlist" && child.template.type === "element") {
+        visit(child.template, true);
+      }
+    }
+  };
+
+  visit(root, false);
+  return { links, errors };
 }
 
 async function compileWindow(window: WindowDef, options: CompileOptions): Promise<Compiled> {
@@ -523,6 +586,45 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     const names = imports.get(ref.specifier) ?? new Set<string>();
     names.add(ref.name);
     imports.set(ref.specifier, names);
+  }
+
+  /**
+   * Links, checked against the route table and wired to the route signal.
+   *
+   * "A dead link is meant to be a *build* error" — the `Href` union was half of
+   * that promise, and this is the other half: TypeScript catches typos, the
+   * matcher catches shape (`${string}` in the union spans slashes, so
+   * `products/a/b` type-checks and is refused here). A checked link then
+   * *navigates*: its click handler is synthesized as a write to the window's
+   * route signal, which is the same write the demo's hand-rolled `go()` does —
+   * the host's route machinery takes it from there. An authored `onClick` wins
+   * over synthesis: the author is navigating (or deliberately not) themselves.
+   */
+  const audit = auditLinks(doc, window.routes);
+  if (audit.errors.length > 0) {
+    throw new BuildError(
+      audit.errors.map((e) => `  error: ${e}`).join("\n") +
+        `\n\n${audit.errors.length} dead or unsupported link(s) in ${window.id}. A link the` +
+        `\nroute table cannot answer for would be a click that silently does nothing.`,
+    );
+  }
+  const wired = audit.links.filter((l) => !l.inTemplate && !l.el.onClick);
+  if (wired.length > 0) {
+    if (routeSignalName === null) {
+      throw new WindowError(
+        `window "${window.id}" has <a href> links but <Window> was given no route signal.\n` +
+          `  A link navigates by writing the window's route, so the window has to say which\n` +
+          `  signal that is: <Window route={route}> with the signal a module-level export.`,
+      );
+    }
+    for (const link of wired) {
+      const node = nodeOf.get(link.el);
+      if (node === undefined) continue;
+      // The arrow rides the `ref`-as-source path html `onclick="…"` already uses;
+      // `resolved()` accepts it by its leading paren, and the import is above.
+      const src = `() => ${routeSignalName}.set(${JSON.stringify(link.href)})`;
+      result.handlers.push({ node, ref: src, name: src, kind: "click" });
+    }
   }
 
   /**

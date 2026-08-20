@@ -315,6 +315,32 @@ export function scanWindows(root: string): WindowDef[] {
  * `Href` equal to `string`. The type then checks nothing, and every dead link in
  * that window waits for the compiler instead of the editor.
  */
+/**
+ * The concrete-path matcher: which route, if any, `href` names.
+ *
+ * `routes` is already in match order — `compareRoutes` sorts static segments
+ * before parameters at every depth — so the first hit *is* the winner and
+ * static-beats-param needs no rule here. A parameter segment accepts exactly one
+ * non-empty segment: `products/` names nothing, and `products/1/x` matches only
+ * a route of that depth. This is the compiler's half of the double check the
+ * `Href` union documents — `${string}` spans slashes, so TypeScript catches
+ * typos and this catches shape.
+ */
+export function matchHref(routes: readonly Route[], href: string): Route | null {
+  const segments = segmentsOf(href);
+  outer: for (const route of routes) {
+    if (route.segments.length !== segments.length) continue;
+    for (let i = 0; i < segments.length; i++) {
+      const pattern = route.segments[i]!;
+      if (pattern.startsWith("$") ? segments[i] === "" : pattern !== segments[i]) {
+        continue outer;
+      }
+    }
+    return route;
+  }
+  return null;
+}
+
 export function hrefUnion(routes: readonly Route[]): string {
   const members = new Set<string>();
 

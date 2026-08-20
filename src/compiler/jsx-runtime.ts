@@ -327,13 +327,15 @@ export type Props = {
   /** `<label for=…>`; spelled `htmlFor` because `for` is a reserved word. */
   htmlFor?: string;
   /**
-   * `<a href=…>`, and nothing navigates with it.
+   * `<a href=…>` — a concrete route path, checked and followed.
    *
-   * Here for the same reason `label` on `<optgroup>` is: it is a real attribute a
-   * selector can test — `a[href]` is how a stylesheet tells a link from an anchor —
-   * and leaving it out made the most ordinary `<a>` on the web a type error. dziri
-   * never navigates anywhere; in-app routes go through the typed route signal, and
-   * what an external link should do is an unsettled API.md question, not a prop.
+   * In a window compile the path is matched against the route table (a dead link
+   * is a build error, `auditLinks` in build.ts) and the click handler is
+   * synthesized as a write to the window's route signal — unless the element has
+   * its own `onClick`, which wins. It is also still the attribute a selector can
+   * test: `a[href]` is how a stylesheet tells a link from an anchor. What an
+   * external `https://` link should do remains an unsettled API.md question, so
+   * it is refused like any other non-route path rather than half-opened.
    */
   href?: string;
   /**
