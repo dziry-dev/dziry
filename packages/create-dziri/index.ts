@@ -13,8 +13,9 @@
  *
  * The demo template's window sources are copied from `windows/` by
  * `scripts/template-sync.ts` rather than maintained here, and `bun run
- * template:check` fails if the two have drifted. Other templates — `todo` — are
- * authored: they are apps, not mirrors of this repository's demo.
+ * template:check` fails if the two have drifted. Other templates — `todo`
+ * (LiveStore + Effect), `todo-drizzle` (Drizzle over bun:sqlite, routes,
+ * themes) — are authored: they are apps, not mirrors of this repository's demo.
  */
 import { Glob } from "bun";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
