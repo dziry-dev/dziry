@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { matchRoute, showRoute } from "./window-state.ts";
+import { matchRoute, requireRouteMatch, showRoute } from "./window-state.ts";
 import type { CompiledUi, RouteNodes } from "../ir.ts";
 
 const routes: RouteNodes[] = [
@@ -35,6 +35,30 @@ test("an unknown path is null, not a crash", () => {
 
 test("parameters are URL-decoded", () => {
   expect(matchRoute(routes, "products/a%20b")).toEqual({ index: 3, params: { id: "a b" } });
+});
+
+// ---------------------------------------------------------------------------
+// requireRouteMatch — `--route` at startup, where a concrete path must bind
+// ---------------------------------------------------------------------------
+
+test("a concrete --route binds its parameters, not just the pattern", () => {
+  // The startup path used to exact-match only, so `--route products/1` — the
+  // one spelling a user would actually try — was rejected with a list of
+  // patterns. Found by the route-param golden pointing at a concrete id.
+  expect(requireRouteMatch(routes, "products/1", "main")).toEqual({
+    index: 3,
+    params: { id: "1" },
+  });
+  expect(requireRouteMatch(routes, "about", "main")).toEqual({ index: 1, params: {} });
+});
+
+test("a --route matching nothing throws, naming the window and the routes", () => {
+  expect(() => requireRouteMatch(routes, "nope", "main")).toThrow(
+    'no route "nope" in window main',
+  );
+  expect(() => requireRouteMatch(routes, "products/1/extra/deep", "main")).toThrow(
+    "products/$id",
+  );
 });
 
 // ---------------------------------------------------------------------------

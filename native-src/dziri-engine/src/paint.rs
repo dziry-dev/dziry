@@ -418,6 +418,18 @@ enum Step {
 /// decomposed storage can express — the compiler refuses a list that needs
 /// another. Mirrors `composed()` in `css.test.ts`, which pins this exact sequence
 /// against the matrices Chromium produced.
+/// Bit flags for the per-row memo [`Painter::slot_traits`].
+mod trait_bits {
+    /// Set once the row's bits have been computed — 0 is "unknown", not "none".
+    pub const COMPUTED: u8 = 1 << 0;
+    /// Any of the nine transform fields differs from the identity.
+    pub const TRANSFORM: u8 = 1 << 1;
+    /// `opacity` below 1.
+    pub const OPACITY: u8 = 1 << 2;
+    /// Any ring width set — the three `band()` calls and their six reads.
+    pub const RING: u8 = 1 << 3;
+}
+
 /// The style columns the per-node transform and opacity reads need, resolved once.
 ///
 /// `Tables::f32s` looks like a field access and is not: it resolves a span plan
@@ -429,9 +441,8 @@ enum Step {
 /// same way twenty lines above where it wasn't hoisting these.
 ///
 /// Measured at 8000 nodes: paint 0.729 -> 0.560 ms/frame, and 0.195 -> 0.166 at 1000.
-/// Worth being exact that this is a quarter of the cost and not all of it — paint is
-/// still ~76% above the recorded baseline at 8000 nodes, so something else in the
-/// commits since it is spending the rest.
+/// The reads these columns feed are themselves gated per *row* now — see
+/// [`Painter::slot_traits`] — so an identity answer costs one array read per node.
 struct StyleCols<'a> {
     opacity: &'a [f32],
     translate_x: &'a [f32],
@@ -865,6 +876,16 @@ pub struct Painter {
     /// `LayoutTree::compute` takes this as a parameter rather than reaching
     /// through the painter. See `images.rs`.
     images: Images,
+    /// Per style row: does it transform, is it translucent — computed once per
+    /// commit and memoised.
+    ///
+    /// A node answers "do I have a transform" by reading nine style fields, which
+    /// is the right cost *per row*: rows are interned, so a tree of thousands of
+    /// nodes wears a handful of them, and the paint-regression bisect put the
+    /// per-node form of that question at ~0.08 ms/frame at 8000 nodes on a page
+    /// with no transforms at all. Zero here means "not computed yet this commit";
+    /// the bits are [`trait_bits`].
+    slot_traits: Vec<u8>,
 }
 
 impl Default for Painter {
@@ -906,6 +927,7 @@ impl Painter {
             carets: Carets::new(),
             selects: Selects::new(),
             images: Images::new(),
+            slot_traits: Vec::new(),
         }
     }
 
@@ -916,6 +938,59 @@ impl Painter {
         self.controls.rescan(tables, node_count);
         self.selects.rescan(node_count);
         self.images.rescan(tables, node_count);
+        // The rows may mean something different now, so the per-row answers go with
+        // them. Refilled lazily: the first node wearing a row recomputes its bits.
+        self.slot_traits.fill(0);
+    }
+
+    /// The transform/opacity trait bits of the row(s) a blend reads, memoised per
+    /// row for the length of a commit.
+    fn traits_of(&mut self, tables: &Tables, blend: &Blend) -> u8 {
+        let from = self.trait_of(tables, blend.from);
+        if blend.to == blend.from {
+            return from;
+        }
+        from | self.trait_of(tables, blend.to)
+    }
+
+    fn trait_of(&mut self, tables: &Tables, row: usize) -> u8 {
+        use protocol::styles as f;
+        if row >= self.slot_traits.len() {
+            self.slot_traits.resize(row + 1, 0);
+        }
+        let known = self.slot_traits[row];
+        if known & trait_bits::COMPUTED != 0 {
+            return known;
+        }
+        let g = |field: usize, dflt: f32| -> f32 {
+            tables.f32s(STYLES, field).get(row).copied().unwrap_or(dflt)
+        };
+        let mut bits = trait_bits::COMPUTED;
+        // The same identity rule `transform_of` early-outs on: nine fields, the
+        // origin excluded (meaningless when nothing moves).
+        if g(f::TRANSLATE_X, 0.0) != 0.0
+            || g(f::TRANSLATE_Y, 0.0) != 0.0
+            || g(f::TRANSLATE_PERCENT_X, 0.0) != 0.0
+            || g(f::TRANSLATE_PERCENT_Y, 0.0) != 0.0
+            || g(f::ROTATE, 0.0) != 0.0
+            || g(f::SCALE_X, 1.0) != 1.0
+            || g(f::SCALE_Y, 1.0) != 1.0
+            || g(f::SKEW_X, 0.0) != 0.0
+            || g(f::SKEW_Y, 0.0) != 0.0
+        {
+            bits |= trait_bits::TRANSFORM;
+        }
+        if g(f::OPACITY, 1.0) < 1.0 {
+            bits |= trait_bits::OPACITY;
+        }
+        if g(f::RING_OUTER_WIDTH, 0.0) != 0.0
+            || g(f::RING_INNER_WIDTH, 0.0) != 0.0
+            || g(f::RING_INSET_WIDTH, 0.0) != 0.0
+        {
+            bits |= trait_bits::RING;
+        }
+        self.slot_traits[row] = bits;
+        bits
     }
 
     /// The decoded images, for layout's intrinsic sizing and the FFI boundary.
@@ -1716,8 +1791,20 @@ impl Painter {
             // Both are paint-only, which is measured rather than assumed: neither
             // moves a sibling or changes a parent's height, so layout has already
             // finished and its answer stands.
-            let matrix = transform_of(&cols, &blend, geometry.bounds[node]);
-            let alpha = opacity_of(&cols, &blend);
+            //
+            // Gated on the row's trait bits: nine fields read once per *row* per
+            // commit, rather than per node per frame — interned rows are handfuls.
+            let traits = self.traits_of(tables, &blend);
+            let matrix = if traits & trait_bits::TRANSFORM != 0 {
+                transform_of(&cols, &blend, geometry.bounds[node])
+            } else {
+                None
+            };
+            let alpha = if traits & trait_bits::OPACITY != 0 {
+                opacity_of(&cols, &blend)
+            } else {
+                None
+            };
 
             if matrix.is_some() || alpha.is_some() {
                 match alpha {
@@ -1773,7 +1860,7 @@ impl Painter {
             };
 
             if visible {
-                self.node(canvas, tables, geometry.bounds, &blend, measurer, node);
+                self.node(canvas, tables, geometry.bounds, &blend, traits, measurer, node);
             }
 
             siblings.clear();
@@ -2112,6 +2199,7 @@ impl Painter {
         tables: &Tables,
         bounds: &[[f32; 4]],
         blend: &Blend,
+        traits: u8,
         measurer: &mut Measurer,
         node: usize,
     ) {
@@ -2199,17 +2287,22 @@ impl Painter {
         // matching corner radii the two shapes only touch rather than overlap, so this is
         // ordering for correctness-by-construction rather than for a visible difference
         // today — it stops mattering the day a ring is drawn semi-transparent.
-        let ring_outer = ring_width(g(f::RING_OUTER_WIDTH));
-        let ring_inner = ring_width(g(f::RING_INNER_WIDTH)).min(ring_outer);
-        band(
-            &mut self.fill,
-            ring_outer,
-            ring_inner,
-            c(f::RING_OUTER_COLOR),
-        );
-        // Tailwind's ring offset: a narrower band painted over the inner part of the ring,
-        // which is what puts a gap of page colour between the box and its ring.
-        band(&mut self.fill, ring_inner, 0.0, c(f::RING_INNER_COLOR));
+        //
+        // The whole section is behind the row's RING bit: six field reads and three
+        // `band` calls per node were the cost of ring support on pages with no rings.
+        if traits & trait_bits::RING != 0 {
+            let ring_outer = ring_width(g(f::RING_OUTER_WIDTH));
+            let ring_inner = ring_width(g(f::RING_INNER_WIDTH)).min(ring_outer);
+            band(
+                &mut self.fill,
+                ring_outer,
+                ring_inner,
+                c(f::RING_OUTER_COLOR),
+            );
+            // Tailwind's ring offset: a narrower band painted over the inner part of the ring,
+            // which is what puts a gap of page colour between the box and its ring.
+            band(&mut self.fill, ring_inner, 0.0, c(f::RING_INNER_COLOR));
+        }
 
         let bg = c(f::BG);
 
@@ -2226,8 +2319,10 @@ impl Painter {
 
         // An inset ring goes **over** the background and **under** the border, which is
         // where css-backgrounds-3 puts an inner shadow. Tailwind's `inset-ring-*`.
-        let ring_inset = ring_width(g(f::RING_INSET_WIDTH));
-        band(&mut self.fill, 0.0, -ring_inset, c(f::RING_INSET_COLOR));
+        if traits & trait_bits::RING != 0 {
+            let ring_inset = ring_width(g(f::RING_INSET_WIDTH));
+            band(&mut self.fill, 0.0, -ring_inset, c(f::RING_INSET_COLOR));
+        }
 
         // Non-finite is the sentinel for "unset" everywhere else, and `style_of`
         // already resolves it to no border for layout; paint must agree or the

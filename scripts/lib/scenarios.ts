@@ -145,9 +145,10 @@ export const SCENARIOS: Scenario[] = [
   { name: "features-light-compact", args: ["--route", "features", "--patch", "light,compact"] },
 
   // Nesting and parameters: the `products` layout stays visible because the active
-  // route renders inside it, while its sibling does not.
+  // route renders inside it, while its sibling does not. `route-param` drives a
+  // *concrete* id, which is what the param binding and the loader's `{ id }` read.
   { name: "route-nested", args: ["--route", "products/new"] },
-  { name: "route-param", args: ["--route", "products/$id"] },
+  { name: "route-param", args: ["--route", "products/1"] },
 
   // Hover, which is a predicate bit and an escaped selector — and which was
   // silently dropped for every Tailwind `hover:` utility until `@media (hover:

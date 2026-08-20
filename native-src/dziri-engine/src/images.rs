@@ -85,14 +85,26 @@ impl Images {
     /// Only the index is rebuilt; the decode cache survives, which is the whole
     /// reason it is keyed by `src`. A relinked list row keeps its picture.
     pub fn rescan(&mut self, tables: &Tables, node_count: usize) {
+        let nodes = tables.i32s(IMAGES, protocol::images::NODE);
+        let srcs = tables.i32s(IMAGES, protocol::images::SRC);
+
+        // Nothing real in the table → nothing to index. The dense vector is left
+        // alone deliberately: clearing and refilling it is an O(nodes) write per
+        // commit on pages with no images at all, and every reader reaches it only
+        // through `any` or a `get`, so a stale one is never observed.
+        if !nodes.iter().any(|&n| n >= 0 && (n as usize) < node_count) {
+            self.any = false;
+            self.nodes.clear();
+            self.srcs.clear();
+            return;
+        }
+
         self.dense.clear();
         self.dense.resize(node_count, -1);
         self.nodes.clear();
         self.srcs.clear();
         self.any = false;
 
-        let nodes = tables.i32s(IMAGES, protocol::images::NODE);
-        let srcs = tables.i32s(IMAGES, protocol::images::SRC);
         for (row, &node) in nodes.iter().enumerate() {
             // Spare rows are `i32::MAX`, same convention as the controls table:
             // out of range is a skip, host memory being untrusted.

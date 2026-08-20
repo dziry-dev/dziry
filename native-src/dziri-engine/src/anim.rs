@@ -423,6 +423,18 @@ impl Anims {
         self.live.clear();
         self.running = false;
         self.watched.clear();
+
+        // The cheap answer first: no style row carrying a tween means no node can
+        // animate, whatever it wears. Rows are interned and handfuls; nodes are
+        // neither — measured, the per-node walk below was ~0.07 ms of an 8000-node
+        // commit on a page with no animation at all (the regression bisect
+        // attributed it to the commit that introduced this rescan).
+        if !any_tween(tables) {
+            // Nothing reads `last` when nothing is watched, so it can be dropped
+            // rather than refilled — a clear plus resize is a full O(nodes) write.
+            self.last.clear();
+            return;
+        }
         self.last.clear();
         self.last.resize(node_count, UNKNOWN);
 
@@ -871,6 +883,16 @@ fn tween_ref(tables: &Tables, slot: usize, field: usize) -> Option<u16> {
 fn has_tween(tables: &Tables, slot: usize) -> bool {
     tween_ref(tables, slot, protocol::styles::TRANSITION).is_some()
         || tween_ref(tables, slot, protocol::styles::ANIMATION).is_some()
+}
+
+/// Whether any style row carries a tween.
+///
+/// Variant slots point at rows of the same interned table, so scanning the rows
+/// covers what a node could wear under any predicate combination — which is what
+/// makes this sufficient, not merely close.
+fn any_tween(tables: &Tables) -> bool {
+    let rows = tables.capacities().styles as usize;
+    (0..rows).any(|row| has_tween(tables, row))
 }
 
 #[cfg(test)]

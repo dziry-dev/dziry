@@ -206,6 +206,27 @@ export function requireRoute(
 }
 
 /**
+ * `requireRoute` through the matcher: a *concrete* path binds its parameters.
+ *
+ * `--route products/1` is a legitimate thing to ask for — patterns are how routes
+ * are declared, not how anyone navigates — and exact-only lookup rejected it with
+ * a list of patterns that blamed the user for the matcher's absence. The error
+ * stays for a path that matches nothing, which is the typo case it exists for.
+ */
+export function requireRouteMatch(
+  routeNodes: readonly RouteNodes[],
+  path: string,
+  windowId: string,
+): RouteMatch {
+  const found = matchRoute(routeNodes, path);
+  if (found === null) {
+    const paths = routeNodes.map((r) => r.path).join(", ");
+    throw new Error(`no route "${path}" in window ${windowId}. Routes are ${paths}.`);
+  }
+  return found;
+}
+
+/**
  * Shows one route, hiding the rest.
  *
  * Writes are per route root, so this is bounded by route count and not by node

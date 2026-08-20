@@ -106,29 +106,48 @@ that the seam is wired up, which a unit test cannot.
 `window-state.ts` has since grown `window-state.test.ts` (hot reload's dump/restore), and
 `single.ts` still has no unit test but four harnesses call it.
 
-### 3b. Paint is ~76% over `bench`'s baseline at 8000 nodes, cause unattributed
+### 3b. Paint regression — **attributed and reduced** (2026-08-20)
 
-`bun run bench` showed paint **+129%** against `bench/baseline.json` at 8000 nodes,
-reproducible to three decimals across runs while layout held — so not thermal. Per node
-paint had gone 0.040 → 0.091 µs: a multiplicative factor at every size from 1000 up, not
-a new superlinear term.
+Bisected with per-commit worktrees (`git worktree`, each building its own engine —
+the protocol changed, so old Rust cannot run against new TS), `scene()` verified
+byte-identical across the range first, `bench --sizes 8000` per commit:
 
-A quarter was found and fixed. `transform_of`
-(`native-src/dziri-engine/src/paint.rs:395`) called `Tables::f32s` nine times per node
-*before* the early-out that decides a node has no transform, and `opacity_of` a tenth.
-`f32s` resolves a span plan through two dependent loads, matches the arena, bounds-checks
-a byte range and casts it — cheap once, not ten times per node per frame. `StyleCols`
-(`native-src/dziri-engine/src/paint.rs:355`) hoists the fourteen columns once per frame,
-which `paint()` already did for `hidden`/`first`/`next`. Result: 0.729 → 0.562 ms at
-8000, and `paint/layout` 0.095 → 0.068.
+| commit | paint @8000 | |
+|---|---|---|
+| `adc1e7b` (2026-08-02, pre-range) | 0.373 | reference |
+| `bbb5ec4` transforms | 0.542 | **+45%** |
+| `05f1cd4` hit-test space | 0.529 | flat |
+| `14fca2d` tween table | — | bench broken at that commit (`ui.tweens` absent) |
+| `07742e5` animation clock | 0.706 | **+33%** |
+| `379e14a`, `60321d4` | 0.713, 0.723 | flat |
+| `f974e11` span-plan hoist | 0.651 | the quarter §3b already knew |
 
-`Blend` and `blend.f32` both arrived in one commit — `07742e5`, the animations one — so
-that is where the indirection came from.
+Two costs, both of the shape "feature machinery paid by nodes that do not use the
+feature", fixed:
 
-**Still open: the remaining ~76%.** Seven commits touched `paint.rs` since the baseline:
-`bbb5ec4`, `05f1cd4`, `07742e5`, `14fca2d`, `379e14a`, `60321d4`, `2a2039f`. Attributing
-it needs a measurement per commit, and `git worktree add` rather than a checkout — the
-protocol changed, so old Rust will not run against new TS.
+1. **`transform_of`/`opacity_of` read 15 style fields per node per frame** to learn
+   the answer is "identity" (`bbb5ec4`; `f974e11` had hoisted the span plans but the
+   reads remained). Now a per-row trait memo (`Painter::slot_traits`, invalidated per
+   commit) — rows are interned and handfuls, so the question is asked per *row*.
+   The ring bands in `node()` are behind the same memo's `RING` bit (worth ~nothing —
+   the columns were cache-hot; kept because the mechanism already exists).
+2. **`rescan_animations` ran four O(nodes) subsystem rescans on every commit with any
+   diff** (`07742e5` and followers). `anims.rescan` now scans the interned style rows
+   first and returns early when no row carries a tween; `controls.rescan` clears
+   `DISABLED`/`INVALID` only on the nodes recorded as holding them; `images.rescan`
+   skips its dense rebuild when the table has no real rows (every reader gates on
+   `any` or `get`, so a stale `dense` is unobservable).
+
+Result on this machine: 0.631 → ~0.52 ms at 8000 nodes (paint/layout 0.100 → 0.082).
+**Remaining +~60% over the recorded baseline is diffuse**, ablation-measured: ~0.066
+walk bookkeeping (Step growth, flags reads, blend construction), ~0.058 draw-path
+accumulation, and commit-side span growth (idle 0.013 → 0.016). No single hotspot
+left at that granularity.
+
+Also fixed while verifying: `--route products/1` was rejected at startup —
+`requireRoute` matched exactly and the pattern matcher only served *navigation*.
+`requireRouteMatch` binds params at startup now, and the `route-param` golden
+scenario drives a concrete id (its golden was stale since `8a8252f`; re-blessed).
 
 ### 3c. `bench/baseline.json` lies about its own date
 
@@ -136,8 +155,10 @@ protocol changed, so old Rust will not run against new TS.
 `2026-08-01` while the 10/100/1000 rows were changed and three rows added. Those numbers
 were not produced by a bless run at that date.
 
-**Deliberately not re-blessed**: doing so folds the figures in 3b into a green run and
-the regression stops being visible anywhere. Attribute it first.
+**Still not re-blessed, deliberately.** Attribution (3b) is done and the fix landed,
+but paint is still ~60% over the recorded figure; blessing now would fold the
+remainder into a green run. Bless when the remainder is either fixed or accepted in
+writing here.
 
 ### 3d. Two demo files were reformatted; nothing in the repo arbitrates
 

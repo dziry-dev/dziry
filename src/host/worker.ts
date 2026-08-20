@@ -76,7 +76,7 @@ import {
   dumpState,
   indexOfRoute,
   matchRoute,
-  requireRoute,
+  requireRouteMatch,
   restoreState,
   showRoute,
 } from "./window-state.ts";
@@ -261,21 +261,30 @@ function start(
   const requested = (() => {
     const i = argv.indexOf("--route");
     const wanted = i !== -1 ? argv[i + 1] : null;
-    if (wanted) return requireRoute(routeNodes, wanted, windowId);
+    /* A concrete path binds its parameters — `--route products/1` opens
+       `products/$id` with `{ id: "1" }`, which the loader and the param
+       bindings both read. The signal carries the concrete path, so
+       `{router.path}` says where the window actually is. */
+    if (wanted) {
+      const match = requireRouteMatch(routeNodes, wanted, windowId);
+      return { ...match, path: wanted };
+    }
     /* A reload carries the route the user was on, behind the explicit flag. The
        route table itself may have just changed, so a path that no longer matches
        falls back to the initial route rather than dying on its own edit. */
     if (restored?.route) {
       const match = matchRoute(routeNodes, restored.route);
-      if (match !== null) return match.index;
+      if (match !== null) return { ...match, path: restored.route };
     }
-    return initialRoute;
+    return { index: initialRoute, params: {}, path: null };
   })();
 
-  let active = requested;
+  let active = requested.index;
 
   const routeSignal = generated.routeSignal;
-  if (routeSignal) (routeSignal as Signal<string>).value = routeNodes[active]!.path;
+  if (routeSignal) {
+    (routeSignal as Signal<string>).value = requested.path ?? routeNodes[active]!.path;
+  }
 
   /**
    * `--patch light,compact` flips conditional classes on without a mouse.
@@ -360,7 +369,7 @@ function start(
     });
   }
 
-  navigate(active, {});
+  navigate(active, requested.params);
 
   post({
     t: "ready",

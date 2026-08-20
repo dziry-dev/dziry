@@ -78,6 +78,13 @@ pub struct Controls {
     /// republish would read the stale table back over it and snap the thumb home.
     /// Applying only on a *change* in the table is what lets both be true.
     applied: Vec<u16>,
+    /// The nodes currently holding `DISABLED` or `INVALID` — the bits rescan
+    /// re-reads from the table.
+    ///
+    /// Tracked so the clear pass is over *them* rather than over every node: a
+    /// commit on a page with no controls at all was paying an O(nodes) write to
+    /// clear bits no row had ever set.
+    re_read: Vec<u32>,
 }
 
 impl Controls {
@@ -96,10 +103,16 @@ impl Controls {
         self.values.resize(node_count, f32::NAN);
         self.applied.resize(node_count, u16::MAX);
         // Not cleared: the resize preserves what is already there, which is the whole
-        // point. Only the disabled bit is rebuilt, and only where a row says so.
-        for slot in self.state.iter_mut() {
-            *slot &= control_flags::CHECKED;
+        // point. Only the disabled/invalid bits are rebuilt — and only on the nodes
+        // that hold them, because only a row could have set them and the rows are
+        // about to be re-read.
+        const RE_READ: u8 = control_flags::DISABLED | control_flags::INVALID;
+        for &n in &self.re_read {
+            if (n as usize) < node_count {
+                self.state[n as usize] &= !RE_READ;
+            }
         }
+        self.re_read.clear();
 
         let ids = tables.i32s(CONTROLS, protocol::controls::NODE);
         let flags = tables.u8s(CONTROLS, protocol::controls::FLAGS);
@@ -127,7 +140,14 @@ impl Controls {
             // schema ran on the app thread and said this field is wrong. Whoever publishes
             // the table is the authority for it, so re-reading is exactly right, and seeding
             // it once like `CHECKED` would freeze the first verdict forever.
-            self.state[n] |= authored & (control_flags::DISABLED | control_flags::INVALID);
+            let bits = authored & (control_flags::DISABLED | control_flags::INVALID);
+            if bits != 0 && self.state[n] & bits != bits {
+                // First bit this node gains this rescan: record it for the next
+                // rescan's clear pass. (Duplicates would be harmless — the clear is
+                // idempotent — but they would grow the vec per extra row.)
+                self.re_read.push(node as u32);
+            }
+            self.state[n] |= bits;
 
             // A slider's authored position: applied only when the table *moved* — see
             // `applied`. `u16::MAX` is "the author said nothing", which is mid-track.
