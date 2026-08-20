@@ -241,8 +241,22 @@ grab, drag, page and hover — see A4.
 **Text wrapping landed 2026-08-01** — see A2. A narrow window reflows instead of running its text
 off the right edge, and `layout-diff` agrees with Chrome on 6 of 7 layout scenarios.
 
-**Not started**: text *editing*, images, SVG, animation, widgets, windowing, packaging, hot
-reload, CLI, diagnostics.
+**Landed since this section was last true** (it said "not started" for all of these):
+single-line text *editing* with selection, caret and `::selection` (A5, protocol v17);
+images with async decode and `bind:src`, and an SVG subset renderer; CSS animation —
+transitions, `@keyframes`, interruption (B3, protocol v12); native-feeling widgets —
+checkbox, radio, text input, `<select>` with its picker (A3/A5/B1); windowing via
+`<Window>`/`<Outlet>` with file-path routes; packaging (`dziri build` → one executable,
+D2); hot reload in two stages (CSS live-swap, worker swap under the live window); the
+CLI (`dziri dev/build/compile`, `bun create dziri`); route objects with loaders (sync |
+async | Effect) whose `Redirect`/`Cancel` exits drive navigation, `errorComponent` and
+`loadingComponent` per route; the Effect seam (`<Window layer>`, Effect-returning
+handlers); and diagnostics that name what they refuse — unsupported CSS warns by
+property, a positive `tabindex` fails the build and says why.
+
+**Still not started**: rich text editing (B4, unscheduled), IME and clipboard, an
+assistive-technology surface (UIAutomation/NSAccessibility/AT-SPI), `navigate()`/`back()`
+as framework API, and general SVG beyond the subset.
 
 ---
 

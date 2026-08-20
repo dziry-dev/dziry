@@ -119,10 +119,10 @@ Anything that trades robustness for capability stays a proposal.
 | `<Window>` / `<Outlet>` | **done** — `src/compiler/window.ts`, spliced by `bun run window` | M7 |
 | one table set per window, inactive routes `hidden` | **done** — emitted `hidden` column, `routeChain` | M7 |
 | `navigate` / `back` | partial — `showRoute` in `src/window-host.ts`; no matcher, no history | M7 |
-| `useRoute` params as bindings | planned — recorders exist; the emitter does not read them yet | M7 |
-| `href` checked against the route table | planned — needs `<a>` as a tag the compiler accepts | M7 |
-| `defineScreen` | planned — `args` moved to `useRoute`; only `data` remains | M8 |
-| route `loader` — sync fn \| async fn \| Effect; exits drive navigation | planned — design in data-layer-design.md §4 (2026-08-15): `Redirect`/`Cancel` tags, failure views as tag-named exports in `failure.tsx`, Effect recognised by its registered symbol and imported lazily | M7/M8 |
+| `useRoute` params as bindings | **done** (2026-08-18) — recorders (`route-args.ts`) reach the emitter through the param sentinel; `$id` binds as a signal the router writes on navigation. The demo's `products/$id.tsx` renders `{id}` live | M7 |
+| `href` checked against the route table | planned — `<a href>` compiles as a focusable link but is inert: no compile-time check against the routes, and a click does not navigate | M7 |
+| `defineScreen` | superseded — `defineRoute()` route objects (2026-08-18) carry what `defineScreen` was for: `args` had already moved to `useRoute`, and `data` is the loader's success value | M8 |
+| route `loader` — sync fn \| async fn \| Effect; exits drive navigation | **done** (2026-08-18) — `defineRoute()` route objects: loader as sync fn \| async fn \| Effect, `Redirect`/`Cancel` exits navigate, Effect recognised by its registered symbol and imported lazily. Failure renders the route's `errorComponent` and in-flight its `loadingComponent` — the design's `failure.tsx` tag-named exports did **not** ship; the route object carries the views instead. Demo: `products/$id.tsx` | M7/M8 |
 | `<Window layer={…}>` — Effect Layer as the window's DI root | **done** (2026-08-15) — `src/compiler/window.ts` captures it, `src/compiler/build.ts` resolves it to an export name, `src/runtime/effects.ts` builds the ManagedRuntime at launch and disposes it on quit so `Layer.scoped` finalizers run. Launch-failure *view* still rides M8; today a failed layer prints at launch | — |
 | handlers may return an `Effect` — run on the window's runtime | **done** (2026-08-15) — every dispatch path (`click`/`change`/`focus`/`blur`, list items, form `submit`/`invalid`) hands the return to `runDispatched`; failures print the full Cause, interruption is silent. `effect` recognised structurally and imported lazily; apps without it load none of it | — |
 | `Redirect` / `Cancel` navigation tags | **done** (2026-08-15) — exported from `dziri`, dependency-free classes failable from Effects and throwable from plain functions; the router that *interprets* them rides M7/M8 with `loader` | — |
@@ -803,10 +803,13 @@ One host serves any window — `windows/windows.gen.ts` is a generated registry 
 imported artifacts, so `--window <id>` costs no type safety. Opening two at *once* still needs one
 SDL event pump.
 
-Not built: `navigate`/`back` (the host has `showRoute`, which is the mechanism; what is missing
-is the matcher and the one-entry history), the emitter reading parameter recorders into text
-bindings, and `href` checking — `<a>` is not yet a tag the compiler accepts, so the demo's links
-are inert. Nothing consumes `routes.gen.ts` yet.
+Not built: `navigate`/`back` as framework API (the host has `showRoute`, which is the mechanism;
+what is missing is the matcher and the one-entry history — the demo hand-rolls both in
+`windows/main/router.ts`, typed against the generated `Href` union), and `href` checking —
+`<a href>` compiles as a focusable link but nothing verifies the path against the route table
+and a click does not navigate. Parameter recorders in text bindings landed 2026-08-18
+(`products/$id.tsx` renders `{id}` live), and `routes.gen.ts` is consumed: the demo's router
+imports `Href`.
 
 ### Proposed, not decided
 
