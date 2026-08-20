@@ -94,38 +94,17 @@ and `bun run layout-diff` (need Chrome).
 
 ## 3. Open work
 
-### 3a. `computed.ts` has no test driving it — the biggest gap
+### 3a. ~~`computed.ts` has no test driving it~~ — done
 
-Of the seven modules extracted, four have a test importing them and three do not:
+`computed.test.ts` now drives all eight exports directly: `applyDecls` with a declaration
+map and a `VarEnv`, timing against a stub `AnimContext` (the parameter-list seam, no
+pipeline), `coerceViewportOverflow`'s root rule, the two-axis overflow coercion,
+`inheritFrom`, `textStyle`, and both interners — including NaN-as-`auto` interning, which
+JSON keys would have folded into a collision. `cascade.test.ts` stays as it was: it covers
+that the seam is wired up, which a unit test cannot.
 
-| module | exports | test drives it? |
-|---|---|---|
-| `matcher.ts` | 6 | **yes** — `matcher.test.ts`, 22 tests, mutation-checked |
-| `values.ts` | 21 | yes, via `css.test.ts` |
-| `properties.ts` | 5 | yes, via `css.test.ts` |
-| `diagnostics.ts` | 3 | yes, via `css.test.ts` and `stylesheet.test.ts` |
-| **`computed.ts`** | **8** | **no — only reachable through `compile()`** |
-| `window-state.ts` | 4 | no |
-| `single.ts` | 4 | no unit test, but four harnesses call it |
-
-**Do not count `values`/`properties`/`diagnostics` as work done.** `git log` on
-`css.test.ts` shows only import repointing: those tests already drove `parseColor`,
-`parseLength`, `expandDeclaration` and `CssError` directly. The split revealed they were
-seam tests; it did not create them.
-
-This matters because the review's entire argument for lifting the cascade out of
-`compileTree` was that asserting one integer required driving an HTML parse, the UA
-sheet, `@property` merging, keyframes, every variant cascade and ten typed-array builds.
-The seam now exists and the matcher half has tests. The computed half does not, so the
-stated benefit is half delivered — and nothing surfaces that: `bun test` is green and
-`arch:check` does not look for it.
-
-The work: a `computed.test.ts` driving those 8 exports — `applyDecls`
-(`src/compiler/computed.ts:73`) with a declaration map and a `VarEnv`, `resolveTiming`
-against a stub `AnimContext` (cheap, since it takes the interners as parameters),
-`coerceOverflow`'s two-axis rule, `inheritFrom`. That is the ~35 `cascade.test.ts`
-pipeline tests the review said should become unit tests. **Keep `cascade.test.ts`** — it
-covers that the seam is wired up, which a unit test cannot.
+`window-state.ts` has since grown `window-state.test.ts` (hot reload's dump/restore), and
+`single.ts` still has no unit test but four harnesses call it.
 
 ### 3b. Paint is ~76% over `bench`'s baseline at 8000 nodes, cause unattributed
 
