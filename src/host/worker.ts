@@ -626,14 +626,28 @@ function start(
               // A row's handler is found by decomposing the node into (slot,
               // offset); a plain handler is looked up by node. Both batch, so one
               // click costs one repaint however many signals it writes.
-              if (!dispatchItem(ui, listBindings, e.node)) {
+              //
+              // The lookup walks **up the parent chain** from the hit, because the
+              // hit is the deepest interactive node — deliberately: hover is chain
+              // membership, so a link's text run has to be hittable for the link
+              // to light up — while the handler lives on the element. This is what
+              // bubbling means with no event objects: the handler table is a
+              // delegation map, and the walk stops at the first taker. Clicking
+              // the label text inside <a href> reaches the anchor's synthesized
+              // navigation exactly the way a browser's click on a text node
+              // reaches the anchor.
+              for (let node = e.node; node >= 0; node = ui.nodes.parent[node] ?? -1) {
+                if (dispatchItem(ui, listBindings, node)) break;
                 // A press on a submit button submits its form — the ordinary way a form is
                 // submitted, and more common than Enter. `submitForm` runs the button's own
                 // click handler as part of it, so this must not also `dispatch`, or a
                 // button with an `onClick` would fire it twice.
-                const form = formSubmittedByPress(ui, e.node);
-                if (form >= 0) validated(submitForm(ui, form, e.node));
-                else dispatch(ui, e.node);
+                const form = formSubmittedByPress(ui, node);
+                if (form >= 0) {
+                  validated(submitForm(ui, form, node));
+                  break;
+                }
+                if (dispatch(ui, node)) break;
               }
               break;
             }

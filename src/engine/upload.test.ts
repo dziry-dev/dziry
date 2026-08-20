@@ -45,7 +45,7 @@ import {
 import { INITIAL_STYLE, type CompiledUi, type StyleField } from "../ir.ts";
 import { Engine } from "./host.ts";
 import { NUMBER_FIELDS, Uploader, capacitiesFor } from "./upload.ts";
-import { applyTextBindings, dispatchChange, typeInto } from "../runtime/bindings.ts";
+import { applyTextBindings, dispatch, dispatchChange, typeInto } from "../runtime/bindings.ts";
 import { updateLists, type ListBindingRef } from "../runtime/list-runtime.ts";
 import { applyStylePatches, type StylePatchRef } from "../runtime/patches.ts";
 import { applyDisabled } from "../runtime/controls.ts";
@@ -298,13 +298,47 @@ test("text is measured, not guessed", () => {
 test("hit-testing finds an interactive node and ignores the rest", () => {
   const { engine, ui } = load();
 
-  const button = ui.interactive[0]!;
-  const [x, y, w, h] = engine.bounds(button);
-  expect(engine.hitTest(x + w / 2, y + h / 2)).toBe(button);
+  // The hit is the *deepest* interactive node at the point — deliberately, since
+  // hover is chain membership — so aiming at a nav link's center may land on its
+  // text run. The contract is that the aimed-at node is on the hit's parent
+  // chain, which is exactly the walk the host's click dispatch performs.
+  const link = ui.interactive[0]!;
+  const [x, y, w, h] = engine.bounds(link);
+  let hit = engine.hitTest(x + w / 2, y + h / 2);
+  while (hit >= 0 && hit !== link) hit = ui.nodes.parent[hit] ?? -1;
+  expect(hit).toBe(link);
 
   // The very bottom of the window is past the content entirely.
   expect(engine.hitTest(WIDTH - 2, HEIGHT - 2)).toBe(-1);
   engine.close();
+});
+
+test("a click on a link's text run reaches the synthesized navigation by the parent walk", async () => {
+  const { engine, ui } = load();
+  const { route } = await import("../../windows/main/router.ts");
+  const before = route.value;
+
+  try {
+    // The nav's Layout link: the handler the compiler synthesized from href.
+    const entry = generated.handlers.find(
+      (h) => h.kind === "click" && String(h.fn).includes(`route.set("layout")`),
+    )!;
+    expect(entry).toBeDefined();
+
+    // Its only child is the text run — the node hit_test actually returns when
+    // the pointer is over the label. The run itself has no handler; the anchor
+    // one step up does. This pair is what the host's click walk relies on.
+    const textRun = ui.nodes.firstChild[entry.node]!;
+    expect(ui.nodes.kind[textRun]).toBe(NodeKind.TEXT);
+    expect(dispatch(ui, textRun)).toBe(false);
+    expect(ui.nodes.parent[textRun]).toBe(entry.node);
+
+    expect(dispatch(ui, entry.node)).toBe(true);
+    expect(route.value).toBe("layout");
+  } finally {
+    route.set(before);
+    engine.close();
+  }
 });
 
 /**

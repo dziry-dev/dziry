@@ -2,36 +2,27 @@
  * The window's chrome. An ordinary component in the window folder — `pages/` holds
  * routes and nothing else.
  *
- * These navigate for real: a click writes the window's route signal, the host looks
- * the path up in the compiled route table and writes `hidden` over the routes that
- * left the chain. One byte per route root, no allocation, one relayout.
+ * These are real links. `href` is checked against the route table at build time —
+ * a typo\'d path fails the compile — and the click handler is synthesized by the
+ * compiler as a write to the window's route signal: the host looks the path up in
+ * the compiled route table and writes `hidden` over the routes that left the
+ * chain. One byte per route root, no allocation, one relayout. The fifteen
+ * exported go* handlers this file used to import are gone with nothing in their
+ * place, which is the point.
  *
  * The active entry is `router.matches(path)` in a conditional class. Nothing
  * compares strings at run time — the comparison is compiled into a cell and then
  * into style-table writes, so highlighting costs a few integers when the route
  * changes and nothing per frame.
  *
- * `hover:` compiles to an escaped selector (`.hover\:bg-zinc-700:hover`) and a
- * predicate bit, so hovering is resolved by the engine with nothing sent back here.
+ * `no-underline` because the UA sheet underlines an anchor the way a browser
+ * would, and these are tabs. `hover:` compiles to an escaped selector
+ * (`.hover\:bg-zinc-700:hover`) and a predicate bit, so hovering is resolved by
+ * the engine with nothing sent back here.
  */
 import { cn, useRouter } from 'dziri';
-import {
-    goAnimations,
-    goBorders,
-    goColors,
-    goControls,
-    goFeatures,
-    goForms,
-    goLayout,
-    goOverview,
-    goProducts,
-    goReactivity,
-    goSpacing,
-    goTransforms,
-    goTypography
-} from './router.ts';
 
-const LINK = 'link rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700';
+const LINK = 'link rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-300 no-underline hover:bg-zinc-700';
 
 export function Nav() {
     const router = useRouter();
@@ -45,82 +36,46 @@ export function Nav() {
                 </div>
             </div>
             <div className="flex flex-row flex-wrap gap-2">
-                <button className={cn(LINK, { active: router.matches('/') })} onClick={goOverview}>
+                <a href="/" className={cn(LINK, { active: router.matches('/') })}>
                     Overview
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('layout') })}
-                    onClick={goLayout}
-                >
+                </a>
+                <a href="layout" className={cn(LINK, { active: router.matches('layout') })}>
                     Layout
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('spacing') })}
-                    onClick={goSpacing}
-                >
+                </a>
+                <a href="spacing" className={cn(LINK, { active: router.matches('spacing') })}>
                     Spacing
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('typography') })}
-                    onClick={goTypography}
-                >
+                </a>
+                <a href="typography" className={cn(LINK, { active: router.matches('typography') })}>
                     Type
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('colors') })}
-                    onClick={goColors}
-                >
+                </a>
+                <a href="colors" className={cn(LINK, { active: router.matches('colors') })}>
                     Color
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('borders') })}
-                    onClick={goBorders}
-                >
+                </a>
+                <a href="borders" className={cn(LINK, { active: router.matches('borders') })}>
                     Borders
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('controls') })}
-                    onClick={goControls}
-                >
+                </a>
+                <a href="controls" className={cn(LINK, { active: router.matches('controls') })}>
                     Controls
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('transforms') })}
-                    onClick={goTransforms}
-                >
+                </a>
+                <a href="transforms" className={cn(LINK, { active: router.matches('transforms') })}>
                     Transform
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('animations') })}
-                    onClick={goAnimations}
-                >
+                </a>
+                <a href="animations" className={cn(LINK, { active: router.matches('animations') })}>
                     Motion
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('features') })}
-                    onClick={goFeatures}
-                >
+                </a>
+                <a href="features" className={cn(LINK, { active: router.matches('features') })}>
                     Features
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('reactivity') })}
-                    onClick={goReactivity}
-                >
+                </a>
+                <a href="reactivity" className={cn(LINK, { active: router.matches('reactivity') })}>
                     Reactivity
-                </button>
-                <button
-                    className={cn(LINK, { active: router.matches('forms') })}
-                    onClick={goForms}
-                >
+                </a>
+                <a href="forms" className={cn(LINK, { active: router.matches('forms') })}>
                     Forms
-                </button>
+                </a>
                 {/* Prefix-aware: stays lit on products/new and products/$id too. */}
-                <button
-                    className={cn(LINK, { active: router.matches('products') })}
-                    onClick={goProducts}
-                >
+                <a href="products/new" className={cn(LINK, { active: router.matches('products') })}>
                     Routing
-                </button>
+                </a>
             </div>
         </div>
     );

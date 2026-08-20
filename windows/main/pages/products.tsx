@@ -18,9 +18,9 @@
  * `useRouter()`, so `` {`at ${router.path}`} `` is a build error naming exactly that.
  */
 import { cn, Outlet, useRouter } from "dziri";
-import { goNewProduct, goProductDetail, onNewProduct, onProductDetail } from "../router.ts";
+import { onNewProduct, onProductDetail } from "../router.ts";
 
-const TAB = "tab rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700";
+const TAB = "tab rounded-lg bg-zinc-800 px-3 py-2 text-xs text-zinc-300 no-underline hover:bg-zinc-700";
 
 export default function Products() {
   const router = useRouter();
@@ -35,12 +35,12 @@ export default function Products() {
       </div>
 
       <div className="flex flex-row gap-2">
-        <button className={cn(TAB, { active: onNewProduct })} onClick={goNewProduct}>
+        <a href="products/new" className={cn(TAB, { active: onNewProduct })}>
           New
-        </button>
-        <button className={cn(TAB, { active: onProductDetail })} onClick={goProductDetail}>
+        </a>
+        <a href="products/1" className={cn(TAB, { active: onProductDetail })}>
           First
-        </button>
+        </a>
       </div>
 
       <Outlet />
