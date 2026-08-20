@@ -223,9 +223,87 @@ import type { MapOptions, ReadonlySignal, Signal } from "dziri";
 
 `MapOptions<Item>` is the second argument to `.map` — see [Markup](./markup.mdx#lists).
 
+## effect
+
+<Status of="effect" />
+```ts
+const count = signal(0);
+const label = signal("");
+
+effect(() => {
+  label.set(`count is ${count}`);
+});
+```
+
+Runs now, and again whenever anything it read changes. Dependencies are captured the
+same way a `computed` captures them — no array to declare, and the captured set is
+*replaced* on every run, so a branch that stopped reading a signal stops being woken
+by it.
+
+Return a function and it is the cleanup — run before each re-run and at disposal:
+
+```ts no-check
+effect(() => {
+  const id = setInterval(() => tick.set(Date.now()), 1000);
+  return () => clearInterval(id);
+});
+```
+
+`effect` returns a disposer. Most callers should not keep it — an effect created at
+module scope lives for the window's lifetime — but it exists for the exceptions:
+
+```ts
+const stop = effect(() => { /* ... */ });
+stop();
+```
+
+## untrack
+
+<Status of="untrack" />
+```ts
+const a = signal(1);
+const b = signal(100);
+
+const total = computed(() => a + untrack(() => b));
+```
+
+Reads inside `untrack` do not become dependencies of the enclosing computation. Here
+`total` recomputes when `a` changes and not when `b` does — but the recompute reads
+the *current* `b`.
+
+## peek
+
+<Status of="peek" />
+```ts
+const count = signal(0);
+count.peek(); // the value, without subscribing whatever is running
+```
+
+The single-read form of `untrack`. Inside a `computed` or `effect`, `count.peek()`
+reads without making `count` a dependency. Outside one it is just the value.
+
+## createScope
+
+<Status of="createScope" />
+```ts
+const scope = createScope();
+
+scope.run(() => {
+  effect(() => { /* ... */ });
+});
+
+scope.dispose(); // every effect created inside run() is disposed
+```
+
+An ownership boundary for effects. Disposing a scope disposes everything it owns,
+transitively — a scope created inside another scope's `run` belongs to it. This is
+what lets a teardown say "everything this part of the app created" without tracking
+handles by hand.
+
+`scope.own(fn)` adds an arbitrary disposer; `run` on a disposed scope throws, and
+`own` into one runs the disposer immediately rather than losing it.
+
 ## Not built yet
 
-`effect` <Status of="effect" />, `untrack` <Status of="untrack" />,
-`peek` <Status of="peek" /> and `resource` <Status of="resource" /> are designed
-but not implemented. They are described in `API.md`; nothing on this page depends
-on them.
+`resource` <Status of="resource" /> is designed but not implemented. It is described
+in `API.md`; nothing on this page depends on it.

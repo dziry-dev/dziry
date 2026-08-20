@@ -1,8 +1,8 @@
 {
-  "symbols": 74,
-  "bytes": 27209,
+  "symbols": 77,
+  "bytes": 27997,
   "bun": "1.3.14",
-  "recorded": "2026-08-18",
+  "recorded": "2026-08-20",
   "inventory": [
     "alert.ts:alert",
     "alert.ts:setAlertSink",
@@ -72,10 +72,13 @@
     "signal.ts:batch",
     "signal.ts:collectReads",
     "signal.ts:computed",
+    "signal.ts:createScope",
+    "signal.ts:effect",
     "signal.ts:isSignal",
     "signal.ts:setCompiling",
     "signal.ts:setListBuilder",
     "signal.ts:signal",
+    "signal.ts:untrack",
     "source.ts:source",
     "source.ts:takeSources"
   ]

@@ -53,6 +53,8 @@ type Ops<T> = {
    * should not use it: `count` is the read.
    */
   readonly value: T;
+  /** The value without capturing a dependency — see the implementations. */
+  peek(): T;
 };
 
 /**
@@ -107,6 +109,34 @@ const INVALIDATOR = Symbol.for("skia-proto.invalidator");
 
 type Invalidator = Subscriber & { [INVALIDATOR]?: true };
 
+/**
+ * A subscriber that re-captures its dependencies — a computed's invalidator, an
+ * effect's re-run — carries the sets it has registered into, so a re-run can
+ * leave the ones it no longer reads.
+ *
+ * Without this, capture was one-way: a read added the listener to the signal's
+ * subscribers and nothing ever removed it. A computed whose dependency set
+ * changes across recomputes — `cond ? a : b` — stayed subscribed to `a` for
+ * ever: woken by every write to a signal it no longer reads, one more entry per
+ * abandoned branch, without bound. Never a wrong *value* — a recompute reads
+ * current deps — but unbounded bookkeeping is a leak, and instance churn
+ * (pooled templates) is exactly where it would have bitten.
+ */
+type Tracked = Subscriber & { deps?: Set<Set<Subscriber>> };
+
+/** Registers `listener` in `subs`, recording `subs` as one of its dependencies. */
+function track(subs: Set<Subscriber>, listener: Tracked): void {
+  subs.add(listener);
+  listener.deps?.add(subs);
+}
+
+/** Leaves every set a tracked subscriber captured into, before it re-captures. */
+function detach(t: Tracked): void {
+  if (!t.deps) return;
+  for (const d of t.deps) d.delete(t);
+  t.deps.clear();
+}
+
 function notify(subs: Set<Subscriber>): void {
   // Copy first: a subscriber may unsubscribe during iteration.
   for (const s of [...subs]) {
@@ -150,7 +180,15 @@ export function signal<T>(initial: T): Signal<Widen<T>> {
   const self = {
     [BRAND]: true,
     get value(): T {
-      if (listener) subs.add(listener);
+      if (listener) track(subs, listener);
+      return readValue(self as unknown as ReadonlySignal<unknown>, current);
+    },
+    /**
+     * The value without the dependency capture. The transform routes `sig.peek`
+     * here (it is in `SIGNAL_MEMBERS`), so the method has to exist — an authored
+     * `sig.peek()` would otherwise compile cleanly and crash at run time.
+     */
+    peek(): T {
       return readValue(self as unknown as ReadonlySignal<unknown>, current);
     },
     set value(next: T) {
@@ -215,17 +253,21 @@ export function computed<T>(compute: () => T): ReadonlySignal<T> {
   // one this object can.
   let self: Ops<T> & { readonly value: T };
 
-  const invalidate: Invalidator = (): void => {
+  const invalidate: Invalidator & Tracked = (): void => {
     if (stale) return;
     stale = true;
     notify(subs);
   };
   invalidate[INVALIDATOR] = true;
+  invalidate.deps = new Set();
 
   self = {
     [BRAND]: true,
     get value(): T {
       if (stale) {
+        // Re-capturing: leave the sets the previous computation read into
+        // before capturing the new ones, or conditional reads accumulate.
+        detach(invalidate);
         const outer = listener;
         listener = invalidate;
         try {
@@ -235,8 +277,13 @@ export function computed<T>(compute: () => T): ReadonlySignal<T> {
         }
         stale = false;
       }
-      if (listener) subs.add(listener);
+      if (listener) track(subs, listener);
       return readValue(self as unknown as ReadonlySignal<unknown>, cached!);
+    },
+    peek(): T {
+      // Still computes when stale — peek is about the *listener* not capturing,
+      // not about refusing to be current.
+      return untrack(() => self.value);
     },
     subscribe(fn: Subscriber): () => void {
       // Priming, and it is load-bearing.
@@ -284,8 +331,137 @@ export function batch<T>(fn: () => T): T {
   }
 }
 
+/**
+ * Reads without capturing: `fn`'s signal reads do not become dependencies of
+ * whatever is evaluating — a computed, an effect — around it.
+ *
+ * This is the whole of what `peek` was ever planned to be at the expression
+ * level: not "read a signal's value" (that is `.value`) but "read it without
+ * subscribing the current computation to it".
+ */
+export function untrack<T>(fn: () => T): T {
+  const outer = listener;
+  listener = null;
+  try {
+    return fn();
+  } finally {
+    listener = outer;
+  }
+}
+
 export function isSignal(value: unknown): value is ReadonlySignal<unknown> {
   return typeof value === "object" && value !== null && BRAND in value;
+}
+
+// ---------------------------------------------------------------------------
+// effect, and the scope that disposes it
+// ---------------------------------------------------------------------------
+
+/**
+ * Runs `fn` now and again whenever anything it read changes. The dependencies
+ * are captured by the same read-tracking a computed uses — no array to declare,
+ * and the captured set is *replaced* on every run, so a branch that stopped
+ * reading a signal stops being woken by it.
+ *
+ * A function returned from `fn` is the cleanup: run before each re-run and at
+ * disposal, which is where a timer or an external subscription gets torn down.
+ *
+ * Returns the disposer. Most callers should not keep it: an effect created in
+ * a component lives for the component's lifetime, and the window's scope
+ * disposes it. The handle exists for the exceptions, and because a scope
+ * captures it — see {@link createScope}.
+ *
+ * Batching applies: writes inside a `batch` wake an effect once, at the end.
+ */
+export function effect(fn: () => void | (() => void)): () => void {
+  let cleanup: (() => void) | void;
+  let disposed = false;
+
+  const run: Tracked = () => {
+    if (disposed) return; // a queued re-run may outlive the dispose
+    detach(run);
+    if (cleanup) {
+      const c = cleanup;
+      cleanup = undefined;
+      c();
+    }
+    const outer = listener;
+    listener = run;
+    try {
+      cleanup = fn();
+    } finally {
+      listener = outer;
+    }
+  };
+  run.deps = new Set();
+
+  run();
+
+  const dispose = (): void => {
+    if (disposed) return;
+    disposed = true;
+    detach(run);
+    if (cleanup) {
+      const c = cleanup;
+      cleanup = undefined;
+      c();
+    }
+  };
+  activeScope?.own(dispose);
+  return dispose;
+}
+
+/**
+ * An ownership boundary for effects: everything created inside `run` is
+ * disposed by one `dispose()` call.
+ *
+ * The consumer that motivated it is pooled templates (M10): freeing an
+ * instance must drop its subscriptions with no dangling edges, and "everything
+ * this instance created" is exactly a scope. Windows get the same treatment on
+ * quit. It is deliberately not a context API — a scope is created, run and
+ * disposed; it is not read by anything in between except `effect`.
+ */
+export type DisposalScope = {
+  /** Runs `fn` with this scope current, so effects it creates are owned. */
+  run<T>(fn: () => T): T;
+  /** Adds an arbitrary disposer to the scope. Runs it immediately if disposed. */
+  own(dispose: () => void): void;
+  /** Disposes everything owned, once. */
+  dispose(): void;
+};
+
+let activeScope: DisposalScope | null = null;
+
+export function createScope(): DisposalScope {
+  const owned: (() => void)[] = [];
+  let disposed = false;
+  const scope: DisposalScope = {
+    run(fn) {
+      if (disposed) throw new Error("createScope: run() on a disposed scope");
+      const outer = activeScope;
+      activeScope = scope;
+      try {
+        return fn();
+      } finally {
+        activeScope = outer;
+      }
+    },
+    own(dispose) {
+      // Owning into a dead scope is a leak by another name: run it now, which
+      // is the disposal the caller was asking to happen eventually anyway.
+      if (disposed) dispose();
+      else owned.push(dispose);
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      for (const d of owned.splice(0)) d();
+    },
+  };
+  // A scope created inside another scope's run belongs to it: disposing the
+  // outer disposes the subtree, or "nested" scopes would be "leaked" scopes.
+  activeScope?.own(() => scope.dispose());
+  return scope;
 }
 
 // ---------------------------------------------------------------------------

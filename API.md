@@ -102,7 +102,7 @@ Anything that trades robustness for capability stays a proposal.
 | `<form>` — payload by `name`, `onSubmit`, `validate`, `onInvalid` | **done** — see **Form controls** below | A3 |
 | `alert()` — the platform's modal message box | **done** — `SDL_ShowSimpleMessageBox` behind the FFI, so it is a Win32 task dialog, an `NSAlert` or the GTK box and not something dziri draws. Nothing was vendored: SDL3 is already linked. Shown on the engine thread, because SDL requires the thread that initialised video, so app code posts a message; headless is a no-op so screenshots and goldens are unaffected | — |
 | `confirm()` / `prompt()` | planned — the same call with an answer, which needs a reply message rather than a return value: the thread that would answer is the one the dialog is blocking | — |
-| `effect` `untrack` `peek` cleanup, disposal scopes | planned | M6 |
+| `effect` `untrack` `peek` cleanup, `createScope` disposal scopes | **done** (2026-08-20) — `src/runtime/signal.ts`: `effect(fn)` (cleanup via return, dispose via handle, batched), `untrack(fn)`, `sig.peek()`, `createScope()` with transitive disposal. Includes the dep-set fix: re-capturing subscribers leave sets they no longer read | M6 |
 | `Show` | planned | M3 |
 | `source` | **done** — `source(subscribe, initial)`: a signal fed from outside. The subscribe is handed `set`, and what it returns decides the shape — an unsubscribe (callback, no `effect`), or an Effect `Stream` run with `Stream.runForEach` after a lazy import. `src/runtime/source.ts` | — |
 | `resource` / Suspense / error boundaries | planned | M8 |
@@ -151,9 +151,10 @@ count.set((n) => n + 1);                     // one method, value or function
 ```ts
 signal<T>(initial: T): Signal<T>                       // .set(value | fn), .subscribe()
 computed<T>(fn: () => T): Cell<T>
-effect(fn: () => void | (() => void)): void            // no dep array; cleanup via return
+effect(fn: () => void | (() => void)): () => void      // no dep array; cleanup via return; returns dispose
 batch<T>(fn: () => T): T
 untrack<T>(fn: () => T): T
+createScope(): DisposalScope                           // .run(fn) .own(fn) .dispose() — owns effects created inside
 
 source<T>(subscribe: (set: (v: T) => void) => unknown, initial: T): Cell<T>
 ref(): Ref                                             // .node .bounds() .focus() .on()

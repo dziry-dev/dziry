@@ -49,8 +49,8 @@ export type {
 } from "./compiler/route.ts";
 
 // --- state, the part that survives the compiler ------------------------------
-export { $, batch, computed, isSignal, signal } from "./runtime/signal.ts";
-export type { MapOptions, ReadonlySignal, Signal } from "./runtime/signal.ts";
+export { $, batch, computed, createScope, effect, isSignal, signal, untrack } from "./runtime/signal.ts";
+export type { DisposalScope, MapOptions, ReadonlySignal, Signal } from "./runtime/signal.ts";
 
 /** A stream-backed signal — Effect's `Stream` feeding a dziri signal. */
 export { source } from "./runtime/source.ts";

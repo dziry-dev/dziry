@@ -96,8 +96,8 @@ const FENCE = /^([ \t]*)```([A-Za-z0-9]+)([^\n]*)\n([\s\S]*?)^[ \t]*```[ \t]*$/g
  * have made this harness disagree with the page it was checking.
  */
 const PREAMBLE = [
-  'import { $, alert, batch, bind, cn, computed, Fragment, isSignal, Outlet, signal, useRoute, useRouter, Window } from "dziri";',
-  'import type { AlertLevel, Args, Child, ClassArg, ClassSpec, Component, MapOptions, Props, ReadonlySignal, Route, Router, Signal, StyleObject, WindowConfig, WindowProps } from "dziri";',
+  'import { $, alert, batch, bind, cn, computed, createScope, effect, Fragment, isSignal, Outlet, signal, untrack, useRoute, useRouter, Window } from "dziri";',
+  'import type { AlertLevel, Args, Child, ClassArg, ClassSpec, Component, DisposalScope, MapOptions, Props, ReadonlySignal, Route, Router, Signal, StyleObject, WindowConfig, WindowProps } from "dziri";',
 ].join("\n");
 
 type Example = { page: Page; startLine: number; lang: string; body: string; file: string };
