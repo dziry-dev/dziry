@@ -56,6 +56,7 @@ import {
 import { setAlertSink, type AlertRequest } from "../runtime/alert.ts";
 import { disposeWindowRuntime, provideWindowLayer, runLoader, startSources } from "../runtime/effects.ts";
 import { applyFieldChange } from "../runtime/forms.ts";
+import { installNavigation } from "../runtime/navigate.ts";
 import { isRangeControl } from "../runtime/numerics.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
 import { applyHotPayload } from "../runtime/hot.ts";
@@ -284,6 +285,8 @@ function start(
   const routeSignal = generated.routeSignal;
   if (routeSignal) {
     (routeSignal as Signal<string>).value = requested.path ?? routeNodes[active]!.path;
+    // From here on `navigate()`/`back()` in app code reach this window's route.
+    installNavigation(routeSignal as Signal<string>);
   }
 
   /**

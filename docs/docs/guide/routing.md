@@ -113,40 +113,35 @@ export default function ProductDetail() {
 The string must match the file's own path under `pages/`. It is what types the params
 and nothing else verifies it, so a mismatch is an error naming both paths.
 
-:::warning Params are not live bindings yet
-
-The recorders exist but the emitter does not read them, so a param does not yet produce
-a binding that updates. Check `API.md` for status.
-:::
+Params are live bindings: `{id}` in the component is a signal the router writes on
+navigation, so navigating from `products/1` to `products/2` updates the text without
+recompiling anything.
 
 ## Navigating
 
-There is no `navigate()` yet. A window exports one handler per destination:
+A link is the ordinary way. `href` is a concrete route path, checked at build time —
+a path the route table cannot answer for fails the compile rather than shipping as a
+click that silently does nothing — and a checked link navigates by itself:
 
-```ts no-check
-let previous = "/";
-
-function go(path: string): void {
-  if (path === route) return;
-  previous = route;
-  route.set(path);
-}
-
-export const goLayout = () => go("layout");
-export const goProducts = () => go("products/new");
-export const back = () => go(previous);
+```tsx no-check
+<a href="products/new">New</a>
 ```
 
-This is not boilerplate to apologise for. A click handler has to be a module-level
-export, because the generated artifact imports it by name —
-`onClick={() => go("layout")}` at the call site would be a closure created inside a
-component, with nowhere to live once components are erased.
+An `onClick` on the link wins over the synthesized navigation, for the cases where
+navigating is only part of what the click does.
 
-`navigate` needs the matcher and a way to pass an argument to a compiled handler. Until
-then the repetition is visible and honest rather than hidden behind something that does
-not work yet.
+For navigation outside a link, `navigate` and `back` come from `dziri`:
 
-History is one entry deep, by decision.
+```ts no-check
+import { navigate, back } from "dziri";
+
+export const goLayout = () => navigate("layout");
+```
+
+`navigate("…")` literals in handlers are checked against the route table the same way
+`href` is; a computed path is the author's to get right. History is one entry deep, by
+decision — `back()` returns to the previous route, and a second `back()` returns to
+where you just were, not anywhere older.
 
 ## Link typing
 

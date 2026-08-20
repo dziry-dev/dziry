@@ -3787,6 +3787,13 @@ export function emit(
     ...(/\$m\(/.test(emitted) ? ["$m"] : []),
   ];
 
+  // An inline handler that navigates is emitted as source, so the artifact has
+  // to import what the source names — same scan, different runtime module.
+  const navigationNames = [
+    ...(/\bnavigate\(/.test(emitted) ? ["navigate"] : []),
+    ...(/\bback\(/.test(emitted) ? ["back"] : []),
+  ];
+
   /**
    * Hot reload's state manifest: every referenced app module again as a
    * namespace import, so the host can walk exports by name when it carries
@@ -3805,6 +3812,9 @@ export function emit(
   const importLines = [
     ...(runtimeNames.length > 0
       ? [`import { ${runtimeNames.sort().join(", ")} } from "${typesFrom}/runtime/signal.ts";`]
+      : []),
+    ...(navigationNames.length > 0
+      ? [`import { ${navigationNames.sort().join(", ")} } from "${typesFrom}/runtime/navigate.ts";`]
       : []),
     ...[...imports].map(
       ([specifier, names]) =>

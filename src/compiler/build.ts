@@ -315,6 +315,33 @@ export function auditLinks(
   return { links, errors };
 }
 
+/**
+ * `navigate("…")` literals in captured handler sources, checked like hrefs.
+ *
+ * The same promise on the other authoring form: a navigation the route table
+ * cannot answer for is a build error, not a click that silently does nothing.
+ * Only literals are checkable — a computed path is the author's to get right,
+ * and module-level handlers (an app's own `go()`) cross the boundary as names,
+ * so their bodies are not visible here. Checked where checkable, named where
+ * not: exactly the `auditLinks` policy.
+ */
+export function deadNavigations(sources: readonly string[], routes: readonly Route[]): string[] {
+  const literal = /\bnavigate\(\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')\s*\)/g;
+  const errors: string[] = [];
+  for (const source of sources) {
+    for (const m of source.matchAll(literal)) {
+      const path = m[1] ?? m[2] ?? "";
+      if (matchHref(routes, path) === null) {
+        errors.push(
+          `navigate(${JSON.stringify(path)}) names no route of this window. Routes: ` +
+            (routes.length === 0 ? "(this window has no routes)" : routes.map((r) => r.path).join(", ")),
+        );
+      }
+    }
+  }
+  return errors;
+}
+
 async function compileWindow(window: WindowDef, options: CompileOptions): Promise<Compiled> {
   const started = performance.now();
   /* Coarse phase timings, printed when DZIRI_TIMING is set. Exists because "the
@@ -601,6 +628,12 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
    * over synthesis: the author is navigating (or deliberately not) themselves.
    */
   const audit = auditLinks(doc, window.routes);
+  audit.errors.push(
+    ...deadNavigations(
+      result.handlers.map((h) => h.name),
+      window.routes,
+    ),
+  );
   if (audit.errors.length > 0) {
     throw new BuildError(
       audit.errors.map((e) => `  error: ${e}`).join("\n") +

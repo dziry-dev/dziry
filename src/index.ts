@@ -37,6 +37,7 @@ export { Window, Outlet } from "./compiler/window.ts";
 export type { WindowConfig, WindowProps } from "./compiler/window.ts";
 
 export { defineRoute, useRoute, useRouter } from "./compiler/route.ts";
+export { navigate, back } from "./runtime/navigate.ts";
 export type {
   Args,
   ComponentProps,
