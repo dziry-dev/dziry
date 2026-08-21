@@ -12,6 +12,9 @@
  * rather than present-or-absent — the test says so rather than reading as a browser claim.
  */
 import { expect, test } from "bun:test";
+import { signal } from "../runtime/signal.ts";
+import { jsx, toDocument } from "./jsx-runtime.ts";
+import type { Node } from "./html.ts";
 import { compileTree } from "./compile.ts";
 import { collectFields, fieldKindOf, formKeys, markupDisabled, optionValue } from "./fields.ts";
 import { parseHtml, type Element } from "./html.ts";
@@ -289,6 +292,32 @@ test("a bind:value field keeps the author's signal instead of getting a cell", (
   const { specs, cells } = collectFields(tree);
   expect(cells).toEqual([]);
   expect(specs.get(input)!.cell).toBe("");
+});
+
+test("a bind:value field is two-way: the signal is its editable AND its display", () => {
+  // The display half is what makes seeding work — a loader writing the signal
+  // puts the text *in* the field. It regressed invisibly once (the write landed,
+  // the run never repainted, and only a screenshot caught it), so both halves
+  // are pinned: the editables ref carries the signal, and the field's run is a
+  // text binding over the same signal.
+  const sig = signal("seeded");
+  // Through the real authoring path: jsx() is what inserts the signal as the
+  // field's display child — a parser-built tree with bindValue attached by
+  // hand would prove nothing about what an app compiles to.
+  const tree = toDocument(
+    jsx("body", { children: jsx("input", { type: "text", "bind:value": sig }) }) as Node,
+  );
+
+  const built = compileTree(tree, "");
+  const editable = built.editables.find((e) => e.ref === sig);
+  expect(editable).toBeDefined();
+
+  const binding = built.textBindings.find((b) =>
+    b.parts.some((p) => "source" in p && p.source === sig),
+  );
+  expect(binding).toBeDefined();
+  // The bound run is the field's child, so what the signal holds is what paints.
+  expect(built.nodes[binding!.node]!.parent).toBe(editable!.node);
 });
 
 test("the innermost form owns a field, and a nested form's fields are its own", () => {

@@ -22,17 +22,13 @@ function Edit({ data }: ComponentProps<typeof route>) {
   return (
     <div className="card flex flex-col gap-3 rounded-2xl bg-zinc-900 p-5">
       <div className="heading text-sm font-semibold text-zinc-50">Edit todo</div>
-      {/* The current title comes from the loader as a data-cell binding. The
-          field below starts empty rather than seeded: writing a signal into a
-          text field's *display* is the half of bind:value that is not built
-          yet (API.md, M12) — when it lands, seed `editTitle` in the loader and
-          this comment goes away. */}
       <div className="muted text-xs text-zinc-400">
-        currently: {data.title}
+        loaded by the route's loader · id {data.id}
       </div>
+      {/* Seeded by the loader — bind:value is two-way, so the title is already
+          in the field and typing edits it in place. */}
       <input
         type="text"
-        placeholder="a new title"
         className="field rounded-lg bg-zinc-800 px-3 py-2 text-sm text-zinc-100"
         bind:value={editTitle}
       />

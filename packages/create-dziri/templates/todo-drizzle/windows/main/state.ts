@@ -71,10 +71,9 @@ export const editTodo = (item: Todo): void => {
 
 /**
  * The edit page's state. The loader runs on navigation: it reads the row, notes
- * which id is being edited, and clears the field — the *current* title reaches
- * the page as the loader's return, through a data-cell binding. (`editTitle` is
- * cleared rather than seeded because writing a signal into a text field's
- * display is the unbuilt half of bind:value — see API.md, M12.)
+ * which id is being edited, and seeds the field — `bind:value` is two-way, so
+ * writing the signal here is what puts the current title *in* the field, and
+ * typing then edits it in place.
  */
 export const editingId = signal("");
 export const editTitle = signal("");
@@ -83,7 +82,7 @@ export const loadTodoForEdit = (args: Record<string, string>): Todo => {
   const todo = getTodo(args.id ?? "");
   if (todo === undefined) throw new Error(`no todo with id ${args.id}`);
   editingId.set(todo.id);
-  editTitle.set("");
+  editTitle.set(todo.title);
   return todo;
 };
 

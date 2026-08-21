@@ -97,7 +97,7 @@ Anything that trades robustness for capability stays a proposal.
 | `.map(fn, { key })` keyed lists | **done** | — |
 | inline `style=` (string + object) | **done** | — |
 | `ref()` | partial — `resolve-refs.ts` | C3 |
-| `bind:value` | partial — append + backspace, and a click now focuses the field | M12 |
+| `bind:value` | **done** for text-entry fields, and it is two-way — typing writes the signal, and a signal write repaints the field (so a loader can seed an edit form). The display half is a text binding jsx() inserts as the field's child; a launch-ordering gap that swallowed writes from an initial route's sync loader was fixed 2026-08-21 and is pinned by a test. This row previously said "append + backspace" — caret, selection, word-select and Home/End all landed with A5. Still missing: clipboard and IME (A5's remainder) | M12 |
 | form controls — `<Checkbox>` `<Switch>` `<Radio>` `<Toggle>` `<Tabs>` `<Input>` | planned — see **Form controls** below | C2 |
 | `<form>` — payload by `name`, `onSubmit`, `validate`, `onInvalid` | **done** — see **Form controls** below | A3 |
 | `alert()` — the platform's modal message box | **done** — `SDL_ShowSimpleMessageBox` behind the FFI, so it is a Win32 task dialog, an `NSAlert` or the GTK box and not something dziri draws. Nothing was vendored: SDL3 is already linked. Shown on the engine thread, because SDL requires the thread that initialised video, so app code posts a message; headless is a no-op so screenshots and goldens are unaffected | — |

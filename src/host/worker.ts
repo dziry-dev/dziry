@@ -414,6 +414,15 @@ function start(
     schedule();
   });
 
+  /* The gap between the initial application at launch and the subscription
+     above is real: the initial route's `navigate()` runs its loader first, and
+     a *sync* loader that writes a bound signal — seeding an edit field — wrote
+     to no subscribers, so nothing ever re-applied and the field painted stale
+     until the next unrelated flush (measured: the seeded title stayed
+     invisible while the signal held it). One application here closes the gap,
+     and it costs no extra upload: the first flush is already pending. */
+  applyTextBindings(ui, changedNodes);
+
   subscribeImageBindings(ui, () => {
     applyImageBindings(ui);
     dirty = true;

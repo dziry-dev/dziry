@@ -438,6 +438,25 @@ export async function runMain(options: MainOptions): Promise<void> {
     frame();
     await loadImages(engine);
 
+    /* The app thread may still be flushing launch work. An initial route's
+       loader writes signals, and the flush that carries them into the shared
+       tables is *scheduled* on the worker's event loop — so a shot taken on the
+       first frame raced it (measured: an edit page's field painted its
+       placeholder while its bound signal already held the loaded title, because
+       the loader's flush landed just after the capture). Settle: keep committing
+       published batches until the worker has been quiet for a few checks,
+       bounded so a misbehaving app cannot hang a shot. */
+    const settleDeadline = Date.now() + 500;
+    for (let quiet = 0; quiet < 3 && Date.now() < settleDeadline; ) {
+      if (Atomics.load(flags, DIRTY) === 1) {
+        quiet = 0;
+        frame();
+      } else {
+        quiet++;
+      }
+      await Bun.sleep(10);
+    }
+
     if (advance !== null) {
       engine.setInputState(-1, -1, -1);
       frame();
