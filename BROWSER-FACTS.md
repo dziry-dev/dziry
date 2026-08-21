@@ -2310,3 +2310,32 @@ Two things follow, and they cut in dziri's favour rather than against:
 - **The payload is already an object, not a multimap.** dziri parts company with `FormData`
   here anyway — typed values, stable key shapes — so nesting is a change of degree in a
   direction already chosen, not a new divergence.
+
+## Newlines in a single-line input — the editing path spaces them, assignment strips them
+
+**Measured 2026-08-21 · Chromium 152 (via Edge 152) · `probes/input-newline-sanitization.html`.
+Two runs, identical.**
+
+Asked because clipboard paste is landing in dziri's text fields, and a pasted string is the
+one way multi-line text reaches a single-line editable. A trusted OS paste cannot be
+synthesized from script, so the editing path is measured through `execCommand("insertText")`,
+which is the same editing insertion the paste default action performs.
+
+| case | `<input type=text>` | `<textarea>` |
+|---|---|---|
+| `value = "a\nb"` / `"a\r\nb"` / `"a\rb"` | `"ab"` — breaks **stripped** | `"a\nb"` — `\r\n` normalised to `\n` |
+| insertText `"a\nb"` / `"a\r\nb"` | `"a b"` — each break → **one space** | `"a\nb"` — kept |
+| insertText `"one\ntwo\nthree"` | `"one two three"` | — |
+| insertText `"a\n\nb"` / `"a\r\n\r\nb"` | `"a  b"` — two breaks → two spaces | — |
+| `setRangeText("a\nb")` | `"ab"` — stripped, like assignment | — |
+
+Two distinct sanitizations, both synchronous: **value assignment** (and `setRangeText`) runs
+the value sanitization algorithm and deletes CR/LF outright; the **editing insertion path**
+replaces each break — `\r\n` counting as one — with exactly one space, so consecutive breaks
+leave consecutive spaces.
+
+Bearing on dziri: paste into a single-line field replaces each `\r\n | \r | \n` with one
+space, in the engine, before the caret is optimistically advanced — so the char count the
+engine advances by is the char count the worker splices. Assignment-style stripping applies
+to nothing today (a signal write replaces the whole value; there is no sanitizer), and
+textareas ride B4 with the rest of multi-line editing.

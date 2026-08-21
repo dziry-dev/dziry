@@ -858,6 +858,7 @@ export const EventKind = {
   CHANGE: 10,
   FOCUS_IN: 11,
   FOCUS_OUT: 12,
+  PASTE: 13,
 } as const;
 export type EventKind = (typeof EventKind)[keyof typeof EventKind];
 

@@ -498,6 +498,11 @@ mod tests {
         // the *lower-case* keycode whether or not Shift or Ctrl is held, so matching 0x41
         // would never fire.
         assert_eq!(Keycode::A.to_ll().0 as i32, 0x61);
+
+        // The clipboard trio, same rule.
+        assert_eq!(Keycode::C.to_ll().0 as i32, 0x63);
+        assert_eq!(Keycode::V.to_ll().0 as i32, 0x76);
+        assert_eq!(Keycode::X.to_ll().0 as i32, 0x78);
     }
 
     /// So are the modifier bits `engine.rs` masks with.
@@ -517,6 +522,11 @@ mod tests {
             0x0001 | 0x0002
         );
         assert_eq!(Mod::LCTRLMOD.bits() | Mod::RCTRLMOD.bits(), 0x0040 | 0x0080);
+
+        // The GUI pair is ⌘ on macOS — the command modifier there, where Ctrl is
+        // everywhere else. Asserted here rather than written from memory for the same
+        // reason as the pairs above: a wrong bit is a ⌘C that silently types nothing.
+        assert_eq!(Mod::LGUIMOD.bits() | Mod::RGUIMOD.bits(), 0x0400 | 0x0800);
     }
 
     /// Even spacing, so the expected answers are readable: 10px per character.

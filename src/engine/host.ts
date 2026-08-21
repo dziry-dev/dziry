@@ -99,6 +99,7 @@ const SYMBOLS = {
   dziri_engine_panic_for_testing: { args: [u32], returns: i32 },
   dziri_engine_open_file_dialog: { args: [u32, i32, PTR, u32, i32, PTR], returns: i32 },
   dziri_engine_take_file_dialog_result: { args: [u32, PTR, PTR, u32, PTR], returns: i32 },
+  dziri_engine_take_paste_text: { args: [u32, PTR, u32, PTR], returns: i32 },
 } as const;
 
 /** The engine's file name on this platform. */
@@ -515,7 +516,13 @@ export class Engine {
         c: view.getInt32(at + 16, true),
         x: view.getFloat32(at + 20, true),
         y: view.getFloat32(at + 24, true),
-        text: decoder.decode(bytes.subarray(at + 28, at + 28 + textLen)),
+        // A paste does not fit the 32-byte inline buffer, so its text waits in
+        // the engine and is fetched here, beside the drain, where the handle is
+        // — the same reason `selected` below is. `a` is its exact byte length.
+        text:
+          kind === EventKind.PASTE
+            ? this.takePasteText(a)
+            : decoder.decode(bytes.subarray(at + 28, at + 28 + textLen)),
         // A list box's `CHANGE` carries how many options are selected in `b`, and every
         // other `CHANGE` leaves it 0 — so `b` doubles as both the gate and the exact
         // buffer size, and the read cannot truncate. The set itself is fetched here,
@@ -940,6 +947,29 @@ export class Engine {
     const len = lenBuf[0]!;
     const paths = len > 0 ? decoder.decode(pathBuf.subarray(0, len)).split("\n") : [];
     return { node: nodeBuf[0]!, paths };
+  }
+
+  /**
+   * The string behind the oldest undrained `PASTE` event.
+   *
+   * `byteLen` is the event's `a`, which the engine set to the text's exact byte
+   * length — so the buffer always fits and the boundary-truncating path in the
+   * FFI never runs. One call per `PASTE` event, in drain order: the engine's
+   * queue and the event queue pair positionally.
+   */
+  takePasteText(byteLen: number): string {
+    const buf = new Uint8Array(Math.max(1, byteLen));
+    const lenBuf = new Uint32Array(1);
+    check(
+      engine.dziri_engine_take_paste_text(
+        this.#handle,
+        ptr(buf) as Pointer,
+        buf.length,
+        ptr(lenBuf) as Pointer,
+      ),
+      "dziri_engine_take_paste_text",
+    );
+    return decoder.decode(buf.subarray(0, lenBuf[0]!));
   }
 
   close(): void {

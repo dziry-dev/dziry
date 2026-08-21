@@ -333,7 +333,10 @@ export type Erase = "backward" | "forward";
  * looks like. It appends, so a host that never places a caret still behaves as this did
  * before there was one.
  *
- * Still no clipboard.
+ * The clipboard rides this path too: a `PASTE` event is a big `TEXT_INPUT` — the worker
+ * routes both through here — and a cut arrives as the Backspace-over-a-range it is. The
+ * engine owns the clipboard itself; by the time text reaches this splice its line breaks
+ * are already spaces (BROWSER-FACTS.md, "Newlines in a single-line input").
  *
  * Returns true if the key was consumed.
  */

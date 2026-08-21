@@ -883,6 +883,7 @@ pub mod event_kind {
     pub const CHANGE: u32 = 10;
     pub const FOCUS_IN: u32 = 11;
     pub const FOCUS_OUT: u32 = 12;
+    pub const PASTE: u32 = 13;
 }
 
 /// `controls.kind`. What a press does to this node, which is the only thing the engine needs to know about a control — appearance is the stylesheet's job and is already resolved into the style table. `CHECKBOX` toggles; `RADIO` sets itself and clears its group, and cannot be unchecked by pointer (measured). `SELECT` opens its picker on the press rather than the release, and `OPTION` commits — which is the same set-self-clear-group `RADIO` does, plus closing.

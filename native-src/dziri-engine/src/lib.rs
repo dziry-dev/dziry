@@ -1070,10 +1070,12 @@ pub unsafe extern "C" fn dziri_engine_alert(
     let title = read(title, title_len);
     let message = read(message, message_len);
 
-    with(handle, |engine| match engine.alert(level, &title, &message) {
-        Ok(()) => status::OK,
-        // The error carries its own category, so it is reported rather than flattened.
-        Err(e) => fail(e.status, &e.to_string()),
+    with(handle, |engine| {
+        match engine.alert(level, &title, &message) {
+            Ok(()) => status::OK,
+            // The error carries its own category, so it is reported rather than flattened.
+            Err(e) => fail(e.status, &e.to_string()),
+        }
     })
 }
 
@@ -1144,15 +1146,17 @@ pub unsafe extern "C" fn dziri_engine_open_file_dialog(
         .iter()
         .map(|(n, p)| (n.as_str(), p.as_str()))
         .collect();
-    with(handle, |engine| match engine.open_file_dialog(node, &filter_refs, allow_many != 0) {
-        Ok(()) => {
-            if !out.is_null() {
-                // SAFETY: checked non-null.
-                unsafe { *out = 0 };
+    with(handle, |engine| {
+        match engine.open_file_dialog(node, &filter_refs, allow_many != 0) {
+            Ok(()) => {
+                if !out.is_null() {
+                    // SAFETY: checked non-null.
+                    unsafe { *out = 0 };
+                }
+                status::OK
             }
-            status::OK
+            Err(e) => fail(e.status, e.detail),
         }
-        Err(e) => fail(e.status, e.detail),
     })
 }
 
@@ -1232,7 +1236,9 @@ pub unsafe extern "C" fn dziri_engine_take_file_dialog_result(
             }
             Some((node, paths)) => {
                 // SAFETY: checked non-null above.
-                unsafe { *node_out = node; }
+                unsafe {
+                    *node_out = node;
+                }
                 let joined = paths.join("\n");
                 let bytes = joined.as_bytes();
                 let len = bytes.len().min(path_cap as usize);
@@ -1240,6 +1246,51 @@ pub unsafe extern "C" fn dziri_engine_take_file_dialog_result(
                 unsafe {
                     std::ptr::copy_nonoverlapping(bytes.as_ptr(), path_buf, len);
                     *path_len_out = len as u32;
+                }
+            }
+        }
+        status::OK
+    })
+}
+
+/// Returns the text behind the oldest undrained `PASTE` event, if any.
+///
+/// Copies up to `cap` bytes of UTF-8 into `buf` — truncating on a character
+/// boundary, though a caller sizing `buf` from the event's `a` (the byte
+/// length) never truncates — and writes the copied length to `len_out`.
+/// `len_out = 0` means no paste is pending; an empty string is never queued.
+///
+/// One string per `PASTE` event, in event order: the host calls this once per
+/// `PASTE` it drains, and the queue stays paired.
+///
+/// # Safety
+/// `buf` must be writable for `cap` bytes; `len_out` for one `u32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_take_paste_text(
+    handle: Handle,
+    buf: *mut u8,
+    cap: u32,
+    len_out: *mut u32,
+) -> i32 {
+    if buf.is_null() || len_out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        match engine.take_paste_text() {
+            None => {
+                // SAFETY: checked non-null above.
+                unsafe { *len_out = 0 };
+            }
+            Some(text) => {
+                let bytes = text.as_bytes();
+                let mut len = bytes.len().min(cap as usize);
+                while len > 0 && !text.is_char_boundary(len) {
+                    len -= 1;
+                }
+                // SAFETY: buf is writable for cap bytes; len <= cap.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, len);
+                    *len_out = len as u32;
                 }
             }
         }

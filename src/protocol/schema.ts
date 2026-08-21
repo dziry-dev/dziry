@@ -1312,6 +1312,26 @@ export const ENUMS: EnumDef[] = [
        * on every click of the field it is already in.
        */
       FOCUS_OUT: 12,
+      /**
+       * Clipboard text is waiting to be spliced into the focused field. `node`
+       * is the field, `b` the caret and `c` the anchor — the same trio
+       * `TEXT_INPUT` carries — and `a` is the byte length of the text.
+       *
+       * The text itself is NOT in the event: `Event.text` is a 32-byte inline
+       * buffer sized for an IME commit, and a paste has no upper bound. The
+       * engine holds the string and the host fetches it with
+       * `dziri_engine_take_paste_text` while draining — the same
+       * fetch-beside-the-drain pattern as a list box's `CHANGE` selection,
+       * because the worker that will splice it has no engine handle.
+       *
+       * Already normalised: each line break (`\r\n` counting as one) is a
+       * single space, measured against the editing-insertion path —
+       * BROWSER-FACTS.md "Newlines in a single-line input". Normalising on
+       * this side is load-bearing, not cosmetic: the engine optimistically
+       * advances the caret by the char count it hands over, so the count it
+       * advances by must be the count the worker splices.
+       */
+      PASTE: 13,
     },
   },
   {

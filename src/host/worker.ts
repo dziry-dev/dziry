@@ -710,6 +710,12 @@ function start(
               validated(revalidate(ui, e.node, "change"));
               break;
 
+            // A paste shares typing's body deliberately: it *is* a big TEXT_INPUT —
+            // text spliced at the caret, over the selection, revalidated — and two
+            // paths would be two places for the splice to disagree. It is a separate
+            // kind only so the drain knows to fetch the full text from the engine;
+            // by the time it reaches here, `e.text` already holds it.
+            case EventKind.PASTE:
             case EventKind.TEXT_INPUT:
               // `b` is the caret, which the engine owns. Without it this could only append,
               // so clicking into the middle of a field and typing put the text at the end.

@@ -210,7 +210,8 @@ impl EventWatchCallback for ResizeWatch {
 pub struct Window {
     /// Kept for `SDL_GetModState`, which a wheel needs and its event does not carry.
     sdl: Sdl,
-    _video: VideoSubsystem,
+    /// Kept alive for the window's lifetime, and read for the clipboard.
+    video: VideoSubsystem,
     /// Removed from SDL when this is dropped, so it must outlive the window.
     _resize_watch: EventWatch<ResizeWatch>,
     events: EventPump,
@@ -308,7 +309,7 @@ impl Window {
 
         Ok(Self {
             sdl,
-            _video: video,
+            video,
             _resize_watch: resize_watch,
             events,
             canvas,
@@ -323,6 +324,27 @@ impl Window {
 
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
+    }
+
+    /// The OS clipboard's text, or `None` when it holds none (or holds something
+    /// that is not text — an image, a file list; text fields have no use for either).
+    ///
+    /// `SDL_GetClipboardText` via the crate's safe wrapper, which also frees the
+    /// buffer SDL allocates. Called from the video thread, like everything here.
+    pub fn clipboard_text(&self) -> Option<String> {
+        let clipboard = self.video.clipboard();
+        if !clipboard.has_clipboard_text() {
+            return None;
+        }
+        clipboard.clipboard_text().ok().filter(|t| !t.is_empty())
+    }
+
+    /// Puts `text` on the OS clipboard. A failure is dropped rather than surfaced:
+    /// a copy that did not take is an OS refusal (a clipboard manager holding a
+    /// lock, a Wayland focus rule), and there is nothing a text field can do about
+    /// it that the user's retry would not do better.
+    pub fn set_clipboard_text(&self, text: &str) {
+        let _ = self.video.clipboard().set_clipboard_text(text);
     }
 
     /// Shows a native modal message box, parented to this window, and **blocks until it is

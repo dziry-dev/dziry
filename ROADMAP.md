@@ -254,10 +254,11 @@ async | Effect) whose `Redirect`/`Cancel` exits drive navigation, `errorComponen
 handlers); and diagnostics that name what they refuse — unsupported CSS warns by
 property, a positive `tabindex` fails the build and says why.
 
-**Still not started**: rich text editing (B4, unscheduled), IME and clipboard, an
+**Still not started**: rich text editing (B4, unscheduled), IME, an
 assistive-technology surface (UIAutomation/NSAccessibility/AT-SPI), and general SVG
 beyond the subset. (`navigate()`/`back()` shipped 2026-08-19 — `src/runtime/navigate.ts`,
-with `<a href>` checked against the route table at build time.)
+with `<a href>` checked against the route table at build time. The clipboard shipped
+2026-08-21 — Ctrl+C/X/V decided engine-side, see A5.)
 
 ---
 
@@ -876,14 +877,17 @@ pointer, which is why one in the right half of a hyphen selects the word after i
 Delete are *identical* over a range. And the selection is `(anchor, focus)`, because a Shift
 reversal keeps the anchor while the ends cross. See BROWSER-FACTS.md.
 
-What is left of A5 is images and icons, plus the clipboard and IME below.
+What is left of A5 is images and icons, plus IME below.
 
 - Image decode, async load, cache, eviction. Decode off the main thread.
 - **Icons.** Lucide SVGs are what shadcn uses, so Tier 0 needs *something*. Full SVG is not
   fundamental — ship a built-in icon set (paths baked at compile time, which suits the thesis) and
   move general SVG parsing behind demand.
-- **Single-line text input**, moved forward from B4. Editing and selection ship; **IME and the
-  clipboard do not**, and they are the two things still standing between this and "text input,
+- **Single-line text input**, moved forward from B4. Editing and selection ship, and **the
+  clipboard shipped 2026-08-21** — Ctrl+C/X/V (⌘ on macOS), decided engine-side beside Ctrl+A
+  because the forwarded `KEY_DOWN` carries no modifier mask; a paste's line breaks become
+  spaces, one per break (measured, BROWSER-FACTS.md "Newlines in a single-line input").
+  **IME does not ship**, and is now the one thing standing between this and "text input,
   finished". *Rich* editing — multi-line, undo, word navigation — stays deferred indefinitely.
   - **This is the one part of forms that fails the compile-time gate**, and it fails at question 3:
     the set of strings a user can type is unbounded, so there are no variants to emit. The *value*

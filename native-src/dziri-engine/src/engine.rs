@@ -61,6 +61,10 @@ pub mod keys {
     /// A printable key's keycode *is* its Unicode scalar, so `a` is 0x61 — lower case, and
     /// SDL reports the same keycode whether or not Ctrl is held.
     pub const A: i32 = 0x61;
+    /// The clipboard trio, same story as `A`: lower-case scalars, modifier not folded in.
+    pub const C: i32 = 0x63;
+    pub const V: i32 = 0x76;
+    pub const X: i32 = 0x78;
     pub const UP: i32 = SCANCODE_MASK | 82;
     pub const DOWN: i32 = SCANCODE_MASK | 81;
     /// Opens a closed `<select>`, along with the arrows and Alt+ArrowDown. Measured.
@@ -97,11 +101,24 @@ enum Hit {
 pub mod mod_bits {
     pub const SHIFT: u16 = 0x0001 | 0x0002; // LSHIFT | RSHIFT
     pub const CTRL: u16 = 0x0040 | 0x0080; // LCTRL | RCTRL
-                                           // No `ALT`. `Alt+ArrowDown` opens a closed `<select>` — measured — but it needs no bit
-                                           // here, because the branch that opens one ignores the modifier mask entirely, so a bare
-                                           // arrow and an Alt-held arrow take the same path. A constant nothing read would imply a
-                                           // distinction the code does not make.
+    /// ⌘ — what macOS uses where everything else uses Ctrl. Checked against
+    /// `sdl3::keyboard::Mod` in `caret.rs` like the two above.
+    pub const GUI: u16 = 0x0400 | 0x0800; // LGUI | RGUI
+                                          // No `ALT`. `Alt+ArrowDown` opens a closed `<select>` — measured — but it needs no bit
+                                          // here, because the branch that opens one ignores the modifier mask entirely, so a bare
+                                          // arrow and an Alt-held arrow take the same path. A constant nothing read would imply a
+                                          // distinction the code does not make.
 }
+
+/// The bits meaning "the command modifier is held" — the one shortcuts hang off.
+///
+/// Ctrl everywhere but macOS, where the convention (and what SDL reports for ⌘) is the
+/// GUI pair. **Not** `CTRL | GUI` on every platform: Win+V on Windows is the OS
+/// clipboard-history popup, and treating the Windows key as Ctrl would fight it.
+#[cfg(target_os = "macos")]
+pub const COMMAND: u16 = mod_bits::GUI;
+#[cfg(not(target_os = "macos"))]
+pub const COMMAND: u16 = mod_bits::CTRL;
 
 use crate::layout::LayoutTree;
 use crate::paint::{
@@ -318,6 +335,17 @@ pub struct Engine {
     /// Each entry is `(node_id, paths)` — empty paths on cancel, one path
     /// normally, several when the input had `multiple`.
     pub file_dialog_results: Arc<Mutex<Vec<(i32, Vec<String>)>>>,
+    /// Pasted strings waiting behind their `PASTE` events, in the same order.
+    ///
+    /// A queue rather than an `Option` because a key repeat can land two pastes
+    /// between drains, and the pairing is positional: `Event.text` is a 32-byte
+    /// inline buffer sized for an IME commit, so the paste travels here instead
+    /// and [`Engine::take_paste_text`] hands it over — one string per event.
+    pending_paste: std::collections::VecDeque<String>,
+    /// The clipboard when there is no window — every Rust test, every headless
+    /// run. Process-local, so copy → paste round-trips are testable without a
+    /// display; a real window ignores it and asks SDL.
+    clipboard_fallback: String,
 }
 
 impl Engine {
@@ -391,6 +419,8 @@ impl Engine {
             drag: None,
             png: Vec::new(),
             file_dialog_results: Arc::new(Mutex::new(Vec::new())),
+            pending_paste: std::collections::VecDeque::new(),
+            clipboard_fallback: String::new(),
         })
     }
 
@@ -486,7 +516,11 @@ impl Engine {
     /// Returns and removes the oldest pending file-dialog result, if any.
     pub fn take_file_dialog_result(&self) -> Option<(i32, Vec<String>)> {
         let mut guard = self.file_dialog_results.lock().ok()?;
-        if guard.is_empty() { None } else { Some(guard.remove(0)) }
+        if guard.is_empty() {
+            None
+        } else {
+            Some(guard.remove(0))
+        }
     }
 
     /// The pixels of the last painted frame, as BGRA_8888.
@@ -1526,7 +1560,11 @@ impl Engine {
 
         let shift = mods & mod_bits::SHIFT != 0;
         let ctrl = mods & mod_bits::CTRL != 0;
-        let select_all = ctrl && keycode == keys::A;
+        // The platform's shortcut modifier — Ctrl, or ⌘ on macOS. `ctrl` stays alongside it
+        // because a list box's Ctrl+Arrow (move focus without selecting) is Ctrl by
+        // convention even on macOS, so the two are different questions.
+        let command = mods & COMMAND != 0;
+        let select_all = command && keycode == keys::A;
 
         // The picker gets the key first and consumes what it uses, which has to come before
         // the caret: an open picker's arrows are its own, and a select is not a text field so
@@ -1567,6 +1605,28 @@ impl Engine {
             self.select_all();
             return;
         }
+
+        // The clipboard trio. Consumed whether or not they did anything — Ctrl+C over a
+        // collapsed caret copies nothing and must still not fall through, or the `c` would
+        // be forwarded as a `KEY_DOWN` the way `select_all` never lets its `a` be.
+        //
+        // All three live on this side of the boundary because the *decision* has to: the
+        // forwarded `KEY_DOWN` deliberately carries no modifier mask (`b`/`c` are the caret
+        // and anchor now), so the host cannot tell `v` from Ctrl+V — and the mask is right
+        // here, beside `select_all`, which is the precedent.
+        if command && keycode == keys::C {
+            self.copy_selection();
+            return;
+        }
+        if command && keycode == keys::X {
+            self.cut_selection();
+            return;
+        }
+        if command && keycode == keys::V {
+            self.paste_clipboard();
+            return;
+        }
+
         if self.move_caret(keycode, shift) {
             return;
         }
@@ -1943,8 +2003,8 @@ impl Engine {
             let now = self.painter.range_fraction(focused).unwrap_or(0.5);
             if self.painter.set_range_fraction(focused, now + delta) {
                 self.needs_paint = true;
-                let per_mille = (self.painter.range_fraction(focused).unwrap_or(0.5) * 1000.0)
-                    .round() as i32;
+                let per_mille =
+                    (self.painter.range_fraction(focused).unwrap_or(0.5) * 1000.0).round() as i32;
                 self.events.push(Event {
                     kind: event_kind::CHANGE,
                     node: focused,
@@ -2198,6 +2258,132 @@ impl Engine {
         false
     }
 
+    /// Ctrl+C (⌘C): copies the focused field's selected text to the clipboard.
+    ///
+    /// Returns whether anything was copied — a collapsed caret copies nothing and leaves
+    /// the clipboard alone, which is what a browser's input does. Resolved through the
+    /// *focused* field the way `select_all` is, and additionally checked against the
+    /// caret's own run: a caret left over from a field the user has since left must not
+    /// let a shortcut operate on text the user is no longer in.
+    fn copy_selection(&mut self) -> bool {
+        let nodes = self.tree.bounds().len();
+        let Some(run) = editable_run_of(&self.tables, self.state.focused, nodes) else {
+            return false;
+        };
+        if self.painter.caret().map(|(node, _)| node) != Some(run) {
+            return false;
+        }
+        let Some((start, end)) = self
+            .painter
+            .selection(&self.tables, nodes, self.state.focused)
+        else {
+            return false;
+        };
+        let slot = self
+            .tables
+            .i32s(protocol::Table::Nodes as usize, protocol::nodes::TEXT)
+            .get(run)
+            .copied()
+            .unwrap_or(-1);
+        let text: String = self
+            .tables
+            .string(slot)
+            .chars()
+            .skip(start)
+            .take(end - start)
+            .collect();
+        if text.is_empty() {
+            return false;
+        }
+        self.clipboard_set(&text);
+        true
+    }
+
+    /// Ctrl+X (⌘X): the copy above, then **Backspace over the live range** — literally.
+    ///
+    /// The deletion is queued as the same `KEY_DOWN` a Backspace press queues, with the
+    /// same local caret shift, so the host needs no new case: over a range, Backspace
+    /// erases the range and nothing more (measured, see `key_down`), which is exactly
+    /// what cutting leaves behind.
+    fn cut_selection(&mut self) {
+        if !self.copy_selection() {
+            return;
+        }
+        self.events.push(Event {
+            kind: event_kind::KEY_DOWN,
+            node: self.state.focused,
+            a: keys::BACKSPACE,
+            b: self.painter.caret_index().map_or(-1, |i| i as i32),
+            c: self.painter.caret_anchor().map_or(-1, |i| i as i32),
+            ..Default::default()
+        });
+        self.shift_caret(-1, 0);
+    }
+
+    /// Ctrl+V (⌘V): reads the clipboard, normalises line breaks, queues a `PASTE` event
+    /// and optimistically advances the caret — typing's optimism, and typing's reason:
+    /// waiting for Bun to splice and republish would leave the caret a frame behind.
+    ///
+    /// The text does not fit `Event.text` in general, so it waits in `pending_paste` for
+    /// [`Engine::take_paste_text`], and the event's `a` carries its byte length so the
+    /// host can size the fetch. Normalising *here* is what keeps the optimism honest:
+    /// the char count the caret advances by is the char count the worker will splice.
+    ///
+    /// **No length clamp.** `typeInto` refuses a splice past `MAX_SLOT_CHARS` whole,
+    /// exactly as it refuses a keystroke at the cap, and the caret heals on the next
+    /// click — the documented cap behaviour, not a new one.
+    fn paste_clipboard(&mut self) {
+        let nodes = self.tree.bounds().len();
+        let Some(run) = editable_run_of(&self.tables, self.state.focused, nodes) else {
+            return;
+        };
+        if self.painter.caret().map(|(node, _)| node) != Some(run) {
+            return;
+        }
+        let Some(raw) = self.clipboard_get() else {
+            return;
+        };
+        let text = normalize_paste(&raw);
+        if text.is_empty() {
+            return;
+        }
+        self.events.push(Event {
+            kind: event_kind::PASTE,
+            node: self.state.focused,
+            a: text.len() as i32,
+            b: self.painter.caret_index().map_or(-1, |i| i as i32),
+            c: self.painter.caret_anchor().map_or(-1, |i| i as i32),
+            ..Default::default()
+        });
+        let chars = text.chars().count();
+        self.pending_paste.push_back(text);
+        self.shift_caret(chars as i32, chars);
+    }
+
+    /// The string behind the oldest undrained `PASTE` event, or `None`.
+    ///
+    /// The pairing is positional — events drain in order and this pops in order — which
+    /// is why `pending_paste` is a queue and not a slot.
+    pub fn take_paste_text(&mut self) -> Option<String> {
+        self.pending_paste.pop_front()
+    }
+
+    /// The clipboard's text — SDL's when a window exists, the process-local fallback
+    /// headless. `None` when empty, either way.
+    fn clipboard_get(&self) -> Option<String> {
+        match &self.window {
+            Some(w) => w.clipboard_text(),
+            None => (!self.clipboard_fallback.is_empty()).then(|| self.clipboard_fallback.clone()),
+        }
+    }
+
+    fn clipboard_set(&mut self, text: &str) {
+        match &self.window {
+            Some(w) => w.set_clipboard_text(text),
+            None => self.clipboard_fallback = text.to_string(),
+        }
+    }
+
     /// The control a press on `node` operates, or `node` itself.
     ///
     /// The rule focus has always followed, named because the caret follows it too. A control
@@ -2303,7 +2489,8 @@ impl Engine {
         // would freeze the drag the moment the pointer left the bar.
         if self.state.pressed != -1 {
             let slider = self.activates_of(self.state.pressed);
-            if slider >= 0 && self.painter.control_kind(&self.tables, slider) == control_kind::RANGE {
+            if slider >= 0 && self.painter.control_kind(&self.tables, slider) == control_kind::RANGE
+            {
                 self.move_slider(slider, x);
                 return;
             }
@@ -3543,4 +3730,59 @@ fn read_title(config: &EngineConfig) -> String {
     // copied immediately, so nothing outlives the call.
     let bytes = unsafe { std::slice::from_raw_parts(config.title, config.title_len as usize) };
     String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// What a paste does to line breaks before a single-line field sees them: each
+/// break — `\r\n` counting as one — becomes exactly one space, so consecutive
+/// breaks leave consecutive spaces.
+///
+/// Measured, not recalled: Chromium's *editing insertion* path does this, while
+/// `value` assignment strips breaks outright — two different sanitizations, and
+/// paste is the editing one. BROWSER-FACTS.md, "Newlines in a single-line input".
+/// Multi-line paste into a textarea rides B4 with the rest of multi-line editing;
+/// until then a textarea is a single-line editable and gets the same treatment.
+fn normalize_paste(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                out.push(' ');
+            }
+            '\n' => out.push(' '),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_paste;
+
+    /// The measured table from BROWSER-FACTS.md, "Newlines in a single-line
+    /// input", row by row — the editing-insertion column, which is paste's.
+    #[test]
+    fn a_paste_spaces_line_breaks_the_way_chromium_inserts_them() {
+        assert_eq!(normalize_paste("a\nb"), "a b");
+        assert_eq!(normalize_paste("a\r\nb"), "a b");
+        assert_eq!(normalize_paste("a\rb"), "a b");
+        assert_eq!(normalize_paste("one\ntwo\nthree"), "one two three");
+        // Consecutive breaks are consecutive spaces — each break is one space,
+        // not "runs collapse".
+        assert_eq!(normalize_paste("a\n\nb"), "a  b");
+        assert_eq!(normalize_paste("a\r\n\r\nb"), "a  b");
+    }
+
+    #[test]
+    fn a_paste_without_breaks_is_untouched() {
+        assert_eq!(normalize_paste("hello world"), "hello world");
+        assert_eq!(normalize_paste(""), "");
+        // A lone trailing break still becomes a space; trimming would be a
+        // different (unmeasured) behaviour.
+        assert_eq!(normalize_paste("a\n"), "a ");
+    }
 }

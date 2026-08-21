@@ -25,6 +25,7 @@ that lands in the runtime should come with a note saying which question was answ
 | Hit-testing | **dynamic** | needs final layout bounds |
 | Layout | **dynamic** in part | window size is a runtime input; everything else about it is precomputed |
 | Live service instances (`<Window layer={…}>`) | **dynamic** | a layer's services acquire OS resources — a store handle, a socket — that exist only at launch. Which export the layer is, and whether one exists, are compile-time; the runtime holds one disposable `ManagedRuntime` handle per window, plus the one bit per dispatch "did this handler return an Effect". Absent a layer, no trace (2026-08-15, runtime/effects.ts) |
+| The clipboard string, at the moment of a paste | **dynamic** | OS-supplied user data, same category as the deep-link string: it does not exist at build time and cannot be enumerated. The trace is one queued string per undrained `PASTE` event and, headless, one fallback buffer; the *decision* — which keys, what normalisation — is fixed in the engine, and Bun sees only the same splice a keystroke is (2026-08-21, engine.rs `paste_clipboard`) |
 
 ## The Rust engine — what exists (2026-07-30)
 

@@ -1,0 +1,85 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>input-newline-sanitization</title>
+<style>body{font:12px ui-monospace,monospace;padding:16px}#out{white-space:pre;line-height:1.5}</style>
+<h3>what happens to \r and \n put into a single-line input — stripped, spaced, or kept?</h3>
+<script type="module">
+  import { log, mount, measure, report } from "./_harness.js";
+
+  // Each case reads the control's value as JSON so \n vs \r\n vs "" are legible
+  // in the table. A trusted OS paste cannot be synthesized, so the editing path
+  // is measured through execCommand("insertText"), which is the same editing
+  // insertion the paste default action performs.
+  const field = (tag) => () => {
+    mount(tag === "input" ? '<input id="f" type="text">' : '<textarea id="f"></textarea>');
+    const f = document.getElementById("f");
+    f.focus();
+    return f;
+  };
+  const value = () => JSON.stringify(document.getElementById("f").value);
+
+  log("=== value assignment (value sanitization algorithm) ===");
+  await measure("input.value = 'a\\nb'", {
+    setup: field("input"),
+    mutate: (f) => { f.value = "a\nb"; },
+    read: value,
+  });
+  await measure("input.value = 'a\\r\\nb'", {
+    setup: field("input"),
+    mutate: (f) => { f.value = "a\r\nb"; },
+    read: value,
+  });
+  await measure("input.value = 'a\\rb'", {
+    setup: field("input"),
+    mutate: (f) => { f.value = "a\rb"; },
+    read: value,
+  });
+
+  log("=== editing insertion (execCommand insertText — the paste default action's path) ===");
+  await measure("insertText 'a\\nb' into input", {
+    setup: field("input"),
+    mutate: () => document.execCommand("insertText", false, "a\nb"),
+    read: value,
+  });
+  await measure("insertText 'a\\r\\nb' into input", {
+    setup: field("input"),
+    mutate: () => document.execCommand("insertText", false, "a\r\nb"),
+    read: value,
+  });
+  await measure("insertText 'one\\ntwo\\nthree' into input", {
+    setup: field("input"),
+    mutate: () => document.execCommand("insertText", false, "one\ntwo\nthree"),
+    read: value,
+  });
+  await measure("insertText 'a\\n\\nb' into input (consecutive breaks)", {
+    setup: field("input"),
+    mutate: () => document.execCommand("insertText", false, "a\n\nb"),
+    read: value,
+  });
+  await measure("insertText 'a\\r\\n\\r\\nb' into input", {
+    setup: field("input"),
+    mutate: () => document.execCommand("insertText", false, "a\r\n\r\nb"),
+    read: value,
+  });
+
+  log("=== setRangeText (programmatic splice) ===");
+  await measure("setRangeText 'a\\nb' into input", {
+    setup: field("input"),
+    mutate: (f) => f.setRangeText("a\nb"),
+    read: value,
+  });
+
+  log("=== textarea for contrast ===");
+  await measure("textarea.value = 'a\\r\\nb'", {
+    setup: field("textarea"),
+    mutate: (f) => { f.value = "a\r\nb"; },
+    read: value,
+  });
+  await measure("insertText 'a\\nb' into textarea", {
+    setup: field("textarea"),
+    mutate: () => document.execCommand("insertText", false, "a\nb"),
+    read: value,
+  });
+
+  report();
+</script>
