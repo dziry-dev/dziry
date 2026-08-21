@@ -59,6 +59,7 @@ import { applyFieldChange } from "../runtime/forms.ts";
 import { installNavigation } from "../runtime/navigate.ts";
 import { isRangeControl } from "../runtime/numerics.ts";
 import { applyStylePatches, subscribeStylePatches } from "../runtime/patches.ts";
+import { describeThrown, hideRedbox, setFailureSink, showRedbox } from "../runtime/redbox.ts";
 import { applyHotPayload } from "../runtime/hot.ts";
 import { applyDisabled, subscribeDisabled } from "../runtime/controls.ts";
 import type { Signal } from "../runtime/signal.ts";
@@ -593,7 +594,24 @@ function start(
     post({ t: "published" });
   }
 
-  return (message: ToWorker) => {
+  /**
+   * Paints the failure overlay, in development. A shipped app stays quiet on
+   * purpose — a wall of stack trace is a dev affordance, ROADMAP's dev-vs-prod
+   * ruling — and every producer keeps its own `console.error`, so nothing is
+   * lost where this returns early. The env var is the watcher's: `dziri dev`
+   * sets it on the app process, a packaged build never has it, and the Worker
+   * shares the process env.
+   */
+  const paintFailure = (title: string, detail: string): void => {
+    if (generated.redbox === null || process.env.DZIRI_HOT !== "1") return;
+    changedNodes.push(...showRedbox(ui, generated.redbox, title, detail));
+    dirty = true;
+    schedule();
+  };
+  // The runtime's failure reports (a dispatched Effect failing) land in the same box.
+  setFailureSink(paintFailure);
+
+  const handle = (message: ToWorker) => {
     switch (message.t) {
       case "init":
         // Already started. A second `init` would mean the engine thread lost track
@@ -854,6 +872,45 @@ function start(
         schedule();
         break;
       }
+
+      case "redbox": {
+        // The watcher's channel: a recompile failed, and the formatted error —
+        // the same string the terminal shows — belongs in the window the author
+        // is looking at. Not gated on DZIRI_HOT: only the watcher sends this.
+        if (generated.redbox !== null) {
+          changedNodes.push(...showRedbox(ui, generated.redbox, message.title, message.detail));
+          dirty = true;
+          schedule();
+        }
+        break;
+      }
+
+      case "redbox_clear": {
+        // The recompile that follows a failure succeeded. A *code* fix arrives as
+        // a worker swap and never gets here; a CSS-only fix keeps this worker, so
+        // the byte has to be put back by hand.
+        if (generated.redbox !== null && ui.nodes.hidden[generated.redbox.root] === 0) {
+          hideRedbox(ui, generated.redbox);
+          dirty = true;
+          schedule();
+        }
+        break;
+      }
+    }
+  };
+
+  return (message: ToWorker) => {
+    try {
+      handle(message);
+    } catch (e) {
+      /* The pump is the app thread's outermost frame: a handler that threw, a
+         subscriber that threw inside a batch flush, a splice over corrupt state —
+         all land here, and before this catch the Worker's `error` event tore the
+         window down with nothing on screen, which is the failure mode the red box
+         exists to end. Logged in full either way; painted in dev. */
+      const detail = describeThrown(e);
+      console.error(`  the app thread failed handling "${message.t}":\n${detail}`);
+      paintFailure(`Something threw handling "${message.t}"`, detail);
     }
   };
 }

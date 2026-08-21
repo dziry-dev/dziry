@@ -1,6 +1,6 @@
 {
-  "symbols": 81,
-  "bytes": 28856,
+  "symbols": 86,
+  "bytes": 29322,
   "bun": "1.4.0",
   "recorded": "2026-08-21",
   "inventory": [
@@ -71,6 +71,11 @@
     "patches.ts:resetAppliedPatches",
     "patches.ts:subscribeStylePatches",
     "read-path.ts:readPath",
+    "redbox.ts:describeThrown",
+    "redbox.ts:hideRedbox",
+    "redbox.ts:reportFailure",
+    "redbox.ts:setFailureSink",
+    "redbox.ts:showRedbox",
     "signal.ts:$",
     "signal.ts:$m",
     "signal.ts:batch",

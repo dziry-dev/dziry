@@ -239,3 +239,16 @@ test("a Rust panic returns a status code instead of killing the process", () => 
   expect(engine.panicForTesting()).toBe(Status.PANIC);
   expect(engine.tick.bind(engine)).toThrow();
 });
+
+/**
+ * After the poisoning above, deliberately: the fatal alert is the one poison-exempt
+ * entry point — a dying engine's last words. If this regressed to the ordinary
+ * gate, the report of a failure would be refused *because of* the failure, and the
+ * window would go back to vanishing with nothing said. Headless it is a no-op, so
+ * not-throwing is the whole observable contract; the ordinary gate staying shut is
+ * asserted beside it.
+ */
+test("the fatal alert still works on the poisoned engine", () => {
+  expect(engine.fatalAlert.bind(engine, "dziri: the engine failed", "why")).not.toThrow();
+  expect(engine.tick.bind(engine)).toThrow(); // everything else keeps refusing
+});

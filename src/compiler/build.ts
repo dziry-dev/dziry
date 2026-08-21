@@ -529,7 +529,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
   }
   mark("pages");
 
-  const { root, roots, loadingRoots, errorRoots } = spliceWindow(shell, pages);
+  const { root, roots, loadingRoots, errorRoots, redbox } = spliceWindow(shell, pages);
 
   const nodeOf = new Map<Element, number>();
   const doc = toDocument(root);
@@ -738,6 +738,29 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     window.routes.findIndex((r) => r.path === "/"),
   );
 
+  /**
+   * The failure overlay's node ids. The elements are known — `spliceWindow`
+   * minted them — so a miss here is a compiler bug, not a legitimate tree shape,
+   * and it fails the build rather than emitting a window that cannot report.
+   */
+  const redboxIds = (() => {
+    const textOf = (el: Element): number => {
+      const id = nodeOf.get(el);
+      const child = id === undefined ? undefined : result.nodes[id]!.children[0];
+      if (child === undefined) {
+        throw new BuildError(
+          `window "${window.id}": the failure overlay lost its message node — a compiler bug.`,
+        );
+      }
+      return child;
+    };
+    return {
+      root: nodeOf.get(redbox.root)!,
+      title: textOf(redbox.title),
+      detail: textOf(redbox.detail),
+    };
+  })();
+
   const routing: EmittedRouting = {
     window: window.id,
     config: configOf(shell)!,
@@ -746,6 +769,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     routeSignal: routeSignalName,
     layer: layerName,
     loaders,
+    redbox: redboxIds,
   };
 
   const emitted = emit(

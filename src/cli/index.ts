@@ -276,16 +276,33 @@ async function dev(theirs: string[], only?: string): Promise<void> {
     /^\/([A-Za-z]:)/,
     "$1",
   );
+  /* A failed compile is painted in the window as well as printed here — the red
+     box. Tracked so the *next* successful compile clears it: a code fix clears
+     by swapping the worker anyway, but a CSS-only fix keeps the worker, and the
+     box would otherwise outlive the error it reports. */
+  let buildBroken = false;
+
   const server = Bun.spawn([process.execPath, serverPath, projectDir, ...(only ? [only] : [])], {
     cwd: projectDir,
     stdio: ["inherit", "inherit", "inherit"],
     ipc(message) {
       const m = message as
         | { t: "compiled"; cssOnly: boolean; manifest: Record<string, HotManifestEntry> }
-        | { t: "failed" };
-      if (m.t === "compiled") onCompiled(m.cssOnly, m.manifest);
-      // `failed` needs no handling: the server printed the error, and the
-      // running app keeps its last good artifacts.
+        | { t: "failed"; message: string };
+      if (m.t === "compiled") {
+        if (buildBroken && proc !== null && proc.exitCode === null) {
+          buildBroken = false;
+          proc.send({ t: "redbox_clear" });
+        }
+        onCompiled(m.cssOnly, m.manifest);
+      } else if (m.t === "failed") {
+        // The server printed the error and the app keeps its last good
+        // artifacts; this only puts the same words in front of the author.
+        buildBroken = true;
+        if (proc !== null && proc.exitCode === null) {
+          proc.send({ t: "redbox", title: "Build failed", detail: m.message });
+        }
+      }
     },
   });
 

@@ -19,6 +19,7 @@
  * handle per window. Ledger entry: NOTES.md, "live service instances".
  */
 
+import { reportFailure } from "./redbox.ts";
 import { takeSources } from "./source.ts";
 
 /**
@@ -167,7 +168,11 @@ export function runDispatched(value: unknown, label: string): boolean {
     const rt = await windowRuntime().catch(() => null);
     const exit = await (rt ? rt.runPromiseExit(value) : mod.Effect.runPromiseExit(value));
     if (exit._tag === "Failure" && !mod.Cause.isInterruptedOnly(exit.cause)) {
-      console.error(`  ${label} failed:\n${mod.Cause.pretty(exit.cause)}`);
+      const pretty = mod.Cause.pretty(exit.cause);
+      console.error(`  ${label} failed:\n${pretty}`);
+      // The paint channel, beside the log — a window's worker turns this into the
+      // red box; anything else registered no sink and this line is a no-op.
+      reportFailure(`${label} failed`, pretty);
     }
   })();
 

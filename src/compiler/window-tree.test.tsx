@@ -240,3 +240,26 @@ test("a window without a layer records none", () => {
   const shell = Window({ title: "dziri", children: <Outlet /> });
   expect(layerOf(shell)).toBeUndefined();
 });
+
+test("every window carries the failure overlay: last child, hidden shape, own dyntext slots", () => {
+  const shell = Window({ title: "dziri", children: <Outlet /> });
+
+  const { root, redbox } = spliceWindow(shell, [page("/", -1, <div className="home" />)]);
+
+  // Last child of the shell — document order is paint order, so nothing the app
+  // renders can paint over it.
+  expect(root.children[root.children.length - 1]).toBe(redbox.root);
+  expect(redbox.root.children).toEqual([redbox.title, redbox.detail]);
+
+  // The message children are dyntext, which is what buys each a *reserved* string
+  // slot — an interned "" would be shared with any app text that happens to be "".
+  for (const el of [redbox.title, redbox.detail]) {
+    expect(el.children).toHaveLength(1);
+    expect(el.children[0]!.type).toBe("dyntext");
+  }
+
+  // No classes: an app stylesheet must have nothing to select the box by, and its
+  // look rides inline style, which beats every selector.
+  expect(redbox.root.classes).toEqual([]);
+  expect(redbox.root.style).toContain("position:absolute");
+});

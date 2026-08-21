@@ -1238,6 +1238,20 @@ export type RouteNodes = {
 };
 
 /**
+ * The failure overlay's nodes — the red box compiled hidden into every window.
+ *
+ * `root` is the subtree's top node: visibility is one `hidden` byte, the same
+ * write navigation makes. `title` and `detail` are TEXT nodes whose string slots
+ * (`nodes.text[…]`) the runtime overwrites with the failure message — reserved
+ * slots, never shared with an interned literal, because dyntext minted them.
+ */
+export type RedboxNodes = {
+  root: number;
+  title: number;
+  detail: number;
+};
+
+/**
  * A route and its ancestors — the set visible at once.
  *
  * An ancestor stays visible because the active route renders *inside* it; that is

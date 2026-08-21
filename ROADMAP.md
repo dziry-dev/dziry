@@ -296,18 +296,27 @@ a segfault?
   `undefined` there (measured, 1.3.14) — so the "one field and one argument" estimate is void until
   either Bun populates it or we own the TSX transform, which is ruled out elsewhere. See the note in
   `jsx-dev-runtime.ts`.
-- **Runtime error overlay — a red box, as React Native has.** Catch the failure and paint it
-  instead of dying. Today both drivers abort on a non-OK `tick()`, so the window simply
-  disappears, which is the failure mode this whole boundary was built to avoid.
+- **Runtime error overlay — a red box, as React Native has. Done 2026-08-21.** The box is
+  *compiled*: `window-tree.ts` appends a hidden, inline-styled, absolutely-positioned subtree
+  to every shell — the same synthesis a `<select>`'s internals get — and showing it is one
+  `hidden` byte plus two reserved string slots, the mechanism navigation already rides
+  (`runtime/redbox.ts`). Three producers feed it:
+  - **the app thread** — the worker's message pump wraps its switch, so a throwing handler,
+    a throwing subscriber inside a batch flush, and a dispatched Effect's failure all paint
+    instead of tearing the window down (before this, the Worker `error` event did exactly that);
+  - **the watcher** — a failed recompile's `formatBuildError` string rides
+    compile-server → CLI IPC → engine thread → worker, and the next successful compile clears it;
+  - **the engine** — a failed `tick()` cannot paint anything (a panic poisons the engine, and
+    every entry point then refuses), so its report is `dziri_engine_fatal_alert`: the one
+    **poison-exempt** FFI, a native modal that touches SDL and nothing of the corrupted state,
+    shown by the frame loop's catch before a *clean* shutdown — the raw throw used to skip
+    `stop`/`close`/`terminate` on its way out of the process.
 
-  Its prerequisite is done: `EngineError` carries `{status, detail}`, so the overlay has a
-  category to title itself with and a message to render. Two sources feed it — engine failures
-  crossing FFI as a status, and host failures (a signal throwing inside a handler) that never
-  reach the engine at all. Both should land in the same surface.
-
-  One thing it still needs: a decision on dev-versus-production behaviour — React Native's red box
-  is a development affordance and a shipped app wants something quieter. The other blocker, text
-  wrapping for a detail longer than the window is wide, landed 2026-08-01.
+  The dev-versus-production decision, made: the painted box is a development affordance, gated
+  on the watcher's `DZIRI_HOT`; a shipped app logs the same detail to stderr and keeps running
+  (a failed handler means that click did nothing), and only an engine failure — which is fatal
+  either way — gets the native box. Known v1 edge: the box is not `INTERACTIVE`, so clicks
+  pass through to the app beneath it.
 - A `--explain` mode that shows why a node got the style it did (which rules matched, which won).
 
 ### Testing strategy

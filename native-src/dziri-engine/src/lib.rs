@@ -156,6 +156,15 @@ fn slot_of(table: &[Slot], handle: Handle) -> Result<usize, &'static str> {
 /// a whole frame — and a second call naming the same engine finds the slot empty
 /// rather than deadlocking or aliasing.
 fn with<F: FnOnce(&mut Engine) -> i32>(handle: Handle, body: F) -> i32 {
+    with_gate(handle, body, false)
+}
+
+/// [`with`], with the poison refusal made explicit.
+///
+/// `even_poisoned` exists for exactly one caller — [`dziri_engine_fatal_alert`] —
+/// and the argument for the exemption lives there. Everything else goes through
+/// [`with`] and keeps refusing.
+fn with_gate<F: FnOnce(&mut Engine) -> i32>(handle: Handle, body: F, even_poisoned: bool) -> i32 {
     let taken = {
         let mut table = registry();
         let index = match slot_of(&table, handle) {
@@ -189,7 +198,7 @@ fn with<F: FnOnce(&mut Engine) -> i32>(handle: Handle, body: F) -> i32 {
 
     let mut owned = taken;
     let poisoned = owned.0.poisoned;
-    let code = if poisoned {
+    let code = if poisoned && !even_poisoned {
         fail(
             status::POISONED,
             "the engine panicked earlier and refuses further work",
@@ -1077,6 +1086,50 @@ pub unsafe extern "C" fn dziri_engine_alert(
             Err(e) => fail(e.status, &e.to_string()),
         }
     })
+}
+
+/// [`dziri_engine_alert`] at error level, working **even on a poisoned engine**.
+///
+/// The one poison exemption, and the argument for it: poisoning exists because a
+/// panic leaves the *tables and trees* unreliable, and every other entry point
+/// reads them. This one touches nothing but SDL's message box — a native modal
+/// the platform draws — so the state a panic corrupted is not on its path. Without
+/// the exemption a dying engine could never say why: the failure poisons, and the
+/// report is then refused for being after a failure.
+///
+/// Headless (no window), a no-op that returns OK, like `alert`.
+///
+/// # Safety
+/// `title` and `message` must each be readable for the length beside them, or
+/// null with a length of 0.
+#[no_mangle]
+pub unsafe extern "C" fn dziri_engine_fatal_alert(
+    handle: Handle,
+    title: *const u8,
+    title_len: u32,
+    message: *const u8,
+    message_len: u32,
+) -> i32 {
+    // SAFETY: the caller's promise, narrowed as in `dziri_engine_alert`.
+    let read = |ptr: *const u8, len: u32| -> String {
+        if ptr.is_null() || len == 0 {
+            return String::new();
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+
+    let title = read(title, title_len);
+    let message = read(message, message_len);
+
+    with_gate(
+        handle,
+        |engine| match engine.alert(2, &title, &message) {
+            Ok(()) => status::OK,
+            Err(e) => fail(e.status, &e.to_string()),
+        },
+        true,
+    )
 }
 
 /// Milliseconds spent in the last `tick`.

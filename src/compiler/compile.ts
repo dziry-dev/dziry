@@ -1005,6 +1005,14 @@ export type EmittedRouting = {
    * function survives the compiler/runtime boundary only as a name.
    */
   loaders: (LoaderRef | null)[];
+  /**
+   * The failure overlay's node ids — the synthesized subtree `window-tree.ts`
+   * appends to every shell. `root` starts hidden (this feeds `hiddenAtStart`
+   * alongside the off-chain routes); `title` and `detail` are the TEXT nodes
+   * whose string slots the runtime overwrites, reserved rather than interned
+   * because they are dyntext.
+   */
+  redbox: { root: number; title: number; detail: number } | null;
 };
 
 /**
@@ -1034,6 +1042,11 @@ function hiddenAtStart(nodeCount: number, routing: EmittedRouting): number[] {
     if (chain.has(i)) continue;
     for (const node of route.roots) hidden[node] = 1;
   }
+
+  // The failure overlay. Unlike a route's loading/error trees — which the launch
+  // navigation immediately writes over — nothing touches this byte until a failure
+  // does, so the emitted column is its only "at rest" state.
+  if (routing.redbox) hidden[routing.redbox.root] = 1;
 
   return hidden;
 }
@@ -4354,7 +4367,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RedboxNodes, RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef, ImageBinding } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -4760,6 +4773,18 @@ ${routing.loaders
 
 /** Folder name of the window, for diagnostics and multi-window dispatch later. */
 export const windowId: string = ${JSON.stringify(routing.window)};
+
+/**
+ * The failure overlay — a hidden subtree compiled into the shell, shown by the
+ * worker when something on the app thread fails (dev), or by the watcher when a
+ * recompile does. \`root\` is the byte navigation-style visibility writes;
+ * \`title\`/\`detail\` are TEXT nodes whose reserved string slots carry the message.
+ */
+export const redbox = ${
+    routing.redbox
+      ? `{ root: ${routing.redbox.root}, title: ${routing.redbox.title}, detail: ${routing.redbox.detail} }`
+      : "null"
+  } satisfies RedboxNodes | null;
 `;
 }
 

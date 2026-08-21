@@ -100,6 +100,7 @@ const SYMBOLS = {
   dziri_engine_open_file_dialog: { args: [u32, i32, PTR, u32, i32, PTR], returns: i32 },
   dziri_engine_take_file_dialog_result: { args: [u32, PTR, PTR, u32, PTR], returns: i32 },
   dziri_engine_take_paste_text: { args: [u32, PTR, u32, PTR], returns: i32 },
+  dziri_engine_fatal_alert: { args: [u32, PTR, u32, PTR, u32], returns: i32 },
 } as const;
 
 /** The engine's file name on this platform. */
@@ -650,6 +651,26 @@ export class Engine {
         messageBytes.length,
       ),
       "dziri_engine_alert",
+    );
+  }
+
+  /**
+   * `alert` at error level, working **even on a poisoned engine** — the dying
+   * engine's last words. Called from the frame loop's catch, where `tick()` just
+   * failed: every other entry point would refuse with POISONED, and the window
+   * would simply vanish, which is the failure mode ROADMAP's overlay exists to
+   * end. Headless is a no-op, and a failure to show the box is swallowed — the
+   * caller is already on its way out with the real error.
+   */
+  fatalAlert(title: string, message: string): void {
+    const titleBytes = new TextEncoder().encode(title);
+    const messageBytes = new TextEncoder().encode(message);
+    engine.dziri_engine_fatal_alert(
+      this.#handle,
+      titleBytes.length === 0 ? null : (ptr(titleBytes) as Pointer),
+      titleBytes.length,
+      messageBytes.length === 0 ? null : (ptr(messageBytes) as Pointer),
+      messageBytes.length,
     );
   }
 

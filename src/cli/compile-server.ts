@@ -44,7 +44,9 @@ if (!sendRaw) {
 const send: (m: unknown) => void = (m) => sendRaw.call(process, m);
 
 type Compiled = { t: "compiled"; cssOnly: boolean; manifest: Record<string, HotManifestEntry> };
-type Failed = { t: "failed" };
+/** `message` is the formatted, author-facing error — what the terminal shows,
+ *  carried along so the CLI can put the same words in the window's red box. */
+type Failed = { t: "failed"; message: string };
 
 let compiling = false;
 let pending: { files: Set<string>; cssOnly: boolean } | null = null;
@@ -67,9 +69,11 @@ async function compile(changed: readonly string[], cssOnly: boolean): Promise<vo
       }
       send({ t: "compiled", cssOnly, manifest: Object.fromEntries(hot) } satisfies Compiled);
     } catch (e) {
-      const message = await formatBuildError(e, projectDir);
-      console.error(message ?? `  error: ${e instanceof Error ? e.message : String(e)}`);
-      send({ t: "failed" } satisfies Failed);
+      const message =
+        (await formatBuildError(e, projectDir)) ??
+        `  error: ${e instanceof Error ? e.message : String(e)}`;
+      console.error(message);
+      send({ t: "failed", message } satisfies Failed);
     }
   } finally {
     compiling = false;

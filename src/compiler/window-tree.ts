@@ -65,6 +65,8 @@ export type SplicedWindow = {
   loadingRoots: Element[][];
   /** Per route: the errorComponent's top-level elements, or []. */
   errorRoots: Element[][];
+  /** The synthesized failure overlay — see [`redboxTree`]. */
+  redbox: { root: Element; title: Element; detail: Element };
 };
 
 /**
@@ -169,7 +171,70 @@ export function spliceWindow(shell: Element, pages: readonly PageTree[]): Splice
     );
   }
 
-  return { root: shell, roots, loadingRoots, errorRoots };
+  const redbox = redboxTree();
+  shell.children.push(redbox.root);
+
+  return { root: shell, roots, loadingRoots, errorRoots, redbox };
+}
+
+/** An element with no attributes, handlers or classes — the shape `ua-structure.ts` mints. */
+function synthesized(tag: string, style: string, children: Node[]): Element {
+  return {
+    type: "element",
+    tag,
+    id: null,
+    classes: [],
+    children,
+    onClick: null, onChange: null, onFocus: null, onBlur: null,
+    onSubmit: null,
+    classWhen: null,
+    bindValue: null,
+    bindSrc: null,
+    style,
+    attrs: new Map(),
+  };
+}
+
+/**
+ * The runtime failure overlay — ROADMAP's red box — compiled into every window.
+ *
+ * Synthesized like a control's internals (`ua-structure.ts`): ordinary elements the
+ * cascade never has to know are special. The compile-time gate's answer is question 3
+ * — the overlay's two states are enumerable, so it is a hidden subtree and the runtime
+ * writes one `hidden` byte and two string slots, exactly the mechanism a route's
+ * `errorComponent` already rides. It starts hidden, and a hidden node is excluded from
+ * layout, paint and hit-testing, so an app that never fails carries three idle nodes
+ * and nothing else.
+ *
+ * The message slots are **dyntext** children, which is what gives each its own
+ * reserved string slot — an interned literal would be shared with whatever app text
+ * happens to be equal, and the runtime overwrites these.
+ *
+ * Styling is inline because inline beats every selector: an app stylesheet cannot
+ * restyle the box that reports the app's own failure. Painted last in document order
+ * — it is the shell's last child — and stacked over everything by `position:absolute`.
+ * Deliberately not `INTERACTIVE`: clicks pass through to the app underneath, which is
+ * a known v1 rough edge, not a design position.
+ */
+function redboxTree(): { root: Element; title: Element; detail: Element } {
+  const dyn = (): Node => ({ type: "dyntext", parts: [{ literal: "" }] });
+  const title = synthesized(
+    "div",
+    "color:#fecaca;font-size:15px;font-weight:700",
+    [dyn()],
+  );
+  const detail = synthesized(
+    "div",
+    "color:#ffffff;font-size:13px",
+    [dyn()],
+  );
+  const root = synthesized(
+    "div",
+    "position:absolute;top:0;right:0;bottom:0;left:0;" +
+      "background:rgba(69,10,10,0.97);padding:24px;gap:12px;overflow-y:auto",
+    [title, detail],
+  );
+  return { root, title, detail };
 }
 
 /**

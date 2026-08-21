@@ -172,6 +172,9 @@ export async function runMain(options: MainOptions): Promise<void> {
       try {
         if (t === "hot") send(message as ToWorker);
         else if (t === "reload") reloadApp();
+        // A failed recompile's formatted error, and the success that clears it —
+        // the red box's build-error channel. Forwarded whole, like "hot".
+        else if (t === "redbox" || t === "redbox_clear") send(message as ToWorker);
       } catch {
         // Terminated mid-flight: the process is on its way out.
       }
@@ -684,10 +687,25 @@ export async function runMain(options: MainOptions): Promise<void> {
 
     if (tryAcquire(flags)) {
       takeDirty(flags);
+      let tickFailure: Error | null = null;
       try {
         engine.tick();
+      } catch (e) {
+        tickFailure = asError(e);
       } finally {
         release(flags);
+      }
+      if (tickFailure !== null) {
+        /* The engine failed mid-frame. It cannot paint its own obituary — a panic
+           poisons it and every ordinary entry point now refuses — so the report is
+           the one poison-exempt surface: a native modal, blocking until dismissed,
+           shown after the lock is back so the app thread is not pinned under it.
+           Then a *clean* shutdown: before this existed the throw skipped `stop`,
+           `engine.close()` and `worker.terminate()` on its way out of the process,
+           and the window simply vanished. */
+        engine.fatalAlert("dziri: the engine failed", tickFailure.message);
+        failure = tickFailure;
+        break;
       }
       /* Images load outside the lock: the read is a scan of the *live* table,
          and the write-back is one FFI call that touches no staged memory. An

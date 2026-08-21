@@ -50,6 +50,7 @@ import { updateLists, type ListBindingRef } from "../runtime/list-runtime.ts";
 import { applyStylePatches, type StylePatchRef } from "../runtime/patches.ts";
 import { applyDisabled } from "../runtime/controls.ts";
 import { Dirty } from "../runtime/bindings.ts";
+import { hideRedbox, showRedbox } from "../runtime/redbox.ts";
 import { buildUi, requireRoute, showRoute } from "../host/window-state.ts";
 import * as generated from "../../windows/main/ui.gen.ts";
 
@@ -1212,5 +1213,67 @@ test("applying an unchanged disabled signal writes nothing", () => {
   // this reports a change, so a version that always reported one would put a table write on
   // the path of every keystroke, and one that never did would never deliver the flag.
   expect(applyDisabled(ui, ui.disabledBindings)).toBe(Dirty.NONE);
+  engine.close();
+});
+
+/**
+ * The failure overlay, end to end: the compiled-in subtree, shown the way the
+ * worker shows it, laid out over the whole window and painted on top.
+ *
+ * The real emitter output is the fixture here for the same reason it is
+ * everywhere in this file — the claim is that the *synthesized* nodes made the
+ * round trip: `window-tree.ts` appended them, the walk gave their dyntext
+ * children reserved slots, `hiddenAtStart` shipped the byte set, and one
+ * `showRedbox` plus the worker's two uploads is the entire path from a caught
+ * throw to a red frame.
+ */
+test("the failure overlay covers the window and paints over the app", () => {
+  const { ui, engine, uploader } = load();
+  const redbox = generated.redbox!;
+  expect(redbox).not.toBeNull();
+
+  // At rest: shipped hidden, so it is excluded from layout — bounds read zero.
+  expect(engine.bounds(redbox.root)).toEqual([0, 0, 0, 0]);
+
+  // What the worker's catch does, then its two uploads.
+  const changed = showRedbox(ui, redbox, "Something threw handling \"events\"", "Error: boom\n    at onAdd (state.ts:12)");
+  expect(changed).toEqual([redbox.title, redbox.detail]);
+  uploader.uploadNodes();
+  uploader.uploadStrings();
+  engine.tick();
+
+  // position:absolute, inset 0 — the box is the window.
+  const [x, y, w, h] = engine.bounds(redbox.root);
+  expect([x, y]).toEqual([0, 0]);
+  expect(w).toBe(WIDTH);
+  expect(h).toBeGreaterThan(0);
+
+  // The message nodes laid out inside it, title above detail.
+  const [, ty, tw, th] = engine.bounds(redbox.title);
+  const [, dy] = engine.bounds(redbox.detail);
+  expect(tw).toBeGreaterThan(0);
+  expect(th).toBeGreaterThan(0);
+  expect(dy).toBeGreaterThan(ty);
+
+  // And it painted: document-order-last over rgba(69,10,10,.97) means the frame
+  // reads dark red where the app's own background used to show through. BGRA.
+  const [, , rowBytes] = engine.surfaceInfo();
+  const px = engine.readPixels();
+  const at = (xx: number, yy: number) => {
+    const i = yy * rowBytes + xx * 4;
+    return { b: px[i]!, g: px[i + 1]!, r: px[i + 2]! };
+  };
+  const corner = at(4, 4);
+  expect(corner.r).toBeGreaterThan(45);
+  expect(corner.r).toBeLessThan(100);
+  expect(corner.g).toBeLessThan(40);
+  expect(corner.b).toBeLessThan(40);
+
+  // Hiding it again is one byte, and layout stops seeing it.
+  hideRedbox(ui, redbox);
+  uploader.uploadNodes();
+  engine.tick();
+  expect(engine.bounds(redbox.root)).toEqual([0, 0, 0, 0]);
+
   engine.close();
 });
