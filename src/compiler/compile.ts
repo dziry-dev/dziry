@@ -1020,6 +1020,14 @@ export type EmittedRouting = {
    * visible — the inverse of every write `applyBoundaries` will make.
    */
   boundaries: { content: number[]; fallback: number[]; names: string[] }[];
+  /**
+   * `<Show>` boundaries: two sets of node ids and the condition, already
+   * resolved to what the artifact contains — an imported name, or an inline
+   * `computed(() => …)` expression. `initiallyVisible` is the condition's value
+   * at build time; the side losing it ships hidden, so a Show whose cell holds
+   * its launch value costs the first frame nothing.
+   */
+  shows: { content: number[]; fallback: number[]; expr: string; initiallyVisible: boolean }[];
 };
 
 /**
@@ -1060,6 +1068,11 @@ function hiddenAtStart(nodeCount: number, routing: EmittedRouting): number[] {
   // needs no boundary write at all.
   for (const boundary of routing.boundaries) {
     for (const node of boundary.content) hidden[node] = 1;
+  }
+
+  // Shows open on whichever side the condition's build-time value picked.
+  for (const show of routing.shows) {
+    for (const node of show.initiallyVisible ? show.fallback : show.content) hidden[node] = 1;
   }
 
   return hidden;
@@ -3974,6 +3987,7 @@ export function emit(
     ...result.handlers.map((h) => h.name),
     ...locals.map((l) => `signal(${JSON.stringify(l.initial)})`),
     ...result.fieldCells.map((c) => `signal(${JSON.stringify(c.initial)})`),
+    ...(routing?.shows ?? []).map((s) => s.expr),
   ].join("\n");
 
   const needsComputed =
@@ -4381,7 +4395,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", BoundaryNodes, RedboxNodes, RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", BoundaryNodes, RedboxNodes, RouteNodes, ShowNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef, ImageBinding } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -4814,6 +4828,21 @@ ${routing.boundaries
   )
   .join("\n")}
 ] satisfies BoundaryNodes[];
+
+/**
+ * \`<Show>\` boundaries: content and fallback node sets, and the condition —
+ * a cell imported by name or re-created from the author's own expression —
+ * whose truthiness picks between them.
+ */
+export const shows = [
+${routing.shows
+  .map(
+    (s) =>
+      `  { content: [${s.content.join(", ")}], fallback: [${s.fallback.join(", ")}],` +
+      ` when: ${s.expr} },`,
+  )
+  .join("\n")}
+] satisfies ShowNodes[];
 `;
 }
 

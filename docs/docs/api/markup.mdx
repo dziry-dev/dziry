@@ -357,6 +357,36 @@ than written in markup.
 Groups children without introducing a node, and is spliced away during flattening.
 JSX desugars to it automatically; the export exists so it can be named directly.
 
+## Show
+
+<Status of="Show" />
+```tsx
+import { Show, signal } from "dziri";
+
+const open = signal(false);
+
+<Show when={open} fallback={<div>nothing selected</div>}>
+  <div>the details</div>
+</Show>;
+```
+
+Conditional rendering, compiled. Both trees are built into the window as siblings;
+the condition's truthiness picks one with a `hidden`-byte write — the same switch a
+navigation makes. Nothing mounts or unmounts, so flipping it costs no layout beyond
+the reflow itself.
+
+`when` takes a signal, a computed, or an expression over them — `when={count > 5}`
+works, and truthiness is JavaScript's, so `when={items.length}` closes on an empty
+array. A *constant* condition is resolved at build time: the winning tree is
+compiled, the losing tree never becomes nodes.
+
+`fallback` is optional. Without one, a closed Show is nothing, and the layout
+collapses as if the subtree were `display: none` — because it is.
+
+Two shapes are refused at build time, each because the switch hides *nodes*: bare
+text directly inside the boundary (it would stay visible in both states), and a bare
+`<Show>` or `<Suspense>` directly inside another boundary (wrap it in an element).
+
 ## Lists
 
 <Status of="map" />

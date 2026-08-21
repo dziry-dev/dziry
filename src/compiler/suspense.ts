@@ -28,6 +28,7 @@
  * compilation never knows boundaries exist.
  */
 import { jsx, type Props } from "./jsx-runtime.ts";
+import { conditionOf, fallbackOf, isLiveCondition, SHOW_TAG, type ShowBoundary } from "./show.ts";
 import type { Element, Node } from "./html.ts";
 
 const SUSPENSE_TAG = "#suspense";
@@ -80,29 +81,40 @@ export type SuspenseBoundary = {
 };
 
 /**
- * Replaces every `<Suspense>` marker with its two trees, spliced in place as
- * siblings — content first, then fallback — and reports each boundary's
- * top-level elements so the build can resolve them to node ids after the walk.
+ * Replaces every `<Suspense>` and `<Show>` marker with its trees, spliced in
+ * place as siblings — content first, then fallback — and reports each
+ * boundary's top-level elements so the build can resolve them to node ids after
+ * the walk. A `<Show>` whose `when` is a plain constant is resolved here
+ * instead: the winning tree is spliced, the loser is dropped, and no boundary
+ * is reported — the build never learns it existed.
  *
- * Runs on the window root after routes are spliced, so a boundary inside a page
- * is already in the tree. Splicing re-scans what it inserted, so a marker at the
- * top level of another's content is *seen* — and refused, because the outer
- * boundary's root list would name a marker that never becomes a node, and the
- * inner trees would silently escape the outer's control.
+ * One walk over both marker kinds, and that is load-bearing rather than tidy:
+ * a fallback tree lives in a side map until its own marker dissolves, so two
+ * separate passes would each be blind to the other's markers inside fallbacks.
+ * Splicing re-scans what it inserted, so a marker anywhere under a spliced
+ * tree is seen — and a *bare* marker at the top level of another's list is
+ * refused, because that list would name an element that never becomes a node.
+ *
+ * Runs on the window root after routes are spliced, so a marker inside a page
+ * is already in the tree.
  */
-export function spliceSuspense(root: Element): SuspenseBoundary[] {
-  const out: SuspenseBoundary[] = [];
-  walk(root, out);
-  return out;
+export function spliceBoundaries(root: Element): {
+  suspense: SuspenseBoundary[];
+  shows: ShowBoundary[];
+} {
+  const suspense: SuspenseBoundary[] = [];
+  const shows: ShowBoundary[] = [];
+  walk(root, suspense, shows);
+  return { suspense, shows };
 }
 
 /** Element children only: the boundary hides by node, and only elements are ones it can. */
-function elementsOf(nodes: Node[], what: string): Element[] {
+function elementsOf(nodes: Node[], owner: string, what: string): Element[] {
   for (const node of nodes) {
     if (node.type === "element") continue;
     // jsx's normalization has already collapsed whitespace, so anything left is real.
     throw new SuspenseError(
-      `<Suspense> has bare ${what} that is not an element.\n` +
+      `<${owner}> has bare ${what} that is not an element.\n` +
         `  The boundary switches visibility by hiding nodes, and a bare text child\n` +
         `  would stay visible in both states. Wrap it in an element.`,
     );
@@ -110,34 +122,62 @@ function elementsOf(nodes: Node[], what: string): Element[] {
   return nodes as Element[];
 }
 
-function walk(el: Element, out: SuspenseBoundary[]): void {
+/** Refuses a bare marker of either kind at the top level of a captured list. */
+function refuseBareMarkers(els: readonly Element[], owner: string): void {
+  if (!els.some(isMarker)) return;
+  throw new SuspenseError(
+    `<Suspense> or <Show> directly inside <${owner}>.\n` +
+      `  A boundary dissolves into its trees, so a bare inner boundary is not a node\n` +
+      `  the outer one can hide — its content would escape the outer's control.\n` +
+      `  Wrap the inner boundary in an element.`,
+  );
+}
+
+function walk(el: Element, suspense: SuspenseBoundary[], shows: ShowBoundary[]): void {
   for (let i = 0; i < el.children.length; i++) {
     const child = el.children[i]!;
     if (child.type !== "element") continue;
 
-    if (child.tag !== SUSPENSE_TAG) {
-      walk(child, out);
+    if (child.tag === SUSPENSE_TAG) {
+      const content = elementsOf(child.children, "Suspense", "content");
+      const fallback = elementsOf(fallbacks.get(child) ?? [], "Suspense", "fallback");
+      refuseBareMarkers(content, "Suspense");
+      refuseBareMarkers(fallback, "Suspense");
+
+      suspense.push({ content, fallback, on: explicitOn.get(child) ?? [] });
+      el.children.splice(i, 1, ...content, ...fallback);
+      // Re-scan from the first spliced element: their own subtrees may hold markers.
+      i--;
       continue;
     }
 
-    const content = elementsOf(child.children, "content");
-    const fallback = elementsOf(fallbacks.get(child) ?? [], "fallback");
-    if (content.some(isMarker) || fallback.some(isMarker)) {
-      throw new SuspenseError(
-        `<Suspense> directly inside <Suspense>.\n` +
-          `  A boundary dissolves into its trees, so a bare inner boundary is not a node\n` +
-          `  the outer one can hide — its content would escape the outer's control.\n` +
-          `  Wrap the inner boundary in an element.`,
-      );
+    if (child.tag === SHOW_TAG) {
+      const when = conditionOf(child);
+
+      // A constant condition is the build's to answer: splice the winner —
+      // bare text and all, since nothing will ever need to hide it — and drop
+      // the loser before it costs a single node.
+      if (!isLiveCondition(when)) {
+        el.children.splice(i, 1, ...(when ? child.children : fallbackOf(child)));
+        i--;
+        continue;
+      }
+
+      const content = elementsOf(child.children, "Show", "content");
+      const fallback = elementsOf(fallbackOf(child), "Show", "fallback");
+      refuseBareMarkers(content, "Show");
+      refuseBareMarkers(fallback, "Show");
+
+      shows.push({ content, fallback, when });
+      el.children.splice(i, 1, ...content, ...fallback);
+      i--;
+      continue;
     }
 
-    out.push({ content, fallback, on: explicitOn.get(child) ?? [] });
-    el.children.splice(i, 1, ...content, ...fallback);
-    // Re-scan from the first spliced element: their own subtrees may hold markers.
-    i--;
+    walk(child, suspense, shows);
   }
 }
 
 function isMarker(el: Element): boolean {
-  return el.tag === SUSPENSE_TAG;
+  return el.tag === SUSPENSE_TAG || el.tag === SHOW_TAG;
 }

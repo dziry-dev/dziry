@@ -6,7 +6,14 @@
  * engine thread reads nothing but needs the type to exist, and `--window` has to
  * mean the same thing wherever it is parsed.
  */
-import type { BoundaryNodes, CompiledUi, RedboxNodes, RouteNodes, WindowConfig } from "../ir.ts";
+import type {
+  BoundaryNodes,
+  CompiledUi,
+  RedboxNodes,
+  RouteNodes,
+  ShowNodes,
+  WindowConfig,
+} from "../ir.ts";
 import type { EditableRef, ImageBinding } from "../runtime/bindings.ts";
 import type { ListBindingRef } from "../runtime/list-runtime.ts";
 import type { StylePatchRef } from "../runtime/patches.ts";
@@ -32,6 +39,8 @@ export type WindowArtifact = CompiledUi & {
   redbox: RedboxNodes | null;
   /** `<Suspense>` boundaries — content/fallback node sets and their live resources. */
   boundaries: BoundaryNodes[];
+  /** `<Show>` boundaries — content/fallback node sets and the cell that picks. */
+  shows: ShowNodes[];
   windowConfig: WindowConfig;
   windowId: string;
   /** Route loaders, indexed by route — the function to run on navigation, or null. */

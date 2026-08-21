@@ -33,8 +33,14 @@
  * Freezing one order here would claim to fix a bug that does not exist, and would
  * take the choice away from a caller that has a reason to make it.
  */
-import { routeChain, type BoundaryNodes, type CompiledUi, type RouteNodes } from "../ir.ts";
-import { isSignal, type Signal } from "../runtime/signal.ts";
+import {
+  routeChain,
+  type BoundaryNodes,
+  type CompiledUi,
+  type RouteNodes,
+  type ShowNodes,
+} from "../ir.ts";
+import { $, isSignal, type Signal } from "../runtime/signal.ts";
 import type { WindowArtifact } from "./registry.ts";
 
 /**
@@ -326,6 +332,31 @@ export function applyBoundaries(ui: CompiledUi, boundaries: readonly BoundaryNod
     );
     for (const node of boundary.content) write(node, pending ? 1 : 0);
     for (const node of boundary.fallback) write(node, pending ? 0 : 1);
+  }
+  return moved;
+}
+
+/**
+ * Settles every `<Show>` against its condition's current value. Returns whether
+ * any byte moved, so the caller knows to flush.
+ *
+ * Truthiness is JavaScript's — `when={items.length}` closes on an empty array
+ * exactly as `{items.length && …}` would render nothing in React. Write-if-
+ * changed, like the boundaries above, so an unrelated signal write that wakes
+ * the subscriber costs no upload.
+ */
+export function applyShows(ui: CompiledUi, shows: readonly ShowNodes[]): boolean {
+  let moved = false;
+  const write = (node: number, hidden: 0 | 1): void => {
+    if (ui.nodes.hidden[node] === hidden) return;
+    ui.nodes.hidden[node] = hidden;
+    moved = true;
+  };
+
+  for (const show of shows) {
+    const visible = Boolean($(show.when));
+    for (const node of show.content) write(node, visible ? 0 : 1);
+    for (const node of show.fallback) write(node, visible ? 1 : 0);
   }
   return moved;
 }

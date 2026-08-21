@@ -1268,6 +1268,21 @@ export type BoundaryNodes = {
 };
 
 /**
+ * A `<Show>`'s nodes and the condition that drives it.
+ *
+ * The same co-resident-alternatives shape as a `<Suspense>` boundary, switched
+ * by any cell rather than by a resource's status: content is visible while
+ * `when`'s value is truthy, fallback exactly otherwise. `when` is the live
+ * cell — imported by name, or re-created in the artifact from the author's own
+ * inline expression — so the worker subscribes to what the app reads.
+ */
+export type ShowNodes = {
+  content: readonly number[];
+  fallback: readonly number[];
+  when: unknown;
+};
+
+/**
  * A route and its ancestors — the set visible at once.
  *
  * An ancestor stays visible because the active route renders *inside* it; that is

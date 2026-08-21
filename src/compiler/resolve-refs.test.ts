@@ -8,7 +8,9 @@
  * signal that a handler created inside a component has nowhere to live.
  */
 import { expect, test } from "bun:test";
+import { $, signal } from "../runtime/signal.ts";
 import type { CompileResult } from "./compile.ts";
+import { inline } from "./reactive-runtime.ts";
 import { RefError, buildRefIndex, resolveRefs, type RefSource } from "./resolve-refs.ts";
 
 /** The CompileResult fields resolveRefs walks, empty except where a test fills one. */
@@ -152,4 +154,26 @@ test("the same signal used twice is one import and one name", () => {
   } as unknown as Partial<CompileResult>);
   const { imports } = resolveRefs(result, buildRefIndex([state({ count })]));
   expect(imports.get("./state.ts")).toEqual(new Set(["count"]));
+});
+
+test("a <Show>'s when: a named cell resolves to its name, an inline cell to its expression", () => {
+  const open = signal(false);
+  const cell = inline(() => $(open) === false, "__dzr.$(open) === false");
+  const shows = [
+    { when: open, expr: "" },
+    { when: cell, expr: "" },
+  ];
+  const { imports } = resolveRefs(
+    emptyResult(),
+    buildRefIndex([state({ open })]),
+    undefined,
+    undefined,
+    shows,
+  );
+
+  // By identity for the export; re-created from the author's own text otherwise,
+  // with the transform's namespace stripped — the artifact imports $ by name.
+  expect(shows[0]!.expr).toBe("open");
+  expect(shows[1]!.expr).toBe("computed(() => $(open) === false)");
+  expect(imports.get("./state.ts")).toEqual(new Set(["open"]));
 });

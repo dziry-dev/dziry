@@ -56,7 +56,7 @@ export class TransformError extends Error {
  * `LogicalExpression` is excluded on purpose and is not an oversight: `{cond && <div/>}`
  * is conditional *rendering*, which the compiler resolves at build time by dropping
  * the child. Wrapping it would hand the runtime a `computed` where it expects a node.
- * Making that reactive is a separate feature with its own IR.
+ * The reactive form is `<Show when={cond}>` — see `show.ts`.
  */
 const WRAPPED = new Set([
   "BinaryExpression",

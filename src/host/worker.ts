@@ -76,6 +76,7 @@ import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
 import {
   applyBoundaries,
+  applyShows,
   buildUi,
   dumpState,
   indexOfRoute,
@@ -460,6 +461,20 @@ function start(
   }
   for (const start of takeResources()) start();
   settleBoundaries();
+
+  /* `<Show>`s follow the same shape: subscribe the condition, settle once now.
+     The compiled hidden column already ships the build-time answer, so the
+     initial settle writes nothing unless a loader moved the cell before launch
+     — the seeding case bind:value already taught us to cover. */
+  const settleShows = (): void => {
+    if (!applyShows(ui, generated.shows)) return;
+    dirty = true;
+    schedule();
+  };
+  for (const show of generated.shows) {
+    (show.when as { subscribe(fn: () => void): unknown }).subscribe(settleShows);
+  }
+  settleShows();
 
   subscribeStylePatches(stylePatches, () => {
     applyStylePatches(ui, stylePatches);

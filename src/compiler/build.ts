@@ -33,10 +33,11 @@ import { withPage, withWindowRoute } from "./route.ts";
 import { routeArgs } from "./route-args.ts";
 import { dataRecorder, errorRecorder } from "./route-data.ts";
 import { configOf, layerOf, routeSignalOf, WindowError } from "./window.ts";
-import { spliceSuspense, SuspenseError } from "./suspense.ts";
+import { spliceBoundaries, SuspenseError } from "./suspense.ts";
+import { ShowError } from "./show.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./window-tree.ts";
 import { isResource } from "../runtime/resource.ts";
-import { setCompiling, signal } from "../runtime/signal.ts";
+import { $, setCompiling, signal } from "../runtime/signal.ts";
 import { installReactivePlugin, reactiveEnabled } from "./reactive-plugin.ts";
 import { resetLocals } from "./reactive-runtime.ts";
 import type { Element, Node } from "./html.ts";
@@ -533,10 +534,12 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
 
   const { root, roots, loadingRoots, errorRoots, redbox } = spliceWindow(shell, pages);
 
-  // `<Suspense>` markers dissolve into their two trees before the cascade sees
-  // the tree; what survives is each boundary's top-level elements, resolved to
-  // node ids after the walk like route roots are.
-  const suspense = spliceSuspense(root);
+  // `<Suspense>` and `<Show>` markers dissolve into their trees before the
+  // cascade sees them; what survives is each boundary's top-level elements,
+  // resolved to node ids after the walk like route roots are. A `<Show>` with
+  // a constant condition dissolves entirely — the winner spliced, the loser
+  // dropped — and is not in `shows` at all.
+  const { suspense, shows } = spliceBoundaries(root);
 
   const nodeOf = new Map<Element, number>();
   const doc = toDocument(root);
@@ -602,11 +605,12 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
    * sources, image bindings — which is the same provenance every reference in
    * the artifact has, plus whatever the `on` prop named explicitly.
    */
+  const idsOf = (els: readonly Element[]): number[] =>
+    els.map((el) => nodeOf.get(el)).filter((n): n is number => n !== undefined);
+
   const boundaryRows = suspense.map((b) => {
-    const ids = (els: readonly Element[]): number[] =>
-      els.map((el) => nodeOf.get(el)).filter((n): n is number => n !== undefined);
-    const content = ids(b.content);
-    const fallback = ids(b.fallback);
+    const content = idsOf(b.content);
+    const fallback = idsOf(b.fallback);
 
     const under = new Set<number>();
     const stack = [...content];
@@ -651,8 +655,34 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     return { content, fallback, resources: [...resources], names: [] as string[] };
   });
 
+  /**
+   * Each `<Show>`'s node sets and its condition, still the live cell here;
+   * `resolveRefs` turns it into the name or expression the artifact contains.
+   * The initial value is read now — at build time, off the same object the
+   * worker will subscribe to — so the emitted hidden column ships the right
+   * side visible and the first frame needs no write. A cell whose launch-time
+   * value differs (a loader seeded it) is corrected by the worker's initial
+   * settle before the first commit.
+   */
+  const showRows = shows.map((s) => {
+    let visible = true;
+    try {
+      visible = Boolean($(s.when));
+    } catch {
+      // A cell that cannot be read at build time starts content-visible; the
+      // worker's settle decides for real.
+    }
+    return {
+      content: idsOf(s.content),
+      fallback: idsOf(s.fallback),
+      when: s.when,
+      expr: "",
+      initiallyVisible: visible,
+    };
+  });
+
   const index = buildRefIndex(sources);
-  const { imports } = resolveRefs(result, index, variants, boundaryRows);
+  const { imports } = resolveRefs(result, index, variants, boundaryRows, showRows);
 
   /**
    * The route signal, resolved to the export name the artifact will import.
@@ -834,6 +864,12 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     loaders,
     redbox: redboxIds,
     boundaries: boundaryRows.map(({ content, fallback, names }) => ({ content, fallback, names })),
+    shows: showRows.map(({ content, fallback, expr, initiallyVisible }) => ({
+      content,
+      fallback,
+      expr,
+      initiallyVisible,
+    })),
   };
 
   const emitted = emit(
@@ -1056,6 +1092,7 @@ export async function formatBuildError(e: unknown, projectDir: string): Promise<
     e instanceof WindowError ||
     e instanceof WindowTreeError ||
     e instanceof SuspenseError ||
+    e instanceof ShowError ||
     e instanceof RefError ||
     e instanceof RouteError
   ) {

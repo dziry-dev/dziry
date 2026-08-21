@@ -72,6 +72,8 @@ export function resolveRefs(
   },
   /** `<Suspense>` boundaries — each resource object becomes an import by name. */
   boundaries?: { resources: unknown[]; names: string[] }[],
+  /** `<Show>` boundaries — each condition becomes a name or an inline expression. */
+  shows?: { when: unknown; expr: string }[],
 ): { imports: Map<string, Set<string>> } {
   const imports = new Map<string, Set<string>>();
 
@@ -389,6 +391,14 @@ export function resolveRefs(
     boundary.names = boundary.resources.map(
       (r) => lookup(r, `a resource watched by a <Suspense> boundary`).name,
     );
+  }
+
+  for (const show of shows ?? []) {
+    // The expression when the cell has no name of its own — `when={count > 5}`
+    // arrives as an inline cell and emits as `computed(() => …)` — the name
+    // otherwise. Same split every reference makes.
+    const ref = lookup(show.when, `the when of a <Show>`);
+    show.expr = ref.expression ?? ref.name;
   }
 
   for (const patch of variants?.patches ?? []) {

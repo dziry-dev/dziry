@@ -188,3 +188,49 @@ test("applyBoundaries reports no movement when every byte already agrees", async
   expect(applyBoundaries(ui, boundaries)).toBe(true); // first application moves fallbacks
   expect(applyBoundaries(ui, boundaries)).toBe(false); // settled: nothing to flush
 });
+
+// ---------------------------------------------------------------------------
+// applyShows — the <Show> switch
+
+/** A ui of six hidden-byte slots and two shows over real cells. */
+function showUi(first: unknown, second: unknown) {
+  const ui = { nodes: { hidden: new Uint8Array(6) } } as unknown as CompiledUi;
+  const shows = [
+    { content: [1], fallback: [2], when: first },
+    { content: [3], fallback: [], when: second },
+  ];
+  return { ui, shows };
+}
+
+test("applyShows: truthiness picks the side, and a signal unwraps", async () => {
+  const { applyShows } = await import("./window-state.ts");
+  const { signal } = await import("../runtime/signal.ts");
+  const open = signal(false);
+  const { ui, shows } = showUi(open, signal(1));
+
+  applyShows(ui, shows);
+  expect([...ui.nodes.hidden]).toEqual([0, 1, 0, 0, 0, 0]);
+
+  open.set(true);
+  expect(applyShows(ui, shows)).toBe(true);
+  expect([...ui.nodes.hidden]).toEqual([0, 0, 1, 0, 0, 0]);
+});
+
+test("applyShows: JavaScript truthiness — zero and empty string close, an object opens", async () => {
+  const { applyShows } = await import("./window-state.ts");
+  const { signal } = await import("../runtime/signal.ts");
+  const { ui, shows } = showUi(signal(0), signal(""));
+
+  applyShows(ui, shows);
+  // Both falsy: content hidden, the first's fallback visible, the second has none.
+  expect([...ui.nodes.hidden]).toEqual([0, 1, 0, 1, 0, 0]);
+});
+
+test("applyShows reports no movement when every byte already agrees", async () => {
+  const { applyShows } = await import("./window-state.ts");
+  const { signal } = await import("../runtime/signal.ts");
+  const { ui, shows } = showUi(signal(true), signal(true));
+
+  expect(applyShows(ui, shows)).toBe(true); // first application hides the fallback
+  expect(applyShows(ui, shows)).toBe(false); // settled: nothing to flush
+});

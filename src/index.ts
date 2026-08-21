@@ -67,6 +67,14 @@ export type { Resource, ResourceStatus } from "./runtime/resource.ts";
 export { Suspense } from "./compiler/suspense.ts";
 
 /**
+ * Compiled conditional rendering: both trees are compiled in, and the `when`
+ * cell's truthiness picks one with a `hidden`-byte write — the same switch a
+ * navigation makes. A constant `when` is resolved at build time and the losing
+ * tree never becomes nodes.
+ */
+export { Show } from "./compiler/show.ts";
+
+/**
  * The platform's own modal message box.
  *
  * Exported by name because Bun has a *global* `alert()` that reads stdin, and an author who

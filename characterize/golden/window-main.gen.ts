@@ -20,7 +20,7 @@ import * as __state_4 from "./../../../workspace/skia-proto/windows/main/reactiv
 import * as __state_5 from "./../../../workspace/skia-proto/windows/main/pages/products/$id.tsx";
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable, BoundaryNodes, RedboxNodes, RouteNodes, WindowConfig } from "dziri/ir.ts";
+import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable, BoundaryNodes, RedboxNodes, RouteNodes, ShowNodes, WindowConfig } from "dziri/ir.ts";
 import type { EditableRef, ImageBinding } from "dziri/runtime/bindings.ts";
 import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
 import type { StylePatchRef } from "dziri/runtime/patches.ts";
@@ -1071,3 +1071,12 @@ export const redbox = { root: 1506, title: 1508, detail: 1510 } satisfies Redbox
 export const boundaries = [
 
 ] satisfies BoundaryNodes[];
+
+/**
+ * `<Show>` boundaries: content and fallback node sets, and the condition —
+ * a cell imported by name or re-created from the author's own expression —
+ * whose truthiness picks between them.
+ */
+export const shows = [
+
+] satisfies ShowNodes[];
