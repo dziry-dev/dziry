@@ -13,7 +13,10 @@
 //! resolve here beyond picking an index.
 
 use skia_safe::textlayout::TextAlign;
-use skia_safe::{Canvas, Color, FilterMode, Matrix, MipmapMode, Paint, PaintStyle, Point, RRect, Rect, SamplingOptions};
+use skia_safe::{
+    Canvas, Color, FilterMode, Matrix, MipmapMode, Paint, PaintStyle, Point, RRect, Rect,
+    SamplingOptions,
+};
 
 use crate::anim::{Anims, Blend};
 use crate::caret::{boundary_at, Carets, Motion};
@@ -1537,12 +1540,19 @@ fn resolve_slot(
     if control & control_flags::DISABLED != 0 {
         live |= predicate::DISABLED;
     }
-    // `:invalid`, and the only per-node predicate whose answer came from the app thread.
+    // `:invalid`, and the first per-node predicate whose answer came from the app thread.
     // Read against `subject` like the rest, so `.cell:invalid` on a list row resolves against
     // that row's own input — which is the whole reason this is a predicate and not a class:
     // replicas share a style row, and they do not share a control row.
     if control & control_flags::INVALID != 0 {
         live |= predicate::INVALID;
+    }
+    // The row's data-driven class — `cn({ done: t.done })` — carried the same way
+    // `INVALID` is: Bun wrote the bit at list-update time, rescan re-read it, and
+    // here it selects the style row the compiler resolved with the class applied.
+    // Against `subject`, so the class's `::before`/`::after` follow their element.
+    if control & control_flags::ROW != 0 {
+        live |= predicate::ROW;
     }
 
     // `:open`, and it is the cheapest of the lot: one integer for the whole document,
@@ -1860,7 +1870,15 @@ impl Painter {
             };
 
             if visible {
-                self.node(canvas, tables, geometry.bounds, &blend, traits, measurer, node);
+                self.node(
+                    canvas,
+                    tables,
+                    geometry.bounds,
+                    &blend,
+                    traits,
+                    measurer,
+                    node,
+                );
             }
 
             siblings.clear();
@@ -1907,9 +1925,17 @@ impl Painter {
                 ));
 
                 let left = if clip_x { x + bl } else { outer.left };
-                let right = if clip_x { (x + w - br).max(x + bl) } else { outer.right };
+                let right = if clip_x {
+                    (x + w - br).max(x + bl)
+                } else {
+                    outer.right
+                };
                 let top = if clip_y { y + bt } else { outer.top };
-                let bottom = if clip_y { (y + h - bb).max(y + bt) } else { outer.bottom };
+                let bottom = if clip_y {
+                    (y + h - bb).max(y + bt)
+                } else {
+                    outer.bottom
+                };
 
                 canvas.save();
                 canvas.clip_rect(
@@ -2328,7 +2354,11 @@ impl Painter {
         // already resolves it to no border for layout; paint must agree or the
         // ring and the box disagree about where the content starts.
         let sane = |v: f32| -> f32 {
-            if v.is_finite() && v > 0.0 { v } else { 0.0 }
+            if v.is_finite() && v > 0.0 {
+                v
+            } else {
+                0.0
+            }
         };
         // [top, right, bottom, left] — the sides are independent: `border-t-2
         // border-b-red-500` is a top width and a bottom colour and nothing else.
@@ -2344,7 +2374,8 @@ impl Painter {
             c(f::BORDER_BOTTOM_COLOR),
             c(f::BORDER_LEFT_COLOR),
         ];
-        if bw.iter().any(|&s| s > 0.0) && bc.iter().any(|&col| col >> 24 != 0) && w > 0.0 && h > 0.0 {
+        if bw.iter().any(|&s| s > 0.0) && bc.iter().any(|&col| col >> 24 != 0) && w > 0.0 && h > 0.0
+        {
             // A ring between the border box and the padding box, not a stroke
             // inset by half its width. The stroke was wrong at the corners: its
             // outer edge is an arc of radius `radius + width/2`, so the fill
@@ -2369,12 +2400,7 @@ impl Painter {
                 Point::new((radii[3] - bw[3]).max(0.0), (radii[3] - bw[2]).max(0.0)),
             ];
             let inner = RRect::new_rect_radii(
-                Rect::from_xywh(
-                    x + bw[3],
-                    y + bw[0],
-                    inner_w.max(0.0),
-                    inner_h.max(0.0),
-                ),
+                Rect::from_xywh(x + bw[3], y + bw[0], inner_w.max(0.0), inner_h.max(0.0)),
                 &inner_radii,
             );
 
@@ -2498,11 +2524,7 @@ impl Painter {
                         // every downscaled photo.
                         let sampling = SamplingOptions::new(FilterMode::Linear, MipmapMode::Linear);
                         canvas.draw_image_rect_with_sampling_options(
-                            image,
-                            None,
-                            content,
-                            sampling,
-                            &self.fill,
+                            image, None, content, sampling, &self.fill,
                         );
                     }
                     crate::images::Decoded::Vector(svg) => {
@@ -2528,24 +2550,28 @@ impl Painter {
                 let track_y = y + (h - track_h) / 2.0;
                 self.fill.set_color(Color::from(0x5576_7676));
                 canvas.draw_rrect(
-                    RRect::new_rect_xy(Rect::from_xywh(x, track_y, w, track_h), track_h / 2.0, track_h / 2.0),
+                    RRect::new_rect_xy(
+                        Rect::from_xywh(x, track_y, w, track_h),
+                        track_h / 2.0,
+                        track_h / 2.0,
+                    ),
                     &self.fill,
                 );
 
                 let accent = {
                     let a = c(f::ACCENT_COLOR);
-                    if a >> 24 != 0 { a } else { 0xff33_90ff }
+                    if a >> 24 != 0 {
+                        a
+                    } else {
+                        0xff33_90ff
+                    }
                 };
                 let thumb = 12.0_f32.min(h);
                 // The thumb's *centre* rides the track's ends: at 0 it is fully
                 // visible at the left edge, not half off it.
                 let cx = x + thumb / 2.0 + fraction * (w - thumb);
                 self.fill.set_color(Color::from(accent));
-                canvas.draw_circle(
-                    Point::new(cx, y + h / 2.0),
-                    thumb / 2.0,
-                    &self.fill,
-                );
+                canvas.draw_circle(Point::new(cx, y + h / 2.0), thumb / 2.0, &self.fill);
             }
         }
 
@@ -2567,7 +2593,11 @@ impl Painter {
         )
         .with_leading({
             let lh = blend.f32(tables, f::LINE_HEIGHT, 0.0);
-            if lh > 0.0 { lh } else { 0.0 }
+            if lh > 0.0 {
+                lh
+            } else {
+                0.0
+            }
         });
 
         // The selection band goes **behind** the text and behind the caret, which is the order
@@ -2636,7 +2666,15 @@ impl Painter {
             let tx = x + bw[3] + g(f::PAD_LEFT);
             let ty = y + bw[0] + g(f::PAD_TOP) + (box_h - paragraph.height()) / 2.0;
             crate::text::paint_paragraph(&mut paragraph, canvas, (tx, ty).into(), &self.fill);
-            self.decorate(tables, &blend, measurer, canvas, &mut paragraph, (tx, ty).into(), spec);
+            self.decorate(
+                tables,
+                &blend,
+                measurer,
+                canvas,
+                &mut paragraph,
+                (tx, ty).into(),
+                spec,
+            );
         } else {
             // A text run is its own node, so its bounds *are* the text block and
             // the wrap width is the box width. Laying out to anything else here
@@ -2644,7 +2682,15 @@ impl Painter {
             // would be the wrong height for what is drawn in it.
             let mut paragraph = measurer.paragraph(text, spec, w, TextAlign::Left);
             crate::text::paint_paragraph(&mut paragraph, canvas, (x, y).into(), &self.fill);
-            self.decorate(tables, &blend, measurer, canvas, &mut paragraph, (x, y).into(), spec);
+            self.decorate(
+                tables,
+                &blend,
+                measurer,
+                canvas,
+                &mut paragraph,
+                (x, y).into(),
+                spec,
+            );
 
             // Selected characters in `::selection`'s colour, by drawing the same paragraph a
             // second time clipped to the band. Not a styled range on the paragraph: the

@@ -521,10 +521,10 @@ export class MediaBits {
     if (existing !== undefined) return existing;
 
     const index = this.#order.length;
-    if (Predicate.FIRST_GLOBAL << index === 0 || index >= 24) {
+    if (Predicate.FIRST_GLOBAL << index === 0 || index >= 23) {
       throw new Error(
         `too many distinct media conditions (${index + 1}); a predicate mask is a u32 ` +
-          `and bits 0-7 are input state, so 24 is the limit`,
+          `and bits 0-8 are per-node state, so 23 is the limit`,
       );
     }
     const bit = Predicate.FIRST_GLOBAL << index;

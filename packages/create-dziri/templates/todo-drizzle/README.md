@@ -2,8 +2,9 @@
 
 A [dziri](https://github.com/dziri/dziri) app: HTML, CSS and TypeScript compiled to a
 native UI — no browser engine, no DOM, no webview. This template is a todo app backed
-by **Drizzle** over `bun:sqlite`, with multiple routes, a validated add form, inline
-✓/edit/delete, and a dark/light theme — styled with **Tailwind**.
+by **Drizzle** over `bun:sqlite`, with multiple routes, a validated add form, real
+checkboxes whose ticks come from the data, per-row edit/delete, and a dark/light
+theme — styled with **Tailwind**.
 
 ```sh
 bun run dev      # compile and open the window; edits hot-reload
@@ -62,6 +63,22 @@ Dark is the default. The header checkbox drives a `light` conditional class on t
 window root, and `app.css` restyles the semantic classes under `body.light`. Both
 themes are compiled up front; toggling writes a handful of style-table entries and
 costs nothing per frame.
+
+## Per-row state, from data
+
+Two things in each row come straight from its data, and both cost one predicate
+bit at run time (both looks are compiled up front):
+
+```tsx
+<input type="checkbox" checked={done} onChange={toggleDone} />
+<div className={cn("row …", { "done-row": done })}>
+```
+
+`checked={t.done}` renders the row's own done-ness and is re-seeded on every list
+change; clicking still fires `onChange`. `cn({ "done-row": t.done })` is a
+data-driven class — one row dims while its neighbour doesn't. A data-driven class
+styles the element's own box (here `opacity`, which composites over the whole
+row); text runs don't follow per-node predicates yet.
 
 ## Validation
 

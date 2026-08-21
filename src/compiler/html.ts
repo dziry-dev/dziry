@@ -117,6 +117,24 @@ export type Element = {
    */
   bindSrc: unknown;
   /**
+   * A recorded item path driving a checkbox's checkedness — `checked={t.done}`
+   * inside a list template. Optional so the hand-built `Element` sites need no
+   * edit; absent means the ordinary seed-once checkbox. The compiler marks the
+   * control row `DATA_CHECKED` and the list update writes `CHECKED` from the
+   * row's data — see `ControlFlags.DATA_CHECKED` in the protocol schema.
+   */
+  bindChecked?: unknown;
+  /**
+   * Data-driven class names, as plain strings — the transport form of a
+   * recorder-valued `classWhen` entry. A recorder is a proxy and cannot cross a
+   * worker boundary, so the variant transport rewrites it as this field; the
+   * cascade treats either spelling as `Predicate.ROW`. Without it the toggle
+   * variants compiled *without* the row machinery and diverged from the
+   * baseline — measured: every toggle appeared to "patch" the class's fields,
+   * and the conflict detector refused the build.
+   */
+  rowClasses?: string[];
+  /**
    * An inline `style="…"` declaration list.
    *
    * Applied after the cascade and beating every selector, exactly as a browser

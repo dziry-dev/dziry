@@ -69,6 +69,7 @@ import {
   dispatchItemChange,
   typeIntoRow,
   applyRowValidity,
+  takeListControlsTouched,
 } from "../runtime/list-runtime.ts";
 import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
@@ -431,6 +432,9 @@ function start(
 
   subscribeLists(listBindings, () => {
     updateLists(ui, listBindings);
+    // A list update may have written per-row control flags (data-driven classes,
+    // data-driven checkedness); the controls table only uploads when asked.
+    if (takeListControlsTouched()) controlsDirty = true;
     dirty = true;
     schedule();
   });

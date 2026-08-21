@@ -97,7 +97,15 @@ body.light .mark {
     border-color: #f43f5e;
 }
 
-/* The theme checkbox. */
+/* A finished row — a *data-driven* class: `cn({ "done-row": t.done })` reads the
+   row's own data, so one row can dim while its neighbour does not. Compiled both
+   ways; one predicate bit picks at run time. Opacity, because it composites over
+   the whole subtree — the checkbox, the title and the buttons all fade with it. */
+.done-row {
+    opacity: 0.45;
+}
+
+/* The checkboxes — the theme toggle in the header, and one per row. */
 .check {
     width: 16px;
     height: 16px;

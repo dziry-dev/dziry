@@ -6,7 +6,7 @@
 
 /// Bumped on any schema change. The engine refuses to start on a mismatch rather
 /// than rendering garbage.
-pub const PROTOCOL_VERSION: u32 = 44;
+pub const PROTOCOL_VERSION: u32 = 45;
 
 /// Structural fingerprint of every table, field name and element type, in order.
 ///
@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: u32 = 44;
 /// same-width fields, or an `i32` retyped to `f32` all leave the field count
 /// untouched — so a handshake that counts fields cannot see them, and the result
 /// is one side reading the other's bytes as a different type at a valid offset.
-pub const SCHEMA_HASH: u32 = 0xf09db103;
+pub const SCHEMA_HASH: u32 = 0x76598602;
 
 pub const TABLE_COUNT: usize = 12;
 
@@ -698,6 +698,8 @@ pub mod control_flags {
     pub const DISABLED: u8 = 1 << 1;
     pub const MULTIPLE: u8 = 1 << 2;
     pub const INVALID: u8 = 1 << 3;
+    pub const ROW: u8 = 1 << 4;
+    pub const DATA_CHECKED: u8 = 1 << 5;
 }
 
 /// What a node is. `nodes.kind`.
@@ -839,7 +841,8 @@ pub mod predicate {
     pub const OPEN: u32 = 32;
     pub const FOCUS_VISIBLE: u32 = 64;
     pub const INVALID: u32 = 128;
-    pub const FIRST_GLOBAL: u32 = 256;
+    pub const ROW: u32 = 256;
+    pub const FIRST_GLOBAL: u32 = 512;
 }
 
 /// `styles.INTERP`. How a field's value is found partway between two style rows. `NONE` is discrete and is what every enum gets. See the `Interp` doc comment in schema.ts for why a colour is its own kind rather than a number.

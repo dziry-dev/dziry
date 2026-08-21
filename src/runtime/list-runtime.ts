@@ -77,9 +77,29 @@ export type ListBindingRef = {
   bindings: ItemBindingRef[];
   itemHandlers: ItemHandlerRef[];
   itemEditables: ItemEditableRef[];
+  /**
+   * Data-driven classes — `cn({ done: t.done })`; writes `ControlFlags.ROW` per
+   * replica. Optional so artifacts and fixtures from before v45 stay loadable.
+   */
+  itemFlags?: ItemEditableRef[];
+  /** Data-driven checkedness — `checked={t.done}`; writes `ControlFlags.CHECKED` per replica. */
+  itemChecked?: ItemEditableRef[];
   /** Which data index each slot currently renders, set by `updateList`. */
   slotData?: Int32Array;
 };
+
+/**
+ * Whether any list update since the last take wrote a control row's flags — the
+ * worker's cue to upload the controls table, which `flush` deliberately does not
+ * send on every batch.
+ */
+let controlsTouched = false;
+
+export function takeListControlsTouched(): boolean {
+  const touched = controlsTouched;
+  controlsTouched = false;
+  return touched;
+}
 
 /** Which key each slot currently renders, so slots can keep their identity. */
 const slotKeys = new WeakMap<ListBindingRef, (unknown | undefined)[]>();
@@ -300,7 +320,11 @@ function growControls(
       // A radio group is `(form, name)` and every row shares both, so a new replica joins
       // the group its template is in — which is what makes one row's radio clear the others'.
       group[at] = controls.group[r]!;
-      flags[at] = controls.flags[r]! & ControlFlags.DISABLED;
+      // DISABLED is compile-time and rides along; DATA_CHECKED is the *marker*
+      // that checkedness is data-owned, so a fresh slot keeps it. CHECKED, ROW
+      // and INVALID are deliberately dropped: a fresh slot must not inherit the
+      // template's tick, class or verdict — the next update writes the truth.
+      flags[at] = controls.flags[r]! & (ControlFlags.DISABLED | ControlFlags.DATA_CHECKED);
       // Inside the item subtree, so it shifts. A label pointing outside the arena would be
       // a control in a row labelled by static text, which the compiler does not produce.
       label[at] = controls.label[r]! === -1 ? -1 : controls.label[r]! + shift;
@@ -438,6 +462,34 @@ export function updateList(ui: CompiledUi, ref: ListBindingRef, array?: unknown[
       // Keep the node pointing at its own slot; replication set this, but a
       // regrown arena or a moved slot needs it re-asserted.
       nodes.text[itemBase + binding.offset] = stringSlot;
+    }
+
+    // Data-driven per-row state: the class bit and the tick, written into the
+    // replica's control row from the row's own data. Set *and* cleared, because
+    // a slot reassigned from a done row to an open one has to lose the bit. The
+    // engine re-reads both on every rescan — `ROW` like `:invalid`, `CHECKED`
+    // under the `DATA_CHECKED` marker — so the table is the authority.
+    for (const f of ref.itemFlags ?? []) {
+      const row = findRow(ui.controls.node.subarray(0, ui.controls.count), itemBase + f.offset);
+      if (row < 0) continue;
+      const before = ui.controls.flags[row]!;
+      const after = readPath(items[i], f.path) ? before | ControlFlags.ROW : before & ~ControlFlags.ROW;
+      if (before !== after) {
+        ui.controls.flags[row] = after;
+        controlsTouched = true;
+      }
+    }
+    for (const c of ref.itemChecked ?? []) {
+      const row = findRow(ui.controls.node.subarray(0, ui.controls.count), itemBase + c.offset);
+      if (row < 0) continue;
+      const before = ui.controls.flags[row]!;
+      const after = readPath(items[i], c.path)
+        ? before | ControlFlags.CHECKED
+        : before & ~ControlFlags.CHECKED;
+      if (before !== after) {
+        ui.controls.flags[row] = after;
+        controlsTouched = true;
+      }
     }
   }
 

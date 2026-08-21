@@ -817,6 +817,11 @@ export function jsx(
     classWhen: names.classWhen,
     bindValue: bound ?? null,
     bindSrc: props["bind:src"] ?? null,
+    // `checked={t.done}` — a recorded item path, so the row's data owns the tick.
+    // A literal `checked` stays an attribute (attrsOf keeps `true` and strings);
+    // a *signal* here is not supported yet and falls through to the dropped-signal
+    // warning, which names it rather than half-working.
+    ...(isRecorder(props.checked) ? { bindChecked: props.checked } : {}),
     style: styleAttr(props.style, type),
     attrs,
   };

@@ -436,6 +436,15 @@ export type BuiltList = {
   bindings: BuiltItemBinding[];
   itemHandlers: BuiltItemHandler[];
   itemEditables: BuiltItemEditable[];
+  /**
+   * Data-driven classes in the template — `cn({ done: t.done })`. The list
+   * update writes `ControlFlags.ROW` on the replica's control row from the
+   * recorded path, and `Predicate.ROW` in the node's compiled mask picks the
+   * class-on style row.
+   */
+  itemFlags: BuiltItemEditable[];
+  /** Data-driven checkedness — `checked={t.done}`; writes `ControlFlags.CHECKED`. */
+  itemChecked: BuiltItemEditable[];
   /** First string slot of item 0's block; each item owns `bindings.length` slots. */
   slotStart: number;
 };
@@ -747,6 +756,10 @@ function needsControlRow(el: Element, path: Element[] = []): boolean {
   // The *tag* question rather than the typeable one: a readonly field is still a field a
   // schema can reject, and the row is structural rather than a statement about input.
   if (isTextEntryTag(el)) return true;
+  // A data-driven class needs somewhere to put its per-node bit, exactly as
+  // text-entry inputs got a `NONE`-kind row for `:invalid` in v39. The row is
+  // the one per-node place the engine already looks.
+  if (el.classWhen && Object.values(el.classWhen).some((s) => isRecorder(s))) return true;
   return DISABLEABLE.has(el.tag) && el.attrs.has("disabled");
 }
 
@@ -1131,6 +1144,10 @@ export function compileTree(
    * dead field if it ever becomes possible.
    */
   const itemEditableCandidates: { node: number; path: (string | number)[]; where: string }[] = [];
+  // Data-driven classes and checkedness sighted in templates, lifted by their list
+  // exactly as editables are.
+  const itemFlagCandidates: { node: number; path: (string | number)[]; where: string }[] = [];
+  const itemCheckedCandidates: { node: number; path: (string | number)[]; where: string }[] = [];
   /** Node ids of elements carrying `bind:value`, so their text run can be flagged. */
   const editableFields = new Set<number>();
 
@@ -1469,6 +1486,53 @@ export function compileTree(
       if (hasPseudoRule(rules, path, pseudo, element)) mask |= bit;
     }
 
+    /**
+     * The one data-driven class this element may carry — `cn({ done: t.done })`
+     * with a recorded item path. It compiles exactly like a pseudo-state: the
+     * mask gains `Predicate.ROW`, and every combination where the bit is live is
+     * cascaded **with the class present**, so `.done` and `.row.done` rules land
+     * in their own interned style rows and the engine picks by one bit the list
+     * update wrote. One bit, so one such class per element; a second is refused
+     * by name rather than mis-sharing the bit.
+     *
+     * The detection re-runs the pseudo/media scan with the class pushed, because
+     * a rule like `.done:hover` is reachable only while the class is on — its
+     * hover bit has to join the mask even though no plain rule reads `:hover`.
+     */
+    const rowNames = [
+      ...(el.classWhen
+        ? Object.entries(el.classWhen)
+            .filter(([, source]) => isRecorder(source))
+            .map(([name]) => name)
+        : []),
+      // The transport form: a variant worker's tree carries plain names where the
+      // live tree carried recorders — see `Element.rowClasses`. Both spellings
+      // must compile identically, or the toggle variants diverge from the
+      // baseline and every toggle looks like it patches the class's fields.
+      ...(el.rowClasses ?? []),
+    ];
+    if (rowNames.length > 1) {
+      throw new Error(
+        `${where} binds ${rowNames.length} data-driven classes ` +
+          `(${rowNames.map((n) => `"${n}"`).join(", ")}); one per element is the limit.\n` +
+          `  A data-driven class rides one per-node predicate bit. Style with a single\n` +
+          `  class per element, or bind the second class on a child of its own.`,
+      );
+    }
+    const rowClass = rowNames[0] ?? null;
+    if (rowClass !== null) {
+      mask |= Predicate.ROW;
+      el.classes.push(rowClass);
+      try {
+        mask |= mediaMaskFor(rules, path, media, element);
+        for (const [bit, pseudo] of PREDICATE_PSEUDO) {
+          if (hasPseudoRule(rules, path, pseudo, element)) mask |= bit;
+        }
+      } finally {
+        el.classes.pop();
+      }
+    }
+
     // One entry per *combination*, each resolved as a full cascade with exactly
     // those states active.
     //
@@ -1499,6 +1563,8 @@ export function compileTree(
         if (pseudo) {
           states.push(pseudo);
           label += `:${pseudo}`;
+        } else if (bit === Predicate.ROW && rowClass !== null) {
+          label += `.${rowClass}`;
         } else {
           label += `@${bit}`;
         }
@@ -1507,7 +1573,16 @@ export function compileTree(
       // Each combination re-derives its own environment: `:hover { --tone: … }`
       // is a legitimate way to theme a state, and reusing the base environment
       // here would resolve the hover cascade against the resting variables.
-      const stateDecls = inline(collectDecls(rules, path, states, media, live, element));
+      // A ROW-live combination cascades with the data-driven class present —
+      // that is the entire trick: both answers are compiled, the bit picks.
+      const rowOn = rowClass !== null && (live & Predicate.ROW) !== 0;
+      if (rowOn) el.classes.push(rowClass!);
+      let stateDecls: Map<string, string>;
+      try {
+        stateDecls = inline(collectDecls(rules, path, states, media, live, element));
+      } finally {
+        if (rowOn) el.classes.pop();
+      }
       const resolvedStyle = applyDecls(
         inherited,
         stateDecls,
@@ -2026,6 +2101,23 @@ export function compileTree(
       );
     }
 
+    // The data-driven class and checkedness, recorded for the list that owns this
+    // template to lift — the same shape as `bind:value={row.title}` below. The
+    // compile side already happened in `resolveVariants` (the mask bit and the
+    // class-on style rows); these carry the *path* the list update reads.
+    if (el.classWhen) {
+      for (const [, source] of Object.entries(el.classWhen)) {
+        if (!isRecorder(source)) continue;
+        itemFlagCandidates.push({ node: self, path: pathOf(source), where });
+        break; // one per element; resolveVariants refused a second
+      }
+    }
+    if (el.bindChecked !== undefined && el.bindChecked !== null) {
+      if (isRecorder(el.bindChecked)) {
+        itemCheckedCandidates.push({ node: self, path: pathOf(el.bindChecked), where });
+      }
+    }
+
     if (el.onClick) handlers.push({ node: self, ref: el.onClick, name: "", kind: "click" });
     if (el.onChange) handlers.push({ node: self, ref: el.onChange, name: "", kind: "change" });
     if (el.onFocus) handlers.push({ node: self, ref: el.onFocus, name: "", kind: "focus" });
@@ -2144,7 +2236,11 @@ export function compileTree(
         flags:
           (el.attrs.has("checked") || option?.selected === true ? ControlFlags.CHECKED : 0) |
           (el.attrs.has("disabled") ? ControlFlags.DISABLED : 0) |
-          (listbox?.multiple === true ? ControlFlags.MULTIPLE : 0),
+          (listbox?.multiple === true ? ControlFlags.MULTIPLE : 0) |
+          // `checked={t.done}`: the data owns the tick, so rescan re-reads it —
+          // this is the authored, compile-time half; the list update writes the
+          // CHECKED bit itself from the row's data.
+          (isRecorder(el.bindChecked) ? ControlFlags.DATA_CHECKED : 0),
         // Not knowable yet — the run is a child and children have not been walked.
         label: -1,
         // A file input's dialog config, read on the app thread when the click
@@ -2350,6 +2446,23 @@ export function compileTree(
       itemEditableCandidates.splice(e, 1);
     }
 
+    // Data-driven classes and checkedness, lifted identically: the offset names the
+    // replica node whose control row the list update writes.
+    const itemFlags: BuiltItemEditable[] = [];
+    for (let e = itemFlagCandidates.length - 1; e >= 0; e--) {
+      const candidate = itemFlagCandidates[e]!;
+      if (candidate.node < arenaStart || candidate.node >= arenaStart + stride) continue;
+      itemFlags.unshift({ offset: candidate.node - arenaStart, path: candidate.path });
+      itemFlagCandidates.splice(e, 1);
+    }
+    const itemChecked: BuiltItemEditable[] = [];
+    for (let e = itemCheckedCandidates.length - 1; e >= 0; e--) {
+      const candidate = itemCheckedCandidates[e]!;
+      if (candidate.node < arenaStart || candidate.node >= arenaStart + stride) continue;
+      itemChecked.unshift({ offset: candidate.node - arenaStart, path: candidate.path });
+      itemCheckedCandidates.splice(e, 1);
+    }
+
     // Item bindings were recorded as ordinary text bindings; lift them out.
     const raw = textBindings.splice(bindingsBefore);
 
@@ -2449,6 +2562,8 @@ export function compileTree(
       bindings,
       itemHandlers,
       itemEditables,
+      itemFlags,
+      itemChecked,
       slotStart,
     });
 
@@ -2579,6 +2694,22 @@ export function compileTree(
       `bind:value={item.${orphan.path.join(".")}} is not inside the map() it belongs to.\n` +
         `    A row's property can only be edited by an element in that row's template, because\n` +
         `    the write goes back into the array through the row a replica is rendering.\n` +
+        `    ${orphan.where}`,
+    );
+  }
+  for (const orphan of itemFlagCandidates) {
+    warnings.push(
+      `cn({ …: item.${orphan.path.join(".")} }) is not inside the map() it belongs to.\n` +
+        `    A data-driven class reads a row's property, so it only means something on an\n` +
+        `    element in that row's template. Outside one, drive the class with a signal.\n` +
+        `    ${orphan.where}`,
+    );
+  }
+  for (const orphan of itemCheckedCandidates) {
+    warnings.push(
+      `checked={item.${orphan.path.join(".")}} is not inside the map() it belongs to.\n` +
+        `    Data-driven checkedness reads a row's property; outside a template, write the\n` +
+        `    attribute (\`checked\`) for the authored state instead.\n` +
         `    ${orphan.where}`,
     );
   }
@@ -4081,6 +4212,12 @@ export function emit(
       const rowEditables = l.itemEditables
         .map((e) => `      { offset: ${e.offset}, path: ${JSON.stringify(e.path)} },`)
         .join("\n");
+      const rowFlags = l.itemFlags
+        .map((e) => `      { offset: ${e.offset}, path: ${JSON.stringify(e.path)} },`)
+        .join("\n");
+      const rowChecked = l.itemChecked
+        .map((e) => `      { offset: ${e.offset}, path: ${JSON.stringify(e.path)} },`)
+        .join("\n");
 
       return (
         `  {\n` +
@@ -4092,6 +4229,8 @@ export function emit(
         `    bindings: [\n${binds}\n    ],\n` +
         `    itemHandlers: [\n${rowHandlers}\n    ],\n` +
         `    itemEditables: [\n${rowEditables}\n    ],\n` +
+        `    itemFlags: [\n${rowFlags}\n    ],\n` +
+        `    itemChecked: [\n${rowChecked}\n    ],\n` +
         `  },`
       );
     })

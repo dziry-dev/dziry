@@ -29,6 +29,7 @@ import {
 import { compileTree, type CompileResult } from "./compile.ts";
 import type { BuiltKeyframe, BuiltTween } from "./computed.ts";
 import type { Element, Node } from "./html.ts";
+import { isRecorder } from "./item-path.ts";
 import type { VariantRunResult } from "./variant-worker.ts";
 
 /** A conditional class discovered in the tree. */
@@ -127,6 +128,11 @@ export function findToggles(root: Element): Toggle[] {
   const visit = (el: Element): void => {
     if (el.classWhen) {
       for (const [className, source] of Object.entries(el.classWhen)) {
+        // A recorded item path is not a toggle: `cn({ done: t.done })` is per-row
+        // state, compiled as `Predicate.ROW` in the node's own mask — a toggle
+        // here would style every replica at once, the exact failure the predicate
+        // exists to avoid.
+        if (isRecorder(source)) continue;
         const existing = bySource.get(source);
         if (existing) {
           existing.sites++;
@@ -235,11 +241,20 @@ function annotateToggleSites(
 ): void {
   if (live.classWhen) {
     const sites: ToggleSite[] = [];
+    const rowClasses: string[] = [];
     for (const [className, source] of Object.entries(live.classWhen)) {
+      // A recorder-valued entry is per-row state, not a toggle — but the worker's
+      // cascade still has to compile it, and the recorder proxy cannot cross. It
+      // crosses as a plain name instead; `resolveVariants` accepts either form.
+      if (isRecorder(source)) {
+        rowClasses.push(className);
+        continue;
+      }
       const i = indexOf.get(source);
       if (i !== undefined) sites.push([className, i]);
     }
     (transported as Element & { toggleSites?: ToggleSite[] }).toggleSites = sites;
+    if (rowClasses.length > 0) transported.rowClasses = rowClasses;
   }
   for (let c = 0; c < live.children.length; c++) {
     const child = live.children[c]!;
@@ -605,14 +620,25 @@ export async function compileVariants(
 
     for (let b = a + 1; b < patches.length; b++) {
       let conflicts = 0;
+      const detail: string[] = [];
       for (const e of patches[b]!.entries) {
-        for (const s of e.slots) if (keys.has(`${e.field}#${s}`)) conflicts++;
+        for (let k = 0; k < e.slots.length; k++) {
+          const s = e.slots[k]!;
+          if (keys.has(`${e.field}#${s}`)) {
+            conflicts++;
+            const ea = patches[a]!.entries.find((x) => x.field === e.field)!;
+            const ka = ea.slots.indexOf(s);
+            detail.push(
+              `${e.field}#${s}: a(on=${ea.on[ka]},off=${ea.off[ka]}) b(on=${e.on[k]},off=${e.off[k]})`,
+            );
+          }
+        }
       }
       if (conflicts > 0) {
         warnings.push(
           `.${patches[a]!.className} and .${patches[b]!.className} both write ${conflicts} ` +
             `style field(s) in common; with both active the cascade may resolve differently ` +
-            `than sequencing their patches`,
+            `than sequencing their patches [${detail.join(" | ")}]`,
         );
       }
     }

@@ -1164,6 +1164,25 @@ export const ENUMS: EnumDef[] = [
       INVALID: 1 << 7,
 
       /**
+       * This list row's data says its conditional class is on — `cn({ done: t.done })`.
+       *
+       * The second per-node predicate whose answer is **Bun's**, and it exists for
+       * the same reason `INVALID` does, stated in that bit's own doc: replicas
+       * share a style row, so a class on one row is a class on every row — a
+       * predicate is resolved per node against the control table, so one row can
+       * wear the class and its neighbour not. `INVALID` proved the mechanism on
+       * form fields; this is the general case, driven by the row's own data at
+       * list-update time rather than by a validator.
+       *
+       * One bit, so one data-driven class per element — the compiler refuses a
+       * second by name rather than mis-sharing the bit. And it styles the element
+       * it is on (compound selectors, plus its own pseudo-elements through
+       * `GENERATED`); a descendant that wants row styling binds the class on
+       * itself, which costs another controls row and nothing else.
+       */
+      ROW: 1 << 8,
+
+      /**
        * The first bit the *engine* owns rather than the input state.
        *
        * Everything from here up is a global condition — a media query, a colour
@@ -1176,7 +1195,7 @@ export const ENUMS: EnumDef[] = [
        * The compiler assigns them in order of first use and emits the thresholds
        * alongside; nothing here hardcodes a breakpoint.
        */
-      FIRST_GLOBAL: 1 << 8,
+      FIRST_GLOBAL: 1 << 9,
     },
   },
   {
@@ -1684,7 +1703,17 @@ export const ENUMS: EnumDef[] = [
  * old tree's node ids and rebuilds on the next tick. A new symbol, no layout
  * change — the bump is so a host that calls it cannot load a binary without it.
  */
-export const PROTOCOL_VERSION = 44;
+/*
+ * v45 — per-row state from data: `Predicate.ROW` (per-node, Bun-written, the
+ * mechanism `:invalid` proved generalised to any conditional class a list row's
+ * data drives), `ControlFlags.ROW` to carry it, and `ControlFlags.DATA_CHECKED`
+ * to mark a checkbox whose checkedness the data owns — rescan re-reads `CHECKED`
+ * from the table for exactly those rows. `FIRST_GLOBAL` moves from bit 8 to bit
+ * 9, so the media-condition budget drops 24 → 23; none of the bits moves a byte,
+ * so the bump is by hand like v39's. An old engine ignores all three: row
+ * classes never light, data-driven checkboxes keep seed-once checkedness.
+ */
+export const PROTOCOL_VERSION = 45;
 
 /** Node flag bits, shared by both sides. */
 export const NodeFlags = {
@@ -1903,4 +1932,29 @@ export const ControlFlags = {
    * this bit for the fields that need it most.
    */
   INVALID: 1 << 3,
+
+  /**
+   * This row's data-driven class is on, so `Predicate.ROW` is live on it.
+   *
+   * The same third kind of bit as `INVALID` — written by Bun, re-read on every
+   * rescan — but written from a different place: `updateLists`, when a replica is
+   * (re)assigned its data row, from the recorded item path the class binds. It is
+   * why an element with a data-driven class gets a control row even when its
+   * `ControlKind` is `NONE`, exactly as text-entry inputs did for `INVALID`.
+   */
+  ROW: 1 << 4,
+
+  /**
+   * Checkedness here is the *data's*, not the user's — `checked={t.done}`.
+   *
+   * `CHECKED` is normally seeded once and then owned by the user's clicks; a row
+   * whose checkbox renders its data cannot work that way, because replicas are
+   * reassigned to different rows on every list change and a slot's accumulated
+   * clicks are about no row in particular. Under this bit `Controls::rescan`
+   * re-reads `CHECKED` from the table on every commit — the table is the
+   * authority, `updateLists` writes it from the row's data, and a user's click
+   * still flips the control optimistically until the data catches up (the app's
+   * onChange writes the store, the store re-renders the list, and the two agree).
+   */
+  DATA_CHECKED: 1 << 5,
 } as const;

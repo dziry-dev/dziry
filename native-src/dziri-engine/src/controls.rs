@@ -103,10 +103,11 @@ impl Controls {
         self.values.resize(node_count, f32::NAN);
         self.applied.resize(node_count, u16::MAX);
         // Not cleared: the resize preserves what is already there, which is the whole
-        // point. Only the disabled/invalid bits are rebuilt — and only on the nodes
+        // point. Only the host-authoritative bits are rebuilt — and only on the nodes
         // that hold them, because only a row could have set them and the rows are
-        // about to be re-read.
-        const RE_READ: u8 = control_flags::DISABLED | control_flags::INVALID;
+        // about to be re-read. `ROW` is Bun's the same way `INVALID` is: a list update
+        // wrote it from the row's data, and whoever publishes the table is the authority.
+        const RE_READ: u8 = control_flags::DISABLED | control_flags::INVALID | control_flags::ROW;
         for &n in &self.re_read {
             if (n as usize) < node_count {
                 self.state[n as usize] &= !RE_READ;
@@ -135,12 +136,28 @@ impl Controls {
                 self.seen[n] = true;
                 self.state[n] |= authored & control_flags::CHECKED;
             }
+
+            // A data-bound checkbox's checkedness is the *table's*, on every commit —
+            // `checked={t.done}` means replicas are reassigned rows on list changes,
+            // so a slot's accumulated clicks are about no row in particular. Seed-once
+            // (above) still ran for the first commit; this overrides it and every
+            // user flip the moment the host publishes, which is the convergence the
+            // flag's doc in schema.ts promises.
+            if authored & control_flags::DATA_CHECKED != 0 {
+                if authored & control_flags::CHECKED != 0 {
+                    self.state[n] |= control_flags::CHECKED;
+                } else {
+                    self.state[n] &= !control_flags::CHECKED;
+                }
+            }
+
             // `INVALID` joins `DISABLED` on the re-read side, and for a sharper reason than
             // "it is also compile-time" — it is not compile-time at all. It is *Bun's*: a
             // schema ran on the app thread and said this field is wrong. Whoever publishes
             // the table is the authority for it, so re-reading is exactly right, and seeding
             // it once like `CHECKED` would freeze the first verdict forever.
-            let bits = authored & (control_flags::DISABLED | control_flags::INVALID);
+            let bits =
+                authored & (control_flags::DISABLED | control_flags::INVALID | control_flags::ROW);
             if bits != 0 && self.state[n] & bits != bits {
                 // First bit this node gains this rescan: record it for the next
                 // rescan's clear pass. (Duplicates would be harmless — the clear is
@@ -155,7 +172,11 @@ impl Controls {
                 let v = values.get(row).copied().unwrap_or(u16::MAX);
                 if v != self.applied[n] {
                     self.applied[n] = v;
-                    self.values[n] = if v == u16::MAX { 0.5 } else { f32::from(v) / 1000.0 };
+                    self.values[n] = if v == u16::MAX {
+                        0.5
+                    } else {
+                        f32::from(v) / 1000.0
+                    };
                 }
             }
         }
@@ -344,7 +365,11 @@ impl Controls {
             return None;
         }
         let v = *self.values.get(node as usize)?;
-        if v.is_nan() { None } else { Some(v) }
+        if v.is_nan() {
+            None
+        } else {
+            Some(v)
+        }
     }
 
     /// Moves a RANGE's thumb, clamped to the track. Returns whether it moved —
@@ -369,7 +394,8 @@ impl Controls {
     }
 
     /// A `LISTBOX`'s height in rows, or 0 for anything else. `controls.rows`.
-    pub fn rows_of(&self, tables: &Tables, node: i32) -> i32 {        match self.row_of(tables, node) {
+    pub fn rows_of(&self, tables: &Tables, node: i32) -> i32 {
+        match self.row_of(tables, node) {
             Some(row) => tables
                 .i32s(CONTROLS, protocol::controls::ROWS)
                 .get(row)

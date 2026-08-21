@@ -1,8 +1,8 @@
 {
-  "symbols": 80,
-  "bytes": 28312,
+  "symbols": 81,
+  "bytes": 28856,
   "bun": "1.4.0",
-  "recorded": "2026-08-20",
+  "recorded": "2026-08-21",
   "inventory": [
     "alert.ts:alert",
     "alert.ts:setAlertSink",
@@ -54,6 +54,7 @@
     "list-runtime.ts:dispatchItemChange",
     "list-runtime.ts:readPath",
     "list-runtime.ts:subscribeLists",
+    "list-runtime.ts:takeListControlsTouched",
     "list-runtime.ts:typeIntoRow",
     "list-runtime.ts:updateList",
     "list-runtime.ts:updateLists",

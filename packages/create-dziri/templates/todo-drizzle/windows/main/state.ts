@@ -37,12 +37,9 @@ const invalidate = (): void => refetch();
 export const remaining = computed(() => todos.filter((t) => !t.done).length);
 export const total = computed(() => todos.length);
 
-/** Rows as rendered: the mark is precomputed so a row is pure data. */
-const dressed = (list: Todo[]) => list.map((t) => ({ ...t, mark: t.done ? "✓" : "" }));
-
-export const viewAll = computed(() => dressed(todos));
-export const viewActive = computed(() => dressed(todos.filter((t) => !t.done)));
-export const viewDone = computed(() => dressed(todos.filter((t) => t.done)));
+export const viewAll = computed(() => [...todos]);
+export const viewActive = computed(() => todos.filter((t) => !t.done));
+export const viewDone = computed(() => todos.filter((t) => t.done));
 
 // --- mutations -------------------------------------------------------------------
 
