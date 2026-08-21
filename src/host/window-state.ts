@@ -33,7 +33,7 @@
  * Freezing one order here would claim to fix a bug that does not exist, and would
  * take the choice away from a caller that has a reason to make it.
  */
-import { routeChain, type CompiledUi, type RouteNodes } from "../ir.ts";
+import { routeChain, type BoundaryNodes, type CompiledUi, type RouteNodes } from "../ir.ts";
 import { isSignal, type Signal } from "../runtime/signal.ts";
 import type { WindowArtifact } from "./registry.ts";
 
@@ -300,6 +300,34 @@ export function showRoute(
     for (const node of route.loading) ui.nodes.hidden[node] = showLoading ? 0 : 1;
     for (const node of route.error) ui.nodes.hidden[node] = showError ? 0 : 1;
   }
+}
+
+/**
+ * Settles every `<Suspense>` boundary against its resources' current statuses.
+ * Returns whether any byte moved, so the caller knows to flush.
+ *
+ * Fallback shows while any watched resource is `"pending"` — and **only** then:
+ * `"stale"` keeps the content up (a refetch must not flash the skeleton, the
+ * design doc's rule), and `"error"` keeps it up too, because the data shown is
+ * the initial or last-good value and the app renders the status itself. The
+ * writes are the route switch's — a `hidden` byte per root, no allocation.
+ */
+export function applyBoundaries(ui: CompiledUi, boundaries: readonly BoundaryNodes[]): boolean {
+  let moved = false;
+  const write = (node: number, hidden: 0 | 1): void => {
+    if (ui.nodes.hidden[node] === hidden) return;
+    ui.nodes.hidden[node] = hidden;
+    moved = true;
+  };
+
+  for (const boundary of boundaries) {
+    const pending = boundary.resources.some(
+      (r) => (r as { status: { value: unknown } }).status.value === "pending",
+    );
+    for (const node of boundary.content) write(node, pending ? 1 : 0);
+    for (const node of boundary.fallback) write(node, pending ? 0 : 1);
+  }
+  return moved;
 }
 
 /**

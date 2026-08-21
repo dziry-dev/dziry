@@ -108,7 +108,7 @@ Anything that trades robustness for capability stays a proposal.
 | `effect` `untrack` `peek` cleanup, `createScope` disposal scopes | **done** (2026-08-20) — `src/runtime/signal.ts`: `effect(fn)` (cleanup via return, dispose via handle, batched), `untrack(fn)`, `sig.peek()`, `createScope()` with transitive disposal. Includes the dep-set fix: re-capturing subscribers leave sets they no longer read | M6 |
 | `Show` | planned | M3 |
 | `source` | **done** — `source(subscribe, initial)`: a signal fed from outside. The subscribe is handed `set`, and what it returns decides the shape — an unsubscribe (callback, no `effect`), or an Effect `Stream` run with `Stream.runForEach` after a lazy import. `src/runtime/source.ts` | — |
-| `resource` / Suspense / error boundaries | planned | M8 |
+| `resource` / `<Suspense>` / error boundaries | **done** (2026-08-21) — `resource(fetcher, initial)` (`src/runtime/resource.ts`): the data **is the signal** (one export, one import name), with `status`/`error` signals and `refetch()` riding on it; registered at import, started by the worker at launch, so the compiler's import of app modules never fetches. Status walks `pending → ready \| error`; `refetch()` sets **`stale`, never `pending`**, so revalidation cannot flash a fallback. `<Suspense fallback={…}>` (`src/compiler/suspense.ts`) compiles both trees as co-resident siblings — the route mechanism — and the worker flips `hidden` bytes when a watched resource's status crosses `pending` (`applyBoundaries`, `src/host/window-state.ts`). Watched resources are collected from the bindings under the content; reads hidden inside a `computed` need `on={[stats]}` (the pending bit does not propagate through derived cells). An empty boundary is a compile error: *nothing under this boundary can pend*. Error boundaries are the route object's `errorComponent` (shipped 2026-08-18); a resource error keeps content up and lands in `stats.error`/`stats.status` for the app to render | M8 |
 | `token()` (context) | planned | — |
 | `onFrame(dt)` | planned | — |
 | `<Overlay>` | planned | M11 |
@@ -160,6 +160,8 @@ untrack<T>(fn: () => T): T
 createScope(): DisposalScope                           // .run(fn) .own(fn) .dispose() — owns effects created inside
 
 source<T>(subscribe: (set: (v: T) => void) => unknown, initial: T): Cell<T>
+resource<T>(fetcher: () => Promise<T> | T, initial: T): Resource<T>
+                                                       // the data cell itself, plus .status .error .refetch()
 ref(): Ref                                             // .node .bounds() .focus() .on()
 token<T>(defaultValue: T): Token<T>                    // build-time lexical scope, no runtime
 onFrame(fn: (dt: number) => void): void
@@ -168,6 +170,10 @@ onFrame(fn: (dt: number) => void): void
 `source` = push, from outside the process. `resource` = pull, async, drives a boundary.
 The subscribe's return decides the shape: an unsubscribe, or an Effect `Stream` (recognised
 structurally and run with `Stream.runForEach` — the one place `source` touches `effect`).
+A resource's `status`/`error`/`refetch` sit on the signal object itself so the resource is
+**one** module export; the reactive rewrite routes those three members to the signal only
+when it actually owns them, so a plain signal holding `{ status: "shipped" }` still resolves
+`order.status` to the value's key (`RESOURCE_MEMBERS` in `src/runtime/signal.ts`).
 
 OS/window state (theme, focus, DPI) ships as **built-in cells** — it arrives via the engine
 event ring, not a user `source`. `source` is for Bun-side externals:

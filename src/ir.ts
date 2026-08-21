@@ -1252,6 +1252,22 @@ export type RedboxNodes = {
 };
 
 /**
+ * A `<Suspense>` boundary's nodes and the resources that drive it.
+ *
+ * `content` and `fallback` are sibling subtrees at the boundary's position —
+ * routes' co-resident-alternatives design — and exactly one set is visible:
+ * fallback while any resource's status is `"pending"`, content otherwise
+ * (`"stale"` shows content, deliberately, so a refetch never flashes the
+ * fallback). `resources` are the live objects, imported by the artifact, so the
+ * worker subscribes to the same signals the app's bindings read.
+ */
+export type BoundaryNodes = {
+  content: readonly number[];
+  fallback: readonly number[];
+  resources: readonly unknown[];
+};
+
+/**
  * A route and its ancestors — the set visible at once.
  *
  * An ancestor stays visible because the active route renders *inside* it; that is

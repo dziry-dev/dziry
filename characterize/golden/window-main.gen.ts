@@ -20,7 +20,7 @@ import * as __state_4 from "./../../../workspace/skia-proto/windows/main/reactiv
 import * as __state_5 from "./../../../workspace/skia-proto/windows/main/pages/products/$id.tsx";
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable, RedboxNodes, RouteNodes, WindowConfig } from "dziri/ir.ts";
+import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable, BoundaryNodes, RedboxNodes, RouteNodes, WindowConfig } from "dziri/ir.ts";
 import type { EditableRef, ImageBinding } from "dziri/runtime/bindings.ts";
 import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
 import type { StylePatchRef } from "dziri/runtime/patches.ts";
@@ -1062,3 +1062,12 @@ export const windowId: string = "main";
  * `title`/`detail` are TEXT nodes whose reserved string slots carry the message.
  */
 export const redbox = { root: 1506, title: 1508, detail: 1510 } satisfies RedboxNodes | null;
+
+/**
+ * `<Suspense>` boundaries: content and fallback node sets, and the resources
+ * whose `"pending"` status picks between them — imported live, so the worker
+ * subscribes to the same objects the app's own bindings read.
+ */
+export const boundaries = [
+
+] satisfies BoundaryNodes[];

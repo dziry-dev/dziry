@@ -303,7 +303,31 @@ handles by hand.
 `scope.own(fn)` adds an arbitrary disposer; `run` on a disposed scope throws, and
 `own` into one runs the disposer immediately rather than losing it.
 
-## Not built yet
+## `resource` — pull-based async data
 
-`resource` <Status of="resource" /> is designed but not implemented. It is described
-in `API.md`; nothing on this page depends on it.
+<Status of="resource" />
+
+```ts
+import { resource } from "dziri";
+
+async function fetchStats(): Promise<{ users: number }> {
+  return { users: 42 };
+}
+
+export const stats = resource(async () => fetchStats(), { users: 0 });
+```
+
+`source` is push, from outside the process; `resource` is pull: it runs its fetcher
+once at launch — never at import, so the compiler touching your modules fetches
+nothing — and the value that comes back **is the data signal**. `{stats}` binds it
+like any signal, `stats.map(...)` compiles a list from it. Three members ride on it:
+`stats.status` (`"pending" | "ready" | "stale" | "error"`, a signal), `stats.error`,
+and `stats.refetch()`.
+
+`refetch()` sets `"stale"`, never `"pending"` — the shown data stays up while newer
+is fetched, so revalidating cannot flash a fallback. Only the first run pends.
+
+`<Suspense fallback={...}>` shows a fallback exactly while a resource read under it
+is pending. Both trees are compiled into the window; the switch is a byte write, the
+same one navigation makes. A read hidden inside a `computed` is invisible to the
+boundary's collection — name it explicitly with `on={[stats]}`.

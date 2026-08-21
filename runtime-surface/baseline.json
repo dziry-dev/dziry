@@ -1,6 +1,6 @@
 {
-  "symbols": 86,
-  "bytes": 29322,
+  "symbols": 89,
+  "bytes": 29983,
   "bun": "1.4.0",
   "recorded": "2026-08-21",
   "inventory": [
@@ -76,6 +76,9 @@
     "redbox.ts:reportFailure",
     "redbox.ts:setFailureSink",
     "redbox.ts:showRedbox",
+    "resource.ts:isResource",
+    "resource.ts:resource",
+    "resource.ts:takeResources",
     "signal.ts:$",
     "signal.ts:$m",
     "signal.ts:batch",

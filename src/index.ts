@@ -57,6 +57,16 @@ export type { DisposalScope, MapOptions, ReadonlySignal, Signal } from "./runtim
 export { source } from "./runtime/source.ts";
 
 /**
+ * Pull-based async data, and the boundary that shows a fallback while it pends.
+ * `source` = push, from outside the process; `resource` = pull, async, drives a
+ * boundary. `<Suspense>` compiles to co-resident subtrees switched by `hidden`
+ * bytes — the route mechanism — when a watched resource's status crosses pending.
+ */
+export { resource } from "./runtime/resource.ts";
+export type { Resource, ResourceStatus } from "./runtime/resource.ts";
+export { Suspense } from "./compiler/suspense.ts";
+
+/**
  * The platform's own modal message box.
  *
  * Exported by name because Bun has a *global* `alert()` that reads stdin, and an author who

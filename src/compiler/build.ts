@@ -33,7 +33,9 @@ import { withPage, withWindowRoute } from "./route.ts";
 import { routeArgs } from "./route-args.ts";
 import { dataRecorder, errorRecorder } from "./route-data.ts";
 import { configOf, layerOf, routeSignalOf, WindowError } from "./window.ts";
+import { spliceSuspense, SuspenseError } from "./suspense.ts";
 import { spliceWindow, WindowTreeError, type PageTree } from "./window-tree.ts";
+import { isResource } from "../runtime/resource.ts";
 import { setCompiling, signal } from "../runtime/signal.ts";
 import { installReactivePlugin, reactiveEnabled } from "./reactive-plugin.ts";
 import { resetLocals } from "./reactive-runtime.ts";
@@ -531,6 +533,11 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
 
   const { root, roots, loadingRoots, errorRoots, redbox } = spliceWindow(shell, pages);
 
+  // `<Suspense>` markers dissolve into their two trees before the cascade sees
+  // the tree; what survives is each boundary's top-level elements, resolved to
+  // node ids after the walk like route roots are.
+  const suspense = spliceSuspense(root);
+
   const nodeOf = new Map<Element, number>();
   const doc = toDocument(root);
 
@@ -588,8 +595,64 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     );
   }
 
+  /**
+   * Each boundary's node sets and resources. The elements came from the
+   * pre-splice; ids the way route roots get theirs. Resources are collected from
+   * the bindings the walk recorded *under the content* — text parts, list
+   * sources, image bindings — which is the same provenance every reference in
+   * the artifact has, plus whatever the `on` prop named explicitly.
+   */
+  const boundaryRows = suspense.map((b) => {
+    const ids = (els: readonly Element[]): number[] =>
+      els.map((el) => nodeOf.get(el)).filter((n): n is number => n !== undefined);
+    const content = ids(b.content);
+    const fallback = ids(b.fallback);
+
+    const under = new Set<number>();
+    const stack = [...content];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (under.has(n)) continue;
+      under.add(n);
+      for (const child of result.nodes[n]!.children) stack.push(child);
+    }
+
+    for (const named of b.on) {
+      if (!isResource(named)) {
+        throw new BuildError(
+          `window "${window.id}": <Suspense on={…}> was given something that is not a resource.\n` +
+            `  The prop names resource() exports the boundary should watch; a plain signal\n` +
+            `  has no pending state to watch.`,
+        );
+      }
+    }
+    const resources = new Set<unknown>(b.on);
+    for (const tb of result.textBindings) {
+      if (!under.has(tb.node)) continue;
+      for (const p of tb.parts) if ("source" in p && isResource(p.source)) resources.add(p.source);
+    }
+    for (const list of result.lists) {
+      if (under.has(list.container) && isResource(list.source)) resources.add(list.source);
+    }
+    for (const ib of result.imageBindings) {
+      if (under.has(ib.node) && isResource(ib.ref)) resources.add(ib.ref);
+    }
+
+    if (resources.size === 0) {
+      throw new BuildError(
+        `window "${window.id}": a <Suspense> boundary watches nothing — nothing under this\n` +
+          `boundary can pend.\n` +
+          `  A boundary is driven by the resource() reads in the bindings under it. Reads\n` +
+          `  wrapped in computed() are invisible to that collection — name those resources\n` +
+          `  explicitly: <Suspense on={[stats]}>.`,
+      );
+    }
+
+    return { content, fallback, resources: [...resources], names: [] as string[] };
+  });
+
   const index = buildRefIndex(sources);
-  const { imports } = resolveRefs(result, index, variants);
+  const { imports } = resolveRefs(result, index, variants, boundaryRows);
 
   /**
    * The route signal, resolved to the export name the artifact will import.
@@ -770,6 +833,7 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     layer: layerName,
     loaders,
     redbox: redboxIds,
+    boundaries: boundaryRows.map(({ content, fallback, names }) => ({ content, fallback, names })),
   };
 
   const emitted = emit(
@@ -991,6 +1055,7 @@ export async function formatBuildError(e: unknown, projectDir: string): Promise<
     e instanceof BuildError ||
     e instanceof WindowError ||
     e instanceof WindowTreeError ||
+    e instanceof SuspenseError ||
     e instanceof RefError ||
     e instanceof RouteError
   ) {

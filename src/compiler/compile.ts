@@ -1013,6 +1013,13 @@ export type EmittedRouting = {
    * because they are dyntext.
    */
   redbox: { root: number; title: number; detail: number } | null;
+  /**
+   * `<Suspense>` boundaries: each is two sets of node ids and the export names
+   * of the resources whose `"pending"` status picks between them. Content
+   * starts hidden (a resource is pending at launch by definition), fallback
+   * visible — the inverse of every write `applyBoundaries` will make.
+   */
+  boundaries: { content: number[]; fallback: number[]; names: string[] }[];
 };
 
 /**
@@ -1047,6 +1054,13 @@ function hiddenAtStart(nodeCount: number, routing: EmittedRouting): number[] {
   // navigation immediately writes over — nothing touches this byte until a failure
   // does, so the emitted column is its only "at rest" state.
   if (routing.redbox) hidden[routing.redbox.root] = 1;
+
+  // Suspense boundaries open on their fallback: every resource is pending at
+  // launch by definition, and shipping the column that way means the first frame
+  // needs no boundary write at all.
+  for (const boundary of routing.boundaries) {
+    for (const node of boundary.content) hidden[node] = 1;
+  }
 
   return hidden;
 }
@@ -4367,7 +4381,7 @@ export function emit(
 // ${result.textBindings.length} text bindings, ${result.handlers.length} handlers.
 ${importLines ? "\n" + importLines + "\n" : ""}
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", RedboxNodes, RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
+import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable${routing ? ", BoundaryNodes, RedboxNodes, RouteNodes, WindowConfig" : ""} } from "${typesFrom}/ir.ts";
 import type { EditableRef, ImageBinding } from "${typesFrom}/runtime/bindings.ts";
 import type { ListBindingRef } from "${typesFrom}/runtime/list-runtime.ts";
 import type { StylePatchRef } from "${typesFrom}/runtime/patches.ts";${routing ? `\nimport type { ReadonlySignal } from "${typesFrom}/runtime/signal.ts";` : ""}
@@ -4785,6 +4799,21 @@ export const redbox = ${
       ? `{ root: ${routing.redbox.root}, title: ${routing.redbox.title}, detail: ${routing.redbox.detail} }`
       : "null"
   } satisfies RedboxNodes | null;
+
+/**
+ * \`<Suspense>\` boundaries: content and fallback node sets, and the resources
+ * whose \`"pending"\` status picks between them — imported live, so the worker
+ * subscribes to the same objects the app's own bindings read.
+ */
+export const boundaries = [
+${routing.boundaries
+  .map(
+    (b) =>
+      `  { content: [${b.content.join(", ")}], fallback: [${b.fallback.join(", ")}],` +
+      ` resources: [${b.names.join(", ")}] },`,
+  )
+  .join("\n")}
+] satisfies BoundaryNodes[];
 `;
 }
 

@@ -179,6 +179,13 @@ does the right thing with it: keyed builds a dynamic list, unkeyed is an ordinar
 That mechanism survives; it was going to be deleted under the previous draft and earns its place
 here.
 
+**A resource's three members ride the same table, ownership-checked** (2026-08-21).
+`resource()` attaches `status`, `error` and `refetch` to the data signal itself, so a resource
+is one module export the artifact can import by name. `$m` resolves those three keys to the
+signal only when the signal *owns* them (`Object.hasOwn`), which is what keeps a plain signal
+holding `{ status: "shipped" }` resolving `order.status` to the value's key — the mistake a
+blanket member list would make. `RESOURCE_MEMBERS` in `signal.ts`, beside `SIGNAL_MEMBERS`.
+
 ---
 
 ## 3. What exists today, and what happens to it

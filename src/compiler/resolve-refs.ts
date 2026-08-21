@@ -70,6 +70,8 @@ export function resolveRefs(
       exportExpression?: string;
     }[];
   },
+  /** `<Suspense>` boundaries — each resource object becomes an import by name. */
+  boundaries?: { resources: unknown[]; names: string[] }[],
 ): { imports: Map<string, Set<string>> } {
   const imports = new Map<string, Set<string>>();
 
@@ -381,6 +383,12 @@ export function resolveRefs(
         `a per-row click handler in the list in node ${list.container}`,
       ).name;
     }
+  }
+
+  for (const boundary of boundaries ?? []) {
+    boundary.names = boundary.resources.map(
+      (r) => lookup(r, `a resource watched by a <Suspense> boundary`).name,
+    );
   }
 
   for (const patch of variants?.patches ?? []) {

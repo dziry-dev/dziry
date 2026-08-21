@@ -75,6 +75,7 @@ import {
 import { capacitiesFor } from "../engine/upload.ts";
 import { pickWindow, type WindowRegistry } from "./registry.ts";
 import {
+  applyBoundaries,
   buildUi,
   dumpState,
   indexOfRoute,
@@ -83,6 +84,7 @@ import {
   restoreState,
   showRoute,
 } from "./window-state.ts";
+import { takeResources } from "../runtime/resource.ts";
 
 /**
  * SDL keycodes. A handful of constants is cheaper than binding the whole keysym table.
@@ -439,6 +441,25 @@ function start(
     dirty = true;
     schedule();
   });
+
+  /* `resource()`s start here — at launch, never at import, which is the rule that
+     keeps the compiler's import of app modules from fetching during the build.
+     Boundary subscriptions attach *first*, so a fast async settle is seen; a sync
+     fetcher settles inside its start call, before any subscriber exists, which is
+     why the apply below runs once immediately after — the same launch-gap lesson
+     the text bindings learned. */
+  const settleBoundaries = (): void => {
+    if (!applyBoundaries(ui, generated.boundaries)) return;
+    dirty = true;
+    schedule();
+  };
+  for (const boundary of generated.boundaries) {
+    for (const r of boundary.resources) {
+      (r as { status: { subscribe(fn: () => void): unknown } }).status.subscribe(settleBoundaries);
+    }
+  }
+  for (const start of takeResources()) start();
+  settleBoundaries();
 
   subscribeStylePatches(stylePatches, () => {
     applyStylePatches(ui, stylePatches);

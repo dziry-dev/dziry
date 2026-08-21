@@ -150,3 +150,41 @@ test("restoreState writes same-named signals and ignores what changed names", as
   expect(count.value).toBe(41);
   expect(added.value).toBe("fresh");
 });
+
+// ---------------------------------------------------------------------------
+// applyBoundaries — the <Suspense> switch
+
+/** A ui of eight hidden-byte slots and two boundaries over fake resources. */
+function boundaryUi(statuses: [string, string]) {
+  const ui = { nodes: { hidden: new Uint8Array(8) } } as unknown as CompiledUi;
+  const resource = (status: string) => ({ status: { value: status } });
+  const boundaries = [
+    { content: [1], fallback: [2], resources: [resource(statuses[0])] },
+    { content: [3, 4], fallback: [5], resources: [resource(statuses[1])] },
+  ];
+  return { ui, boundaries };
+}
+
+test("applyBoundaries: pending shows the fallback, anything else the content", async () => {
+  const { applyBoundaries } = await import("./window-state.ts");
+  const { ui, boundaries } = boundaryUi(["pending", "ready"]);
+
+  expect(applyBoundaries(ui, boundaries)).toBe(true);
+  expect([...ui.nodes.hidden]).toEqual([0, 1, 0, 0, 0, 1, 0, 0]);
+});
+
+test("applyBoundaries: stale and error keep the content up — no fallback flash", async () => {
+  const { applyBoundaries } = await import("./window-state.ts");
+  const { ui, boundaries } = boundaryUi(["stale", "error"]);
+
+  applyBoundaries(ui, boundaries);
+  expect([...ui.nodes.hidden]).toEqual([0, 0, 1, 0, 0, 1, 0, 0]);
+});
+
+test("applyBoundaries reports no movement when every byte already agrees", async () => {
+  const { applyBoundaries } = await import("./window-state.ts");
+  const { ui, boundaries } = boundaryUi(["ready", "ready"]);
+
+  expect(applyBoundaries(ui, boundaries)).toBe(true); // first application moves fallbacks
+  expect(applyBoundaries(ui, boundaries)).toBe(false); // settled: nothing to flush
+});

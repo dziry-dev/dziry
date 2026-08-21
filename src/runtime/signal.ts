@@ -542,8 +542,22 @@ export function collectReads(run: () => void): Set<ReadonlySignal<unknown>> {
  */
 const SIGNAL_MEMBERS = new Set(["set", "subscribe", "value", "peek"]);
 
+/**
+ * A resource's own members, resolved to the signal only when the signal actually
+ * carries them — `resource()` attaches all three as own properties, and nothing
+ * else does. The ownership check is what keeps this from being `SIGNAL_MEMBERS`'s
+ * mistake writ large: a plain signal holding `{ status: "shipped" }` must keep
+ * resolving `order.status` to the *value's* status, and `Object.hasOwn` is what
+ * tells a resource's member apart from a value's key of the same name.
+ */
+const RESOURCE_MEMBERS = new Set(["status", "error", "refetch"]);
+
 export function $m<T>(value: T, key: string): unknown {
-  if (isSignal(value) && SIGNAL_MEMBERS.has(key)) {
+  if (
+    isSignal(value) &&
+    (SIGNAL_MEMBERS.has(key) ||
+      (RESOURCE_MEMBERS.has(key) && Object.hasOwn(value as object, key)))
+  ) {
     // Handed back whole, so the read happens at `.value` rather than here — but the
     // dependency is this signal either way, and the collector only sees `$`.
     collecting?.add(value);
