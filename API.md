@@ -46,6 +46,12 @@ Claude's output from a brainstorm session, not agreed design. Do not treat them 
 - **Focus clears when a node becomes unreachable** — collapsed, `<Show>` closed, navigated away,
   removed. Focus lands on the window root, so Tab restarts from the top (matching `BODY`).
   **Retained** across scroll-out, because the item still exists and only its row was recycled.
+  *Enforced 2026-08-21*: `focus::is_reachable` (the bottom-up twin of the tab walk's exclusions —
+  a `hidden` byte or `display:none` anywhere up the parent chain) runs on every structural tick,
+  and clearing goes through `set_focus`, so the host hears the blur — `FOCUS_OUT` naming `-1`,
+  which is what lets validate-on-blur run when a `<Show>` closes over the field. Removal by
+  arena unlink is not yet detected (the parent chain survives an unlink); rows carry focus
+  through keys, so the reachable case is the hidden/`display:none` one.
 
   Divergence from Chromium — **one**, deliberate, passing the three-part test:
   1. Chromium leaves focus on a `display:none` element (measured — `BROWSER-FACTS.md`). We clear.

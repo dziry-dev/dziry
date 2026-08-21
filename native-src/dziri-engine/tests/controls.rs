@@ -309,7 +309,11 @@ fn an_invalid_field_paints_and_recovers_when_the_flag_clears() {
     }
     engine.tick().expect("tick");
 
-    assert_eq!(centre(&mut engine), GREY, "`:invalid` is live because the table says so");
+    assert_eq!(
+        centre(&mut engine),
+        GREY,
+        "`:invalid` is live because the table says so"
+    );
 
     // Bun clears it, the way `applyIssues` does when the next validation passes.
     {
@@ -1242,6 +1246,149 @@ mod tab_order {
         engine.tick().expect("tick");
 
         assert_eq!(tab(&mut engine, 4, false), vec![1, 3, 4, 1]);
+    }
+
+    /// Focus clears when the focused node becomes unreachable — API.md's doctrine,
+    /// and the enforcement is engine-side because the causes are: a route switching
+    /// away, a `<Show>` closing, a class collapsing the subtree. The one deliberate
+    /// divergence from Chromium, which leaves focus on a `display:none` element
+    /// (measured — a WCAG 2.4.3/2.4.7 defect the focus libraries all work around).
+    ///
+    /// The host must hear the blur: FOCUS_OUT naming `-1` as the taker, because a
+    /// form validating on blur has to run when the field vanishes — that is the
+    /// moment the user "left" it. And Tab afterwards restarts from the top, which is
+    /// the doctrine's "focus lands on the window root".
+    #[test]
+    fn hiding_the_focused_node_clears_focus_and_reports_the_blur() {
+        let mut engine = four_stops();
+        let mut out = [dziri_engine::engine::Event::default(); 16];
+
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 1);
+        engine.drain_events(&mut out);
+
+        {
+            let t = engine.tables_mut();
+            t.set_u8(NODES, nodes::HIDDEN, 1, 1);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(engine.focused(), -1, "focus cannot stay on a hidden node");
+        let n = engine.drain_events(&mut out);
+        let focus: Vec<(u32, i32, i32)> = out[..n]
+            .iter()
+            .filter(|e| {
+                e.kind == protocol::event_kind::FOCUS_OUT
+                    || e.kind == protocol::event_kind::FOCUS_IN
+            })
+            .map(|e| (e.kind, e.node, e.a))
+            .collect();
+        assert_eq!(
+            focus,
+            vec![(protocol::event_kind::FOCUS_OUT, 1, -1)],
+            "the blur names nothing as the taker — the browser's real-blur shape"
+        );
+
+        assert_eq!(
+            tab(&mut engine, 1, false),
+            vec![2],
+            "Tab restarts from the top, not from where focus used to be"
+        );
+    }
+
+    /// The subtree case: the focused node's *ancestor* hides — a route switch, a
+    /// `<Show>` closing over a form — and focus inside it clears, exactly as the
+    /// tab walk excludes the whole subtree.
+    #[test]
+    fn hiding_an_ancestor_clears_focus_inside_its_subtree() {
+        let mut engine = Engine::new(&config(4, 2)).expect("engine");
+        {
+            let t = engine.tables_mut();
+            init_style(t, 0);
+            init_style(t, 1);
+
+            // 0 root, 1 a subtree holding 2 (a tab stop), 3 a showing sibling stop.
+            node(t, 0, 0, -1);
+            node(t, 1, 0, 0);
+            node(t, 2, 0, 1);
+            node(t, 3, 0, 0);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, 1, 3);
+            t.set_i32(NODES, nodes::FIRST_CHILD, 1, 2);
+
+            let stop = protocol::flags::INTERACTIVE | protocol::flags::TAB_STOP;
+            t.set_u8(NODES, nodes::FLAGS, 2, stop);
+            t.set_u8(NODES, nodes::FLAGS, 3, stop);
+            pad_variants(t, 0);
+            pad_controls(t, 0);
+        }
+        engine.tick().expect("tick");
+
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 2, "first stop in document order");
+
+        {
+            let t = engine.tables_mut();
+            t.set_u8(NODES, nodes::HIDDEN, 1, 1);
+        }
+        engine.tick().expect("tick");
+        assert_eq!(
+            engine.focused(),
+            -1,
+            "the ancestor took its subtree's focus with it"
+        );
+    }
+
+    /// `display: none` clears it the same way — the same two exclusions the tab
+    /// walk applies, asked bottom-up about the one focused node.
+    #[test]
+    fn display_none_on_the_focused_node_clears_focus() {
+        let mut engine = four_stops();
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 1);
+
+        {
+            let t = engine.tables_mut();
+            t.set_u16(NODES, nodes::STYLE, 1, 2);
+        }
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), -1);
+    }
+
+    /// And the guard against the over-eager version: a commit that does not touch
+    /// the focused node's chain leaves focus exactly where it is — no spurious
+    /// blur, no validate-on-blur firing because an unrelated route moved.
+    #[test]
+    fn an_unrelated_commit_leaves_focus_alone() {
+        let mut engine = four_stops();
+        let mut out = [dziri_engine::engine::Event::default(); 16];
+
+        engine.key_down(keys::TAB, 0);
+        engine.tick().expect("tick");
+        assert_eq!(engine.focused(), 1);
+        engine.drain_events(&mut out);
+
+        {
+            let t = engine.tables_mut();
+            t.set_u8(NODES, nodes::HIDDEN, 3, 1);
+        }
+        engine.tick().expect("tick");
+
+        assert_eq!(
+            engine.focused(),
+            1,
+            "an unrelated node hiding is not a blur"
+        );
+        let n = engine.drain_events(&mut out);
+        assert!(
+            out[..n]
+                .iter()
+                .all(|e| e.kind != protocol::event_kind::FOCUS_OUT),
+            "no focus event fired when focus did not move"
+        );
     }
 
     /// **A radio group is one tab stop, and it is the checked member.**

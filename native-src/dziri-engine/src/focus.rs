@@ -128,6 +128,54 @@ pub fn autofocus_candidates(
     );
 }
 
+/// Whether the user can still see `node` — the bottom-up twin of the walk below.
+///
+/// The walk asks "which nodes can focus land on"; this asks "may focus *stay* where
+/// it is", each tick, for one node. Walking up the parent chain checks the same two
+/// exclusions the top-down walk applies to whole subtrees — a `hidden` byte (a route
+/// switched away, a `<Show>` closed, a Suspense boundary flipped) and `display:none`
+/// anywhere above — without the O(nodes) sweep, because an ancestor chain is as deep
+/// as the tree, not as wide.
+///
+/// This is the enforcement half of the API's focus doctrine: focus clears when a node
+/// becomes unreachable, so a hidden field cannot keep eating keystrokes. It is also a
+/// deliberate divergence from Chromium, which leaves focus on a `display:none` element
+/// (measured, BROWSER-FACTS.md) — a WCAG 2.4.3/2.4.7 defect every focus library works
+/// around, and the one place the browser's observable contract is not matched.
+///
+/// Deliberately *not* checked: `:disabled` (not in the doctrine — a control disabling
+/// itself mid-interaction keeping focus is at worst harmless, and clearing it is a
+/// behaviour nobody measured), and scroll-out (the node still exists; only its row was
+/// recycled — the doctrine says retained).
+pub fn is_reachable(painter: &Painter, tables: &Tables, state: &InputState, node: i32) -> bool {
+    let hidden = tables.u8s(NODES, protocol::nodes::HIDDEN);
+    let parent = tables.i32s(NODES, protocol::nodes::PARENT);
+    let count = hidden.len();
+    if node < 0 || node as usize >= count {
+        return false;
+    }
+
+    let mut current = node;
+    // A parent chain longer than the node count is a cycle in Bun-written memory —
+    // untrusted input, so it is an answer ("unreachable") rather than a hang.
+    let mut budget = count + 1;
+    while current >= 0 && (current as usize) < count {
+        if budget == 0 {
+            return false;
+        }
+        budget -= 1;
+
+        if hidden[current as usize] != 0 {
+            return false;
+        }
+        if painter.display_is_none(tables, current as usize, state) {
+            return false;
+        }
+        current = parent[current as usize];
+    }
+    true
+}
+
 /// Every focusable node in document order, before a group is collapsed to one stop.
 fn focusable_nodes(
     painter: &Painter,

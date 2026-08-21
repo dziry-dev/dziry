@@ -542,10 +542,30 @@ impl Engine {
         let diff = self.tables.commit();
         self.resync(&diff)?;
 
-        if self.fresh || diff.any || self.relayout_pending {
+        // A commit, a resize (which re-evaluates media bits and can flip `display`),
+        // or the first tick — the same set of causes that force the relayout below,
+        // and the set that can change what the focus check after it must answer.
+        let structural = self.fresh || diff.any || self.relayout_pending;
+
+        if structural {
             self.relayout_pending = false;
             self.relayout()?;
             self.needs_paint = true;
+        }
+
+        // Focus clears when the focused node becomes unreachable — a route switched
+        // away, a `<Show>` closed, a class collapsed the subtree to `display:none`,
+        // a breakpoint crossed. Only on a structural tick: the walk is one parent
+        // chain, but its inputs (hidden bytes, style slots, media bits) cannot move
+        // on an idle one. Through `set_focus`, so the host hears the blur — a form
+        // validating on blur must run when the field vanishes, or it never runs at
+        // all. Landing on the root (`-1`) is the doctrine's rule: Tab restarts from
+        // the top, exactly as Chromium's `BODY`.
+        if structural
+            && self.state.focused >= 0
+            && !focus::is_reachable(&self.painter, &self.tables, &self.state, self.state.focused)
+        {
+            self.set_focus(-1);
         }
 
         // **After the relayout, and that is a requirement rather than a preference.**
