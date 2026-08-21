@@ -255,8 +255,9 @@ handlers); and diagnostics that name what they refuse — unsupported CSS warns 
 property, a positive `tabindex` fails the build and says why.
 
 **Still not started**: rich text editing (B4, unscheduled), IME and clipboard, an
-assistive-technology surface (UIAutomation/NSAccessibility/AT-SPI), `navigate()`/`back()`
-as framework API, and general SVG beyond the subset.
+assistive-technology surface (UIAutomation/NSAccessibility/AT-SPI), and general SVG
+beyond the subset. (`navigate()`/`back()` shipped 2026-08-19 — `src/runtime/navigate.ts`,
+with `<a href>` checked against the route table at build time.)
 
 ---
 

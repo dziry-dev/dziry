@@ -4,6 +4,14 @@ target/
 
 node_modules/
 
+# Session scratch that lives inside the checkout: bisect worktrees (with their own
+# cargo-target), link-probe scripts, and a hand-rolled test app. Ignored rather than
+# deleted so tooling (ripgrep, `git stash --include-untracked`) stops tripping over
+# them — a plain `git stash -u` once failed outright on the size of .bisect/.
+.bisect/
+.link-probe/
+my-todo/
+
 # Prebuilt natives, fetched or vendored — never source.
 # Nothing needs these any more: the engine links SDL3 and Skia statically. They
 # are ignored rather than merely deleted so a stale copy cannot come back.
