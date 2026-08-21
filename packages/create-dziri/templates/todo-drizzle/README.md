@@ -66,19 +66,21 @@ costs nothing per frame.
 
 ## Per-row state, from data
 
-Two things in each row come straight from its data, and both cost one predicate
-bit at run time (both looks are compiled up front):
+Three things in each row come straight from its data, and each costs one
+predicate bit at run time (both looks are compiled up front):
 
 ```tsx
 <input type="checkbox" checked={done} onChange={toggleDone} />
 <div className={cn("row …", { "done-row": done })}>
+<div className={cn("rowtitle …", { "done-title": done })}>{title}</div>
 ```
 
 `checked={t.done}` renders the row's own done-ness and is re-seeded on every list
-change; clicking still fires `onChange`. `cn({ "done-row": t.done })` is a
-data-driven class — one row dims while its neighbour doesn't. A data-driven class
-styles the element's own box (here `opacity`, which composites over the whole
-row); text runs don't follow per-node predicates yet.
+change; clicking still fires `onChange`. The data-driven classes style one row
+while its neighbour keeps the other look: `done-row` dims the card (`opacity`
+composites over the subtree) and `done-title` strikes the title — an element's
+predicates reach its own text runs, so the class goes on the element whose text
+it styles.
 
 ## Validation
 

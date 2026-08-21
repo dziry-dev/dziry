@@ -15,6 +15,7 @@ import { setCompiling, signal, type Signal } from "../runtime/signal.ts";
 import { updateList, takeListControlsTouched, type ListBindingRef } from "../runtime/list-runtime.ts";
 import { findRow } from "../find-row.ts";
 import { ControlFlags, ControlKind, Predicate } from "../protocol/generated.ts";
+import { NodeKind } from "../ir.ts";
 
 type Todo = { id: number; title: string; done: boolean };
 
@@ -146,6 +147,38 @@ test("checked={t.done} marks the row DATA_CHECKED and the update writes the tick
   expect(flagsAt(1) & ControlFlags.CHECKED).toBe(ControlFlags.CHECKED);
   // The marker survives beside the data-written bit — rescan re-reads under it.
   expect(flagsAt(1) & ControlFlags.DATA_CHECKED).toBe(ControlFlags.DATA_CHECKED);
+});
+
+test("the element's text run follows its predicates — projected, not copied", () => {
+  const { result } = build((t) => <div className={cn("row", { done: t.done })}>{t.title}</div>);
+  const list = result.lists[0]!;
+  const element = list.arenaStart + list.itemFlags[0]!.offset;
+  const textRun = result.nodes[element]!.children.find(
+    (c) => result.nodes[c]!.kind === NodeKind.TEXT,
+  )!;
+  const run = result.nodes[textRun]!;
+
+  // .done changes `color`, an inherited text field, so the run carries the ROW
+  // bit and two rows whose fg differs — the projection of its element's pair.
+  expect(run.mask).toBe(Predicate.ROW);
+  expect(result.styles[run.run[0]!]!.fg).not.toBe(result.styles[run.run[1]!]!.fg);
+});
+
+test("a predicate that moves no inherited text field leaves the run maskless", () => {
+  // A ring is box-shadow — the element's mask gains the bit, the text projection
+  // does not, so the run stays exactly as cheap as before this existed.
+  const { result } = build(
+    (t) => <div className={cn("row", { done: t.done })}>{t.title}</div>,
+    undefined,
+    `.row { color: #e4e4e7 } .done { border-color: #10b981; border-width: 1px }`,
+  );
+  const list = result.lists[0]!;
+  const element = list.arenaStart + list.itemFlags[0]!.offset;
+  expect(result.nodes[element]!.mask & Predicate.ROW).toBe(Predicate.ROW);
+  const textRun = result.nodes[element]!.children.find(
+    (c) => result.nodes[c]!.kind === NodeKind.TEXT,
+  )!;
+  expect(result.nodes[textRun]!.mask).toBe(0);
 });
 
 test("a signal-driven cn is still a toggle: recorders are the exception, not the rule", () => {

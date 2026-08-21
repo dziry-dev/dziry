@@ -2330,18 +2330,21 @@ export function compileTree(
       const runStyle = styles.intern(textStyle(style));
       const initial = ownsRun ? String(fieldSpecs.get(el)?.initial ?? "") : "";
       const slot = ownsRun ? reserveSlot(initial) : internString("");
-      const run = nodes.push({
+      // The field's predicates, projected — `.field:invalid { color }` has to
+      // recolour the text the field shows, not just its border.
+      const projected = textRunVariants(mask, run);
+      const runNode = nodes.push({
         kind: NodeKind.TEXT,
         style: runStyle,
-        mask: 0,
-        run: [runStyle],
+        mask: projected?.mask ?? 0,
+        run: projected?.run ?? [runStyle],
         text: slot,
         parent: self,
         children: [],
         editable: true,
       }) - 1;
-      nodes[self]!.children.push(run);
-      if (ownsRun) textBindings.push({ node: run, slot, parts: [{ export: cell }] });
+      nodes[self]!.children.push(runNode);
+      if (ownsRun) textBindings.push({ node: runNode, slot, parts: [{ export: cell }] });
     }
 
     // `<span error />` — its text is its wrapper's message, so the run is created bound to
@@ -2375,7 +2378,7 @@ export function compileTree(
     }
 
     for (const child of ownsRun || messageCell !== undefined || rowError !== undefined ? [] : kids) {
-      const childIndex = walkChild(child, path, style, self, vars);
+      const childIndex = walkChild(child, path, style, self, vars, { mask, run });
       if (childIndex !== -1) nodes[self]!.children.push(childIndex);
     }
     if (after !== -1) nodes[self]!.children.push(after);
@@ -2577,12 +2580,60 @@ export function compileTree(
     return -1;
   }
 
+  /**
+   * A text run's variants: its element's, projected onto inherited text fields.
+   *
+   * A run's style is `textStyle(parent)` — so when a predicate changes the
+   * element's `color` or `text-decoration`, the *element's* row swaps and the
+   * run's used to stay put: `.done { color }` on a row class, `.field:invalid
+   * { color }`, `a:hover { color }` all compiled a variant the text never
+   * showed. This projects each of the element's combinations through
+   * `textStyle` and keeps only the bits that change the projection — a mask of
+   * 0 (a `:focus-visible` ring, a hover background) leaves the run exactly as
+   * cheap as before. The engine resolves a TEXT node's predicates against its
+   * parent, so the bit that swaps the element's row swaps the run's too.
+   */
+  function textRunVariants(
+    parentMask: number,
+    parentRun: readonly number[],
+  ): { mask: number; run: number[] } | null {
+    if (parentMask === 0) return null;
+    const bits = maskBits(parentMask);
+    const ids = parentRun.map((id) => styles.intern(textStyle(styles.list[id]!)));
+
+    let mask = 0;
+    for (let b = 0; b < bits.length; b++) {
+      for (let combo = 0; combo < ids.length; combo++) {
+        if (ids[combo] !== ids[combo ^ (1 << b)]) {
+          mask |= bits[b]!;
+          break;
+        }
+      }
+    }
+    if (mask === 0) return null;
+
+    // The child's run over its own (sub)mask. The representative parent
+    // combination sets exactly the child's live bits — the bits left out are,
+    // by construction, the ones that do not move the projection.
+    const childBits = maskBits(mask);
+    const run: number[] = new Array(1 << childBits.length);
+    for (let c = 0; c < run.length; c++) {
+      let parentCombo = 0;
+      for (let b = 0; b < childBits.length; b++) {
+        if ((c & (1 << b)) !== 0) parentCombo |= 1 << bits.indexOf(childBits[b]!);
+      }
+      run[c] = ids[parentCombo]!;
+    }
+    return { mask, run };
+  }
+
   function walkChild(
     node: Node,
     path: Element[],
     parentStyle: ComputedStyle,
     parent: number,
     parentVars: VarEnv = EMPTY_VARS,
+    parentRun?: { mask: number; run: number[] },
   ): number {
     if (node.type === "dynlist") return walkList(node, path, parentStyle, parent, parentVars);
 
@@ -2598,11 +2649,14 @@ export function compileTree(
       const slot = node.type === "text" ? internString(initial) : reserveSlot(initial);
 
       const textStyleId = styles.intern(textStyle(parentStyle));
+      // The element's predicates, projected — see `textRunVariants`. Null when
+      // no predicate moves an inherited text field, which is the common case.
+      const projected = parentRun ? textRunVariants(parentRun.mask, parentRun.run) : null;
       nodes.push({
         kind: NodeKind.TEXT,
         style: textStyleId,
-        mask: 0,
-        run: [textStyleId],
+        mask: projected?.mask ?? 0,
+        run: projected?.run ?? [textStyleId],
         text: slot,
         parent,
         children: [],

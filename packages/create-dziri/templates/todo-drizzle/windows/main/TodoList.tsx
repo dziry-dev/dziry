@@ -7,14 +7,14 @@
  * own handlers, and the checkbox, edit and delete each receive the row's own
  * todo.
  *
- * Two pieces of per-row state come straight from the data, and both are one
+ * Three pieces of per-row state come straight from the data, and each is one
  * predicate bit at run time (compiled both ways up front, protocol v45):
  * - `checked={done}` — the checkbox renders the row's own done-ness, re-seeded
  *   from data on every list change, and clicking it still fires `onChange`;
- * - `cn({ "done-row": done })` — a data-driven class, so a finished row can
- *   look finished while its neighbour does not. It dims via `opacity`, which
- *   composites over the whole subtree — a data-driven class styles the
- *   element's *own* box, and text runs do not follow predicates yet.
+ * - `cn({ "done-row": done })` on the row — dims the whole card via `opacity`;
+ * - `cn({ "done-title": done })` on the title — strikes it through. The class
+ *   goes on the element whose text it styles: an element's predicates reach its
+ *   own text runs, and a deeper descendant binds the class itself.
  */
 import { cn, type Props, type ReadonlySignal } from "dziri";
 import { deleteTodo, editTodo, toggleDone, type Todo } from "./state.ts";
@@ -28,7 +28,9 @@ function TodoRow({ title, done }: Props & Pick<Todo, "title" | "done">) {
       )}
     >
       <input type="checkbox" className="check" checked={done} onChange={toggleDone} />
-      <div className="rowtitle grow text-sm text-zinc-100">{title}</div>
+      <div className={cn("rowtitle grow text-sm text-zinc-100", { "done-title": done })}>
+        {title}
+      </div>
       <button
         className="rowbtn rounded-md bg-transparent px-2 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-700 hover:text-zinc-200"
         onClick={editTodo}
