@@ -97,7 +97,7 @@ Signals and handlers are normally module-level exports, so the compiler can name
 the export it came from.
 
 ```ts title="windows/main/state.ts" no-check
-import { computed, signal } from "dziri";
+import { computed, signal } from "dziry";
 
 export const draft = signal("");
 export const todos = signal<Todo[]>([]);

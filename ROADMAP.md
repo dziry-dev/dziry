@@ -1,10 +1,10 @@
-# dziri — roadmap
+# dziry — roadmap
 
 A framework for building **real desktop products** with HTML, CSS and TypeScript. The compiler
 and your app run on Bun; layout, painting and the window are a native Rust engine. No browser
 engine, no DOM, no webview.
 
-Open source, with `create-dziri` scaffolding and a `dziri` CLI.
+Open source, with `create-dziry` scaffolding and a `dziry` CLI.
 
 Revised after two independent reviews and the A0 spike. Where the reviewers disagreed, the
 disagreement is recorded rather than smoothed over — see *Compatibility: the experiment, not the
@@ -18,22 +18,22 @@ and the removal of a whole category of FFI hazards.
 
 ## P0 · Prerequisites — before any public work
 
-**Name — decided: `dziri`.** The earlier working name `bun-native` would not have survived Oven's
+**Name — decided: `dziry`.** The earlier working name `bun-native` would not have survived Oven's
 trademark policy, and `bun create bun-native` resolves to a package called `create-bun-native`,
-which reads as officially affiliated. `dziri` carries no such exposure; the README says "powered by
+which reads as officially affiliated. `dziry` carries no such exposure; the README says "powered by
 Bun" and gets the association without borrowing the mark.
 
-Remaining checks, none blocking design work: npm availability for both `dziri` and `create-dziri`,
+Remaining checks, none blocking design work: npm availability for both `dziry` and `create-dziry`,
 the GitHub org, and a trademark search for existing software marks.
 
 Naming conventions that follow:
 
 | | |
 | --- | --- |
-| CLI | `dziri dev`, `dziri build`, `dziri compile` |
-| Scaffold | `bun create dziri my-app` |
-| Packages | `dziri` (CLI), `dziri/compiler`, `dziri/runtime`, `dziri/primitives`, `dziri/components` |
-| Engine binary | `dziri_engine.{dll,dylib,so}` |
+| CLI | `dziry dev`, `dziry build`, `dziry compile` |
+| Scaffold | `bun create dziry my-app` |
+| Packages | `dziry` (CLI), `dziry/compiler`, `dziry/runtime`, `dziry/primitives`, `dziry/components` |
+| Engine binary | `dziry_engine.{dll,dylib,so}` |
 | Generated IR | `ui.gen.ts`, unchanged |
 
 **Toolchain floor — resolved.** `skia-safe`'s prebuilt Skia needs **MSVC 14.4x**; 17.6
@@ -52,7 +52,7 @@ screenshots stay usable as golden images for verifying the engine against the ru
 
 ## A0 · The engine *(crate landed; steps 3–6 remain)*
 
-**Status, 2026-07-30.** `native-src/dziri-engine` builds, opens a window, lays out with
+**Status, 2026-07-30.** `native-src/dziry-engine` builds, opens a window, lays out with
 Taffy, paints with Skia and reports events. 26 tests pass — 9 unit, 9 bounds, 8 boundary.
 `cargo run --release --example window` shows a window; `-- --screenshot out.png` renders
 a frame headlessly with no window at all.
@@ -93,7 +93,7 @@ Landed decisions worth not re-deriving:
   the engine and every later call returns `POISONED`, because `catch_unwind` needs
   `AssertUnwindSafe` over `&mut Engine` and that assertion is only honest if nobody can
   then observe half-updated state.
-- **Binary size, measured**: `dziri_engine.dll` is **7.4 MB** — *but only because
+- **Binary size, measured**: `dziry_engine.dll` is **7.4 MB** — *but only because
   SkParagraph is not called yet*, so the linker drops ICU entirely and the 9.98 MB
   `icudtl.dat` never loads. Expect ~17 MB once A2 uses paragraphs. The 20+ MB figure
   below is still the one to plan around.
@@ -246,9 +246,9 @@ single-line text *editing* with selection, caret and `::selection` (A5, protocol
 images with async decode and `bind:src`, and an SVG subset renderer; CSS animation —
 transitions, `@keyframes`, interruption (B3, protocol v12); native-feeling widgets —
 checkbox, radio, text input, `<select>` with its picker (A3/A5/B1); windowing via
-`<Window>`/`<Outlet>` with file-path routes; packaging (`dziri build` → one executable,
+`<Window>`/`<Outlet>` with file-path routes; packaging (`dziry build` → one executable,
 D2); hot reload in two stages (CSS live-swap, worker swap under the live window); the
-CLI (`dziri dev/build/compile`, `bun create dziri`); route objects with loaders (sync |
+CLI (`dziry dev/build/compile`, `bun create dziry`); route objects with loaders (sync |
 async | Effect) whose `Redirect`/`Cancel` exits drive navigation, `errorComponent` and
 `loadingComponent` per route; the Effect seam (`<Window layer>`, Effect-returning
 handlers); and diagnostics that name what they refuse — unsupported CSS warns by
@@ -307,13 +307,13 @@ a segfault?
   - **the watcher** — a failed recompile's `formatBuildError` string rides
     compile-server → CLI IPC → engine thread → worker, and the next successful compile clears it;
   - **the engine** — a failed `tick()` cannot paint anything (a panic poisons the engine, and
-    every entry point then refuses), so its report is `dziri_engine_fatal_alert`: the one
+    every entry point then refuses), so its report is `dziry_engine_fatal_alert`: the one
     **poison-exempt** FFI, a native modal that touches SDL and nothing of the corrupted state,
     shown by the frame loop's catch before a *clean* shutdown — the raw throw used to skip
     `stop`/`close`/`terminate` on its way out of the process.
 
   The dev-versus-production decision, made: the painted box is a development affordance, gated
-  on the watcher's `DZIRI_HOT`; a shipped app logs the same detail to stderr and keeps running
+  on the watcher's `DZIRY_HOT`; a shipped app logs the same detail to stderr and keeps running
   (a failed handler means that click did nothing), and only an engine failure — which is fatal
   either way — gets the native box. Known v1 edge: the box is not `INTERACTIVE`, so clicks
   pass through to the app beneath it.
@@ -376,7 +376,7 @@ the shared-memory protocol and the layout/paint pipeline, both of which are inte
   2026-08-01 from the real window at ~400 px as "even buttons are out of container", and measured
   rather than assumed: `layout-diff`'s `row-too-narrow` reproduces `app.css`'s `.newrow` — a
   `flex: 1` field and two content-sized buttons in a container too small for their combined
-  minimum — and **Chrome overflows it by the same amount dziri does**, to within 0.05 px. A flex
+  minimum — and **Chrome overflows it by the same amount dziry does**, to within 0.05 px. A flex
   row past its minimum overflows; that is CSS, not a bug, and no engine fix would change it.
 
   What a browser does instead is *stop being a row* below some width, and that is now
@@ -412,7 +412,7 @@ Choosing `skia-safe` collapses most of this milestone, because **SkParagraph** s
 > **Wrapping landed 2026-08-01.** Reported 2026-07-31 from the real window as "text is not
 > wrapping up with container, that's the first obvious bug": `Measurer::measure` took an
 > `available_width` and ignored it, so a string longer than its box overflowed at any width.
-> `text.rs` is now `ParagraphBuilder` + `layout(width)`, and `layout-diff` puts dziri at **6 of 7
+> `text.rs` is now `ParagraphBuilder` + `layout(width)`, and `layout-diff` puts dziry at **6 of 7
 > scenarios agreeing with Chrome within 0.5 px**, up from 2 of 7 before the work started.
 >
 > What it actually cost, against what was priced:
@@ -474,7 +474,7 @@ winit-versus-SDL3 choice reversible.
   browser collects one and typed by each control's kind. The bullet assumed a bound field, and
   the measurement (`probes/form-data.html`) is what changed the design — a browser reads live
   state from every named control, bound or not, so the compiler declares a cell for each field
-  that has none. `validate={schema}` takes any Standard Schema or an Effect schema without dziri
+  that has none. `validate={schema}` takes any Standard Schema or an Effect schema without dziry
   depending on either. Still `onChange` vs `onInput` to distinguish.
 - `:focus-visible` — ring for keyboard focus only, which is the difference between polished and
   broken.
@@ -554,7 +554,7 @@ the wire encoding is a protocol detail and should not reach app code.
 
 **`tabindex` works**, in both directions, and it needed no protocol change — which was worth
 checking rather than assuming. `NodeFlags.TAB_STOP`'s own comment anticipated a second bit for
-"focusable but not tabbable"; that set is empty in dziri, because a pointer press focuses whatever
+"focusable but not tabbable"; that set is empty in dziry, because a pointer press focuses whatever
 it hits regardless of any flag, so `tabindex="-1"` is exactly "not a tab stop" and one bit says it.
 
 A **positive** `tabindex` is refused with a build warning and treated as `0`. Measured: browsers
@@ -582,7 +582,7 @@ remember.
 Still missing: `onInput` — and it is worth saying why it is *not* next. For a checkbox, radio or
 select the measured `input` fires with `change` every time, so an `onInput` there would be a
 second name for the same moment; the pair only diverges on a text field, where `input` is
-per-keystroke and `change` waits for blur. dziri's fields are `bind:value` signals, so the
+per-keystroke and `change` waits for blur. dziry's fields are `bind:value` signals, so the
 per-keystroke half already exists, and the blur half is now expressible for the first time. That
 is the shape to build, not a duplicate event kind.
 
@@ -596,7 +596,7 @@ written down in the first place:
   bit is already set. `autofocus` opening with a ring is that rule, not a rule of its own, and the
   code was `focus_visible: false` → `true`. A second probe then changed the design: an unfocusable
   claim is walked past, and with thirteen of fourteen routes hidden on the first frame, several
-  claims are dziri's normal case — so the compiler marks every claim and the engine walks for the
+  claims are dziry's normal case — so the compiler marks every claim and the engine walks for the
   first one showing.
 - **Implicit form submission** — done. `onSubmit` on `<form>`, no protocol change. The four
   conditions were each measured and none were guessable: no button submits anyway but only with
@@ -608,7 +608,7 @@ written down in the first place:
   all. `field` on a wrapper names a group and the wrapper chain *is* the payload's path, so
   `{ position: { x, y } }` needs no bracket syntax and no parser: measured, no browser nests
   anything (`name="user[email]"` is that literal string key at both the `FormData` and wire
-  layers), so the convention belongs to server-side parsers and dziri can do better than adopt
+  layers), so the convention belongs to server-side parsers and dziry can do better than adopt
   one of their dialects — it sees the structure. A path claimed as both a value and a group is a
   build error rather than a silent last-write-wins.
 
@@ -707,7 +707,7 @@ written down in the first place:
   each field gets a cell — the author's `bind:value` signal, or one the compiler declares in the
   artifact — which is what lets `<form><input name="email"></form>` work with no state module.
   `validate={…}` runs before the handler and takes any Standard Schema, an Effect schema, or a
-  predicate, with dziri depending on none of them.
+  predicate, with dziry depending on none of them.
 - **`onChange` inside a list row** — done, and the cause was a layer below the symptom. A list
   arena is `capacity` copies of one template, and the copy was *structural only*: anything in a
   side table keyed by node id stayed behind, so a control in a row had exactly one control row —
@@ -782,7 +782,7 @@ BROWSER-FACTS.md. What they settled, in the order it bears on the work:
    box, which is the test `hit_test` already makes. `tabindex="-1"` is the one thing that splits
    focusable from tabbable, so the table needs two bits rather than one.
 3. **A `<select>` is one tab stop, and a radio group is one tab stop landing on the checked
-   member.** dziri builds a select's `<button>` as a real compile-time node, so it would be a
+   member.** dziry builds a select's `<button>` as a real compile-time node, so it would be a
    second stop by default. The rule to write is "UA-generated parts of a control are not tab
    stops", not a special case for `select`.
 4. **`:focus-visible` is a modality bit, not a focus bit** — set when focus arrives from the
@@ -840,7 +840,7 @@ A thumb is drawn over the content, reserving no layout room, which is why `style
 Taffy's `scrollbar_width` at 0. Chromium 151 reserves a 15 px gutter instead — but *conditionally*:
 only when the content overflows if the keyword was `auto`, and unconditionally if it was `scroll`
 (measured, BROWSER-FACTS.md, "What a scrollbar costs in layout room"). Two things stand between
-dziri and that gutter, and they have to land together or not at all:
+dziry and that gutter, and they have to land together or not at all:
 
 1. `auto` and `scroll` collapse into one `SCROLL` wire value in `overflowKeyword`, so the engine
    cannot tell which of the two behaviours was asked for.
@@ -953,7 +953,7 @@ What is left of A5 is images and icons, plus IME below.
     Backspace and Delete are *identical* over a range. See BROWSER-FACTS.md.
 
     `::selection` is protocol v17, and the one place a measurement was refused: Chromium does not
-    expose its own highlight colour to script, so the default is a stated convention in dziri's UA
+    expose its own highlight colour to script, so the default is a stated convention in dziry's UA
     sheet — the same admission `caret.rs` makes about the blink rate.
   - Still ahead: the clipboard, IME, and a double-click-then-drag that extends by word rather
     than by character.
@@ -1070,7 +1070,7 @@ asked what *makes* one, and answered:
   `multiple` is a list box — same box, same in-flow options, same empty initial selection.
   Keying on the attribute would have compiled a shape authors really write into a dropdown.
 - **A list box starts with nothing selected.** A dropdown falls back to its first option; a
-  list box does not. dziri had the dropdown’s rule in both places.
+  list box does not. dziry had the dropdown’s rule in both places.
 - **The height is a ratio.** Content height is `size` times the option’s own row, holding
   across a 4x font-size range — so the 17px it looks like at the default font is an instance,
   not a constant.
@@ -1083,7 +1083,7 @@ What shipped, and where each half lives:
 - **Structure is the compiler’s.** No picker, no button, no `<selectedcontent>`, options in
   flow. Stacking and clipping are ordinary UA declarations reached through a *computed*
   attribute — CSS cannot say “multiple or size above one”, so `matcher.ts` answers
-  `[data-dziri-listbox]` from `listboxOf` rather than anything being stamped on the element.
+  `[data-dziry-listbox]` from `listboxOf` rather than anything being stamped on the element.
 - **The height is the engine’s**, and it is the only part that had to be: a row is Skia’s
   ascent + descent + line gap plus the option’s padding, known first at layout. The row
   *count* crosses the boundary and `layout.rs::size_listboxes` multiplies.
@@ -1096,7 +1096,7 @@ What shipped, and where each half lives:
 
 **The open design question is answered, and the answer changed shape.** One `CHANGE` per
 gesture, on the list box, with `a` = the row the gesture landed on and `b` = how many are
-selected. The *set* travels beside the event, read through `dziri_engine_listbox_selection`
+selected. The *set* travels beside the event, read through `dziry_engine_listbox_selection`
 at drain time — which resolves the objection that killed the accessor route, since the drain
 happens on the engine thread and only the worker lacks a handle. A bitmask was rejected
 outright: it is silently wrong on the 32nd option.
@@ -1110,7 +1110,7 @@ Still open, and none of it blocks a second overlay user:
 - **Collision handling.** A picker near the window’s bottom edge hangs off it rather than
   flipping above its select, and a wide one runs off the right. That is B2’s, deliberately: a
   half-version here would be a second placement engine to delete. The anchor offset is computed
-  from the two rects layout produced, because the spec’s `top: anchor(bottom)` has no dziri
+  from the two rects layout produced, because the spec’s `top: anchor(bottom)` has no dziry
   spelling — `top: 100%` would be it, and `css.ts` refuses percentage lengths.
 - **Nothing but a picker uses the layer yet.** A tooltip or a popover would be the test of
   whether the flag generalises; the design says it should, and that is untested.
@@ -1332,12 +1332,12 @@ accessibility — shipping the visuals while dropping the reason it exists will 
 
 ### D1 · CLI, template, hot reload
 
-**CLI and template landed 2026-08-02.** `dziri compile | dev | build`, and
-`bun create dziri my-app` scaffolds from the demo this repository develops against.
+**CLI and template landed 2026-08-02.** `dziry compile | dev | build`, and
+`bun create dziry my-app` scaffolds from the demo this repository develops against.
 
 - **Not split into packages, deliberately.** `compiler`, `runtime`, `cli` as separate
   npm packages was the plan; what actually unblocked everything was giving the
-  existing tree a *package identity* — `name: "dziri"` plus an `exports` map — and
+  existing tree a *package identity* — `name: "dziry"` plus an `exports` map — and
   letting the demo under `windows/` import through it. Bun and `tsc` both resolve a
   package's self-reference, so `windows/main` *is* the scaffold template rather than
   something a codemod has to rewrite, and the twenty-odd harness scripts kept
@@ -1351,7 +1351,7 @@ accessibility — shipping the visuals while dropping the reason it exists will 
   from day one. The template is *derived* from `windows/` by `bun run template:sync`
   and `template:check` fails the build if they drift — a hand-maintained template
   rots into one that will not compile against the framework that scaffolded it.
-- **Hot reload: stage 1 landed 2026-08-18.** `dziri dev` watches `windows/`; a CSS save
+- **Hot reload: stage 1 landed 2026-08-18.** `dziry dev` watches `windows/`; a CSS save
   whose structural fingerprint is unchanged (style *values* only) swaps the style,
   media, tween, keyframe and patch tables into the running window over IPC and
   repaints — state, focus and scroll survive. Anything else recompiles in a
@@ -1369,7 +1369,7 @@ accessibility — shipping the visuals while dropping the reason it exists will 
   old worker dumps its module-level signals and route (`__state` namespaces in the
   artifact, keyed by export name — the one identity a recompile cannot move),
   a fresh worker boots the recompiled artifact with them, and a new
-  `dziri_engine_reset` (protocol v44) drops the engine's references to the old
+  `dziry_engine_reset` (protocol v44) drops the engine's references to the old
   tree — hover, press, focus, picker, scroll — and rebuilds in place. The window
   never closes. Focus and scroll reset deliberately: node ids belong to the old
   tree. A full process restart remains the fallback for a dead IPC channel.
@@ -1393,8 +1393,8 @@ accessibility — shipping the visuals while dropping the reason it exists will 
 ### D2 · Packaging and distribution
 Simpler than before: the engine is **one** statically linked artifact, not three fetched DLLs.
 
-**`dziri build` landed 2026-08-02**, on this machine's platform. It produces a single
-executable that renders byte-identically to `dziri dev`, verified by hashing the same
+**`dziry build` landed 2026-08-02**, on this machine's platform. It produces a single
+executable that renders byte-identically to `dziry dev`, verified by hashing the same
 frame out of both.
 
 - `bun build --compile`; the engine extracted to a real path on first run, since `dlopen` needs a
@@ -1405,7 +1405,7 @@ frame out of both.
   produced a shipped-app-only failure:
   1. A **runtime plugin is not a bundler plugin**, and a `bunfig.toml` preload does
      not change that. The reactive rewrite never ran, so the binary contained a raw
-     `todos.filter(…)` and threw on its first frame while `dziri dev` was fine. Fixed
+     `todos.filter(…)` and threw on its first frame while `dziry dev` was fine. Fixed
      by driving `Bun.build({ plugins })` instead of the CLI — `compile` is
      undocumented in `@types/bun` 1.3.14 but implemented.
   2. A **standalone binary reads `bunfig.toml` from its working directory** and
@@ -1416,7 +1416,7 @@ frame out of both.
      loads an embedded `.ts` verbatim and dies on the first `const`.
   4. **`--windows-hide-console` does not produce a GUI binary** — the PE subsystem
      field is still 3, so launching the app pops a terminal behind its window.
-     `dziri build` writes the field itself; `--console` opts out for diagnostics,
+     `dziry build` writes the field itself; `--console` opts out for diagnostics,
      since a GUI-subsystem process has no stdout.
 - **Still to do:** cross-compilation. `--target` can cross-build the JavaScript half,
   but the embedded engine is the one built for this machine, so shipping for another
@@ -1464,7 +1464,7 @@ the order they should be considered:
   where we beat Tauri too, since Tauri still hosts a system webview. This needs the
   measurement D3 already asks for.
 - Ship a directory rather than one file — a small launcher beside a shared Bun
-  runtime and the engine — for anyone shipping several dziri apps.
+  runtime and the engine — for anyone shipping several dziry apps.
 - Treat the single file as a *convenience*, which is what it actually is.
 
 The old "~20 KB runtime" headline stays dead either way; `runtime-surface` reports
@@ -1686,8 +1686,8 @@ Two things are deliberately left for later, in this order:
 
    | | frames rendered |
    | --- | --- |
-   | one thread (`dziri dev --single`) | **62** |
-   | app in a Worker (`dziri dev`) | **190** |
+   | one thread (`dziry dev --single`) | **62** |
+   | app in a Worker (`dziry dev`) | **190** |
 
    Three things had to exist, and each has an obvious wrong version:
 

@@ -45,21 +45,21 @@
   import { log, report } from "./_harness.js";
 
   /**
-   * dziri has a `<select>` that opens a picker, and `multiple` is only an attribute a
+   * dziry has a `<select>` that opens a picker, and `multiple` is only an attribute a
    * selector can test — so `<select multiple>` currently compiles to a dropdown, which is
    * not merely incomplete but the wrong *shape*. Before any of it is written down:
    *
    * 1. **Is there a picker at all?** A single select's options are browser chrome, which
    *    is why `select-picker.html` had to opt into `appearance: base-select` to see them.
    *    If a multiple's options are ordinary in-flow boxes, they have computed styles and
-   *    dziri needs no overlay for them — a completely different implementation.
+   *    dziry needs no overlay for them — a completely different implementation.
    * 2. **How tall is it with no `size`?** The box has to come from somewhere and "four
    *    rows" is folklore.
    * 3. **What does a plain click do** — add to the selection, or replace it? Ctrl+click,
    *    Shift+click. Everyone has a different memory of this and the platforms differ.
    * 4. **What do the arrows do?** In a single select they move *and* commit. Here they
    *    might move a focus ring without selecting, which would be a third piece of state
-   *    dziri does not have.
+   *    dziry does not have.
    * 5. **Space**, which activates a checkbox and opens a single select.
    * 6. **What fires** — one `change` per toggle, or one per gesture?
    */
@@ -110,7 +110,7 @@
   const opt = ms.options[0];
   const cs = getComputedStyle(opt);
   // The load-bearing question. If an option in a multiple has a real computed style and a
-  // real box, it is an ordinary element and dziri needs no picker overlay for it.
+  // real box, it is an ordinary element and dziry needs no picker overlay for it.
   log("");
   log(`option[0] box           ${box(opt)}`);
   log(`option[0] display       ${cs.display}`);
@@ -147,7 +147,7 @@
     // Keyboard. A single select's arrows move the highlight *and* commit; if a multiple's
     // arrows do the same then a range cannot be built with the keyboard at all, and if
     // they do not then there is a focus-within-the-list that is not the selection — which
-    // is a third piece of state dziri would have to hold.
+    // is a third piece of state dziry would have to hold.
     ["ArrowDown", { key: "ArrowDown" }],
     ["ArrowDown", { key: "ArrowDown" }],
     ["Space", { key: " " }],
@@ -184,7 +184,7 @@
 
   window.__probeMouseDone = () => {
     log("");
-    // `:checked` is how dziri draws a committed option, so whether it tracks a
+    // `:checked` is how dziry draws a committed option, so whether it tracks a
     // multiple's selection decides whether the same styling path works here.
     log("does :checked follow the selection?");
     for (const o of gest.options) {

@@ -9,23 +9,23 @@
  * `conformance` already asks Chrome what a declaration *computes to*. That cannot
  * catch a laid-out box in the wrong place, because every input can compute
  * correctly and still be arranged wrongly — which is the entire class that text
- * wrapping lives in. So this feeds **the same html+css pair** to dziri's compiler
+ * wrapping lives in. So this feeds **the same html+css pair** to dziry's compiler
  * and to headless Chrome, lays both out at the same viewport, and compares boxes.
  *
  * How the two sides are made comparable, which is where the judgement is:
  *
- *  - **dziri ships no default stylesheet**, so Chrome gets `RESET` — dziri's own
- *    initial values from `INITIAL_STYLE`, spelled out as CSS. dziri needs no rule
+ *  - **dziry ships no default stylesheet**, so Chrome gets `RESET` — dziry's own
+ *    initial values from `INITIAL_STYLE`, spelled out as CSS. dziry needs no rule
  *    for them because they *are* its defaults; Chrome does. `RESET` is injected
  *    only into Chrome and is deliberately not part of a scenario's css, so a
  *    scenario never accidentally tests the reset.
  *
- *  - **dziri's defaults are flex-column, not block**, so the reset says so. This
+ *  - **dziry's defaults are flex-column, not block**, so the reset says so. This
  *    is not a fudge: `display: FLEX` / `Direction.COLUMN` is what `INITIAL_STYLE`
  *    contains, and a browser told to lay out in block flow would be answering a
  *    different question.
  *
- *  - **dziri has no `font-family` property at all** — the engine always uses the
+ *  - **dziry has no `font-family` property at all** — the engine always uses the
  *    platform sans (Segoe UI here). The reset pins Chrome to the same family and
  *    size, or every text box differs by font metrics and nothing else is legible.
  *
@@ -34,7 +34,7 @@
  *    finding — so it is reported rather than normalised away.
  *
  * Text nodes are compared on `y`, `height` and line count only, never on `x`/`w`.
- * dziri makes a text run a real node that stretches to its container; Chrome makes
+ * dziry makes a text run a real node that stretches to its container; Chrome makes
  * it an anonymous flex item with no box you can measure. Their heights and
  * positions are the same question, their widths are not the same measurement, and
  * a tolerant width comparison here would be a lenient normaliser turning a real
@@ -64,7 +64,7 @@ const ONLY = flag("--only");
 const TOLERANCE = Number(flag("--tolerance") ?? 0.5);
 
 /**
- * dziri's `INITIAL_STYLE`, as a stylesheet, so Chrome starts where dziri starts.
+ * dziry's `INITIAL_STYLE`, as a stylesheet, so Chrome starts where dziry starts.
  *
  * Kept as narrow as that claim: every declaration here corresponds to a field in
  * `src/ir.ts`'s `INITIAL_STYLE`, or to the absence of a field (`font-family`,
@@ -77,22 +77,22 @@ const TOLERANCE = Number(flag("--tolerance") ?? 0.5);
  * exactly like a layout bug and is not one. Left as a warning: a reset written to
  * make two engines comparable is itself capable of contaminating the measurement.
  *
- * **`height: 100%` on `html` and `body`** states dziri's root sizing rather than
- * changing it: the engine lays the root node out against the surface, so dziri's
+ * **`height: 100%` on `html` and `body`** states dziry's root sizing rather than
+ * changing it: the engine lays the root node out against the surface, so dziry's
  * node 0 *is* the viewport box. Chrome's `body` is content-sized by default, and
  * comparing a viewport-sized box with a content-sized one would report a
  * difference on node 0 of every scenario forever.
  *
  * `box-sizing: content-box` agrees with both sides as of `d56611d`, which made
- * dziri size the content box. It used to be a stated divergence — Taffy's default
+ * dziry size the content box. It used to be a stated divergence — Taffy's default
  * is `BorderBox` — and this tool reported it as `w 424 vs 400` on the control until
  * that landed. It is still spelled out rather than dropped, because Chrome's
  * default is only a default.
  *
  * **Two kinds of line live in the reset, and they are not the same kind.** Some
- * state a difference dziri means to close — those are bug reports waiting to be
+ * state a difference dziry means to close — those are bug reports waiting to be
  * filed, and this block should shrink as they are fixed, exactly as box-sizing
- * did. The rest normalise a difference dziri will never close: it has no block
+ * did. The rest normalise a difference dziry will never close: it has no block
  * layout, no `font-family` property, and no UA stylesheet at all. Every line of
  * the second kind is a blind spot, because a difference normalised away is never
  * reported.
@@ -100,7 +100,7 @@ const TOLERANCE = Number(flag("--tolerance") ?? 0.5);
  * **Which is why inherited properties go on `body` and not on `body, body *`.** A
  * selector that matches the child beats the value the child would have inherited,
  * so `body * { font-size: 16px }` flattens inheritance on Chrome's side: measured,
- * a child of `.parent { font-size: 24px }` computes 16px rather than 24px. A dziri
+ * a child of `.parent { font-size: 24px }` computes 16px rather than 24px. A dziry
  * inheritance bug would then read as *agreement*, because Chrome had been told not
  * to inherit either — two engines wrong in the same direction is a green run. The
  * non-inherited half has to stay on `body *`: it does not inherit, and Chrome's UA
@@ -215,7 +215,7 @@ const CORPUS: Scenario[] = [
   // Reported from the real window at ~400px: "even button are out of container".
   // This is `app.css`'s `.newrow` — a `flex: 1` field and two content-sized
   // buttons — in a container too narrow to hold their combined minimum. The
-  // question is not whether it overflows; it is whether dziri overflows *by the
+  // question is not whether it overflows; it is whether dziry overflows *by the
   // same amount Chrome does*, because a flex item's `min-width: auto` floor is
   // exactly the rule that decides it.
   {
@@ -390,8 +390,8 @@ type Row = {
 
 const isText = (r: Row) => r.label === "#text";
 
-// ── dziri side ───────────────────────────────────────────────────────────────
-function dziriWalk(s: Scenario, i: number): Row[] {
+// ── dziry side ───────────────────────────────────────────────────────────────
+function dziryWalk(s: Scenario, i: number): Row[] {
   // In this process. What this replaced was a subprocess plus two workarounds for
   // reading its stderr, both correct and both only necessary because the seam was a
   // process: Bun prints a source excerpt first, so `split("\n")[0]` reported `162 |`
@@ -432,12 +432,12 @@ function dziriWalk(s: Scenario, i: number): Row[] {
 
 // ── chrome side ──────────────────────────────────────────────────────────────
 /**
- * Walks `document.body` in the order dziri's compiler emits nodes: body first,
+ * Walks `document.body` in the order dziry's compiler emits nodes: body first,
  * then depth-first, elements and non-whitespace text runs alike.
  *
  * Whitespace-only text nodes are skipped because the compiler drops them, and a
  * text run's own text is trimmed for the same reason. That is a real difference —
- * dziri has no inline flow, so it cannot preserve a collapsed space between two
+ * dziry has no inline flow, so it cannot preserve a collapsed space between two
  * inline boxes — but it is `html-coverage`'s finding, not this tool's, and
  * leaving it in here would misalign every row after it.
  */
@@ -476,20 +476,20 @@ const px = (v: number) => (Math.round(v * 100) / 100).toString();
 /** Returns a reason when the two walks are not walks of the same tree. */
 function shapeMismatch(dz: Row[], ch: Row[]): string | null {
   if (dz.length !== ch.length) {
-    return `${dz.length} nodes in dziri, ${ch.length} in Chrome`;
+    return `${dz.length} nodes in dziry, ${ch.length} in Chrome`;
   }
   for (let i = 0; i < dz.length; i++) {
     if (dz[i]!.parent !== ch[i]!.parent) {
-      return `node ${i}: parent ${dz[i]!.parent} in dziri, ${ch[i]!.parent} in Chrome`;
+      return `node ${i}: parent ${dz[i]!.parent} in dziry, ${ch[i]!.parent} in Chrome`;
     }
     if (isText(dz[i]!) !== isText(ch[i]!)) {
-      return `node ${i}: ${dz[i]!.label} in dziri, ${ch[i]!.label} in Chrome`;
+      return `node ${i}: ${dz[i]!.label} in dziry, ${ch[i]!.label} in Chrome`;
     }
   }
   return null;
 }
 
-// No temp directory: the dziri side compiles in this process, so there are no paths
+// No temp directory: the dziry side compiles in this process, so there are no paths
 // to hand a subprocess and nothing to clean up.
 const session = await chromeSession();
 
@@ -537,7 +537,7 @@ if (!list.length) {
  * Scenarios that differ from Chrome **on purpose**, keyed by scenario name.
  *
  * Empty today, and deliberately so. The one scenario that currently differs,
- * `wrap-unbreakable`, is a bug — dziri splits a token with no break opportunity
+ * `wrap-unbreakable`, is a bug — dziry splits a token with no break opportunity
  * across two lines where Chrome keeps it on one and lets it overflow — and a bug
  * is something to fix, not something to accept. Putting it here would be using
  * the mechanism to make a red run green, which is precisely the failure this is
@@ -565,7 +565,7 @@ try {
     let dz: Row[];
     let ch: Row[];
     try {
-      [dz, ch] = [dziriWalk(s, i), await chromeWalk(s)];
+      [dz, ch] = [dziryWalk(s, i), await chromeWalk(s)];
     } catch (e) {
       broke++;
       console.log(`BROKE  ${s.name} — ${(e as Error).message}`);
@@ -592,7 +592,7 @@ try {
 
       const where = off.map((f) => `${f} ${px(c[f] as number)} vs ${px(d[f] as number)}`).join(", ");
       const lines = c.lines === undefined ? "" : `  [chrome ${c.lines} line${c.lines === 1 ? "" : "s"}]`;
-      bad.push(`node ${n} ${d.label.padEnd(5)} chrome vs dziri: ${where}${lines}`);
+      bad.push(`node ${n} ${d.label.padEnd(5)} chrome vs dziry: ${where}${lines}`);
     }
 
     if (!bad.length) {

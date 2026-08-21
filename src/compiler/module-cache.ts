@@ -60,7 +60,7 @@ export function installInvalidation(): void {
   installed = true;
 
   plugin({
-    name: "dziri:invalidate",
+    name: "dziry:invalidate",
     setup(build) {
       /* Relative specifiers only, and measured as the reason: redirecting an
          absolute or file:-URL import runs it back through resolution with no

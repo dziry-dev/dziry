@@ -277,7 +277,7 @@ function annotateToggleSites(
  *
  * A worker's real cost is startup: it cold-imports the whole compiler graph
  * (measured: that is why 8 workers lose to 4 — the extra lanes never pay for
- * the extra imports). In `dziri dev` the compiles run inside the warm compile
+ * the extra imports). In `dziry dev` the compiles run inside the warm compile
  * server, one process for the whole session, so the pool outlives a compile the
  * same way the server's own module graph does — and it is exactly as stale,
  * since the server never re-imports compiler code either.
@@ -458,7 +458,7 @@ export async function compileVariants(
   // measured: 18 toggles took 10.4s of an 11.4s compile). Under three, the
   // pool's startup costs more than it saves.
   const variants: VariantRunResult[] = [baseline];
-  if (toggles.length < 3 || process.env.DZIRI_VARIANTS === "seq") {
+  if (toggles.length < 3 || process.env.DZIRY_VARIANTS === "seq") {
     // `seq` is a debugging escape hatch: the pool is the shipping path, and when
     // one diverges you want the other to diff against.
     for (const toggle of toggles) {
@@ -468,7 +468,7 @@ export async function compileVariants(
     variants.push(...(await compileTogglesParallel(doc, css, toggles)));
   }
   const compiledAt = performance.now();
-  if (process.env.DZIRI_TIMING) {
+  if (process.env.DZIRY_TIMING) {
     console.error(`  [timing] variants toggle compiles: ${(compiledAt - t0).toFixed(0)}ms`);
   }
   for (const v of variants) {

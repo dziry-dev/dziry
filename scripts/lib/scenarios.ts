@@ -316,7 +316,7 @@ export const SCENARIOS: Scenario[] = [
    * Three things only a picture can check, and each of them was wrong at some point while
    * this was being built:
    *
-   *   - **The rows stack.** dziri's default display is flex, whose default direction is
+   *   - **The rows stack.** dziry's default display is flex, whose default direction is
    *     `row`, so the first render put six options side by side spilling out of the box.
    *     `display: block` in the UA sheet is what fixes it, and no unit test sees it.
    *   - **The box holds exactly `size` rows.** A row is an *option's* box — its font, its

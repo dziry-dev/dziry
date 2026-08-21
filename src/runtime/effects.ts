@@ -1,13 +1,13 @@
 /**
- * The Effect seam — where dziri meets `effect` without depending on it.
+ * The Effect seam — where dziry meets `effect` without depending on it.
  *
  * Three things live here, and the rule they share is the `validate={}` ruling
- * (`forms.ts`): dziri recognises Effect values *structurally* and imports the
+ * (`forms.ts`): dziry recognises Effect values *structurally* and imports the
  * package *lazily*, so an app that never hands one over never loads a byte of it.
  * That is why this module imports nothing from `effect` — not even types. A
  * type-only import would be erased at run time but would still fail `tsc` in any
- * app that has dziri installed and `effect` not, because this file is reachable
- * from `dziri`'s public exports. Structural types below, deliberately.
+ * app that has dziry installed and `effect` not, because this file is reachable
+ * from `dziry`'s public exports. Structural types below, deliberately.
  *
  * The gate (compile-time-gate): question 1 answered "no" — a handler's returned
  * value and a layer's live services exist only at event/launch time; the user and
@@ -160,7 +160,7 @@ export function runDispatched(value: unknown, label: string): boolean {
       console.error(
         `  ${label} returned an Effect, but "effect" is not installed.\n` +
           `  A handler may return an Effect only in a project that depends on effect —\n` +
-          `  dziri recognises the value structurally and never bundles the library.`,
+          `  dziry recognises the value structurally and never bundles the library.`,
       );
       return;
     }
@@ -319,7 +319,7 @@ export async function startSources(): Promise<void> {
     console.error(
       `  source() returned a Stream, but "effect" is not installed.\n` +
         `  A stream source needs effect — add it to the project's dependencies.\n` +
-        `  dziri recognises the stream structurally and never bundles the library.`,
+        `  dziry recognises the stream structurally and never bundles the library.`,
     );
     return;
   }

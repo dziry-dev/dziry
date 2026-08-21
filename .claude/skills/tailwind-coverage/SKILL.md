@@ -1,6 +1,6 @@
 ---
 name: tailwind-coverage
-description: Measure what fraction of Tailwind works in dziri and rank what is blocking the rest by number of classes unblocked. Use when planning A1, when deciding which CSS parser feature to build next, before claiming any Tailwind support level, and after adding a CSS property or value syntax. Runs `bun run tailwind-coverage`.
+description: Measure what fraction of Tailwind works in dziry and rank what is blocking the rest by number of classes unblocked. Use when planning A1, when deciding which CSS parser feature to build next, before claiming any Tailwind support level, and after adding a CSS property or value syntax. Runs `bun run tailwind-coverage`.
 ---
 
 # tailwind-coverage
@@ -131,7 +131,7 @@ deleted (`scripts/tailwind-coverage.ts:145-152`). Two entries survive for the sa
 and animatability are not supplied by substitution alone. The number moved because the feature
 landed, not because the measuring stick got shorter. Keep it that way.
 
-Note the matching hazard on the other side: `dziriSupported()` detects support by scanning for
+Note the matching hazard on the other side: `dzirySupported()` detects support by scanning for
 `case "name":` in `expandDeclaration()`, so an empty case arm raises coverage while rendering
 nothing. `/tw-loop` bans it outright.
 
@@ -165,6 +165,6 @@ explicit out-of-scope list and this one deliberately does not, so the raw number
 
 ## Related
 
-`css-coverage` asks which properties exist versus which dziri parses, against a curated
+`css-coverage` asks which properties exist versus which dziry parses, against a curated
 denominator. This asks the question users actually care about — *does `p-4` work* — and derives
 its denominator from Tailwind itself. When they disagree, this one is closer to the promise.

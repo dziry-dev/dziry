@@ -280,16 +280,16 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  subgraph native_src_dziri_engine_src["native-src/dziri-engine/src/"]
-    native_src_dziri_engine_src_protocol_rs["protocol.rs<br/><small>485</small>"]
-    native_src_dziri_engine_src_tables_rs["tables.rs<br/><small>1035</small>"]
+  subgraph native_src_dziry_engine_src["native-src/dziry-engine/src/"]
+    native_src_dziry_engine_src_protocol_rs["protocol.rs<br/><small>485</small>"]
+    native_src_dziry_engine_src_tables_rs["tables.rs<br/><small>1035</small>"]
   end
   subgraph src_protocol["src/protocol/"]
     src_protocol_generated_ts["generated.ts<br/><small>452</small>"]
     src_protocol_schema_ts["schema.ts<br/><small>603</small>"]
   end
 
-  native_src_dziri_engine_src_tables_rs --> native_src_dziri_engine_src_protocol_rs
+  native_src_dziry_engine_src_tables_rs --> native_src_dziry_engine_src_protocol_rs
 ```
 
 ## Host
@@ -367,50 +367,50 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-  subgraph native_src_dziri_engine["native-src/dziri-engine/"]
-    native_src_dziri_engine_build_rs["build.rs<br/><small>10</small>"]
+  subgraph native_src_dziry_engine["native-src/dziry-engine/"]
+    native_src_dziry_engine_build_rs["build.rs<br/><small>10</small>"]
   end
-  subgraph native_src_dziri_engine_examples["native-src/dziri-engine/examples/"]
-    native_src_dziri_engine_examples_window_rs["window.rs<br/><small>320</small>"]
+  subgraph native_src_dziry_engine_examples["native-src/dziry-engine/examples/"]
+    native_src_dziry_engine_examples_window_rs["window.rs<br/><small>320</small>"]
   end
-  subgraph native_src_dziri_engine_src["native-src/dziri-engine/src/"]
-    native_src_dziri_engine_src_engine_rs["engine.rs<br/><small>1496</small>"]
-    native_src_dziri_engine_src_error_rs["error.rs<br/><small>298</small>"]
-    native_src_dziri_engine_src_layout_rs["layout.rs<br/><small>964</small>"]
-    native_src_dziri_engine_src_lib_rs["lib.rs<br/><small>758</small>"]
-    native_src_dziri_engine_src_paint_rs["paint.rs<br/><small>1473</small>"]
-    native_src_dziri_engine_src_text_rs["text.rs<br/><small>450</small>"]
-    native_src_dziri_engine_src_window_rs["window.rs<br/><small>518</small>"]
+  subgraph native_src_dziry_engine_src["native-src/dziry-engine/src/"]
+    native_src_dziry_engine_src_engine_rs["engine.rs<br/><small>1496</small>"]
+    native_src_dziry_engine_src_error_rs["error.rs<br/><small>298</small>"]
+    native_src_dziry_engine_src_layout_rs["layout.rs<br/><small>964</small>"]
+    native_src_dziry_engine_src_lib_rs["lib.rs<br/><small>758</small>"]
+    native_src_dziry_engine_src_paint_rs["paint.rs<br/><small>1473</small>"]
+    native_src_dziry_engine_src_text_rs["text.rs<br/><small>450</small>"]
+    native_src_dziry_engine_src_window_rs["window.rs<br/><small>518</small>"]
   end
 
-  native_src_dziri_engine_src_engine_rs --> native_src_dziri_engine_src_error_rs
-  native_src_dziri_engine_src_engine_rs --> native_src_dziri_engine_src_layout_rs
-  native_src_dziri_engine_src_engine_rs --> native_src_dziri_engine_src_paint_rs
-  native_src_dziri_engine_src_engine_rs --> native_src_dziri_engine_src_text_rs
-  native_src_dziri_engine_src_engine_rs --> native_src_dziri_engine_src_window_rs
-  native_src_dziri_engine_src_layout_rs --> native_src_dziri_engine_src_error_rs
-  native_src_dziri_engine_src_layout_rs --> native_src_dziri_engine_src_text_rs
-  native_src_dziri_engine_src_lib_rs --> native_src_dziri_engine_src_engine_rs
-  native_src_dziri_engine_src_lib_rs --> native_src_dziri_engine_src_error_rs
-  native_src_dziri_engine_src_lib_rs --> native_src_dziri_engine_src_layout_rs
-  native_src_dziri_engine_src_lib_rs --> native_src_dziri_engine_src_paint_rs
-  native_src_dziri_engine_src_lib_rs --> native_src_dziri_engine_src_text_rs
-  native_src_dziri_engine_src_lib_rs --> native_src_dziri_engine_src_window_rs
-  native_src_dziri_engine_src_paint_rs --> native_src_dziri_engine_src_text_rs
-  native_src_dziri_engine_src_text_rs --> native_src_dziri_engine_src_error_rs
-  native_src_dziri_engine_src_window_rs --> native_src_dziri_engine_src_error_rs
+  native_src_dziry_engine_src_engine_rs --> native_src_dziry_engine_src_error_rs
+  native_src_dziry_engine_src_engine_rs --> native_src_dziry_engine_src_layout_rs
+  native_src_dziry_engine_src_engine_rs --> native_src_dziry_engine_src_paint_rs
+  native_src_dziry_engine_src_engine_rs --> native_src_dziry_engine_src_text_rs
+  native_src_dziry_engine_src_engine_rs --> native_src_dziry_engine_src_window_rs
+  native_src_dziry_engine_src_layout_rs --> native_src_dziry_engine_src_error_rs
+  native_src_dziry_engine_src_layout_rs --> native_src_dziry_engine_src_text_rs
+  native_src_dziry_engine_src_lib_rs --> native_src_dziry_engine_src_engine_rs
+  native_src_dziry_engine_src_lib_rs --> native_src_dziry_engine_src_error_rs
+  native_src_dziry_engine_src_lib_rs --> native_src_dziry_engine_src_layout_rs
+  native_src_dziry_engine_src_lib_rs --> native_src_dziry_engine_src_paint_rs
+  native_src_dziry_engine_src_lib_rs --> native_src_dziry_engine_src_text_rs
+  native_src_dziry_engine_src_lib_rs --> native_src_dziry_engine_src_window_rs
+  native_src_dziry_engine_src_paint_rs --> native_src_dziry_engine_src_text_rs
+  native_src_dziry_engine_src_text_rs --> native_src_dziry_engine_src_error_rs
+  native_src_dziry_engine_src_window_rs --> native_src_dziry_engine_src_error_rs
 
   ext_protocol(["Protocol"])
   style ext_protocol fill:#f1f3f4,stroke-dasharray: 4 4
-  native_src_dziri_engine_src_engine_rs --> ext_protocol
-  native_src_dziri_engine_src_engine_rs --> ext_protocol
-  native_src_dziri_engine_src_error_rs --> ext_protocol
-  native_src_dziri_engine_src_layout_rs --> ext_protocol
-  native_src_dziri_engine_src_layout_rs --> ext_protocol
-  native_src_dziri_engine_src_lib_rs --> ext_protocol
-  native_src_dziri_engine_src_lib_rs --> ext_protocol
-  native_src_dziri_engine_src_paint_rs --> ext_protocol
-  native_src_dziri_engine_src_paint_rs --> ext_protocol
+  native_src_dziry_engine_src_engine_rs --> ext_protocol
+  native_src_dziry_engine_src_engine_rs --> ext_protocol
+  native_src_dziry_engine_src_error_rs --> ext_protocol
+  native_src_dziry_engine_src_layout_rs --> ext_protocol
+  native_src_dziry_engine_src_layout_rs --> ext_protocol
+  native_src_dziry_engine_src_lib_rs --> ext_protocol
+  native_src_dziry_engine_src_lib_rs --> ext_protocol
+  native_src_dziry_engine_src_paint_rs --> ext_protocol
+  native_src_dziry_engine_src_paint_rs --> ext_protocol
 ```
 
 ## Guards & oracles

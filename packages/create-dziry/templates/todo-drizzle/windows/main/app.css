@@ -1,0 +1,128 @@
+/*
+ * The app's stylesheet. `windows/main/index.tsx` imports it, and the compiler
+ * runs the project's own Tailwind over it during the build.
+ *
+ * Theme + utilities only, no preflight — dziry ships its own UA sheet, which is
+ * the same job done at the right origin. `source(none)` plus explicit `@source`
+ * keeps Tailwind from scanning node_modules for class-shaped strings.
+ */
+@import "tailwindcss/theme.css";
+@import "tailwindcss/utilities.css" source(none);
+@source "./index.tsx";
+@source "./TodoList.tsx";
+@source "./pages/**/*.tsx";
+
+/* ---------------------------------------------------------------------------
+ * Dark is the default; `light` is a conditional class on the window root,
+ * driven by the header checkbox. Both themes are compiled — the toggle is a
+ * handful of style-table writes, and these rules are all paint-only.
+ * ------------------------------------------------------------------------- */
+
+body {
+    background: #09090b;
+    color: #e4e4e7;
+    font-size: 14px;
+    overflow-y: auto;
+    scrollbar-color: #52525b transparent;
+}
+
+body.light {
+    background: #f4f4f5;
+    color: #18181b;
+}
+
+body.light .card {
+    background: #ffffff;
+}
+
+body.light .heading {
+    color: #18181b;
+}
+
+body.light .muted {
+    color: #52525b;
+}
+
+/* Deliberately absent: `body.light .tab`. Two conditional classes may not write
+   the same style field of the same slot — the build refuses the ambiguity — and
+   `.active` already owns the tabs' colours. The dark chips read fine on light. */
+
+body.light .row {
+    background: #ffffff;
+}
+
+body.light .row:hover {
+    background: #fafafa;
+}
+
+body.light .rowtitle {
+    color: #18181b;
+}
+
+body.light .rowbtn {
+    color: #71717a;
+}
+
+body.light .field {
+    background: #ffffff;
+    color: #18181b;
+    border-color: #d4d4d8;
+}
+
+body.light .mark {
+    border-color: #a1a1aa;
+    color: #059669;
+}
+
+/* The active filter tab — one rule, both themes. */
+.tab.active {
+    background: #059669;
+    color: #ecfdf5;
+}
+
+/* ---------------------------------------------------------------------------
+ * The add form's error state. `errorClassName="invalid-wrap"` lands on the
+ * field wrapper while an issue's path starts there; the control itself wears
+ * `:invalid`. Both are ordinary CSS — no JavaScript runs to style a bad field.
+ * ------------------------------------------------------------------------- */
+
+.field {
+    border-width: 1px;
+    border-color: #3f3f46;
+}
+
+/* `:invalid` is a per-node predicate, not a conditional class, so it composes
+   with the theme where an `.invalid-wrap .field` rule would collide with it. */
+.field:invalid {
+    border-color: #f43f5e;
+}
+
+/* A finished row — *data-driven* classes: `cn({ "done-row": t.done })` reads the
+   row's own data, so one row can look finished while its neighbour does not.
+   Compiled both ways; one predicate bit picks at run time. The dim rides the row
+   (opacity composites over the whole subtree); the strike rides the title,
+   because an element's predicates reach its own text runs. */
+.done-row {
+    opacity: 0.6;
+}
+
+.done-title {
+    text-decoration-line: line-through;
+    color: #71717a;
+}
+
+/* The checkboxes — the theme toggle in the header, and one per row. */
+.check {
+    width: 16px;
+    height: 16px;
+    border: 1px solid #52525b;
+    border-radius: 4px;
+}
+
+.check:hover {
+    border-color: #10b981;
+}
+
+body.light .check {
+    border-color: #a1a1aa;
+}

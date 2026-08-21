@@ -12,7 +12,7 @@
  * stdin. An author who forgets the import gets that one, and it hangs the app thread on a
  * terminal nobody is looking at. Nothing here can prevent it — a module cannot shadow a global
  * for its consumers — but it is why the import is worth taking: `import { alert } from
- * "dziri"`.
+ * "dziry"`.
  *
  * # Why it is fire-and-forget
  *
@@ -51,7 +51,7 @@ const LEVELS: Record<AlertLevel, 0 | 1 | 2> = { info: 0, warning: 1, error: 2 };
  * alert("Could not reach the server.", { level: "error", title: "Offline" });
  * ```
  *
- * It is the platform's dialog, not one dziri draws — a Win32 task dialog, an `NSAlert`, the
+ * It is the platform's dialog, not one dziry draws — a Win32 task dialog, an `NSAlert`, the
  * GTK box. The window stops repainting while it is up, which is what a modal is.
  *
  * **With no window there is nobody to notify, so it prints instead.** That is the case every

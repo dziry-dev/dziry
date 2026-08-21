@@ -40,7 +40,7 @@ export const SKIP_DIRS = new Set([
  * A versioned crate or package directory — `skia-bindings-0.87.0/build.rs`,
  * `taffy-0.9.2/src/...`. These are citations into dependency source and are never in
  * this repo, but their *basenames* often are: `build.rs` resolved to
- * `native-src/dziri-engine/build.rs` and reported a false out-of-range. Match the
+ * `native-src/dziry-engine/build.rs` and reported a false out-of-range. Match the
  * path shape before trusting the basename.
  */
 export const VERSIONED_DEP = /(^|\/)[a-z0-9_-]+-\d+\.\d+(\.\d+)?([-+][\w.]+)?\//i;

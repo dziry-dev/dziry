@@ -5,7 +5,7 @@ description: Generate and query architecture diagrams — C4 context/container/c
 
 # arch-diagram
 
-Diagrams of dziri in Mermaid, at four C4 levels. The top three answer *what is this for*
+Diagrams of dziry in Mermaid, at four C4 levels. The top three answer *what is this for*
 and are hand-written; the bottom one is parsed out of the source on every run and is never
 written down.
 

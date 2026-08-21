@@ -76,7 +76,7 @@ async function artifact(
     setCompiling(false);
   }
 
-  const dir = await mkdtemp(join(tmpdir(), "dziri-form-"));
+  const dir = await mkdtemp(join(tmpdir(), "dziry-form-"));
   const specifier = `./state.ts`;
   const { imports } = resolveRefs(result, buildRefIndex([{ specifier, exports }]), variants);
 
@@ -106,7 +106,7 @@ async function artifact(
 /**
  * Where the emitted module finds `ir.ts` and the runtime from a temp directory.
  *
- * An absolute path rather than the bare `dziri` specifier the real build uses, because the
+ * An absolute path rather than the bare `dziry` specifier the real build uses, because the
  * artifact is written outside the project and a bare specifier would resolve against the
  * temp directory's (absent) `node_modules`.
  */

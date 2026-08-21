@@ -877,7 +877,7 @@ export const ControlKind = {
 } as const;
 export type ControlKind = (typeof ControlKind)[keyof typeof ControlKind];
 
-/** Return code of every FFI entry point. Negative is failure, and the detail is in `dziri_last_error`. */
+/** Return code of every FFI entry point. Negative is failure, and the detail is in `dziry_last_error`. */
 export const Status = {
   OK: 0,
   PANIC: -1,

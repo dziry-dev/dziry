@@ -1,5 +1,5 @@
 /**
- * One CSS property, one row — the table that decides what dziri supports.
+ * One CSS property, one row — the table that decides what dziry supports.
  *
  * `PROPERTIES` maps a property name to either a `{ field, parse }` pair or, when the
  * property is a genuine shorthand, a function that writes several fields. Adding
@@ -111,21 +111,21 @@ const TRANSFORM_RANK: Record<string, number> = {
   scaley: 3,
 };
 
-/** Transform functions dziri refuses by name, and why each one. */
+/** Transform functions dziry refuses by name, and why each one. */
 const TRANSFORM_REFUSED: Record<string, string> = {
   matrix:
     "a matrix would have to be decomposed back into components to be stored, and " +
     "the decomposition is lossy for exactly the cases transitions care about",
-  matrix3d: "3D, and dziri is 2D",
-  translate3d: "3D, and dziri is 2D",
-  translatez: "3D, and dziri is 2D",
-  scale3d: "3D, and dziri is 2D",
-  scalez: "3D, and dziri is 2D",
-  rotate3d: "3D, and dziri is 2D",
-  rotatex: "3D, and dziri is 2D",
-  rotatey: "3D, and dziri is 2D",
+  matrix3d: "3D, and dziry is 2D",
+  translate3d: "3D, and dziry is 2D",
+  translatez: "3D, and dziry is 2D",
+  scale3d: "3D, and dziry is 2D",
+  scalez: "3D, and dziry is 2D",
+  rotate3d: "3D, and dziry is 2D",
+  rotatex: "3D, and dziry is 2D",
+  rotatey: "3D, and dziry is 2D",
   rotatez: "a Z rotation is `rotate()` in 2D — use that",
-  perspective: "3D, and dziri is 2D",
+  perspective: "3D, and dziry is 2D",
 };
 
 /**
@@ -158,7 +158,7 @@ function applyTransformList(value: string, out: Patch): void {
 
     if (r < rank) {
       throw new CssError(
-        `transform: "${value}" is not in an order dziri can store. Functions must run ` +
+        `transform: "${value}" is not in an order dziry can store. Functions must run ` +
           `translate, rotate, skew, scale — "${name}()" comes after something that ` +
           `sorts later.\n` +
           `  This is a refusal rather than a reorder because the two are genuinely ` +
@@ -256,7 +256,7 @@ function applyTransformOrigin(value: string, out: Patch): void {
   }
   if (parts.length === 3) {
     throw new CssError(
-      `transform-origin: "${value}" — the third value is a Z origin and dziri is 2D.`,
+      `transform-origin: "${value}" — the third value is a Z origin and dziry is 2D.`,
     );
   }
 
@@ -755,13 +755,13 @@ type ExpandRule = (value: string, out: Partial<Record<StyleField, number>>, prop
 export type PropertyRule = FieldRule | ExpandRule;
 
 /**
- * Every CSS property dziri understands, and what it means.
+ * Every CSS property dziry understands, and what it means.
  *
  * Most of CSS is a field and a parser — `color` is `fg` read as a colour, `padding-top`
  * is `padT` read as a length — so most of this is data, and adding such a property is
  * one row. Only a genuine shorthand, keyword map or side-table write needs a function.
  *
- * This is also the one honest answer to "which properties does dziri support", and a
+ * This is also the one honest answer to "which properties does dziry support", and a
  * *value* rather than a shape to be recovered from this file's source. `css-coverage`
  * and `tailwind-coverage` used to read it back with `/case\s+"([a-z-]+)":/g`, which
  * matches at any depth: value keywords from nested switches reached them as candidate
@@ -859,7 +859,7 @@ const colorOrAuto = (value: string): number =>
  *
  * `display` interacts with `flex-direction`; `content` is a string where every style
  * field is a number; the timing properties resolve as a set into a side table. None
- * can be a rule here, and all are things dziri supports — so they are present and
+ * can be a rule here, and all are things dziry supports — so they are present and
  * do nothing rather than absent and reported as unsupported.
  */
 const handledByCaller: ExpandRule = () => {};
@@ -939,7 +939,7 @@ function parseShadowLayer(layer: string): ShadowLayer {
  * the part with **no offset and no blur** — a spread in a solid colour, which paints an
  * even band around the border box. That is not an arbitrary line: it is exactly what
  * Tailwind's `ring-*`, `inset-ring-*` and `ring-offset-*` utilities compile to. Measured
- * against Tailwind v4.3.3 through dziri's own `var()`/`@property` machinery —
+ * against Tailwind v4.3.3 through dziry's own `var()`/`@property` machinery —
  * `ring-2 ring-sky-400 ring-offset-2 ring-offset-black` arrives here as
  *
  *   `0 0 #0000, 0 0 #0000, 0 0 0 2px #000, 0 0 0 calc(2px + 2px) #38bdf8, 0 0 #0000`
@@ -1095,7 +1095,7 @@ function filterValue(value: string): number {
       "hue-rotate", "invert", "opacity", "saturate", "sepia",
     ];
     if (!known.includes(name)) {
-      throw new CssError(`filter function "${name}()" is not one dziri accepts`);
+      throw new CssError(`filter function "${name}()" is not one dziry accepts`);
     }
     any = true;
   }
@@ -1296,7 +1296,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   /*
    * Logical properties, mapped onto the physical ones.
    *
-   * dziri has one writing mode — horizontal, left to right — so `inline` is the
+   * dziry has one writing mode — horizontal, left to right — so `inline` is the
    * horizontal axis and `block` is the vertical one, always. That is an
    * assumption, and it is the same one the rest of the engine already makes:
    * there is no `writing-mode` or `direction` field anywhere in `STYLE_FIELDS`.
@@ -1538,7 +1538,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
    * The logical sizing properties, which are aliases and not a feature.
    *
    * A writing mode would make them one — `inline-size` is the *cross* dimension
-   * in `vertical-rl`, not the width. dziri has no writing mode and no plans for
+   * in `vertical-rl`, not the width. dziry has no writing mode and no plans for
    * one, so horizontal-tb holds everywhere and the inline axis *is* the
    * horizontal axis. Mapping them straight onto the physical fields is therefore
    * exact rather than approximate.
@@ -1616,7 +1616,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
     },
   },
 
-  // A *generic* family, never a name. dziri resolves one concrete face per
+  // A *generic* family, never a name. dziry resolves one concrete face per
   // generic at startup (`Measurer::new`), so an author picks a category and the
   // platform picks the font — a font file cannot ride in a style table, and
   // naming faces is @font-face territory, a committed non-goal for now. The
@@ -1708,10 +1708,10 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   //
   // `<compat-auto>` is **accepted and folded to `auto`**, because that is what
   // the spec says those keywords do: "the values all behave as `auto`". Refusing
-  // them was the earlier mistake. dziri's field stores the *effect*, so nine
+  // them was the earlier mistake. dziry's field stores the *effect*, so nine
   // more enum variants that all mean AUTO would be nine values nothing reads.
   // The cost is a representation divergence — Chrome's computed value is
-  // as-specified, so it reports `button` where dziri reports `auto` — and that
+  // as-specified, so it reports `button` where dziry reports `auto` — and that
   // is recorded as `conformance`'s KNOWN entry rather than hidden.
   //
   // The list is `mdn-data`'s, not the prose's. MDN's `appearance` page also
@@ -1730,12 +1730,12 @@ export const PROPERTIES: Record<string, PropertyRule> = {
       // parts". Measured as shipping in Chromium 151, on any element.
       if (v === "base-select") return Appearance.BASE_SELECT;
       throw new CssError(
-        `appearance: "${value}" is not a value dziri accepts.\n` +
+        `appearance: "${value}" is not a value dziry accepts.\n` +
           `  Supported: none, auto, base-select, and the <compat-auto> keywords ` +
           `(${[...COMPAT_AUTO].join(", ")}), which fold to auto.\n` +
           `  Refused: base (specified, but no browser implements it — Chromium 151 ` +
           `drops the declaration); textfield and menulist-button (real distinct ` +
-          `effects on input types and on a select's picker, and dziri has neither yet).`,
+          `effects on input types and on a select's picker, and dziry has neither yet).`,
       );
     },
   },
@@ -1777,14 +1777,14 @@ export const PROPERTIES: Record<string, PropertyRule> = {
       const found = cursors[v];
       if (found !== undefined) return found;
       throw new CssError(
-        `cursor: "${value}" is not a value dziri accepts.\n` +
+        `cursor: "${value}" is not a value dziry accepts.\n` +
           `  Supported: ${Object.keys(cursors).join(", ")}`,
       );
     },
   },
 
   // `border-spacing` — horizontal and vertical distance between table cell borders.
-  // Applied to `<table>` but dziri doesn't render tables; paint-only.
+  // Applied to `<table>` but dziry doesn't render tables; paint-only.
   // Two-value form: h v; single value means both. CSS default is 2px.
   "border-spacing": (value, out) => {
     const parts = value.trim().split(/\s+/);
@@ -1987,7 +1987,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
     }
     if (parts.length === 3) {
       throw new CssError(
-        `translate: "${value}" — the third value is a Z translation, and dziri ` +
+        `translate: "${value}" — the third value is a Z translation, and dziry ` +
           `has no 3D transforms. Drop it.`,
       );
     }
@@ -2003,7 +2003,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
     // The axis forms — `rotate: x 45deg`, `rotate: 1 0 0 45deg` — are 3D.
     if (splitTopLevel(v).length > 1) {
       throw new CssError(
-        `rotate: "${value}" — the axis forms are 3D rotations and dziri is 2D. ` +
+        `rotate: "${value}" — the axis forms are 3D rotations and dziry is 2D. ` +
           `Only a bare angle is supported.`,
       );
     }
@@ -2015,7 +2015,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
     if (v === "none") return;
     const parts = splitTopLevel(v);
     if (parts.length > 2) {
-      throw new CssError(`scale: "${value}" — a third value is a Z scale and dziri is 2D.`);
+      throw new CssError(`scale: "${value}" — a third value is a Z scale and dziry is 2D.`);
     }
     const sx = scaleNumber(parts[0]!);
     // One value scales both axes, unlike `translate` where it means "and zero".
@@ -2049,7 +2049,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
       const found = modes[v];
       if (found !== undefined) return found;
       throw new CssError(
-        `mask-composite: "${value}" is not a value dziri accepts.\n` +
+        `mask-composite: "${value}" is not a value dziry accepts.\n` +
           `  Supported: ${Object.keys(modes).join(", ")}`,
       );
     },
@@ -2079,7 +2079,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
           !l.startsWith("-webkit-") // prefixed gradients, e.g. -webkit-linear-gradient(
         ) {
           throw new CssError(
-            `mask-image layer "${layer.trim()}" is not a value dziri accepts.\n` +
+            `mask-image layer "${layer.trim()}" is not a value dziry accepts.\n` +
               `  Supported: none, url(), linear-gradient(), radial-gradient(), conic-gradient()`,
           );
         }
@@ -2126,7 +2126,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   "background-blend-mode": { field: "backgroundBlendMode", parse: blendModeValue },
 
   // `columns` — a count, a width, or both (`columns: 3 20rem`). Either half may
-  // be `auto`. dziri has no column layout; parsed and stored.
+  // be `auto`. dziry has no column layout; parsed and stored.
   columns: (value, out, prop) => {
     let count = 0;
     let width = NaN;
@@ -2240,7 +2240,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
     out.maskPosition = 1;
   },
 
-  // SVG paint properties. dziri draws no SVG, so the engine never reads these;
+  // SVG paint properties. dziry draws no SVG, so the engine never reads these;
   // they exist so Tailwind's icon utilities compile rather than error.
   fill: { field: "fill", parse: parseColor },
   stroke: { field: "stroke", parse: parseColor },
@@ -2255,7 +2255,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
   /**
    * Transitions and animations, also handled by the caller — and listed here for
    * the same reason `display` is: so this table stays the one honest answer to
-   * "which CSS properties does dziri support".
+   * "which CSS properties does dziry support".
    *
    * They cannot be expanded here because neither is a value. `transition-property`
    * is a comma-separated *list* where every style field is one number, and the
@@ -2303,7 +2303,7 @@ export const PROPERTIES: Record<string, PropertyRule> = {
  * and without this the same pair is parsed once per node per state combination
  * per variant compile: the demo's cascade expanded Tailwind's `text-xl` tens of
  * thousands of times. This cache is the single biggest compile-time lever found
- * by the DZIRI_TIMING breakdown.
+ * by the DZIRY_TIMING breakdown.
  *
  * Unbounded growth is not a concern a Map can silently become, so it is capped:
  * past the limit it resets — a dev session's distinct declarations are bounded
@@ -2370,7 +2370,7 @@ export function fieldsForProperty(prop: string): StyleField[] {
     }
     return Object.keys(scratch) as StyleField[];
   }
-  throw new CssError(`inherit: "${prop}" is not a property dziri can inherit`);
+  throw new CssError(`inherit: "${prop}" is not a property dziry can inherit`);
 }
 
 /**
@@ -2408,7 +2408,7 @@ export function parseContent(raw: string): string | null {
       throw new CssError(
         `content: "${value}" — only strings, none and normal are supported. ` +
           `counter(), attr(), url(), images and the "/ alt-text" arm each need a ` +
-          `feature dziri does not have, so they are refused rather than dropped.`,
+          `feature dziry does not have, so they are refused rather than dropped.`,
       );
     }
 

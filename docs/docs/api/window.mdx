@@ -12,14 +12,14 @@ A window is an OS window. Each directory under `windows/` is one, and its
 
 <Status of="Window" />
 ```tsx no-check
-import { cn, Outlet, Window } from "dziri";
+import { cn, Outlet, Window } from "dziry";
 import { route } from "./router.ts";
 import { isLight } from "./state.ts";
 
 export default function Main() {
   return (
     <Window
-      title="dziri — compiled UI"
+      title="dziry — compiled UI"
       width={1040}
       height={700}
       minWidth={520}
@@ -64,7 +64,7 @@ Passed **in** rather than imported from the framework, and this is the whole of
 navigation's plumbing: the host subscribes, looks the path up in the route table, and
 writes `hidden` over the routes that left the chain.
 
-A module-level `currentRoute` inside dziri would make every window share one route,
+A module-level `currentRoute` inside dziry would make every window share one route,
 and two windows on different routes is the normal case. Passing it in makes the
 ownership explicit.
 
@@ -95,7 +95,7 @@ That is why route changes cost integer writes rather than a render.
 ## Types
 
 ```ts
-import type { WindowConfig, WindowProps } from "dziri";
+import type { WindowConfig, WindowProps } from "dziry";
 ```
 
 `WindowConfig` is the compile-time configuration — title and sizes — and is defined

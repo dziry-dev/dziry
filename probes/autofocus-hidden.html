@@ -19,9 +19,9 @@
     focus on #visible  -> unfocusable candidates are skipped and the walk continues
     focus on nothing   -> the first candidate wins or nothing does, showable or not
 
-  dziri needs this because its router hides thirteen of fourteen routes on the first
+  dziry needs this because its router hides thirteen of fourteen routes on the first
   frame with the `hidden` column. If a browser skips, an `autofocus` written on a route
-  the user has not navigated to is harmless. If it does not skip, dziri would open with
+  the user has not navigated to is harmless. If it does not skip, dziry would open with
   focus on an invisible node and a ring drawn nowhere — and the keyboard would be
   somewhere the user cannot see, which is the worst outcome of the four.
 -->
@@ -51,7 +51,7 @@
   // The separate, smaller question underneath: is a display:none element focusable by
   // script at all? If it is not, then "skipped" needs no autofocus-specific rule — it
   // falls out of the same focusability test everything else uses, which is one rule for
-  // dziri instead of two.
+  // dziry instead of two.
   log("script focus(), same elements:");
   for (const id of ["hidden", "inert", "visible"]) {
     const node = document.getElementById(id);

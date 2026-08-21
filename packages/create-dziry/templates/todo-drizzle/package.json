@@ -1,0 +1,24 @@
+{
+  "name": "{{name}}",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "scripts": {
+    "dev": "dziry dev",
+    "build": "dziry build",
+    "compile": "dziry compile",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.0",
+    "dziry": "{{dziry}}"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5"
+  }
+}

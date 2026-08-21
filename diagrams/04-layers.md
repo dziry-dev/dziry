@@ -62,10 +62,10 @@ flowchart LR
 - **Runtime** — The only code that survives to run time: signals, and the three things they drive — text bindings, style patches, list arenas. No parser, no cascade, no tree diff.
   <br>`src/runtime/`
 - **Protocol** — One schema generates both sides' field identities; the engine reports byte offsets at run time. Everything else is a direct write into shared memory.
-  <br>`src/protocol/`, `native-src/dziri-engine/src/protocol.rs`, `native-src/dziri-engine/src/tables.rs`
+  <br>`src/protocol/`, `native-src/dziry-engine/src/protocol.rs`, `native-src/dziry-engine/src/tables.rs`
 - **Host** — Loads a compiled window, uploads it, dispatches input. Two threads — the engine thread that must never block, and the app thread that may.
   <br>`src/host/`, `src/window-host.ts`, `src/engine/`
 - **Engine** — Rust cdylib: Taffy lays out, Skia paints, SDL3 owns the window and input. Reads Bun-written memory as untrusted input and never lets a panic cross back.
-  <br>`native-src/dziri-engine/`
+  <br>`native-src/dziry-engine/`
 - **Guards & oracles** — The scripts that keep claims honest — Chrome as an oracle for CSS and layout, golden frames for paint, generated-vs-source checks for the protocol.
   <br>`scripts/`, `native-src/skia-probe/`

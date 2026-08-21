@@ -8,7 +8,7 @@
  * whatever happened to be ticked at submit.
  *
  * Every expectation traceable to a browser is cited to the row of `probes/form-data.html`
- * it came from. Where dziri deliberately parts company — a lone checkbox is a boolean
+ * it came from. Where dziry deliberately parts company — a lone checkbox is a boolean
  * rather than present-or-absent — the test says so rather than reading as a browser claim.
  */
 import { expect, test } from "bun:test";

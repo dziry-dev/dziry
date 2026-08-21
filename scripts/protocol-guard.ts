@@ -18,7 +18,7 @@
  *   4. the built engine binary reports the same version and hash as the source
  *
  * (4) is the one that catches a stale *binary* — source can be perfectly
- * consistent while `dziri_engine.dll` was built before the last schema change,
+ * consistent while `dziry_engine.dll` was built before the last schema change,
  * which is the same corruption arriving by a different route.
  */
 import { readFile, writeFile, copyFile, unlink } from "node:fs/promises";
@@ -29,7 +29,7 @@ const ROOT = join(import.meta.dir, "..");
 const FIX = process.argv.includes("--fix");
 
 const TS = join(ROOT, "src/protocol/generated.ts");
-const RS = join(ROOT, "native-src/dziri-engine/src/protocol.rs");
+const RS = join(ROOT, "native-src/dziry-engine/src/protocol.rs");
 const SCHEMA = join(ROOT, "src/protocol/schema.ts");
 
 const fail: string[] = [];
@@ -128,13 +128,13 @@ try {
 // the one the app loads would make this check a lie.
 const libName =
   process.platform === "win32"
-    ? "dziri_engine.dll"
+    ? "dziry_engine.dll"
     : process.platform === "darwin"
-      ? "libdziri_engine.dylib"
-      : "libdziri_engine.so";
+      ? "libdziry_engine.dylib"
+      : "libdziry_engine.so";
 
 const dll = [
-  join(ROOT, "native-src", "dziri-engine", "target", "release", libName),
+  join(ROOT, "native-src", "dziry-engine", "target", "release", libName),
   join(ROOT, "native", `${process.platform}-${process.arch}`, libName),
 ].find(existsSync);
 
@@ -144,11 +144,11 @@ if (!dll) {
   try {
     const { dlopen, FFIType } = await import("bun:ffi");
     const lib = dlopen(dll, {
-      dziri_protocol_version: { args: [], returns: FFIType.u32 },
-      dziri_schema_hash: { args: [], returns: FFIType.u32 },
+      dziry_protocol_version: { args: [], returns: FFIType.u32 },
+      dziry_schema_hash: { args: [], returns: FFIType.u32 },
     });
-    const bv = String(lib.symbols.dziri_protocol_version());
-    const bh = lib.symbols.dziri_schema_hash();
+    const bv = String(lib.symbols.dziry_protocol_version());
+    const bh = lib.symbols.dziry_schema_hash();
     lib.close();
 
     const srcV = FIX ? grab(rsText, /pub const PROTOCOL_VERSION:\s*u32\s*=\s*(\d+)/, "version")! : vRs;

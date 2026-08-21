@@ -1,11 +1,11 @@
 /**
- * How each HTML element renders in dziri, versus how it renders in Chrome.
+ * How each HTML element renders in dziry, versus how it renders in Chrome.
  *
  *   bun run html-coverage              # the difference table
  *   bun run html-coverage --same       # also list elements that already match
  *   bun run html-coverage --only h1,p  # a few elements
  *
- * Unlike `css-coverage`, this cannot be static analysis. dziri has no per-element
+ * Unlike `css-coverage`, this cannot be static analysis. dziry has no per-element
  * table — it treats elements as generic boxes — so "supported" is not a lookup,
  * it is a *behaviour*: is `<h1>` bold and larger, does `<ul>` have markers, is
  * `<strong>` distinguishable from `<span>`.
@@ -36,7 +36,7 @@ const ONLY = onlyIdx > -1 ? argv[onlyIdx + 1]!.split(",") : null;
  * The properties a default stylesheet actually sets. Kept narrow on purpose:
  * widen this and every row lights up with differences that no UA rule would fix.
  *
- * `field` is the STYLE_FIELDS key, or null when dziri has no way to express the
+ * `field` is the STYLE_FIELDS key, or null when dziry has no way to express the
  * property at all — which is itself the finding. `match` decodes the enum or
  * bit set the field stores and compares it against Chrome's computed keyword;
  * without one, a keyword row would compare a number to a string and differ
@@ -46,7 +46,7 @@ const PROPS: {
   css: string;
   field: string | null;
   kind: "keyword" | "px" | "int";
-  match?: (chrome: string, dziri: number) => boolean;
+  match?: (chrome: string, dziry: number) => boolean;
 }[] = [
   { css: "display", field: "display", kind: "keyword" },
   { css: "font-weight", field: "fontWeight", kind: "int" },
@@ -65,7 +65,7 @@ const PROPS: {
     css: "font-family",
     field: "fontFamily",
     kind: "keyword",
-    // dziri stores a generic family, not a name: match on the category. Chrome
+    // dziry stores a generic family, not a name: match on the category. Chrome
     // computes its UA monospace to the literal keyword "monospace", and every
     // other default here (Times New Roman, Arial on controls) is non-monospace.
     match: (chrome, dz) => (dz === FontFamily.MONOSPACE) === /mono/i.test(chrome),
@@ -146,8 +146,8 @@ const ATTRS: Record<string, string> = {
 /** A minimal sheet: pin the body so nothing inherits a difference we did not ask for. */
 const SHEET = "body { margin: 0; padding: 0; font-size: 16px; font-weight: 400; color: #000 }";
 
-// ── dziri ────────────────────────────────────────────────────────────────────
-function dziriRow(el: string): Record<string, number> | string {
+// ── dziry ────────────────────────────────────────────────────────────────────
+function dziryRow(el: string): Record<string, number> | string {
   // In this process, so a compile failure is an exception with a message rather
   // than a subprocess's stderr to be mined. The parsing this replaced is worth
   // remembering: Bun prints a source excerpt before a thrown message, so
@@ -179,8 +179,8 @@ const DISPLAY_NAME = Object.fromEntries(Object.entries(Display).map(([k, v]) => 
  * Differences that are decisions, not gaps.
  *
  * This table exists because the headline number was two unrelated things added
- * together. `<p>` differs from Chrome because dziri has no default stylesheet yet
- * — a real gap, and the reason this tool exists. `<span>` differs because dziri
+ * together. `<p>` differs from Chrome because dziry has no default stylesheet yet
+ * — a real gap, and the reason this tool exists. `<span>` differs because dziry
  * has no inline layout, deliberately, permanently. Printed identically, they
  * forced every reader to re-derive which was which, and a backlog you have to
  * mentally filter is a backlog nobody reads.
@@ -202,19 +202,19 @@ const DISPLAY_NAME = Object.fromEntries(Object.entries(Display).map(([k, v]) => 
 type KnownDivergence = {
   id: string;
   why: string;
-  /** `dziri` is null when the finding is "dziri has no field for this at all". */
-  when: (el: string, css: string, chrome: string, dziri: string | null) => boolean;
+  /** `dziry` is null when the finding is "dziry has no field for this at all". */
+  when: (el: string, css: string, chrome: string, dziry: string | null) => boolean;
 };
 
 const KNOWN: KnownDivergence[] = [
   {
     id: "block-is-flex-column",
     why: "no block layout: INITIAL_STYLE is display FLEX with direction COLUMN, which stacks children the way block does (src/ir.ts)",
-    when: (_el, css, chrome, dziri) => css === "display" && chrome === "block" && dziri === "FLEX",
+    when: (_el, css, chrome, dziry) => css === "display" && chrome === "block" && dziry === "FLEX",
   },
   // There was a second entry here, `no-font-family-field`, and removing it is the
   // clearest illustration of the bar above. It excused every `font-family`
-  // difference on the grounds that dziri has no such field — citing layout-diff's
+  // difference on the grounds that dziry has no such field — citing layout-diff's
   // header, which says exactly that. But that sentence is a statement of a *current
   // limitation*, written to justify pinning Chrome's font in a reset. It is not a
   // decision that the field will never exist, and HTML-ELEMENT-COVERAGE-RESEARCH.md
@@ -228,8 +228,8 @@ const KNOWN: KnownDivergence[] = [
 /** Which entries earned their place this run. An unused one is stale, not silent. */
 const matched = new Set<string>();
 
-function knownReason(el: string, css: string, chrome: string, dziri: string | null): string | null {
-  const hit = KNOWN.find((k) => k.when(el, css, chrome, dziri));
+function knownReason(el: string, css: string, chrome: string, dziry: string | null): string | null {
+  const hit = KNOWN.find((k) => k.when(el, css, chrome, dziry));
   if (!hit) return null;
   matched.add(hit.id);
   return hit.why;
@@ -237,7 +237,7 @@ function knownReason(el: string, css: string, chrome: string, dziri: string | nu
 
 /**
  * Chrome's `display` for an element is one of block / inline / list-item / none
- * (mostly). dziri's initial is FLEX and it has **no inline layout at all** — a
+ * (mostly). dziry's initial is FLEX and it has **no inline layout at all** — a
  * committed non-goal — so `inline` vs `FLEX` would otherwise be reported on
  * every one of a hundred elements as if it were a hundred tasks. It is one
  * architectural divergence, counted once at the bottom.
@@ -245,24 +245,24 @@ function knownReason(el: string, css: string, chrome: string, dziri: string | nu
  * `block`, `list-item` and `none` stay per-element: those a default stylesheet
  * genuinely has to set.
  */
-function displayFinding(chrome: string, dziri: number): string | null {
-  const name = DISPLAY_NAME[dziri] ?? String(dziri);
+function displayFinding(chrome: string, dziry: number): string | null {
+  const name = DISPLAY_NAME[dziry] ?? String(dziry);
   if (chrome === "inline" || chrome === "inline-block") return null; // counted separately
-  if (chrome === "block" && dziri === Display.BLOCK) return null;
-  if (chrome === "none" && dziri === Display.NONE) return null;
-  if (chrome === "flex" && dziri === Display.FLEX) return null;
-  if (chrome === "grid" && dziri === Display.GRID) return null;
-  return `display: chrome ${chrome} · dziri ${name}`;
+  if (chrome === "block" && dziry === Display.BLOCK) return null;
+  if (chrome === "none" && dziry === Display.NONE) return null;
+  if (chrome === "flex" && dziry === Display.FLEX) return null;
+  if (chrome === "grid" && dziry === Display.GRID) return null;
+  return `display: chrome ${chrome} · dziry ${name}`;
 }
 
-function differs(kind: string, chrome: string, dziri: number): boolean {
-  if (dziri === undefined || dziri === null || Number.isNaN(dziri)) return true;
-  if (kind === "px") return px(chrome) !== Math.round(dziri * 100) / 100;
-  if (kind === "int") return parseInt(chrome, 10) !== Math.round(dziri);
+function differs(kind: string, chrome: string, dziry: number): boolean {
+  if (dziry === undefined || dziry === null || Number.isNaN(dziry)) return true;
+  if (kind === "px") return px(chrome) !== Math.round(dziry * 100) / 100;
+  if (kind === "int") return parseInt(chrome, 10) !== Math.round(dziry);
   return true;
 }
 
-// No temp directory: the dziri side compiles in this process, so there are no paths
+// No temp directory: the dziry side compiles in this process, so there are no paths
 // to hand a subprocess and nothing to clean up.
 const session = await chromeSession();
 
@@ -289,7 +289,7 @@ try {
       continue;
     }
 
-    const dz = dziriRow(el);
+    const dz = dziryRow(el);
     if (typeof dz === "string") {
       broke.push(`${el}: ${dz}`);
       continue;
@@ -320,7 +320,7 @@ try {
       }
 
       if (!field) {
-        // dziri cannot express this at all — which is the finding. But only when
+        // dziry cannot express this at all — which is the finding. But only when
         // Chrome's value differs from the property's CSS *initial* value: those
         // are the ones a default stylesheet is actually setting. `list-style-type`
         // is `disc` on every element by initial value and renders a marker only
@@ -338,8 +338,8 @@ try {
       const different = match ? !match(chrome, dz[field]!) : differs(kind, chrome, dz[field]!);
       if (different) {
         const why = knownReason(el, css, chrome, String(dz[field]));
-        if (why) known.push(`${css}: chrome ${chrome} · dziri ${dz[field]}  — ${why}`);
-        else diffs.push(`${css}: chrome ${chrome} · dziri ${dz[field]}`);
+        if (why) known.push(`${css}: chrome ${chrome} · dziry ${dz[field]}  — ${why}`);
+        else diffs.push(`${css}: chrome ${chrome} · dziry ${dz[field]}`);
       }
     }
 

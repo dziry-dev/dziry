@@ -12,30 +12,30 @@
   import { log, report } from "./_harness.js";
 
   /**
-   * dziri is about to build a form payload from the `name` attributes in a subtree,
+   * dziry is about to build a form payload from the `name` attributes in a subtree,
    * and every rule below is one people state from memory and get wrong. The entry set
    * is not "the fields" — it is a filtered, ordered, renamed projection of them, and
    * each filter costs the compiler a different amount:
    *
    * - **Exclusions.** Nameless, disabled, `type=button`, `type=reset`, an unchecked
    *   checkbox, an unchecked radio. All but one of those are compile-time facts, so
-   *   whether the exception is real decides whether dziri needs live state to build a
+   *   whether the exception is real decides whether dziry needs live state to build a
    *   payload at all.
    * - **`<fieldset disabled>`.** If disabledness is *inherited*, "is this field
-   *   disabled" is a walk up the ancestors rather than an attribute read, and dziri's
+   *   disabled" is a walk up the ancestors rather than an attribute read, and dziry's
    *   `disabled` handling is per-element today.
    * - **Defaulted values.** A checked checkbox with no `value` submits *something*, and
    *   an `<option>` with no `value` submits *something*. Both defaults are invented by
-   *   the parser rather than written by the author, so dziri has to invent the same one
+   *   the parser rather than written by the author, so dziry has to invent the same one
    *   or diverge on the commonest markup there is.
    * - **The submitter.** A `<button name>` is in the payload only when it is the button
    *   that submitted, which is the one entry that is not a property of the markup.
    * - **Ordering and duplicates.** Two fields sharing a name is legal and is how a
    *   multi-value field is written. Whether the pair keeps tree order decides whether
-   *   dziri can emit an array at build time.
+   *   dziry can emit an array at build time.
    *
    * `type=file` and `type=image` are measured only to record that they are out of
-   * dziri's scope, not to implement them.
+   * dziry's scope, not to implement them.
    */
 
   const stage = document.getElementById("stage");
@@ -137,7 +137,7 @@
     log("submitter: name, no value".padEnd(32) + " -> " + entries(form, valueless));
 
     // What a real submission reports, as opposed to what `new FormData(form, x)` builds:
-    // `event.submitter` is how a listener would find the same button, and dziri's own
+    // `event.submitter` is how a listener would find the same button, and dziry's own
     // submit path knows the button already — so the pair has to agree.
     form.addEventListener("submit", (e) => {
       e.preventDefault();
@@ -152,7 +152,7 @@
 
   // --- does the payload track live state, or the attributes? ----------------------
   //
-  // The whole design question for dziri: a compiled payload could be built from what the
+  // The whole design question for dziry: a compiled payload could be built from what the
   // author wrote, if what the author wrote is what a browser submits. It is not — this
   // pair is what proves the payload has to read live state.
   log("");

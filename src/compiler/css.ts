@@ -80,7 +80,7 @@ const SUPPORTED_PSEUDO = new Set<string>([
 /**
  * Pseudo-elements, which generate a box rather than select an existing one.
  *
- * This is the mechanism dziri uses *instead of* a shadow tree. Servo draws every
+ * This is the mechanism dziry uses *instead of* a shadow tree. Servo draws every
  * form control with zero lines of widget paint code by building its internals out
  * of UA CSS and pseudo-elements; a checkbox's tick is `content: "✓"` on a
  * generated box, not Skia geometry. Here the generated box is an ordinary emitted
@@ -122,7 +122,7 @@ const SUPPORTED_PSEUDO = new Set<string>([
  * `::picker(<ident>)` so that a future control can name a picker of its own, and
  * `select` is the one identifier defined today. Accepting a bare `::picker` would invent
  * a shorthand no browser has, which is the kind of divergence that only surfaces when
- * someone copies a stylesheet out of dziri and into a page.
+ * someone copies a stylesheet out of dziry and into a page.
  *
  * Unlike the other four, this one is a **box that contains authored children** rather
  * than a box holding text the compiler supplies. That is what makes it an overlay: the
@@ -366,7 +366,7 @@ function stripComments(src: string): string {
  * it will produce a wrong cascade before it produces an error.
  *
  * **`@supports` is deliberately not here.** Its body applies only if its condition
- * holds, and dziri cannot evaluate conditions like
+ * holds, and dziry cannot evaluate conditions like
  * `(-webkit-hyphens: none) and (not (margin-trim: inline))` — so inlining it would
  * be asserting the condition is true. Tailwind ships exactly that as a fallback
  * for engines without `@property`, and inlining it exposed a `*, ::before` rule
@@ -380,7 +380,7 @@ const TRANSPARENT_GROUPS = new Set(["@layer"]);
  *
  * `@theme` is Tailwind v4's: it is where every `--color-*`, `--spacing-*` and
  * `--font-*` is defined, and with it dropped, every `var()` in Tailwind's output
- * resolves to nothing. `:root` is the closest thing dziri already understands.
+ * resolves to nothing. `:root` is the closest thing dziry already understands.
  */
 const ROOT_DECL_GROUPS = new Set(["@theme"]);
 
@@ -661,7 +661,7 @@ function parseRuleList(
         // This is not a nicety: Tailwind v4 wraps every `hover:` utility in
         // `@media (hover: hover)`, and skipping it dropped all of them. Hover
         // appeared not to work at all, while the compiler reported one line about a
-        // media query — a symptom nowhere near its cause. dziri renders into an SDL
+        // media query — a symptom nowhere near its cause. dziry renders into an SDL
         // window with a mouse; `(hover: hover)` and `(pointer: fine)` hold, and
         // pretending otherwise is the wrong answer to a question we can answer.
         parseRuleList(text, bodyFrom, bodyTo, rules, order, registered, keyframes);
@@ -1240,7 +1240,7 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
     return { compounds: [], pseudos: [], element: null, specificity: [0, 1, 0], root: true };
   }
 
-  // `:host` matches the shadow host from inside a shadow tree. dziri has no
+  // `:host` matches the shadow host from inside a shadow tree. dziry has no
   // shadow DOM, so it matches nothing — which is the correct answer, not a
   // limitation. It is accepted rather than refused because Tailwind writes
   // `:root, :host` for its theme block, and refusing half of a selector list
@@ -1457,7 +1457,7 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
         if (role === "argument") {
           throw new CssError(
             `":${name}" cannot be used inside :is(), :where() or :not().\n` +
-              `  It selects an interaction state, which dziri compiles into a style\n` +
+              `  It selects an interaction state, which dziry compiles into a style\n` +
               `  variant for the whole rule — so there is no way to make it hold for\n` +
               `  only part of a selector. Write it on the rule instead.`,
             partAt,
@@ -1476,7 +1476,7 @@ function parseSelectorIn(src: string, at: number, role: SelectorRole): Selector 
         if (element !== null) {
           throw new CssError(
             `":${name}" must come before "::${element}" — a pseudo-class after a ` +
-              `pseudo-element selects the generated box, which dziri does not support yet`,
+              `pseudo-element selects the generated box, which dziry does not support yet`,
             partAt,
           );
         }
@@ -1528,7 +1528,7 @@ function applyFuncPseudo(
       const arg = func.args.trim().toLowerCase();
       if (!allowed.has(arg)) {
         throw new CssError(
-          `"::${func.name}(${func.args.trim()})" names no picker dziri knows.\n` +
+          `"::${func.name}(${func.args.trim()})" names no picker dziry knows.\n` +
             `  Supported: ${[...allowed].map((a) => `::${func.name}(${a})`).join(", ")}.`,
           func.offset,
         );

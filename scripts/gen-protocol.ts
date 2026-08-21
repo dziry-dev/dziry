@@ -545,7 +545,7 @@ function tsEnum(e: EnumDef): string {
 
 // ---------------------------------------------------------------------------
 
-const rustPath = join(ROOT, "native-src", "dziri-engine", "src", "protocol.rs");
+const rustPath = join(ROOT, "native-src", "dziry-engine", "src", "protocol.rs");
 const tsPath = join(ROOT, "src", "protocol", "generated.ts");
 
 await Bun.write(rustPath, emitRust());
@@ -572,7 +572,7 @@ if (!fmt.success) {
 const totalFields = TABLES.reduce((n, t) => n + t.fields.length, 0);
 console.log(
   `protocol v${PROTOCOL_VERSION}: ${TABLES.length} tables, ${totalFields} fields\n` +
-    `  -> native-src/dziri-engine/src/protocol.rs\n` +
+    `  -> native-src/dziry-engine/src/protocol.rs\n` +
     `  -> src/protocol/generated.ts`,
 );
 

@@ -1,4 +1,4 @@
-# dziri — API surface & status
+# dziry — API surface & status
 
 Planning + tracking file for the authoring API. Snippets are the spec; prose is kept out.
 Update the status column when something lands.
@@ -33,7 +33,7 @@ Claude's output from a brainstorm session, not agreed design. Do not treat them 
 - **Styling.** A stylesheet is reached by importing it from a module — `import "./app.css"` — and
   several imports cascade in module-graph order, as a bundler would order them. Tailwind is an
   ordinary project dependency: if a sheet asks for it, the project's own copy runs during the
-  compile, and nothing is generated onto disk. dziri ships a **full UA stylesheet**, unconditionally
+  compile, and nothing is generated onto disk. dziry ships a **full UA stylesheet**, unconditionally
   — same as a browser. Tailwind
   is not the only supported way to write CSS; plain CSS is first-class. A Tailwind user gets a
   reset because Preflight is author CSS that undoes the UA sheet, exactly as in a browser. No
@@ -62,7 +62,7 @@ Claude's output from a brainstorm session, not agreed design. Do not treat them 
   on removal. The earlier "fires nothing" measurement came from a backgrounded tab, where Chrome
   suppresses focus events. So we match the browser and emit the events — matching is free here.*
 
-  Not a divergence, despite appearances: dziri's collapse is a `hidden` byte, but the developer
+  Not a divergence, despite appearances: dziry's collapse is a `hidden` byte, but the developer
   wrote *"collapse this node"*, not `display:none`. The browser's contract for **the thing went
   away** is `activeElement === BODY`, which is what we do.
 
@@ -109,7 +109,7 @@ Anything that trades robustness for capability stays a proposal.
 | `bind:value` | **done** for text-entry fields, and it is two-way — typing writes the signal, and a signal write repaints the field (so a loader can seed an edit form). The display half is a text binding jsx() inserts as the field's child; a launch-ordering gap that swallowed writes from an initial route's sync loader was fixed 2026-08-21 and is pinned by a test. This row previously said "append + backspace" — caret, selection, word-select and Home/End all landed with A5. Still missing: clipboard and IME (A5's remainder) | M12 |
 | form controls — `<Checkbox>` `<Switch>` `<Radio>` `<Toggle>` `<Tabs>` `<Input>` | planned — see **Form controls** below | C2 |
 | `<form>` — payload by `name`, `onSubmit`, `validate`, `onInvalid` | **done** — see **Form controls** below | A3 |
-| `alert()` — the platform's modal message box | **done** — `SDL_ShowSimpleMessageBox` behind the FFI, so it is a Win32 task dialog, an `NSAlert` or the GTK box and not something dziri draws. Nothing was vendored: SDL3 is already linked. Shown on the engine thread, because SDL requires the thread that initialised video, so app code posts a message; headless is a no-op so screenshots and goldens are unaffected | — |
+| `alert()` — the platform's modal message box | **done** — `SDL_ShowSimpleMessageBox` behind the FFI, so it is a Win32 task dialog, an `NSAlert` or the GTK box and not something dziry draws. Nothing was vendored: SDL3 is already linked. Shown on the engine thread, because SDL requires the thread that initialised video, so app code posts a message; headless is a no-op so screenshots and goldens are unaffected | — |
 | `confirm()` / `prompt()` | planned — the same call with an answer, which needs a reply message rather than a return value: the thread that would answer is the one the dialog is blocking | — |
 | `effect` `untrack` `peek` cleanup, `createScope` disposal scopes | **done** (2026-08-20) — `src/runtime/signal.ts`: `effect(fn)` (cleanup via return, dispose via handle, batched), `untrack(fn)`, `sig.peek()`, `createScope()` with transitive disposal. Includes the dep-set fix: re-capturing subscribers leave sets they no longer read | M6 |
 | `Show` | **done** (2026-08-21) — `<Show when={…} fallback={…}>` (`src/compiler/show.ts`): both trees compile in as co-resident siblings — the route/`<Suspense>` mechanism — and the worker flips `hidden` bytes on the condition's truthiness (`applyShows`, `src/host/window-state.ts`). `when` takes any cell: a module signal/computed by identity, or an inline expression (`when={count > 5}`) the transform wraps and the artifact re-creates as `computed(() => …)`. A **constant** `when` is resolved at build time — the winning tree is spliced, the loser never becomes nodes. `fallback` is optional (a closed Show is deliberately nothing; a pending Suspense is not, which is why its fallback stays required). The compiled hidden column ships the condition's build-time value, so the first frame needs no write; the worker settles once at launch for loader-seeded cells. One walk splices both marker kinds, so a bare `<Show>` at a `<Suspense>`'s top level (and every other bare cross-nesting) is refused — wrap it in an element | M3 |
@@ -127,14 +127,14 @@ Anything that trades robustness for capability stays a proposal.
 | `useRouter().matches(path)` | **done** — prefix-aware cell, compiled to a `computed` in the artifact | M7 |
 | `<Window>` / `<Outlet>` | **done** — `src/compiler/window.ts`, spliced by `bun run window` | M7 |
 | one table set per window, inactive routes `hidden` | **done** — emitted `hidden` column, `routeChain` | M7 |
-| `navigate` / `back` | **done** (2026-08-20) — `src/runtime/navigate.ts`, exported from `dziri`. The host installs the window's route signal at launch; `navigate(path)` writes it (same-path early-out), `back()` reads the one-entry history — one entry by decision, so a second `back()` oscillates. `navigate("…")` literals in captured handler sources are checked against the route table like hrefs (`deadNavigations` in build.ts); module-level handler bodies cross the boundary as names and are the `Href` type's to check. Before the window is up, `navigate()` warns and does nothing — modules are also imported by the compiler | M7 |
+| `navigate` / `back` | **done** (2026-08-20) — `src/runtime/navigate.ts`, exported from `dziry`. The host installs the window's route signal at launch; `navigate(path)` writes it (same-path early-out), `back()` reads the one-entry history — one entry by decision, so a second `back()` oscillates. `navigate("…")` literals in captured handler sources are checked against the route table like hrefs (`deadNavigations` in build.ts); module-level handler bodies cross the boundary as names and are the `Href` type's to check. Before the window is up, `navigate()` warns and does nothing — modules are also imported by the compiler | M7 |
 | `useRoute` params as bindings | **done** (2026-08-18) — recorders (`route-args.ts`) reach the emitter through the param sentinel; `$id` binds as a signal the router writes on navigation. The demo's `products/$id.tsx` renders `{id}` live | M7 |
 | `href` checked against the route table | **done** (2026-08-20) — `matchHref` in `src/compiler/routes.ts` (first hit over the match-ordered table, so static-beats-param is the existing sort), `auditLinks` in `src/compiler/build.ts`. A dead link fails the build naming the window's routes; a checked link's click is synthesized as a write to the window's route signal, and an authored `onClick` wins over synthesis. Refused by name rather than half-working: interpolated hrefs, links inside list templates without an `onClick`, and external URLs | M7 |
 | `defineScreen` | superseded — `defineRoute()` route objects (2026-08-18) carry what `defineScreen` was for: `args` had already moved to `useRoute`, and `data` is the loader's success value | M8 |
 | route `loader` — sync fn \| async fn \| Effect; exits drive navigation | **done** (2026-08-18) — `defineRoute()` route objects: loader as sync fn \| async fn \| Effect, `Redirect`/`Cancel` exits navigate, Effect recognised by its registered symbol and imported lazily. Failure renders the route's `errorComponent` and in-flight its `loadingComponent` — the design's `failure.tsx` tag-named exports did **not** ship; the route object carries the views instead. Demo: `products/$id.tsx` | M7/M8 |
 | `<Window layer={…}>` — Effect Layer as the window's DI root | **done** (2026-08-15) — `src/compiler/window.ts` captures it, `src/compiler/build.ts` resolves it to an export name, `src/runtime/effects.ts` builds the ManagedRuntime at launch and disposes it on quit so `Layer.scoped` finalizers run. Launch-failure *view* still rides M8; today a failed layer prints at launch | — |
 | handlers may return an `Effect` — run on the window's runtime | **done** (2026-08-15) — every dispatch path (`click`/`change`/`focus`/`blur`, list items, form `submit`/`invalid`) hands the return to `runDispatched`; failures print the full Cause, interruption is silent. `effect` recognised structurally and imported lazily; apps without it load none of it | — |
-| `Redirect` / `Cancel` navigation tags | **done** (2026-08-15) — exported from `dziri`, dependency-free classes failable from Effects and throwable from plain functions; the router that *interprets* them rides M7/M8 with `loader` | — |
+| `Redirect` / `Cancel` navigation tags | **done** (2026-08-15) — exported from `dziry`, dependency-free classes failable from Effects and throwable from plain functions; the router that *interprets* them rides M7/M8 with `loader` | — |
 | `defineQuery` / `defineMutation` | planned | — |
 | `import "./app.css"` from a window module | **done** — module-graph order, `src/compiler/css-imports.ts` | — |
 | Tailwind as an ordinary project dependency | **done** — the project's `tailwindcss`, run in-process, `src/compiler/stylesheet.ts` | — |
@@ -200,12 +200,12 @@ an `HWND` and Taffy cannot lay one out, so child windows would contradict the th
 merely cost more. Sequencing and the full reasoning live in ROADMAP under A3 and C2.
 
 **A control's internals are ordinary nodes, and there is no shadow DOM.** Every part is styleable
-with plain CSS — Tailwind is one way to write it, not the surface itself. This is not a dziri
+with plain CSS — Tailwind is one way to write it, not the surface itself. This is not a dziry
 invention: the customizable-`<select>` model MDN documents *is* light-DOM children —
 `<select><button><selectedcontent></selectedcontent></button><option>…</option></select>` — with
 `appearance: base-select` as the opt-in and `::picker(select)` defined as "all descendants except
 the first `<button>`", which is a structural grouping a compiler computes. So there is nothing to
-pierce: no `::part`, no `::-webkit-*`, no `:host` (which dziri parses and matches nothing, by
+pierce: no `::part`, no `::-webkit-*`, no `:host` (which dziry parses and matches nothing, by
 design). A generated box — `::before` today, `::picker-icon` later — is a real emitted node, so it
 lays out in Taffy, paints in the ordinary pass, and has a hit region, none of which a shadow tree or
 a paint-time rect would give. Its per-node predicates come from its originating element, so
@@ -281,7 +281,7 @@ is a build error rather than an arbitrary winner.
 `name="user[email]"` is the literal key `"user[email]"` in `FormData`, at both the API and the
 wire layer, and `enctype="application/json"` — the W3C proposal that standardised the bracket
 syntax — is not even reflected (BROWSER-FACTS.md, "A nested-looking `name` is just a string").
-So nesting belongs to server-side parsers, each with its own dialect. dziri nests by structure
+So nesting belongs to server-side parsers, each with its own dialect. dziry nests by structure
 instead, because a compiler can see structure: no path is parsed, and a conflict is reported.
 `tags[]` needed no equivalent — two controls sharing a name already give an array, which is
 what the brackets were hinting at.
@@ -322,7 +322,7 @@ With Tailwind, define the variant in its **prefix** form. This is not a preferen
 ```
 
 Tailwind's default form emits `.error\:block:is(:where(.group\/error) *)`, and the `*` inside
-`:is()` is not a selector dziri parses. Both spellings were generated with the real Tailwind
+`:is()` is not a selector dziry parses. Both spellings were generated with the real Tailwind
 CLI and fed to the compiler.
 
 **`<span error />`** marks where the message goes: its text becomes a run bound to a cell the
@@ -393,7 +393,7 @@ problem because `FormData` is a multimap with no shape to keep stable.
 Standard Schema interop spec, which Zod 4, Valibot and ArkType implement natively — is used
 through it. An **Effect** schema does not carry it (measured, effect 3.22), so it is recognised by
 its `ast` and converted with Effect's own `Schema.standardSchemaV1` behind a lazy import: `effect`
-is a dependency of the app that passed one and never of dziri. A plain
+is a dependency of the app that passed one and never of dziry. A plain
 `(data) => issues | null` is the third accepted shape. A schema **narrows what `onSubmit`
 receives** — its output, so `z.coerce.date()` hands over a `Date` — and a rejected payload runs
 `onInvalid(issues)` instead, with issues normalised to `{ path, message }[]` whichever validator
@@ -490,7 +490,7 @@ rather than flipping above its select, which is ROADMAP B2's job — no scroll-o
 | checkbox and radio activation, radio groups, label forwarding | **done** — protocol v13. A radio group is keyed on `(form, name)`, measured | A3 |
 | `:indeterminate` | planned — same shape and cost, held back until a control can be in that state | A3 |
 | `::before` / `::after` + `content` | **done** — generated boxes are real emitted nodes; this is what replaces a UA shadow tree | A1 |
-| `::picker(select)` | **done** — protocol v18, and the first *functional* pseudo-element. `::picker` bare is refused: the spec defines the argument so a future control can name a picker of its own, and a shorthand no browser has is a divergence someone copies out of dziri | C2 |
+| `::picker(select)` | **done** — protocol v18, and the first *functional* pseudo-element. `::picker` bare is refused: the spec defines the argument so a future control can name a picker of its own, and a shorthand no browser has is a divergence someone copies out of dziry | C2 |
 | `::picker-icon` `::checkmark` `::marker` | planned — same machinery as `::before`, refused by name until the parts they draw exist. The demo's arrow is `select button::after` today, which is the same node either way | C2 |
 | attribute selectors — `[a]` `=` `~=` `\|=` `^=` `$=` `*=`, `i` flag | **done** — `input[type=checkbox]` is how a UA sheet names one control among twenty-two | A1 |
 | `<input>` `<select>` `<option>` `<textarea>` `<label>` … as real tags | **done** — they compile to ordinary boxes; being a tag is not being a widget | C2 |
@@ -500,8 +500,8 @@ rather than flipping above its select, which is ROADMAP B2's job — no scroll-o
 | the overlay layer — paint after, hit-test before | **done** — `NodeFlags.OVERLAY`, and it is a flag rather than a second tree because the subtree is already in the right place: only its turn in the walk moves. Both halves are load-bearing and for different reasons — in tree order a picker draws *under* what follows its select, and `hit_test` prunes on the parent's box, which a picker hangs below | B1 |
 | opening a picker costs no relayout | **done** — the box is `position: absolute` and laid out whether or not it shows, so showing it is a pure paint decision. The same split `::placeholder` uses. Committing *does* relayout, once, because the closed button's width comes from the chosen label | B1 |
 | `:open` | **done** — one integer for the document, because only one popover can be open at a time (measured). Reaches `select::picker(select)` through `GENERATED`, so it means "the picker of an open select" | B1 |
-| anchor positioning, collision handling | **half done** — the engine offsets a picker onto its select's bottom edge from the two rects layout produced, because the spec's `top: anchor(bottom)` has no dziri spelling (`top: 100%` would be it, and percentage lengths are refused). It does **not** flip or shift near a window edge; that is B2's `@floating-ui/core` adapter | B2 |
-| a picker as wide as its select | **done** — `left: 0; right: 0` in the UA sheet, which stretches an absolute box to its containing block. That is the spec's `min-inline-size: anchor-size(self-inline)` reached with two plain lengths, and unlike a width in a theme it cannot drift out of step. It is a *fixed* size rather than a minimum: an option longer than the select will not widen the picker, which needs `min-inline-size` with a value dziri cannot yet express | B2 |
+| anchor positioning, collision handling | **half done** — the engine offsets a picker onto its select's bottom edge from the two rects layout produced, because the spec's `top: anchor(bottom)` has no dziry spelling (`top: 100%` would be it, and percentage lengths are refused). It does **not** flip or shift near a window edge; that is B2's `@floating-ui/core` adapter | B2 |
+| a picker as wide as its select | **done** — `left: 0; right: 0` in the UA sheet, which stretches an absolute box to its containing block. That is the spec's `min-inline-size: anchor-size(self-inline)` reached with two plain lengths, and unlike a width in a theme it cannot drift out of step. It is a *fixed* size rather than a minimum: an option longer than the select will not widen the picker, which needs `min-inline-size` with a value dziry cannot yet express | B2 |
 | keyboard: which keys open a closed select | **done** — ArrowDown, ArrowUp, **Space**, **F4** and **Alt+ArrowDown**, all measured 2026-08-06. **Enter does not open one** — measured, and it was asserted to: Enter is the *commit* key, and one that also opened would make Down-then-Enter ambiguous. The belief comes from a legacy select in a `<form>`, where Enter submits, and from macOS | B1 |
 | keyboard: reaching a select at all | **not done, and this is the gap that matters** — there is no Tab order, so a `<select>` cannot be focused without a pointer. Every keyboard behaviour above is therefore only available to someone who can already use a mouse, which is not keyboard accessible however correct the arrow handling is | A3 |
 | `<optgroup>` | **half done** — its options are the select's own: they arrow, highlight and commit like any other, and the group is descended into rather than scanned past. The `label` attribute is accepted, selectable by `[label]`, and **not rendered** — that wants a generated box whose text comes from an attribute, which is exactly what `::placeholder` already does | C2 |
@@ -511,14 +511,14 @@ rather than flipping above its select, which is ROADMAP B2's job — no scroll-o
 | `<Input>` | planned | C2 · Tier 1b (needs A5) |
 | `onSubmit` receives the form's payload | **done** — collected by `name` from the form's subtree, typed by control kind, with the browser's inclusion rules (measured, `probes/form-data.html`). `src/compiler/fields.ts` decides the shape, `src/runtime/forms.ts` reads the cells | A3 |
 | a named field with no `bind:value` | **done** — the compiler declares its cell in the artifact, so a browser-shaped form needs no state module. Typing reaches it through the same `editables` table a bound field uses | A3 |
-| `validate={schema}` — Zod, Valibot, ArkType, Effect | **done** — through Standard Schema's `~standard`, plus one lazy-import branch for a raw Effect schema, which carries no `~standard` of its own (measured, effect 3.22). dziri depends on none of them | A3 |
+| `validate={schema}` — Zod, Valibot, ArkType, Effect | **done** — through Standard Schema's `~standard`, plus one lazy-import branch for a raw Effect schema, which carries no `~standard` of its own (measured, effect 3.22). dziry depends on none of them | A3 |
 | `onInvalid` | **done** — issues normalised to `{ path, message }[]` from all three validator shapes | A3 |
 | `field="…"` — nesting by wrapper | **done** — the wrapper chain is the path, so `{ position: { x, y } }` needs no bracket syntax. No browser nests anything (measured); a path claimed as both a value and a group is a build error | A3 |
 | `errorClassName` + `<span error />` | **done** — a class on the wrapper, compiled to style-table patches, so the error story is CSS. Independent per wrapper even when the class string is shared | A3 |
 | `<span error="city" />` — a named message inside a group | **done** — the name is relative to the wrapper, as `name` is, so a group stays movable. Each marker shows the first issue under its own path that no *more specific* marker would show, which divides a group's complaints between its leaves and its own line with nothing said twice. The class stays singular: "something here is wrong" is one fact however many messages describe it. A name no field produces is a build warning, because a marker that can never fill looks exactly like a field that is never wrong | A3 |
 | `validateOn="submit\|change\|blur"` | **done** — plus two rules that are behaviour rather than knobs: re-validate on change after a failed submit, and no error before a field has moved off its compiled value | A3 |
 | per-field `touched` / `dirty` as styling hooks | **refused by name** — `touched` exists in other libraries to gate error display, which `validateOn` does; per-field `dirty` styling is a need nobody has demonstrated. Reversible: each would be one more class toggle | — |
-| the submitter's own `name`/`value` entry | **not done** — measured (a named `<button type=submit>` contributes only when it is the button that submitted) and deliberately left out: it is the one entry that is not a property of the markup, and a two-button form in dziri would use two `onClick`s | — |
+| the submitter's own `name`/`value` entry | **not done** — measured (a named `<button type=submit>` contributes only when it is the button that submitted) and deliberately left out: it is the one entry that is not a property of the markup, and a two-button form in dziry would use two `onClick`s | — |
 | `form="id"` association | **done** — ownership rather than ancestry, resolved once and read by all three questions a form asks: its payload, its default button, and its blocking-field count. Measured (`probes/form-owner.html`), including that a `form=` naming no form **orphans** the control rather than falling back to its ancestor | A3 |
 | a `field` wrapper holding a `map()` — repeating rows | **done** — the wrapper's value is the list's array, so the payload gains `Job[]` with one entry per live row. The only field whose state the compiler does not declare: an arena of interchangeable replicas has nothing stable to hang a per-row cell on, and the array has a keyed entry per row already. `bind:value={job.title}` writes back into it | A3 |
 | a *named* control inside a `map()` row | **refused by name** — a `name` in a template is the same string in every row, so two rows' entries would be indistinguishable. The array field above is the way rows reach a payload | — |
@@ -528,13 +528,13 @@ rather than flipping above its select, which is ROADMAP B2's job — no scroll-o
 | an `alert()` raised from a handler shows the frame that caused it | **done** — the request is queued until the app thread's next commit and the engine paints once more before blocking. It is raised inside the submit `batch()`, so nothing had reacted to the error cells yet: the box went up over the pre-submit picture, listing complaints that were invisible behind it | A3 |
 | `:user-invalid` | **refused by name** — it differs from `:invalid` only in when a browser lets it match, and that timing is already `validateOn` plus the pristine-field gate. Two spellings would put one rule in two places | — |
 | `<input type=file>` in a payload | **refused by name** — there is no file picker, so there is no file to submit; a named one warns rather than contributing an empty entry | — |
-| a **disabled** `<option>` that is selected | **known divergence** — measured to make its whole `<select>` contribute nothing; dziri submits its value | — |
+| a **disabled** `<option>` that is selected | **known divergence** — measured to make its whole `<select>` contribute nothing; dziry submits its value | — |
 | `onChange` vs `onInput` | planned | A3 |
 | a click focusing a bound field | **done** — editables are `INTERACTIVE`, so `hit_test` can return one | A3 |
 | an empty field is still one line high | **done** — `NodeFlags.EDITABLE`, protocol v14. Measured: a field's height is its *font*, not its content | A5 |
 | `::placeholder` | **done** — protocol v15. An ordinary generated box, like `::before`, with two differences: its text comes from the attribute rather than `content`, and paint draws it only while the field is empty | C2 |
 | a disabled field refuses focus | **done** — a disabled form control now gets a `controls` row, so the engine can see it. A press on one produces no `mousedown`, `mouseup` or `click` at all, as measured | A3 |
-| `<input type=number\|range>` is typeable | **done** — it was in the payload's kind table before it had an editor, so it compiled to a box with no line height: four pixels of border, which is what the forms demo drew where its age field should have been. A browser routes both to the same text editor and adds chrome dziri has no equivalent for (a spinner, a slider track), so being typeable is the part that transfers. The implicit-submission **blocking** set stays the six text keywords it was measured over — widening it here would have changed a measured rule as a side effect of a layout fix, and whether a `number` blocks is unmeasured | A5 |
+| `<input type=number\|range>` is typeable | **done** — it was in the payload's kind table before it had an editor, so it compiled to a box with no line height: four pixels of border, which is what the forms demo drew where its age field should have been. A browser routes both to the same text editor and adds chrome dziry has no equivalent for (a spinner, a slider track), so being typeable is the part that transfers. The implicit-submission **blocking** set stays the six text keywords it was measured over — widening it here would have changed a measured rule as a side effect of a layout fix, and whether a `number` blocks is unmeasured | A5 |
 | a field's **width** from `size` | planned — `29 + 7 × size` px is measured (BROWSER-FACTS.md), and unimplemented: `size="20"` does nothing, so an `<input>` with no width class fills its container instead of being 169px | A5 |
 | caret — position, blink, `caret-color` | **done** — a click resolves to the nearest character boundary (measured); the blink is an engine timer, so it survives a busy Bun | A5 |
 | arrow keys, Home/End | **done** — consumed by the engine, never forwarded, so a caret move costs one rect and no round trip | A5 |
@@ -545,7 +545,7 @@ rather than flipping above its select, which is ROADMAP B2's job — no scroll-o
 | selection — drag, Shift+Arrow, Shift+click | **done** — the engine holds `(anchor, focus)`, not an ordered range, because that is the only shape a Shift reversal survives: from a caret at 5, Shift+Left walks `5..6`, `5..5`, `4..5 backward` with the anchor still at 5 (measured) | A5 |
 | double click for a word, triple click / Ctrl+A for all | **done** — the segment at the *nearest boundary* plus its trailing whitespace run, which is one rule over thirteen measured rows. A double click does **not** use the character under the pointer: at 9.55 in `quick-brown` it selects `brown ` | A5 |
 | editing over a selection | **done** — one splice replaces the range. Backspace and Delete are *identical* once a range is live, so the direction only widens a collapsed caret; insertion leaves the caret after what it inserted | A5 |
-| `::selection` | **done** — protocol v17. Two inherited colours on the originating element's row, not a node: a selection is a range inside a box rather than a box. The default is a **stated convention** in dziri's UA sheet, because Chromium does not expose its own highlight colour to script | A1 |
+| `::selection` | **done** — protocol v17. Two inherited colours on the originating element's row, not a node: a selection is a range inside a box rather than a box. The default is a **stated convention** in dziry's UA sheet, because Chromium does not expose its own highlight colour to script | A1 |
 | clipboard — Ctrl+C/X/V, ⌘ on macOS | **done** (2026-08-21) — the *decision* lives in the engine beside Ctrl+A, because the forwarded `KEY_DOWN` deliberately carries no modifier mask. Copy never crosses the boundary; a cut arrives as the Backspace-over-a-range it is; a paste is a new `PASTE` event whose text waits in the engine (`Event.text` is 32 bytes) and is fetched beside the drain. Line breaks become spaces, one per break — measured, BROWSER-FACTS.md "Newlines in a single-line input". Headless engines get a process-local fallback clipboard, which is what makes `tests/clipboard.rs` possible | A5 |
 | IME, double-click-then-drag by word | planned — a drag after a double click extends by character | A5 |
 | a `<label>` click focusing a text field | planned — `activates` forwards to control kinds only, and a text field is not one | A3 |
@@ -589,11 +589,11 @@ canonical order, so this only bites hand-written lists.
 | easing — keywords, `cubic-bezier()`, `steps()` | **done** — solved by Newton with a bisection fallback, checked against the measured progress table | B3 |
 | interrupting a transition | **done** — a reversal is the same pair of rows *rewound*, so it takes the distance still to travel and starts from the value already reached, measured | B3 |
 | `transition` on a layout-affecting property | **refused by name**, with a build warning naming the property — only paint reads an interpolated value, so honouring it would ease a colour while the geometry jumped | — |
-| per-property timing — `transition: opacity 1s, transform 2s` | **warned by name** — CSS really does compute two durations, measured; dziri carries one timing per node and uses the first entry's. Tailwind never emits this shape | — |
+| per-property timing — `transition: opacity 1s, transform 2s` | **warned by name** — CSS really does compute two durations, measured; dziry carries one timing per node and uses the first entry's. Tailwind never emits this shape | — |
 | `animation-direction: alternate`, `animation-fill-mode`, two animations on one element | **warned by name** — each runs forwards, once through, one at a time | — |
 | a transition retargeted mid-flight to a *third* row | approximated, and said so here: it restarts from the row it was heading to, which is exact whenever the previous tween had settled (hover then press) and jumps by the residual when it had not. The value it is leaving is an interpolation, and there is no interned row holding one | — |
 | `prefers-reduced-motion` | planned — **disables** animation rather than slowing it, and it wants a global predicate bit rather than a media *threshold*, which is what the `media` table currently holds | B3 |
-| `transition-behavior: allow-discrete` | parsed and ignored — it only governs properties dziri refuses to transition anyway, so honouring it would change nothing | — |
+| `transition-behavior: allow-discrete` | parsed and ignored — it only governs properties dziry refuses to transition anyway, so honouring it would change nothing | — |
 
 `@property` came with this and was not optional. Tailwind compiles `translate-x-4` to
 `--tw-translate-x: 1rem; translate: var(--tw-translate-x) var(--tw-translate-y)` and never sets
@@ -605,7 +605,7 @@ inside it by its own offset.
 
 ### What a transition costs, and why it is that little
 
-dziri resolves *both endpoints of a transition at compile time*. A node with `:hover` carries a
+dziry resolves *both endpoints of a transition at compile time*. A node with `:hover` carries a
 predicate mask and a run of fully-resolved style slots — base and hover, both interned — and
 `style_for` already picks one per frame. So a transition is interpolation between two rows the
 compiler already computed, and what stays at runtime is the clock and the current `t`.
@@ -638,7 +638,7 @@ why they were the right slice.
 
 `dt` is a **parameter** everywhere rather than read from a clock: `tick` samples it once and passes
 it to both `advance_scrolls` and `advance_animations`. That is what makes a frame reproducible, and
-`--advance 0.25` plus `dziri_engine_set_time_step` is what turns "an animation" into a golden
+`--advance 0.25` plus `dziry_engine_set_time_step` is what turns "an animation" into a golden
 screenshot at an exact `t`. Without it the same scenario is a different picture every run — measured
 the hard way, three renders and three files.
 
@@ -687,7 +687,7 @@ files in a route folder ordinary; here there are no other files.
 // windows/main/index.tsx
 export default function Main() {
   return (
-    <Window title="dziri">
+    <Window title="dziry">
       <Outlet />
     </Window>
   );

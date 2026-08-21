@@ -1,19 +1,19 @@
 /**
- * `dziri/livestore` — LiveStore's reactive binding, dziri's analog of
+ * `dziry/livestore` — LiveStore's reactive binding, dziry's analog of
  * `@livestore/react`.
  *
  * Two exports, both plain `source()`s. The store engine stays `@livestore/livestore`;
  * this module imports its types *only* (erased at runtime, zero bytes) and turns a
- * query into a dziri signal that `{todos.length}` re-renders from on commit.
+ * query into a dziry signal that `{todos.length}` re-renders from on commit.
  *
- * The store is an explicit argument — dziri has no component tree, so there is no
+ * The store is an explicit argument — dziry has no component tree, so there is no
  * `StoreProvider`/context. `useQuery` is renamed `liveQuery` (TanStack Query owns
- * `useQuery`, and dziri's `use*` names are build-time hooks; this is a runtime
+ * `useQuery`, and dziry's `use*` names are build-time hooks; this is a runtime
  * source). `useSyncStatus` keeps its React name for parity.
  *
  * This is the seam `src/effect.ts` establishes for Effect, applied to LiveStore: the
- * type-only import keeps dziri dependency-free at runtime, so an app that never
- * imports `dziri/livestore` never loads a byte of `@livestore/livestore`.
+ * type-only import keeps dziry dependency-free at runtime, so an app that never
+ * imports `dziry/livestore` never loads a byte of `@livestore/livestore`.
  */
 import type { Store, Queryable, SyncStatus } from "@livestore/livestore";
 import { computed } from "./runtime/signal.ts";

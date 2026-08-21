@@ -144,7 +144,7 @@ initial value. The subscribe runs once at launch (never while the compiler impor
 the module), and the unsubscribe runs on window close.
 
 What the subscribe **returns** decides the shape. Return an unsubscribe and it is a
-callback source that needs nothing. Return an Effect `Stream` and dziri runs it
+callback source that needs nothing. Return an Effect `Stream` and dziry runs it
 with `Stream.runForEach`, importing `effect` lazily — see
 [Effect](../guide/effect.md#source--a-signal-from-a-stream).
 
@@ -164,7 +164,7 @@ alert("Could not reach the server.", { level: "error", title: "Offline" });
 ```
 
 The platform's own modal message box — a Win32 task dialog, an `NSAlert`, the GTK box.
-`SDL_ShowSimpleMessageBox` behind an FFI call, so it is not something dziri draws; a dialog
+`SDL_ShowSimpleMessageBox` behind an FFI call, so it is not something dziry draws; a dialog
 drawn by the framework would be the one part of your app that does not look like the system.
 
 `level` is an `AlertLevel` — `"info"` (the default), `"warning"` or `"error"` — and `title` defaults to your
@@ -213,7 +213,7 @@ is one predicate.
 ## Types
 
 ```ts
-import type { MapOptions, ReadonlySignal, Signal } from "dziri";
+import type { MapOptions, ReadonlySignal, Signal } from "dziry";
 ```
 
 `ReadonlySignal<T>` is `T & Ops<T>` — readable, subscribable, mappable, but no `.set`.
@@ -308,7 +308,7 @@ handles by hand.
 <Status of="resource" />
 
 ```ts
-import { resource } from "dziri";
+import { resource } from "dziry";
 
 async function fetchStats(): Promise<{ users: number }> {
   return { users: 42 };

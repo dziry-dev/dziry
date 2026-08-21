@@ -1,6 +1,6 @@
 # Browser facts — measured, not remembered
 
-dziri repeatedly has to answer *"what does a browser actually do here?"* — for focus, cascade,
+dziry repeatedly has to answer *"what does a browser actually do here?"* — for focus, cascade,
 list markers, form controls, scroll anchoring, IME. Recalled answers are wrong often enough to
 be dangerous, so every answer here is **measured** and stamped with the engine and version.
 
@@ -48,7 +48,7 @@ disagreed, and reading `document.activeElement` around the dispatch appears to p
 result. Needs a probe that observes without touching `activeElement`. Not currently
 decision-bearing.
 
-**Bearing on dziri:** collapse is a `hidden` byte, i.e. `display:none` semantics — so copying
+**Bearing on dziry:** collapse is a `hidden` byte, i.e. `display:none` semantics — so copying
 Chromium literally would strand focus on an invisible node that still swallows keystrokes. And
 recycling a row and re-seating the same item does *not* restore focus under browser rules, so
 keying focus to the logical item is **better than** the platform, not equivalent to it.
@@ -70,9 +70,9 @@ keying focus to the logical item is **better than** the platform, not equivalent
 | `border-top-style` | solid |
 
 `border-color`'s initial value is `currentcolor`, which resolves to the element's computed
-`color`. dziri's `INITIAL_STYLE.borderColor` is `0` — fully transparent.
+`color`. dziry's `INITIAL_STYLE.borderColor` is `0` — fully transparent.
 
-**Bearing on dziri:** `border: 2px solid` with no colour is invisible in dziri and text-coloured
+**Bearing on dziry:** `border: 2px solid` with no colour is invisible in dziry and text-coloured
 in a browser. Together with the `border-style` gap below, borders diverge in *both* directions —
 one paints when it should not, the other does not paint when it should. Both are things a web
 developer hits on their first stylesheet.
@@ -88,7 +88,7 @@ answered yes.
 
 **Measured 2026-07-31 · Chromium 151 · `bun run conformance` (first run, found immediately).**
 
-| Declared | Chrome computed `border-top-width` | dziri |
+| Declared | Chrome computed `border-top-width` | dziry |
 |---|---|---|
 | `border-width: 2px` | **0px** | 2 |
 | `border: 2px solid #3f3f46` | 2px | 2 |
@@ -96,8 +96,8 @@ answered yes.
 `border-style` defaults to `none`, and a `none` border computes to width `0` regardless of what
 `border-width` says. So bare `border-width` paints nothing in a browser.
 
-**Bearing on dziri:** there is no `border-style` field in `STYLE_FIELDS`, and `expand()` in
-`css.ts` has no `border-style` case — so dziri paints a 2px border where a browser paints none.
+**Bearing on dziry:** there is no `border-style` field in `STYLE_FIELDS`, and `expand()` in
+`css.ts` has no `border-style` case — so dziry paints a 2px border where a browser paints none.
 A web developer copying CSS in will hit this. Options are to add `border-style` (at minimum
 `none | solid`, since that is the meaningful distinction here), or to treat a `border-width`
 with no style as zero. The second is cheaper and matches the browser; the first is needed anyway
@@ -149,9 +149,9 @@ case, bursting its own grid track:
    card's *min-content contribution* still includes the unbreakable word, so the track still
    overflows. Fixing that needs `overflow: hidden` or a word-break, not `min-width`.
 
-**Bearing on dziri — this refuted a decision, it did not confirm one.** `overflowX`/`overflowY`
+**Bearing on dziry — this refuted a decision, it did not confirm one.** `overflowX`/`overflowY`
 were implemented as independent fields taking `visible` literally, and `app.css` sets only
-`overflow-y: auto` on the body. Chromium computes `overflow-x: auto` there; dziri computed
+`overflow-y: auto` on the body. Chromium computes `overflow-x: auto` there; dziry computed
 `visible`, so a too-narrow window clipped the right-hand column with no way to reach it — which
 is what was reported. The layout was never wrong; the *reachability* was. Fixing it is the
 coercion rule, applied where computed values are resolved, plus a distinct `CLIP` value so the
@@ -194,7 +194,7 @@ Root scroller: `innerWidth - documentElement.clientWidth` = **15**, same number.
 4. **The gutter is per axis**, matching the axis that scrolls, and both are reserved when both
    scroll.
 
-**Bearing on dziri.** The compiler collapses `auto` and `scroll` into one `SCROLL` value
+**Bearing on dziry.** The compiler collapses `auto` and `scroll` into one `SCROLL` value
 (`src/compiler/css.ts` `overflowKeyword`), and Taffy's `scrollbar_width` is a *static* style
 input — it reserves unconditionally for `Overflow::Scroll`, which is `scroll` semantics. So with
 one wire value there is no setting of `scrollbar_width` that is right for both rows above:
@@ -202,7 +202,7 @@ one wire value there is no setting of `scrollbar_width` that is right for both r
 overflows, and Tailwind's `overflow-y-auto` is by far the common case. Chromium reaches the
 conditional answer by laying out twice.
 
-That is the measured reason dziri draws an **overlay** scrollbar over the content and keeps
+That is the measured reason dziry draws an **overlay** scrollbar over the content and keeps
 `scrollbar_width` at 0 — not an unimplemented gutter. Reserving one honestly needs both a wire
 value that tells `auto` from `scroll` *and* a second layout pass, and buys only the case where
 content fits. Overlay scrollbars are also what this measurement cannot see: Chromium draws them
@@ -243,8 +243,8 @@ Inheritance, from a parent declaring both onto a nested scroller:
 4. `currentcolor` resolves against the element's own colour, and `transparent` survives as
    `rgba(0,0,0,0)` — so a fully transparent thumb is expressible and distinct from `auto`.
 
-**Bearing on dziri.** `scrollbarColor` goes in the cascade's inherited set and `scrollbarWidth`
-does not. `thin` and `none` are honoured against dziri's own overlay thickness rather than
+**Bearing on dziry.** `scrollbarColor` goes in the cascade's inherited set and `scrollbarWidth`
+does not. `thin` and `none` are honoured against dziry's own overlay thickness rather than
 Chromium's gutter widths, because the gutter is not reserved here at all (see above) — `none` means
 no bar drawn *and* nothing to grab, while the wheel keeps working, which is exactly what the
 property means.
@@ -254,13 +254,13 @@ property means.
 ## A word too long for its line: Chrome overflows, Skia breaks it
 
 Measured 2026-08-01 with `bun run layout-diff` (Chrome/Edge over CDP, `wrap-unbreakable`) against
-dziri's own SkParagraph path, both laying out `Unbreakablesupercalifragilistic` at 16px in a 120px
+dziry's own SkParagraph path, both laying out `Unbreakablesupercalifragilistic` at 16px in a 120px
 box:
 
 | Engine | lines | box height |
 |---|---|---|
 | Chrome | **1** | 21 |
-| dziri (SkParagraph) | **2** | 42 |
+| dziry (SkParagraph) | **2** | 42 |
 
 CSS's initial `overflow-wrap: normal` / `word-break: normal` says a token with no break
 opportunity **stays on one line and overflows its box**. Chrome does that. Skia's line breaker
@@ -268,10 +268,10 @@ falls back to breaking anywhere once a word cannot fit the width, so the token i
 the box grows a line — Flutter's behaviour, which is unsurprising given whose text stack this is.
 
 Confirmed from both sides: `text.rs`'s `an_unbreakable_token_is_broken_by_cluster_not_overflowed`
-pins dziri at ≤ the requested width over several lines, and `layout-diff` reports Chrome at one
+pins dziry at ≤ the requested width over several lines, and `layout-diff` reports Chrome at one
 line for the same input.
 
-**Bearing on dziri.** Not adjustable from `ParagraphStyle` or `TextStyle` — there is no
+**Bearing on dziry.** Not adjustable from `ParagraphStyle` or `TextStyle` — there is no
 word-break or overflow-wrap setting exposed anywhere in skia-safe 0.87's paragraph module. Closing
 it means implementing `overflow-wrap`/`word-break` as real properties and doing the fallback
 by hand, which is A2 work that has not been priced. Until then it is a known divergence and the
@@ -280,7 +280,7 @@ quo, not a regression** — if any *other* scenario goes red, that is new.
 
 An adjacent finding from the same work, recorded because it is the opposite mistake: **Skia's
 `ParagraphStyle::apply_rounding_hack` is on by default** and rounds line widths up to whole
-pixels, which browsers do not do. dziri turns it off. What dziri *does* round is the measurement
+pixels, which browsers do not do. dziry turns it off. What dziry *does* round is the measurement
 it hands Taffy, and for an unrelated reason — see the comment on `Measurer::measure`.
 
 ## Which `appearance` values the parser keeps
@@ -314,16 +314,16 @@ which is why the two columns differ for the rejected values and agree for the ke
    to `auto`, because "the spec defines it" is not the same claim as "a browser does it".
 4. **`<compat-auto>` computes as-specified, not as `auto`.** The spec says the values *behave* as
    `auto`; it does not say they *compute* to it, and `appearance`'s computed value is `asSpecified`.
-   dziri's style field stores the effect, so it folds them and reports `auto` where Chrome reports
+   dziry's style field stores the effect, so it folds them and reports `auto` where Chrome reports
    `button`. That is a representation divergence with no behavioural difference, and it is
    `conformance`'s first `KNOWN` entry rather than something hidden.
 
-**Bearing on dziri.** The customizable-`<select>` model is the one to build against, and it is
+**Bearing on dziry.** The customizable-`<select>` model is the one to build against, and it is
 *not* shadow DOM: MDN documents the parts as ordinary light-DOM children —
 `<select><button><selectedcontent></selectedcontent></button><option>…</option></select>` — with
 `::picker(select)` defined as "all descendants except the first `<button>`". That is a structural
 grouping a compiler can compute, which is why compile-time expansion is a fit and `::part`,
-`::-webkit-*` and shadow piercing are not needed. What it does need that dziri lacks is the popover
+`::-webkit-*` and shadow piercing are not needed. What it does need that dziry lacks is the popover
 and anchor-positioning the picker relies on — the overlay layer, ROADMAP B1.
 
 ## How a transform composes, and how a transition samples it
@@ -349,7 +349,7 @@ transition, because sampling a running transition races the compositor and is no
 | Effect on a child's rect | **yes** — a parent's transform scales and moves the child's reported rect |
 | Non-replaced inline box | computed value is the matrix, but the box **does not move** (0.0px). `inline-block` and `block` move |
 
-The load-bearing equivalence for dziri's representation: `translate:10px 20px; rotate:30deg;
+The load-bearing equivalence for dziry's representation: `translate:10px 20px; rotate:30deg;
 scale:2 3` and `transform:translate(10px,20px) rotate(30deg) scale(2,3)` produce the **same rect**
 to 0.1px (`x=-40.1 y=-0.9 w=248.2 h=229.9`). Exact matrices to assert against:
 
@@ -375,7 +375,7 @@ t=0.5. `rotate(0deg) → rotate(720deg)` measures 180° at t=0.25 and keeps wind
 | `none` → `rotate(90deg)` | 45° | `none` is the **per-function neutral**, identical to `rotate(0deg) → rotate(90deg)` |
 | `translateX(20px)` → `translateX(100%)` | 60px on a 100px box | percentages resolve, then lerp; mixes with px |
 
-**Bearing on dziri.** Store the transform **decomposed** — `translateX/Y`, `rotate`, `scaleX/Y`,
+**Bearing on dziry.** Store the transform **decomposed** — `translateX/Y`, `rotate`, `scaleX/Y`,
 `skewX/Y` as separate scalars with an unnormalised rotation — not as a 6-float matrix. Decomposed
 storage reproduces every row above; matrix storage fails the first two outright. It is also what
 the `translate`/`rotate`/`scale` properties already are, and what Tailwind emits.
@@ -434,7 +434,7 @@ a sampled pixel mid-interruption is not reproducible, and `getComputedTiming()` 
 is `oklab(0.5 …)`, a visibly lighter grey than `rgb(128,128,128)`. The two features do **not** share
 a space. A real CSS transition agrees with `element.animate()` on every row above.
 
-Bearing on dziri: colours are a packed `0xAARRGGBB` `u32`, so per-channel sRGB is already the
+Bearing on dziry: colours are a packed `0xAARRGGBB` `u32`, so per-channel sRGB is already the
 representation, and the only thing that has to be got right is **premultiplying by alpha** — which is
 the one row a naive implementation fails. An `oklch()`-authored colour was already flattened to sRGB
 by the compiler, so it interpolates in sRGB here; that is a known divergence and the same one
@@ -456,12 +456,12 @@ this is CSS's `reversing-shortening-factor` — and it starts from the value the
 reached, not from an endpoint. A retarget to a value that is neither endpoint gets the **full**
 duration, also starting from the current value.
 
-**This is what makes a transition cheap for dziri, and it refutes the "rewrite `from` to the current
+**This is what makes a transition cheap for dziry, and it refutes the "rewrite `from` to the current
 interpolated slot" sketch.** Both endpoints are interned style rows, and there is no row holding an
 interpolated value — but none is needed: a reversal is the *same* `(from, to)` pair traversed
 backwards from the current `t` towards 0. Value continuity and the measured 400 ms both fall out of
 "`t` moves at ±1/duration per second", with no new row and no allocation. Only the third-value
-retarget genuinely needs a row dziri does not have, and it is the one case approximated — see
+retarget genuinely needs a row dziry does not have, and it is the one case approximated — see
 API.md.
 
 ### A keyframe's `animation-timing-function` governs the segment *leaving* it
@@ -496,7 +496,7 @@ once.
 
 Tailwind's `ping` has no `0%` at all, and at t=0 reads the element's own `opacity: 1` and
 `transform: none`. The implicit `from` is the element's computed style, which is exactly the interned
-row dziri already has: a keyframe with no `0%` needs no synthetic value, only the base slot.
+row dziry already has: a keyframe with no `0%` needs no synthetic value, only the base slot.
 
 ### `animation` shorthand and `transition-property`, confirmed
 
@@ -518,7 +518,7 @@ that shape: every one of its utilities sets one `transition-duration` for the wh
 
 `display` is in Tailwind's default `transition-property` list, so discrete properties are not
 hypothetical. `transition-behavior: allow-discrete` parses as measured, but `display` is
-layout-affecting in dziri and transitions there are refused by name — see API.md.
+layout-affecting in dziry and transitions there are refused by name — see API.md.
 
 ## `:hover` and `:active` match the ancestors too; `:focus` does not
 
@@ -552,7 +552,7 @@ three are always described in one breath:
 | `:focus` after `btn.focus()` | `btn` |
 | `:focus-within` after the same | `html body card mid btn` |
 
-So focus does **not** propagate, and `:focus-within` is the ancestor form. dziri has neither
+So focus does **not** propagate, and `:focus-within` is the ancestor form. dziry has neither
 `:focus-within` nor any need to change `:focus`.
 
 ### It is the DOM ancestor chain, not geometric containment
@@ -567,10 +567,10 @@ over the escapee, which is outside its parent's box
 ```
 
 So the chain is walked up the *tree*, which means `nodes.parent` is exactly the right column
-and no geometry is involved. dziri cannot currently reach this row from the other direction
+and no geometry is involved. dziry cannot currently reach this row from the other direction
 anyway: `hit_test` prunes a subtree whose parent rect does not contain the point — a
 deliberate divergence the TypeScript runtime also had — so a child outside its parent is
-unhittable, and every chain dziri can produce is geometric as well as structural. Recorded
+unhittable, and every chain dziry can produce is geometric as well as structural. Recorded
 because the two stop agreeing the moment that pruning is relaxed, and then this row is the
 specification.
 
@@ -650,7 +650,7 @@ ancestor or a descendant. And the last row shows there is no disabled guard on e
 control still joins both chains through its label, while still receiving no events of its own.
 
 One asymmetry looks like a spec requirement and the other like an implementation artifact, but both
-are what Chromium does, so both are what dziri does. The difference is one line each in
+are what Chromium does, so both are what dziry does. The difference is one line each in
 `FrameState::set_input`.
 
 ### Focus is the default action of the press, and a label never keeps it
@@ -761,7 +761,7 @@ recorded as approximate on purpose.
 run twice with identical output.** Asked because `space-y-*` and `divide-*` are emitted as
 `:where(.space-y-4 > :not(:last-child))`, so implementing them meant deciding three edge cases
 the compiler cannot avoid: what the root element answers, and whether the two kinds of
-non-element child that dziri's IR *does* give a node — text runs and generated boxes — join
+non-element child that dziry's IR *does* give a node — text runs and generated boxes — join
 the count.
 
 | | matched |
@@ -776,11 +776,11 @@ So an element with **no parent still matches all three** — Selectors 4's "firs
 inclusive siblings" wording, not Selectors 3's "first child of some other element" — and
 neither text nodes nor generated boxes are counted.
 
-All three matter to dziri and all three are now what `positionOf` in `compile.ts` implements.
+All three matter to dziry and all three are now what `positionOf` in `compile.ts` implements.
 The text-node row is the one that would have been silently wrong: a container written across
 several lines has a text run after its final element, so counting *nodes* would mean nothing is
 ever the last child, and `space-y-4` would have put a trailing margin on every row including
-the last. The `::before` row is the same hazard from the other side, because dziri gives a
+the last. The `::before` row is the same hazard from the other side, because dziry gives a
 generated box a real IR node with a real position in its parent's child array.
 
 The end-to-end shape, on the same page, to check the three answers compose into the behaviour
@@ -806,7 +806,7 @@ half of them are guessable backwards.
 the DOM, no computed style, and no script can see whether it is open — so on a legacy control every
 question below is unobservable, and answering them would be reporting confidence rather than
 measurement. `base-select` is the spec's opt-in that moves the picker into the page, which is what
-makes `:open`, `toggle` and `::picker(select)` exist at all; it is also the model dziri is already
+makes `:open`, `toggle` and `::picker(select)` exist at all; it is also the model dziry is already
 copying, since `ua-structure.ts` builds the `<button><selectedcontent>` half of it.
 
 | step | `:open` | `value` | `document.activeElement` | events on the select |
@@ -861,7 +861,7 @@ which follows from the finding in the section just above rather than from anythi
 moving focus. So `option:focus` draws the highlight and Escape discards it by doing what closing
 always does. Recorded because the shape of the error is worth remembering — the measurement was
 right, and the design read off it invented state the measurements themselves said was already
-there. Only dziri emits `CHANGE` today; `INPUT` waits for A3's `onInput` to have a subscriber.
+there. Only dziry emits `CHANGE` today; `INPUT` waits for A3's `onInput` to have a subscriber.
 
 ### A dismissing click still reaches what it hit
 
@@ -877,7 +877,7 @@ second would make every click that closes a dropdown mysteriously do nothing els
 
 Both ArrowDown and ArrowUp opened it, with no `input` and no `change`. **This refutes the common
 belief** that arrowing a closed select in Chrome walks the value directly; that is legacy-appearance
-behaviour, and `base-select` does not inherit it. Convenient for dziri: keyboard opening is then the
+behaviour, and `base-select` does not inherit it. Convenient for dziry: keyboard opening is then the
 same path as the click, not a second mechanism.
 
 ### Which keys open a closed select: Space, F4 and Alt+ArrowDown — **not Enter**
@@ -909,11 +909,11 @@ left.
 than just contradicted.** Two things feed it. On a *legacy* select — the native-popup kind —
 Enter inside a `<form>` submits, which is a visible response and easy to read as activation.
 And on macOS, Enter and Space both open a native select, so the expectation is correct on one
-platform and for one control. Neither is the model dziri copies: `base-select` on Chromium is,
+platform and for one control. Neither is the model dziry copies: `base-select` on Chromium is,
 and there Enter is reserved for *committing* a highlight, which is what the section above
 measured. A key that both opened and committed would make Down-then-Enter ambiguous.
 
-**Bearing on dziri.** Space, F4 and Alt+ArrowDown join the arrows as opening keys, which is
+**Bearing on dziry.** Space, F4 and Alt+ArrowDown join the arrows as opening keys, which is
 three more rows in `Engine::picker_key` and no new state — they are the same "open it" path.
 Enter deliberately stays a commit-only key. The plain-arrow behaviour was already built on the
 earlier measurement and is unchanged.
@@ -931,7 +931,7 @@ question is re-asked headed if it ever matters.
 ## How tall a text field is, and whether its content has any say
 
 **Measured 2026-08-04 · Chromium 151 (via Edge 151) · `probes/text-field-box.html`.** Asked because
-dziri rendered an empty field as a bare line: its height came from the text inside it, and an empty
+dziry rendered an empty field as a bare line: its height came from the text inside it, and an empty
 string measures zero. A browser plainly does not do that — but "one line high" is not a number, and a
 number is what a layout pass needs.
 
@@ -966,21 +966,21 @@ axis: **neither dimension of a text field is a function of its value.**
 `<div></div>` is 0 high, and so is a div containing an empty `<span>`. Only the *editable* box has a
 floor — `contenteditable` behaves exactly like `<input>`, empty or not.
 
-That distinction is load-bearing for dziri, because it rules out the fix that first suggests itself.
-dziri only ever emits a text node with an empty string for a **dynamic binding**, so giving every
+That distinction is load-bearing for dziry, because it rules out the fix that first suggests itself.
+dziry only ever emits a text node with an empty string for a **dynamic binding**, so giving every
 empty run a line's height would appear to work and would be wrong the moment a non-editable binding
 rendered `""` — Chrome gives that 0, and a counter reading empty would silently reserve a line
 forever. Hence `NodeFlags.EDITABLE` (protocol v14) on the run itself: the compiler already knows
 which runs those are, because it is the `editables` table it has been emitting all along.
 
-### What it means for dziri
+### What it means for dziry
 
 `Measurer::line_height` takes the height from a **one-line paragraph**, not from raw font metrics,
 and the reason is the failure mode it avoids: that height has to equal what the *filled* field
 reports one keystroke later, or the box moves by a fraction of a pixel the first time anyone types —
 the same bug being fixed, only smaller and harder to see.
 
-Still not implemented, and now measured rather than assumed: the **width** floor. dziri sizes a field
+Still not implemented, and now measured rather than assumed: the **width** floor. dziry sizes a field
 by its CSS box, so `size="20"` does nothing, and an `<input>` with no width class is as wide as its
 container rather than 169px. That is the `29 + 7 × size` figure recorded above, and it wants the same
 treatment on the inline axis.
@@ -1063,7 +1063,7 @@ and are unrecorded.
 ## What Tailwind's ring utilities actually compile to
 
 **Measured 2026-08-05 · Tailwind CSS v4.3.3 via `bunx @tailwindcss/cli`, then resolved through
-dziri's own `var()` / `@property` machinery** (`parseCss` + `extendVarEnv` + `substituteVars`).
+dziry's own `var()` / `@property` machinery** (`parseCss` + `extendVarEnv` + `substituteVars`).
 
 Not a browser measurement, and it is here anyway: the question is the same shape — *what does the
 real thing emit, rather than what do I remember it emitting* — and the `tailwind-coverage` skill
@@ -1093,7 +1093,7 @@ the expander is:
 Six things follow, and all six changed what got built.
 
 1. **A ring is a spread-only shadow: no offset, no blur, one solid colour.** That is a subset a
-   fixed style row can hold, which is why dziri supports `box-shadow` as *concentric bands* rather
+   fixed style row can hold, which is why dziry supports `box-shadow` as *concentric bands* rather
    than as a layer list. `shadow-md` is the counter-example in the same table — it has offsets, a
    blur and a negative spread, so it is warned about and dropped rather than approximated.
 
@@ -1105,12 +1105,12 @@ Six things follow, and all six changed what got built.
 3. **A ring offset is a second, narrower band written *earlier* in the list** — `2px #000` before
    `calc(2px + 2px) #38bdf8`. Earlier layers paint over later ones, so the visible result is the
    offset colour from 0 to 2 and the ring colour from 2 to 4. Nothing in the CSS says "offset";
-   the layering *is* the offset. That is why dziri stores two outset extents rather than a width
+   the layering *is* the offset. That is why dziry stores two outset extents rather than a width
    and a gap, and why a narrower band written *later* is dropped: it would be entirely hidden.
 
 4. **`ring-2` with no ring colour is `currentcolor`**, reached through
    `var(--tw-ring-color, currentcolor)` — the `@property` for it declares no `initial-value`, so
-   the fallback is used. dziri had no value for `currentcolor` at all, which meant the commonest
+   the fallback is used. dziry had no value for `currentcolor` at all, which meant the commonest
    ring in the framework resolved to nothing. It is not dynamic: it is the element's computed
    `color`, which the cascade already has, so it is substituted textually before the expander
    runs. Same observation as the `border-color` entry above.
@@ -1121,7 +1121,7 @@ Six things follow, and all six changed what got built.
    declaration.
 
 6. **`@layer properties { @supports (…) { *, ::before { --tw-ring-color: initial; … } } }` must
-   stay skipped.** dziri treats `@layer` as transparent and skips `@supports`, so those `initial`
+   stay skipped.** dziry treats `@layer` as transparent and skips `@supports`, so those `initial`
    tokens never land — which is correct, and load-bearing: if that block were applied, `env.has()`
    would find the literal string `initial` and every ring colour would resolve to garbage rather
    than to the `var()` fallback.
@@ -1237,7 +1237,7 @@ Chromium does not expose its highlight colour through `getComputedStyle` — the
 background is a "nothing here", not the colour it paints. Same category as the caret's width and
 blink rate: browser chrome, unmeasurable from script, and it would take a screen recording to get.
 
-So dziri's default belongs in **its own UA sheet**, where a UA default is supposed to live, and is
+So dziry's default belongs in **its own UA sheet**, where a UA default is supposed to live, and is
 therefore a stated convention rather than a match. An author `::selection` rule *is* honoured, which
 is what makes the two style fields worth having: the default is a guess, and overriding it is not.
 
@@ -1331,7 +1331,7 @@ Cheap — it is a bool on the arm that already dispatches on `ControlKind` — b
 before the shared code was written, which is why it was asked now.
 
 `Engine::picker_key` already clamps, and its comment asserted that browsers do too. That assertion
-was true and unmeasured; it is measured now. **Home and End are a real gap** — dziri handles
+was true and unmeasured; it is measured now. **Home and End are a real gap** — dziry handles
 neither in a picker, and both work here.
 
 ---
@@ -1369,10 +1369,10 @@ any of A3, because the ROADMAP's claim that the focusable **set** is compile-tim
 | `display:none` button | no | no |
 | `visibility:hidden` button | no | no |
 
-Four things dziri has to act on:
+Four things dziry has to act on:
 
 1. **`tabindex="-1"` splits the two sets**, and it is the only thing that does. Everything else is
-   focusable-and-tabbable or neither. So dziri needs two bits, or one bit plus one predicate — not
+   focusable-and-tabbable or neither. So dziry needs two bits, or one bit plus one predicate — not
    one "focusable" flag.
 2. **`readonly` stays in the order; `disabled` leaves it.** These are easy to conflate and the
    engine already distinguishes them: `:disabled` is a live predicate bit, so the tab walk asks the
@@ -1380,11 +1380,11 @@ Four things dziri has to act on:
    for free.
 3. **`display:none` and `visibility:hidden` both remove a node** — and neither is visible to the
    compiler. This is the one part of the set that cannot be a compile-time table: a hidden subtree
-   is a *layout* fact. dziri's out is that the engine already knows, because a node that is not
+   is a *layout* fact. dziry's out is that the engine already knows, because a node that is not
    laid out has no box; the walk skips what has no box, which costs nothing and is the same test
    `hit_test` makes.
 4. **A `<select>` is one tab stop.** Its shadow `<button>` never appears in the walk, and
-   `activeElement` reports the `<select>` itself. dziri builds that button as a real compile-time
+   `activeElement` reports the `<select>` itself. dziry builds that button as a real compile-time
    node in `ua-structure.ts`, so it would be a second stop by default — it has to be suppressed
    explicitly, and "the UA-generated parts of a control are not tab stops" is the rule to write
    rather than a special case for `select`.
@@ -1401,12 +1401,12 @@ start -> a[href] -> button -> input -> input[readonly] -> textarea -> checkbox
 
 - **Document order** for everything with `tabindex="0"` or none, exactly as claimed.
 - **Positive `tabindex` sorts ahead of the whole group**, and it is reached *after* the wrap, not
-  where it sits in the document — `div[tabindex="3"]` is the first stop of the next cycle. dziri
+  where it sits in the document — `div[tabindex="3"]` is the first stop of the next cycle. dziry
   has no reason to support positive `tabindex`, and this is the argument for saying so out loud:
   supporting it means the order is no longer a walk at all, it is a sort with a walk as its
   tiebreak.
 - **One stop lands on `BODY`** at the end of the cycle. That is the document boundary — in a real
-  browser it is where focus leaves for the address bar. dziri has no browser chrome to leave to,
+  browser it is where focus leaves for the address bar. dziry has no browser chrome to leave to,
   so it wraps directly; worth naming as a deliberate divergence rather than an oversight.
 - **A radio group is one stop, and it is the checked member.** `g1` (nothing checked) stopped on
   its first radio; `g2` (middle one checked) stopped on the *checked* one, skipping the first.
@@ -1444,21 +1444,21 @@ the one nobody states:
    visible — became visible when a key was pressed, without focus moving. So the bit is not
    decided once at focus time; a keystroke re-evaluates it for whatever is focused now.
 
-**Bearing on dziri.** `:focus-visible` is a live predicate bit like `:checked`, and it is set by
+**Bearing on dziry.** `:focus-visible` is a live predicate bit like `:checked`, and it is set by
 **modality**, not by the focus event: the engine keeps one "last input was a key" flag, sets the
 bit when focus moves while that flag is on, and re-sets it for the currently focused node on any
 keystroke. Clearing it is what a pointer press does. That is one bool and two assignments, and it
 falls out of the fact that `Engine::mouse_down` and `Engine::key_down` are already the only two
 entry points.
 
-Rule 2 is the one that needs a per-kind answer, and dziri's `ControlKind` already has it: the kinds
+Rule 2 is the one that needs a per-kind answer, and dziry's `ControlKind` already has it: the kinds
 that take text are exactly the ones a pointer press should mark visible.
 
 **The UA ring hangs off `:focus-visible`, not `:focus`.** Unfocused-visible elements compute
 `outline-style: none`; visible ones compute `outline: auto 1px`. So a default ring is a UA-sheet
 rule keyed on the new predicate, not something the engine paints — which keeps it overridable by an
 author in the ordinary cascade, the same argument `::placeholder`'s colour is in `ua-sheet.ts` for.
-dziri has no `outline` property and no `auto` outline width, so the ring it draws will be a
+dziry has no `outline` property and no `auto` outline width, so the ring it draws will be a
 divergence in *appearance*; the trigger is what this measures.
 
 ---
@@ -1490,7 +1490,7 @@ activated on press; after it means on release.
 | text field in a form | Enter | `keydown, keypress,` **`submit-button click(detail=0), submit`**`, keyup` — **press** |
 | text field in a form | Space | types a space (`input`) |
 
-### Space activates on release, and dziri has no hook for it
+### Space activates on release, and dziry has no hook for it
 
 **This is the finding that changes code.** `Engine::key_down` is the engine's only key entry point
 — extracted during B1 precisely so keyboard behaviour could be tested at all — and *every* Space
@@ -1507,15 +1507,15 @@ difference in the code and a different control.
 
 Neither key activates `<div tabindex="0">`. So keyboard activation is a property of the control
 kind, not of being focusable — which confirms the shape of `Controls::activate`'s dispatch and
-means dziri's `ControlKind::NONE` nodes correctly do nothing. It also means ARIA's
+means dziry's `ControlKind::NONE` nodes correctly do nothing. It also means ARIA's
 `role="button"` + `tabindex` pattern gets keyboard support from *script*, never from the platform;
 any framework offering it is implementing this table by hand.
 
 ### A keyboard activation really is a click
 
-Every activation above dispatched a real `click`, and dziri can therefore route Enter/Space into
+Every activation above dispatched a real `click`, and dziry can therefore route Enter/Space into
 the same path as a pointer press — the claim A3 makes, now measured. `detail` is `0` for a
-synthesised click and `1` for a pointer one, which is how libraries tell them apart; dziri's
+synthesised click and `1` for a pointer one, which is how libraries tell them apart; dziry's
 `CLICK` event has no such field, so the two are **indistinguishable to a host** today. Worth naming
 before someone needs the difference.
 
@@ -1557,7 +1557,7 @@ whose focus has moved somewhere else — the visible one. Closing *and* advancin
 costs a keystroke: a user tabbing out of a select they opened by accident ends up two stops from
 where they think they are.
 
-**Bearing on dziri.** One more keycode in `picker_key`'s Escape branch, and the ordering inside
+**Bearing on dziry.** One more keycode in `picker_key`'s Escape branch, and the ordering inside
 `Engine::key_down` becomes load-bearing rather than incidental: the picker is offered the key
 before the tab walk sees it, so an open picker claims Tab and a closed one does not.
 
@@ -1591,24 +1591,24 @@ had been skipped — Tab order, `:focus-visible` and activation were all measure
 2. **During `blur`, `activeElement` is `BODY`.** Focus has already left the old element and has
    *not yet* arrived at the new one — there is a window in which nothing is focused, and both
    events fall inside it. So **neither event can name the other element from the focus state**;
-   `relatedTarget` is the only way, and dziri needs a field for it or the question "who took my
+   `relatedTarget` is the only way, and dziry needs a field for it or the question "who took my
    focus" is unanswerable.
 
 3. **`focus` fires before `focusin`, and `blur` before `focusout`.** The non-bubbling pair is the
-   primitive and the bubbling pair is derived. dziri has no bubbling, so it copies the primitive
+   primitive and the bubbling pair is derived. dziry has no bubbling, so it copies the primitive
    and the distinction does not arise — but it is worth knowing which one is being copied.
 
 4. **Re-focusing what is already focused fires nothing.** No blur, no focus. This is the rule that
    keeps "validate on blur" from validating on every click of the field it is already in.
 
-### Bearing on dziri
+### Bearing on dziry
 
 Two event kinds in the existing queue, in that order, each carrying the *other* node — which is
 finding 2 turned into a field rather than a comment. `EventKind::FOCUS` is already the **window**'s
 focus, so the element pair needs its own names.
 
-**One measured divergence, and it is dziri's, not a gap.** A press on a non-focusable `<div>`
-clears focus to nothing in Chromium. dziri focuses whatever `hit_test` returns, and `hit_test`
+**One measured divergence, and it is dziry's, not a gap.** A press on a non-focusable `<div>`
+clears focus to nothing in Chromium. dziry focuses whatever `hit_test` returns, and `hit_test`
 returns only `INTERACTIVE` nodes — so a plain div is not hit and focus clears the same way, but a
 div with an `onClick` *is* interactive and would take focus where a browser would not. Named
 rather than fixed: making it match means gating focus on the tab-stop set, which would also stop a
@@ -1661,10 +1661,10 @@ reason unrelated to autofocus. A button is the kind whose answer can vary.
    is *visible*, and finding 3 fully explains finding 1: **`autofocus` is not special-cased.** It
    inherits the startup bit like every other unrequested focus.
 
-### Bearing on dziri
+### Bearing on dziry
 
 The design question ROADMAP A3 was holding this for is answered, and it costs one initializer.
-dziri already implements the other three halves of the rule correctly: a keystroke sets the bit
+dziry already implements the other three halves of the rule correctly: a keystroke sets the bit
 (`engine.rs` `key_down`), a pointer press clears it unless it placed a caret, and `set_focus`
 does not touch it — which is finding 3, already right.
 
@@ -1673,7 +1673,7 @@ What is wrong is `paint.rs`'s `focus_visible: false` at construction. Chromium's
 something to sit on; it becomes observable the instant `autofocus` exists, and it is the whole
 difference between an autofocused field opening with a ring and opening without one.
 
-**One deliberate non-divergence.** dziri's `--focus` screenshot override sets `focus_visible =
+**One deliberate non-divergence.** dziry's `--focus` screenshot override sets `focus_visible =
 focused >= 0` rather than carrying the live bit, so a golden is reproducible. That is a harness
 rule, not a behaviour, and finding 3 does not touch it.
 
@@ -1684,7 +1684,7 @@ rule, not a behaviour, and finding 3 does not touch it.
 **Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/autofocus-hidden.html`.
 Two runs, agreeing on the answer and disagreeing on the timing — see the correction below.**
 
-Asked because the section above left it open and dziri's router makes it the common case, not
+Asked because the section above left it open and dziry's router makes it the common case, not
 the corner: a page here is fourteen routes with thirteen `hidden` on the first frame, so "each
 route's form focuses its own first field" produces fourteen claims of which one is showing.
 
@@ -1703,7 +1703,7 @@ One document, three claims, ordered so that each possible rule lands focus somew
 2. **"Unfocusable" needs no autofocus-specific rule.** Neither element could be focused by
    script either, so the skip falls out of the ordinary focusability test. One rule, not two.
 
-### Bearing on dziri
+### Bearing on dziry
 
 This is what made `autofocus` a per-node flag on a *set* of nodes rather than a single resolved
 id. The compiler marks everyone who asked; `focus::autofocus_candidates` walks the tree — the
@@ -1714,7 +1714,7 @@ somewhere the user cannot see, which is worse than focusing nothing.
 
 The engine still spends the one chance on the first frame even when every claim is hidden. A
 route appearing later does not pull focus into it — by then the user is somewhere, and moving
-their caret is a worse failure than never having focused at all. That part is dziri's rule; a
+their caret is a worse failure than never having focused at all. That part is dziry's rule; a
 browser has no equivalent situation.
 
 > **Correction to the section above, same day.** It reported that `autofocus` "lands at the
@@ -1726,7 +1726,7 @@ browser has no equivalent situation.
 > So the sharp claim is wrong and the useful one survives: **focus is in place by the first
 > rendered frame, but whether it beats a deferred script is a race.** The flush is a rendering
 > step, and whether a rendering step has happened before the first script depends on load
-> timing. Nothing built on this changed — dziri applies autofocus inside the frame either way —
+> timing. Nothing built on this changed — dziry applies autofocus inside the frame either way —
 > but "measured twice, identical" clearly did not mean "not racy", which is worth remembering
 > the next time two runs agree.
 
@@ -1737,7 +1737,7 @@ browser has no equivalent situation.
 **Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/implicit-submission.html`.
 Two byte-identical consecutive runs.** The headline was measured on 2026-08-05 — Enter in a
 text field inside a `<form>` clicks the submit button, then `submit` fires. That is the easy
-half. These are the conditions, and each one changes how much dziri has to build. Every form
+half. These are the conditions, and each one changes how much dziry has to build. Every form
 here cancels its own `submit`, or the first success would navigate the page away.
 
 | form | Enter in its first field |
@@ -1782,7 +1782,7 @@ field: a focused checkbox submits, even though Enter on a checkbox outside a for
 had actually established was "there was no form to submit". And with two submit buttons it is the
 **first in tree order**, not the last and not the nearest.
 
-### Bearing on dziri
+### Bearing on dziry
 
 It confirms what ROADMAP A3 predicted from the headline and adds the part that costs: this is a
 lookup from the focused field to its form, and then a second lookup from the form to a node
@@ -1791,7 +1791,7 @@ compile-time facts — which form each field is in, and which button each form w
 decided by the markup and cannot change at run time. The only runtime questions are whether the
 button is disabled and whether the focused node is a text area.
 
-`type="submit"` and `type="button"` have no meaning in dziri today, so the default-button rule
+`type="submit"` and `type="button"` have no meaning in dziry today, so the default-button rule
 needs the attribute read before any of this can be faithful.
 
 ---
@@ -1801,7 +1801,7 @@ needs the attribute read before any of this can be faithful.
 **Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/select-multiple.html`.
 Two runs, identical. One section is deliberately left unresolved — see the end.**
 
-Asked because dziri's `<select>` is a closed button plus a `::picker(select)` overlay, and
+Asked because dziry's `<select>` is a closed button plus a `::picker(select)` overlay, and
 `multiple` is currently only an attribute a selector can test — so `<select multiple>`
 compiles to a dropdown today, which is not incomplete but the wrong *shape*.
 
@@ -1821,7 +1821,7 @@ compiles to a dropdown today, which is not incomplete but the wrong *shape*.
    a computed style and an `offsetParent`. A *single* select's options are browser chrome —
    `select-picker.html` had to opt into `appearance: base-select` to see them at all. So a
    multiple needs **no overlay, no picker, and no `NodeFlags.OVERLAY`**: it is a scrolling
-   box of block children, which dziri can already lay out and paint.
+   box of block children, which dziry can already lay out and paint.
 2. **The default height is four rows.** 68px of client height at 17px per option, with six
    options present. Not "as many as fit" and not all of them — a constant.
    `size="2"` gives two. So `size` is a height in rows, defaulting to 4.
@@ -1844,13 +1844,13 @@ compiles to a dropdown today, which is not incomplete but the wrong *shape*.
    case needs no new state.
 5. **But `Ctrl+Space` toggles "the current option"**, and it deselected `f` while the
    selection was `e,f` — so there *is* a current option distinct from the selection, and
-   dziri would need it. It is the same thing `option:focus` already draws for a picker.
+   dziry would need it. It is the same thing `option:focus` already draws for a picker.
 6. **`Ctrl+Arrow` does nothing**, so the current option cannot be moved without changing
    the selection. That bounds how much state is reachable: current-option moves only ever
    accompany a selection change or a `Ctrl+Space`.
 7. `Space` doing nothing is worth knowing because it activates a checkbox and opens a
    single select. Three meanings for one key, all measured.
-8. **`:checked` follows the selection**, so dziri's existing option styling path works
+8. **`:checked` follows the selection**, so dziry's existing option styling path works
    unchanged.
 
 ### The pointer — **corrected 2026-08-08, same probe, and both halves were wrong**
@@ -1899,7 +1899,7 @@ what a single per-gesture event can carry when the answer is a *set*.
 Three runs, identical.**
 
 Asked because `select-multiple.html` measured how a listbox *behaves* and never asked what
-makes one, and dziri was about to fork its whole `<select>` structure on the `multiple`
+makes one, and dziry was about to fork its whole `<select>` structure on the `multiple`
 attribute. Two of the three answers below contradict what the fork assumed.
 
 ### What makes a listbox
@@ -1940,7 +1940,7 @@ attribute. Two of the three answers below contradict what the fork assumed.
 | `multiple`, no options | nothing | -1 |
 
 4. **A listbox selects nothing when no option says `selected`.** A dropdown falls back to
-   the first; a listbox does not. dziri's `uaParts.chosen` implements the dropdown rule —
+   the first; a listbox does not. dziry's `uaParts.chosen` implements the dropdown rule —
    `selected`, else the first — so a listbox inheriting it would come up with a row
    highlighted that the user never chose.
 5. **`selectedIndex` on a multiple is the *first* selected**, not the last or the only.
@@ -1949,7 +1949,7 @@ attribute. Two of the three answers below contradict what the fork assumed.
    `multiple`, and `size=4` without `multiple` is a listbox with dropdown selection
    semantics — a real shape, and one neither half of the fork would have handled.
 
-   **This found a live bug in dziri's dropdown**, which is why the single row was added:
+   **This found a live bug in dziry's dropdown**, which is why the single row was added:
    `uaParts` takes the **first** option marked `selected` (`options.find(…)`), and
    Chromium takes the **last**. Nothing had measured it because every earlier case marked
    at most one option, so the two rules could not disagree. Fixed alongside the listbox
@@ -1967,12 +1967,12 @@ attribute. Two of the three answers below contradict what the fork assumed.
 
 7. **A listbox's content height is `size` × the option's own row height**, holding across a
    4× font-size range — the residual is `clientHeight` being an integer. So the earlier
-   "68px at 17px per option" is an instance of a rule, not a number to bake. **dziri cannot
+   "68px at 17px per option" is an instance of a rule, not a number to bake. **dziry cannot
    compile this height**: its rows come from Skia's ascent + descent + line gap at layout
    time (`Measurer::line_height`), so the row count has to reach the engine and be
    multiplied there.
 
-### One shape is incoherent, and dziri will diverge from it
+### One shape is incoherent, and dziry will diverge from it
 
 | | scrollHeight/client | option height | `offsetParent` | option `display` |
 |---|---|---|---|---|
@@ -1988,19 +1988,19 @@ attribute. Two of the three answers below contradict what the fork assumed.
 
    Recorded because it was about to be built on: the row read "listbox" in the selection
    column and "dropdown" in the box column, and either alone would have been believed.
-   **dziri deliberately diverges** and makes it a one-row scrolling listbox — the coherent
+   **dziry deliberately diverges** and makes it a one-row scrolling listbox — the coherent
    reading of `multiple || size > 1` with `size` rows — since Chromium's version shows six
    options' worth of content in a 17px box with no way to reach five of them.
 
 9. `select[multiple]` matches as a selector, and `option:checked` counts exactly the
-   selected ones — so dziri's existing `:checked` styling path needs nothing new.
+   selected ones — so dziry's existing `:checked` styling path needs nothing new.
 
 ## The viewport scrolls with nobody's permission — `visible` on it means `auto`
 
 **Measured 2026-08-09 · Chromium 152 (via Edge 152) · `probes/viewport-default-scroll.html`.
 Two runs, identical.**
 
-Asked because dziri decides user-scrollability purely from the `OVERFLOW_X/Y` style fields,
+Asked because dziry decides user-scrollability purely from the `OVERFLOW_X/Y` style fields,
 so a window whose stylesheet never says `overflow` cannot scroll at all — the unstyled demo
 window clips at 940px — while every browser page scrolls with no stylesheet anywhere. The
 question was where that behaviour lives, because a UA-sheet rule was the tempting wrong fix.
@@ -2022,24 +2022,24 @@ classic scrollbar. `scrollingElement` is `html` throughout (standards mode).
 1. **An unstyled tall page scrolls, and no computed value says so.** Both `html` and `body`
    compute `overflow: visible` while the viewport shows a scrollbar. Page scrolling is a
    *viewport* behaviour — CSS Overflow's "`visible` on the viewport is interpreted as
-   `auto`" — not a UA stylesheet rule. **So dziri's fix is not `body { overflow: auto }` in
+   `auto`" — not a UA stylesheet rule. **So dziry's fix is not `body { overflow: auto }` in
    `ua-sheet.ts`**: that rule would let an author's `overflow: visible` beat it and kill
    page scrolling, where in Chromium an explicit `visible` (rows 2–3) changes nothing. It
-   would also make dziri's computed value disagree with Chromium's under `conformance`.
+   would also make dziry's computed value disagree with Chromium's under `conformance`.
 2. **`overflow: hidden` on `body` alone reaches the viewport** when `html`'s is `visible`
    (row 5: no scrollbar) — the body→viewport propagation is real. Once `html` says anything
-   other than `visible`, `body`'s value stays its own (row 6: scrollbar back). dziri has one
+   other than `visible`, `body`'s value stays its own (row 6: scrollbar back). dziry has one
    root node standing in for both, so only the first half applies: `hidden` on the window
    root must stop page scrolling.
 3. **`hidden` still scrolls programmatically** — every hidden/clip row moved on `scrollTo`.
    For `clip` that is *not* the element rule (`clip` forbids all scrolling): on the viewport
-   `clip` is interpreted as `hidden`, per spec and confirmed by row 7. Academic for dziri
+   `clip` is interpreted as `hidden`, per spec and confirmed by row 7. Academic for dziry
    today since nothing scrolls programmatically, but it means `clip` and `hidden` on the
    window root are the same thing, which `overflowKeyword`'s comment already almost says.
 4. **`auto` with content that fits shows no scrollbar and does not scroll** (row 8) —
-   dziri's existing "draw a scrollbar only when content overflows" matches.
+   dziry's existing "draw a scrollbar only when content overflows" matches.
 
-For dziri: the engine should treat the **window root's** `Overflow::VISIBLE` as
+For dziry: the engine should treat the **window root's** `Overflow::VISIBLE` as
 `SCROLL`-when-overflowing at the point where scrollability is decided — computed values
 untouched. Not `CLIP`: on the viewport `clip` means `hidden` (row 7), and both spell "no
 page scroll", exactly like an author's `hidden` on the root.
@@ -2049,7 +2049,7 @@ page scroll", exactly like an author's `hidden` on the root.
 **Measured 2026-08-10 · Chromium 152 (via Edge 152) · `probes/disabled-control-styles.html`.
 Three runs, identical.**
 
-Asked because dziri's UA sheet gained default control appearance and a disabled button
+Asked because dziry's UA sheet gained default control appearance and a disabled button
 looked exactly like an enabled one. Unlike the accent, this whole answer is readable from
 the DOM: the system colours (`GrayText` and friends) resolve to `rgb()` in
 `getComputedStyle`.
@@ -2065,12 +2065,12 @@ the DOM: the system colours (`GrayText` and friends) resolve to `rgb()` in
 
 1. **The greys are alphas, not colours**, for button and the text fields: the disabled
    background is 30% of `#efefef` over whatever is behind, so a disabled field on a dark
-   card darkens with it. dziri's colour fields carry alpha, so this transfers verbatim.
+   card darkens with it. dziry's colour fields carry alpha, so this transfers verbatim.
 2. **A disabled select is the odd one out**: its own colour swaps plus a whole-element
-   `opacity: 0.7`, and its background does not change. dziri has an `opacity` field, so
+   `opacity: 0.7`, and its background does not change. dziry has an `opacity` field, so
    this also transfers verbatim.
 3. **A disabled option computes no change at all** — the greying Chromium shows in a
-   picker is widget painting, not style. Nothing to write in a sheet; dziri's engine
+   picker is widget painting, not style. Nothing to write in a sheet; dziry's engine
    already refuses the press.
 4. **Checked-and-disabled fills are not computable**: the greyed fill of a disabled
    checked checkbox is painted like the tick itself. The sheet extends the measured
@@ -2087,7 +2087,7 @@ the DOM: the system colours (`GrayText` and friends) resolve to `rgb()` in
 
 **Measured 2026-08-11 · Chromium 152 (via Edge 152) · `probes/form-data.html`.** Forty-odd
 forms, each built from its own fragment, each printed as `new FormData(form).entries()`. Asked
-because dziri was about to collect a payload from `name` attributes, and every rule below is one
+because dziry was about to collect a payload from `name` attributes, and every rule below is one
 that gets stated from memory — including two the author never wrote and the parser invents.
 
 ### What is in, and what is out
@@ -2161,17 +2161,17 @@ So a payload cannot be compiled from the markup, however much of its *shape* can
 needs a live cell, which is what `fields.ts` gives each one — the author's `bind:value` signal
 where there is one, and a cell the compiler declares in the artifact where there is not.
 
-### Bearing on dziri
+### Bearing on dziry
 
 Everything except the values is compile-time, and that is most of it: which controls are fields,
-which are excluded, what each option submits, which names collapse to arrays. What dziri does
+which are excluded, what each option submits, which names collapse to arrays. What dziry does
 **not** do, named rather than implied: no `form="id"` association (a field is collected by being
 inside the form), no submitter `name`/`value` entry, no file inputs, and a disabled `<option>`
 that is somehow selected still contributes its value rather than nothing.
 
 One deliberate divergence, and it is the payload's *type* rather than its contents: a lone
 valueless checkbox is `true`/`false` rather than `"on"`-or-absent, and a `type=number` field is a
-number rather than a string. dziri knows each control's kind at build time, so the alternative —
+number rather than a string. dziry knows each control's kind at build time, so the alternative —
 every value a string, as `FormData` has it — would push a `z.coerce` onto every schema an author
 writes. A checkbox carrying a `value` keeps the browser's present-or-absent meaning, since the
 string is the point of writing one.
@@ -2181,7 +2181,7 @@ string is the point of writing one.
 ## Which form owns a control, and where the submitter's entry goes
 
 **Measured 2026-08-11 · Chromium 152 (via Edge 152) · `probes/form-owner.html`.** Two questions
-the payload probe left open, both of which dziri had to answer to finish `<form>`.
+the payload probe left open, both of which dziry had to answer to finish `<form>`.
 
 ### `form="id"` is not a hint — it re-parents the control for every purpose
 
@@ -2217,7 +2217,7 @@ another form, and it would count one blocking field where the form has two.
 
 The row that does **not** settle anything: with a descendant button and an associated one
 outside, the descendant won — but it is also first in document order, so "document order" and
-"descendants first" predict the same answer and this does not separate them. dziri implements
+"descendants first" predict the same answer and this does not separate them. dziry implements
 document order, which is the spec's tree order over the form's controls.
 
 ### The submitter's entry sits where the button is written
@@ -2232,11 +2232,11 @@ the submitter, in a form whose button happened to be last — so "at its positio
 | the **second** | `a="x" btn="second"` |
 | a button outside the form, `form=F` | `a="x" btn="outside"` |
 
-So it is an ordinary entry at its own document position, not an append — which is why dziri
+So it is an ordinary entry at its own document position, not an append — which is why dziry
 carries a named submit button as a field in the same ordered list as everything else, with a
 `submitter` kind that contributes only when it is the node that submitted.
 
-### Bearing on dziri
+### Bearing on dziry
 
 `resolveForms` no longer scans a subtree. `fields.ts::formOwnership` resolves ownership once,
 and the payload, the default button and the blocking count are all derived from it. A `owns`
@@ -2249,7 +2249,7 @@ form that is not a control at all.
 ## A nested-looking `name` is just a string — no browser does anything with it
 
 **Measured 2026-08-11 · Chromium 152 (via Edge 152) · `probes/form-nested-names.html`.** Asked
-because dziri is considering `name="user[email]"` collapsing into a nested object, and the
+because dziry is considering `name="user[email]"` collapsing into a nested object, and the
 convention is old enough to feel like part of the platform. It is not part of it at all.
 
 | authored `name` | `FormData` key | urlencoded wire |
@@ -2274,7 +2274,7 @@ brackets are percent-encoded on the wire and nothing else happens to them.
 | two inputs named `tags` | `"tags" "tags"` | `tags=a&tags=b` |
 
 Structurally identical. The *array* comes from repeating the name, which HTML gives you for
-free — the `[]` is a hint to a server-side parser and contributes nothing itself. So dziri's
+free — the `[]` is a hint to a server-side parser and contributes nothing itself. So dziry's
 existing rule (two controls sharing a name give an array) already **is** the array half of the
 convention, without the brackets.
 
@@ -2293,21 +2293,21 @@ the value is rejected outright and falls back to the default, so a form authored
 same thing rather than trusting prose. `URLSearchParams` does not nest either
 (`new URLSearchParams("user[email]=x").get("user")` is `null`), so no platform parser does.
 
-### Bearing on dziri
+### Bearing on dziry
 
 Nesting is **entirely a server-side convention** — PHP's `$_POST`, Rack's nested-query parser,
-`qs`, Express's extended body parser — and each of those is its own dialect. So a dziri
+`qs`, Express's extended body parser — and each of those is its own dialect. So a dziry
 implementation would not be reproducing a browser behaviour; it would be adopting one dialect
 out of several, and it has to be justified on its own terms rather than as fidelity.
 
-Two things follow, and they cut in dziri's favour rather than against:
+Two things follow, and they cut in dziry's favour rather than against:
 
 - **It would be resolved at build time, not parsed at run time.** Every server-side parser
-  reads a flat string map it was handed and guesses at structure. dziri sees every `name` in
+  reads a flat string map it was handed and guesses at structure. dziry sees every `name` in
   the form at once, in the compiler, so a path is a compile-time fact — and a conflict
   (`user` and `user[email]` in one form, or `a[0]` beside `a[b]`) is a build error rather than
   a silent last-write-wins, which is the failure mode every one of those parsers has.
-- **The payload is already an object, not a multimap.** dziri parts company with `FormData`
+- **The payload is already an object, not a multimap.** dziry parts company with `FormData`
   here anyway — typed values, stable key shapes — so nesting is a change of degree in a
   direction already chosen, not a new divergence.
 
@@ -2316,7 +2316,7 @@ Two things follow, and they cut in dziri's favour rather than against:
 **Measured 2026-08-21 · Chromium 152 (via Edge 152) · `probes/input-newline-sanitization.html`.
 Two runs, identical.**
 
-Asked because clipboard paste is landing in dziri's text fields, and a pasted string is the
+Asked because clipboard paste is landing in dziry's text fields, and a pasted string is the
 one way multi-line text reaches a single-line editable. A trusted OS paste cannot be
 synthesized from script, so the editing path is measured through `execCommand("insertText")`,
 which is the same editing insertion the paste default action performs.
@@ -2334,7 +2334,7 @@ the value sanitization algorithm and deletes CR/LF outright; the **editing inser
 replaces each break — `\r\n` counting as one — with exactly one space, so consecutive breaks
 leave consecutive spaces.
 
-Bearing on dziri: paste into a single-line field replaces each `\r\n | \r | \n` with one
+Bearing on dziry: paste into a single-line field replaces each `\r\n | \r | \n` with one
 space, in the engine, before the caret is optimistically advanced — so the char count the
 engine advances by is the char count the worker splices. Assignment-style stripping applies
 to nothing today (a signal write replaces the whole value; there is no sanitizer), and

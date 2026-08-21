@@ -6,7 +6,7 @@
  *   bun run bench --sizes 10,200  # override the tree sizes
  *   bun run bench --reps 400      # samples per measurement (default 200)
  *
- * Every other tool here asks whether dziri is *correct*. None of them ask what it
+ * Every other tool here asks whether dziry is *correct*. None of them ask what it
  * *costs*, which is odd for a project whose whole pitch is that the work happened
  * at compile time. A 10x frame-time regression would ship today and all fourteen
  * would stay green.
@@ -226,7 +226,7 @@ async function measure(dir: string, n: number): Promise<Row> {
   }
 }
 
-const dir = await mkdtemp(join(tmpdir(), "dziri-bench-"));
+const dir = await mkdtemp(join(tmpdir(), "dziry-bench-"));
 const rows: Row[] = [];
 try {
   for (const n of SIZES) rows.push(await measure(dir, n));

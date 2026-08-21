@@ -1,5 +1,5 @@
 /**
- * How much of dziri is still dynamic, as a number that can only go down.
+ * How much of dziry is still dynamic, as a number that can only go down.
  *
  *   bun run runtime-surface           # check against the ratchet
  *   bun run runtime-surface --bless   # record the current numbers as the new limit

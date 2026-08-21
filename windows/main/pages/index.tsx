@@ -16,7 +16,7 @@ export default function Overview() {
         <div className="text-2xl font-semibold text-zinc-50">Coverage, rendered</div>
         <div className="text-sm text-zinc-400">
           Each route below is one family of utilities or one framework feature, written the way you
-          would write it and compiled by dziri. If something on these pages did not compile, the
+          would write it and compiled by dziry. If something on these pages did not compile, the
           build would have printed a warning naming the property — so what renders is what works.
         </div>
       </div>
@@ -66,7 +66,7 @@ export default function Overview() {
         <div className="text-base font-semibold text-zinc-100">What is not here yet</div>
         <div className="text-sm text-zinc-400">
           Masks, filters and SVG paint now compile — the engine stores them but does not render
-          them yet. What is left is mostly 3D transforms (dziri is 2D), intrinsic sizing keywords
+          them yet. What is left is mostly 3D transforms (dziry is 2D), intrinsic sizing keywords
           like fit-content, and a long tail of small properties. They are absent from these pages
           rather than shown broken: a demo that renders a utility wrongly is worse than one that
           omits it.

@@ -672,7 +672,7 @@ class CalcParser<N> {
      *
      * `e` and `pi` come along because they are the same clause in the spec and cost
      * one entry each. `NaN` is included and is not a mistake: CSS defines it, and a
-     * length of `NaN` is already how dziri spells `auto`, so it lands somewhere
+     * length of `NaN` is already how dziry spells `auto`, so it lands somewhere
      * meaningful rather than nowhere.
      */
     const constant = MATH_CONSTANTS[tok.toLowerCase()];
@@ -766,7 +766,7 @@ const dimsAtom = (px: number, pct: number, vw: number, vh: number): { scalar: fa
 
 /**
  * The viewport's small/large/dynamic variants all fold to the plain unit. A
- * dziri window has no browser chrome that grows or shrinks, so the four sizes
+ * dziry window has no browser chrome that grows or shrinks, so the four sizes
  * are one size — the same collapse SDL3's viewport already makes.
  */
 const VIEWPORT_UNITS: Record<string, "vw" | "vh"> = {
@@ -862,7 +862,7 @@ export function lengthCalc(raw: string): LengthDims {
     if (d.pct !== 0 && (d.px !== 0 || d.vw !== 0 || d.vh !== 0)) {
       throw new CssError(
         `"${whole}" mixes a percentage with an absolute or viewport length, which ` +
-          `dziri cannot resolve: the percentage is relative to the containing block at ` +
+          `dziry cannot resolve: the percentage is relative to the containing block at ` +
           `layout time and the rest is known now. Write the two parts as separate ` +
           `properties, or pick one unit.`,
       );
@@ -938,7 +938,7 @@ function angleAtom(raw: string): number {
 }
 
 /**
- * A `<length-percentage>` split into the two halves dziri stores separately.
+ * A `<length-percentage>` split into the two halves dziry stores separately.
  *
  * They cannot be one number: a percentage here is relative to the node's own
  * border box, which layout computes and the compiler does not know. So the px
@@ -968,7 +968,7 @@ export function lengthPercent(raw: string): { px: number; pct: number } {
       return { px: 0, pct: foldCalc(v, percentAtom) / 100 };
     } catch {
       throw new CssError(
-        `"${raw}" mixes a length and a percentage in one calc(), which dziri cannot ` +
+        `"${raw}" mixes a length and a percentage in one calc(), which dziry cannot ` +
           `fold: the percentage resolves against the laid-out box and the length does not. ` +
           `Write the two parts as separate transform functions instead.`,
       );
@@ -1174,12 +1174,12 @@ export const TRANSITIONABLE: Record<string, AnimatableField[]> = {
 };
 
 /**
- * Properties dziri implements but cannot transition, so the refusal can name them.
+ * Properties dziry implements but cannot transition, so the refusal can name them.
  *
  * The distinction this draws is the whole reason it exists. `transition: width` is
- * a request dziri understands and declines — worth a warning, because the author
+ * a request dziry understands and declines — worth a warning, because the author
  * will otherwise watch a box jump and have nothing to read. `transition: filter` is
- * a property dziri does not have at all, and warning about it would print a line
+ * a property dziry does not have at all, and warning about it would print a line
  * for six of the twenty-two entries in Tailwind's default `transition` list on
  * every build, burying the one that matters.
  *
@@ -1225,14 +1225,14 @@ const LAYOUT_TRANSITIONABLE: Record<string, StyleField[]> = {
  * The mask of animatable fields a `transition-property` list asks for.
  *
  * Three outcomes per name, and keeping them apart is what makes the warnings
- * readable. A property in `TRANSITIONABLE` contributes its bits. A property dziri
+ * readable. A property in `TRANSITIONABLE` contributes its bits. A property dziry
  * implements but cannot interpolate is **named** in a warning, because the author
  * is about to watch a box jump and needs to know why. Anything else is dropped in
- * silence: Tailwind's default `.transition` names twenty-two properties and dziri
+ * silence: Tailwind's default `.transition` names twenty-two properties and dziry
  * has six of them, so warning about the rest would print sixteen lines per build
  * and bury the one that matters.
  *
- * `all` is every animatable field, which is what it means once the properties dziri
+ * `all` is every animatable field, which is what it means once the properties dziry
  * does not have are taken out of the question.
  */
 export function transitionMask(properties: readonly string[], warn: (m: string) => void): number {
@@ -1334,7 +1334,7 @@ export function transitionFrom(ordered: Array<[string, string]>): TransitionSpec
         s.properties = parsed.flatMap((p) => p.properties);
         // Measured: CSS really does give each entry its own timing —
         // `transition: opacity 1s, transform 2s` computes to `duration: [1s, 2s]`.
-        // dziri carries one timing per node, so a list that asks for two is
+        // dziry carries one timing per node, so a list that asks for two is
         // approximated and said so. Tailwind never emits this shape.
         for (const p of parsed.slice(1)) {
           if (p.duration !== first.duration || p.delay !== first.delay) {
@@ -1352,7 +1352,7 @@ export function transitionFrom(ordered: Array<[string, string]>): TransitionSpec
         own().properties = list.length === 1 && list[0] === "none" ? [] : list;
         break;
       }
-      // Each of these is a *list* parallel to `transition-property`, and dziri
+      // Each of these is a *list* parallel to `transition-property`, and dziry
       // takes the first entry — the same one-timing-per-node limitation the
       // shorthand arm warns about, reached from the longhand side.
       case "transition-duration": {
@@ -1370,7 +1370,7 @@ export function transitionFrom(ordered: Array<[string, string]>): TransitionSpec
         if (curve) own().easing = curve;
         break;
       }
-      // Parsed and ignored: `allow-discrete` only matters for properties dziri
+      // Parsed and ignored: `allow-discrete` only matters for properties dziry
       // refuses to transition anyway, so honouring it would change nothing.
       case "transition-behavior":
         break;
@@ -1430,7 +1430,7 @@ export function animationFrom(ordered: Array<[string, string]>): AnimationSpec |
     const value = raw.trim();
     switch (prop) {
       case "animation": {
-        // A comma-separated list is several animations at once. dziri runs one per
+        // A comma-separated list is several animations at once. dziry runs one per
         // node, so the first is taken and the rest named in a warning.
         const entries = splitTopLevelCommas(value).map((e) => e.trim()).filter(Boolean);
         if (entries.length === 0) break;

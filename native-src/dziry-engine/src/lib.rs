@@ -1,0 +1,1352 @@
+//! `dziry_engine` — the C ABI Bun opens with `bun:ffi`.
+//!
+//! Everything public here is `extern "C"`, and every one of those functions has
+//! the same three properties:
+//!
+//! 1. **It cannot unwind.** [`error::guard`] catches panics and turns them into a
+//!    status code, because a panic crossing into Bun aborts the process with no
+//!    diagnostic at all.
+//! 2. **It returns a status, never a value.** Results go through out-pointers, so
+//!    failure is always distinguishable from a legitimate `0` or null.
+//! 3. **It validates its handle by looking it up, never by dereferencing it.**
+//!    The handle is a `u32` index-plus-generation into [`REGISTRY`], so a handle
+//!    used after `destroy` is a miss with a message — which matters because the
+//!    host is a scripting language that can easily hold one past `destroy`, and
+//!    because the previous scheme had to read the freed allocation to discover it
+//!    had been freed.
+//!
+//! The bulk data path is deliberately *not* here: Bun writes the tables through
+//! typed-array views over engine memory, so a style patch, a list relink and a
+//! hidden byte cost no FFI call at all. See [`tables`].
+
+pub mod anim;
+pub mod caret;
+pub mod controls;
+pub mod engine;
+pub mod error;
+pub mod focus;
+pub mod images;
+pub mod layout;
+pub mod paint;
+pub mod protocol;
+pub mod select;
+pub mod svg;
+pub mod tables;
+pub mod text;
+pub mod window;
+
+use std::sync::{Mutex, MutexGuard};
+use std::thread::ThreadId;
+
+use engine::{Engine, EngineConfig, Event};
+use error::{fail, guard, status};
+use tables::SpanDesc;
+
+/// An engine handle: a slot index and a generation, packed into one `u32`.
+///
+/// **Deliberately not a pointer.** It used to be `*mut Handle` with a magic number
+/// at offset 0, and validating it meant *dereferencing it first* — so a handle used
+/// after `destroy` read freed memory to discover that it was freed. That read is
+/// undefined behaviour on the happy path and a segfault on the unhappy one, and
+/// under an allocator that reuses the block it can read a valid magic number
+/// belonging to a *different* engine, at which point the call operates on the wrong
+/// one.
+///
+/// A generation-indexed table removes the dereference: the host's number is looked
+/// *up*, and a stale one either names an empty slot or carries a generation the slot
+/// has moved past. Double-destroy becomes a lookup miss with a message. It is also
+/// the shape a render thread needs, since a `u32` crosses threads and a raw pointer
+/// into a `!Send` engine does not.
+///
+/// Layout: low 8 bits are the slot (256 live engines, which is 255 more than any
+/// app has needed), the top 24 are the generation. Generation starts at 1, so **0
+/// is never a valid handle** and a zeroed variable fails the lookup rather than
+/// naming slot 0. A slot reused 16.7 million times wraps and could accept a very
+/// old handle; that is not reachable in a process that opens windows.
+pub type Handle = u32;
+
+const SLOT_BITS: u32 = 8;
+const SLOT_MASK: u32 = (1 << SLOT_BITS) - 1;
+const MAX_SLOTS: usize = 1 << SLOT_BITS;
+
+/// What a slot is doing.
+///
+/// Three states, not `Option<Owned>`. `with` moves the engine out for the duration
+/// of a call so the registry lock is not held across `tick` — which means "nobody
+/// lives here" and "somebody lives here and is mid-call" would otherwise look
+/// identical, and `create` would hand a live, in-use slot to a second engine. The
+/// concurrent test harness caught exactly that, twice.
+enum State {
+    /// Nothing here. `create` may take it.
+    Free,
+    /// An engine, idle.
+    Live(Owned),
+    /// An engine, moved out for the duration of a call. A re-entrant call names this.
+    InCall,
+}
+
+/// One engine, plus what a handle to it has to match.
+struct Slot {
+    /// Bumped by the `destroy` that frees the slot, so a handle from an earlier
+    /// tenancy is stale even once the slot is live again.
+    generation: u32,
+    state: State,
+    /// The thread that called `create`. SDL pins its window and event pump to one
+    /// thread, and Skia's surface is not shared either, so every later call has to
+    /// arrive on this one.
+    owner: ThreadId,
+}
+
+/// An `Engine` that the registry may hold across threads.
+///
+/// The `Engine` itself is emphatically not `Send`: it owns an SDL window and a Skia
+/// surface. What makes this sound is that the registry never *touches* one from a
+/// foreign thread — `with` and `destroy` both compare `owner` against the calling
+/// thread and refuse before taking the box out, so every dereference and the drop
+/// all happen on the creating thread. The `unsafe impl` buys the ability to keep it
+/// in a `static`, not the ability to use it from anywhere.
+struct Owned(Box<Engine>);
+
+// SAFETY: as documented above — access is gated on the owning-thread check in
+// `with` and `dziry_engine_destroy`, which are the only two readers.
+unsafe impl Send for Owned {}
+
+/// Every live engine in the process.
+///
+/// A `static` rather than a thread-local, because the *point* is that a handle can
+/// be validated from a thread that must then be refused: a thread-local registry
+/// would report a foreign-thread handle as "no such engine", which is a different
+/// and more confusing bug.
+///
+/// Statics are never dropped, so a process exiting with a live engine leaks it to
+/// the OS rather than running SDL teardown on whatever thread called `exit` — which
+/// is the outcome we want.
+static REGISTRY: Mutex<Vec<Slot>> = Mutex::new(Vec::new());
+
+fn registry() -> MutexGuard<'static, Vec<Slot>> {
+    // Poisoning carries no information here: every panic that could escape a call
+    // is already caught by `guard`, and a poisoned lock would turn one engine's
+    // panic into every engine's.
+    REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn pack(slot: usize, generation: u32) -> Handle {
+    (generation << SLOT_BITS) | (slot as u32 & SLOT_MASK)
+}
+
+/// Resolves a handle to a slot index, or says why it cannot.
+fn slot_of(table: &[Slot], handle: Handle) -> Result<usize, &'static str> {
+    let index = (handle & SLOT_MASK) as usize;
+    let generation = handle >> SLOT_BITS;
+    if generation == 0 {
+        return Err("not an engine handle");
+    }
+    match table.get(index) {
+        Some(slot) if slot.generation == generation => Ok(index),
+        Some(_) => Err("this engine was already destroyed"),
+        None => Err("not an engine handle"),
+    }
+}
+
+/// Runs `body` with a validated engine, containing panics and poisoning the
+/// engine if one escapes.
+///
+/// The engine is moved out of its slot for the duration and moved back after, so
+/// the registry lock is not held across `tick` — which pumps SDL and can block for
+/// a whole frame — and a second call naming the same engine finds the slot empty
+/// rather than deadlocking or aliasing.
+fn with<F: FnOnce(&mut Engine) -> i32>(handle: Handle, body: F) -> i32 {
+    with_gate(handle, body, false)
+}
+
+/// [`with`], with the poison refusal made explicit.
+///
+/// `even_poisoned` exists for exactly one caller — [`dziry_engine_fatal_alert`] —
+/// and the argument for the exemption lives there. Everything else goes through
+/// [`with`] and keeps refusing.
+fn with_gate<F: FnOnce(&mut Engine) -> i32>(handle: Handle, body: F, even_poisoned: bool) -> i32 {
+    let taken = {
+        let mut table = registry();
+        let index = match slot_of(&table, handle) {
+            Ok(index) => index,
+            Err(why) => return fail(status::INVALID_HANDLE, why),
+        };
+
+        let slot = &mut table[index];
+        if slot.owner != std::thread::current().id() {
+            return fail(
+                status::INVALID_HANDLE,
+                "this engine belongs to the thread that created it; SDL pins its window \
+                 and event pump there",
+            );
+        }
+        match std::mem::replace(&mut slot.state, State::InCall) {
+            State::Live(engine) => engine,
+            State::InCall => {
+                slot.state = State::InCall;
+                return fail(
+                    status::INVALID_HANDLE,
+                    "this engine is already inside a call — the ABI is not re-entrant",
+                );
+            }
+            State::Free => {
+                slot.state = State::Free;
+                return fail(status::INVALID_HANDLE, "this engine was already destroyed");
+            }
+        }
+    };
+
+    let mut owned = taken;
+    let poisoned = owned.0.poisoned;
+    let code = if poisoned && !even_poisoned {
+        fail(
+            status::POISONED,
+            "the engine panicked earlier and refuses further work",
+        )
+    } else {
+        let code = guard(|| body(&mut owned.0));
+        if code == status::PANIC {
+            owned.0.poisoned = true;
+        }
+        code
+    };
+
+    // Unconditional: `guard` turns a panic into a status, so there is no path that
+    // leaves the slot `InCall` and the engine unreachable.
+    let index = (handle & SLOT_MASK) as usize;
+    if let Some(slot) = registry().get_mut(index) {
+        slot.state = State::Live(owned);
+    }
+    code
+}
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+/// The protocol this binary speaks. Read before creating anything, so a version
+/// skew is a message rather than a corrupt frame.
+#[no_mangle]
+pub extern "C" fn dziry_protocol_version() -> u32 {
+    protocol::PROTOCOL_VERSION
+}
+
+/// Structural fingerprint of the schema this binary was generated from.
+///
+/// The version catches a deliberate protocol change; this catches an accidental
+/// one. A renamed field, two same-width fields swapped, or an `i32` retyped to
+/// `f32` all leave [`dziry_protocol_version`] and every field *count* untouched
+/// while changing what the bytes mean — so the host compares this too, and a
+/// mismatch means "the engine binary is older than the generated modules".
+#[no_mangle]
+pub extern "C" fn dziry_schema_hash() -> u32 {
+    protocol::SCHEMA_HASH
+}
+
+/// `size_of::<Event>()`, so the host can check the stride it decodes with.
+///
+/// Every *table* layout is generated from `schema.ts` and every offset is reported by the
+/// engine, which is what that file's header says the generator exists for. `Event` is the one
+/// struct outside it: its fields are written in `engine.rs` and again as literal byte offsets
+/// in `host.ts`, and the two agreed on 56 bytes only because somebody kept them in step by
+/// hand. Adding a field to it — `c`, the selection anchor — is exactly the change that would
+/// have shifted `text` under a host still reading the old offset, and the symptom would have
+/// been keystrokes arriving as mojibake rather than an error.
+///
+/// So the host asserts its constant against this when the library opens. Cheap, and it turns
+/// the whole class of drift into a startup message.
+#[no_mangle]
+pub extern "C" fn dziry_engine_event_size() -> u32 {
+    std::mem::size_of::<engine::Event>() as u32
+}
+
+/// Copies the calling thread's last error into `buf` as UTF-8. Returns the full
+/// byte length, which may exceed `len`.
+///
+/// # Safety
+/// `buf` must be writable for `len` bytes, or null to query the length.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_last_error(buf: *mut u8, len: u32) -> u32 {
+    // SAFETY: forwarding the caller's own promise about `buf` and `len`.
+    unsafe { error::read_last_error(buf, len) }
+}
+
+/// Creates an engine. On success `*out` holds the handle.
+///
+/// # Safety
+/// `config` must point to a valid [`EngineConfig`], and `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_create(config: *const EngineConfig, out: *mut Handle) -> i32 {
+    error::install_hook();
+
+    guard(|| {
+        if config.is_null() || out.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null config or out pointer");
+        }
+        // SAFETY: both pointers were just checked for null, and the caller
+        // promises they are writable and point at a valid config. Zero first: it is
+        // never a valid handle, so a caller who ignores the status still fails the
+        // lookup rather than reaching slot 0.
+        unsafe { *out = 0 };
+
+        let config = unsafe { &*config };
+        if config.protocol_version != protocol::PROTOCOL_VERSION {
+            return fail(
+                status::PROTOCOL_MISMATCH,
+                format!(
+                    "protocol mismatch: the host speaks v{}, this engine speaks v{}",
+                    config.protocol_version,
+                    protocol::PROTOCOL_VERSION
+                ),
+            );
+        }
+
+        let engine = match Engine::new(config) {
+            Ok(engine) => engine,
+            Err(e) => return fail(e.status, e.detail),
+        };
+
+        let mut table = registry();
+        // Reuse a free slot before growing, so a create/destroy loop does not walk
+        // the handle space. The generation it issues was already bumped by the
+        // `destroy` that freed it, so handles from the previous tenancy are stale.
+        let free = table
+            .iter()
+            .position(|slot| matches!(slot.state, State::Free));
+        let owner = std::thread::current().id();
+
+        let (index, generation) = match free {
+            Some(index) => {
+                let slot = &mut table[index];
+                slot.owner = owner;
+                slot.state = State::Live(Owned(Box::new(engine)));
+                (index, slot.generation)
+            }
+            None => {
+                if table.len() >= MAX_SLOTS {
+                    return fail(
+                        status::CAPACITY,
+                        format!("{MAX_SLOTS} engines are already open"),
+                    );
+                }
+                table.push(Slot {
+                    generation: 1,
+                    state: State::Live(Owned(Box::new(engine))),
+                    owner,
+                });
+                (table.len() - 1, 1)
+            }
+        };
+
+        // SAFETY: as above — `out` is non-null and writable.
+        unsafe { *out = pack(index, generation) };
+        status::OK
+    })
+}
+
+/// Destroys an engine.
+///
+/// Handle 0 succeeds, so teardown paths stay simple. A second call with the same
+/// handle is a lookup miss: the slot is empty, and the generation has moved on. No
+/// pointer is dereferenced to discover either, which is the whole point.
+///
+/// The engine is dropped on the calling thread, which is why a foreign thread is
+/// refused rather than accommodated — SDL's window teardown belongs on the thread
+/// that created it.
+#[no_mangle]
+pub extern "C" fn dziry_engine_destroy(handle: Handle) -> i32 {
+    guard(|| {
+        if handle == 0 {
+            return status::OK;
+        }
+
+        let taken = {
+            let mut table = registry();
+            let index = match slot_of(&table, handle) {
+                Ok(index) => index,
+                Err(why) => return fail(status::INVALID_HANDLE, why),
+            };
+
+            let slot = &mut table[index];
+            if slot.owner != std::thread::current().id() {
+                return fail(
+                    status::INVALID_HANDLE,
+                    "this engine belongs to the thread that created it, and has to be \
+                     destroyed there",
+                );
+            }
+            let taken = match std::mem::replace(&mut slot.state, State::Free) {
+                State::Live(engine) => engine,
+                State::InCall => {
+                    slot.state = State::InCall;
+                    return fail(
+                        status::INVALID_HANDLE,
+                        "this engine is inside a call and cannot be destroyed from within it",
+                    );
+                }
+                State::Free => {
+                    slot.state = State::Free;
+                    return fail(status::INVALID_HANDLE, "this engine was already destroyed");
+                }
+            };
+            // The generation moves on *here*, with the engine, so the caller's
+            // handle is stale from this moment and a second `destroy` is refused by
+            // `slot_of` as "already destroyed" rather than mistaken for re-entrancy.
+            // One bump per lifecycle: `create` reusing this slot issues the value
+            // set here.
+            slot.generation = slot.generation.wrapping_add(1).max(1);
+            taken
+        };
+
+        // Outside the lock: dropping an engine closes an SDL window and frees a Skia
+        // surface, and neither needs the registry held while it happens.
+        drop(taken);
+        status::OK
+    })
+}
+
+// ---------------------------------------------------------------------------
+// The shared-memory descriptor
+// ---------------------------------------------------------------------------
+
+/// How many spans [`dziry_engine_describe`] will report.
+///
+/// # Safety
+/// `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_span_count(handle: Handle, out: *mut u32) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        // SAFETY: non-null, and writable by the caller's promise.
+        unsafe { *out = engine.span_count() as u32 };
+        status::OK
+    })
+}
+
+/// Fills `out` with `(table, field, ptr, elemSize, capacity)` per span.
+///
+/// Bun wraps each with `toArrayBuffer(ptr, 0, elemSize * capacity)` — and must
+/// pass **no finalizer**, because this memory belongs to Rust and freeing it
+/// from the JS side would be a double free.
+///
+/// # Safety
+/// `out` must be writable for `capacity` [`SpanDesc`] records.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_describe(
+    handle: Handle,
+    out: *mut SpanDesc,
+    capacity: u32,
+    written: *mut u32,
+) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() || written.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        if (capacity as usize) < engine.span_count() {
+            // SAFETY: non-null, writable. Zero first: a partial descriptor is
+            // worse than none, and this is the value the host keys on.
+            unsafe { *written = 0 };
+            return fail(
+                status::CAPACITY,
+                format!(
+                    "descriptor needs {} spans, was given room for {capacity}",
+                    engine.span_count()
+                ),
+            );
+        }
+
+        // SAFETY: the caller promises room for `capacity` records, and the check
+        // above proved `capacity` covers every span. The slice does not outlive
+        // this call, so nothing holds a Rust reference into host memory.
+        let slice = unsafe { std::slice::from_raw_parts_mut(out, capacity as usize) };
+        unsafe { *written = engine.describe(slice) as u32 };
+        status::OK
+    })
+}
+
+/// Bumped whenever the tables are reallocated — a list arena outgrowing its
+/// capacity. Every pointer from a previous descriptor is dangling after that, so
+/// the host re-reads it whenever this changes.
+///
+/// # Safety
+/// `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_generation(handle: Handle, out: *mut u64) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        // SAFETY: non-null, and writable by the caller's promise.
+        unsafe { *out = engine.generation() };
+        status::OK
+    })
+}
+
+// ---------------------------------------------------------------------------
+// The frame
+// ---------------------------------------------------------------------------
+
+/// Applies what the host staged, relays out what that invalidated, paints and
+/// presents.
+#[no_mangle]
+pub extern "C" fn dziry_engine_tick(handle: Handle) -> i32 {
+    // The status is the error's own, not one guessed per entry point. `tick`
+    // reaches Taffy, Skia and SDL, and reporting all three as LAYOUT told a host
+    // out of video memory that its tree was wrong.
+    with(handle, |engine| match engine.tick() {
+        Ok(()) => status::OK,
+        Err(e) => fail(e.status, e.detail),
+    })
+}
+
+/// Services the window without reading the staged tables.
+///
+/// For a host whose app code runs on another thread: when the writer holds the
+/// staging lock, this keeps the window answering the OS — input, resize, scroll
+/// glide and repaint — while leaving the staged tables strictly alone. See
+/// [`Engine::pump`].
+#[no_mangle]
+pub extern "C" fn dziry_engine_pump(handle: Handle) -> i32 {
+    with(handle, |engine| match engine.pump() {
+        Ok(()) => status::OK,
+        Err(e) => fail(e.status, e.detail),
+    })
+}
+
+/// Moves queued events to the host. `*written` is how many were moved; call
+/// again while it equals `capacity`.
+///
+/// # Safety
+/// `out` must be writable for `capacity` [`Event`] records.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_drain_events(
+    handle: Handle,
+    out: *mut Event,
+    capacity: u32,
+    written: *mut u32,
+) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() || written.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        // SAFETY: the caller promises room for `capacity` events, and
+        // `drain_events` writes no more than the slice's length. Materialised
+        // inside the call only, like every other view over host memory here.
+        let slice = unsafe { std::slice::from_raw_parts_mut(out, capacity as usize) };
+        unsafe { *written = engine.drain_events(slice) as u32 };
+        status::OK
+    })
+}
+
+/// Grows the tables to hold at least the requested capacities.
+///
+/// Call when a list arena outgrows its capacity. On success, check
+/// [`dziry_engine_generation`]: if it changed, every pointer from the previous
+/// descriptor is dangling and the host must re-read it and re-upload.
+///
+/// # Safety
+/// `caps` must point to a valid [`tables::Capacities`].
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_grow(handle: Handle, caps: *const tables::Capacities) -> i32 {
+    with(handle, |engine| {
+        if caps.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null capacities pointer");
+        }
+        // SAFETY: non-null, and the caller promises a valid `Capacities`.
+        engine.grow(unsafe { *caps });
+        status::OK
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dziry_engine_resize(handle: Handle, width: u32, height: u32) -> i32 {
+    with(handle, |engine| match engine.resize(width, height) {
+        Ok(()) => status::OK,
+        Err(e) => fail(e.status, e.detail),
+    })
+}
+
+/// A new tree under a live window: dev hot reload swapped the app. The next
+/// commit's node ids belong to the new tree; the engine drops every reference to
+/// the old one and rebuilds on the next tick. See `Engine::reset`.
+#[no_mangle]
+pub extern "C" fn dziry_engine_reset(handle: Handle, root: u32) -> i32 {
+    with(handle, |engine| {
+        engine.reset(root);
+        status::OK
+    })
+}
+
+/// Overrides hover/press/focus without a mouse, so interaction styles can be
+/// rendered headlessly — the engine-side `--hover` and `--focus`.
+#[no_mangle]
+pub extern "C" fn dziry_engine_set_input_state(
+    handle: Handle,
+    hovered: i32,
+    pressed: i32,
+    focused: i32,
+) -> i32 {
+    with(handle, |engine| {
+        engine.set_input_state(hovered, pressed, focused);
+        status::OK
+    })
+}
+
+/// Fixes every subsequent frame's length in seconds, or restores the wall clock.
+///
+/// A non-finite or negative `dt` restores the clock. This is what makes a frame
+/// reproducible: `dt` is a parameter all the way down through `advance_scrolls` and
+/// `advance_animations`, and a golden screenshot of an animation is a frame at an
+/// exact `t` — which a wall-clock reading cannot be twice.
+#[no_mangle]
+pub extern "C" fn dziry_engine_set_time_step(handle: Handle, dt: f32) -> i32 {
+    with(handle, |engine| {
+        engine.set_time_step(dt);
+        status::OK
+    })
+}
+
+/// Hands the engine the bytes `src` refers to, decoded once and kept.
+///
+/// The tables say *that* a node is an image and where its bytes come from;
+/// getting them is the host's — a file read or a `fetch`, both of which are
+/// Bun's job, with the engine deliberately off the network. `src` is the cache
+/// key rather than a table row, because the table is republished on every
+/// commit and row identity means nothing across one. See `images.rs`.
+///
+/// A decode failure is *not* an error return: a 404 is content, and the node
+/// keeps its CSS box while painting nothing, like a browser's broken image.
+///
+/// # Safety
+/// `src` must be readable for `src_len` bytes and `bytes` for `bytes_len`.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_provide_image(
+    handle: Handle,
+    src: *const u8,
+    src_len: u32,
+    bytes: *const u8,
+    bytes_len: u32,
+) -> i32 {
+    if src.is_null() || (bytes.is_null() && bytes_len > 0) {
+        return status::INVALID_ARGUMENT;
+    }
+    // SAFETY: both pointers were just checked, and the caller promises the
+    // lengths. The slices do not outlive this call — the decode copies.
+    let src = unsafe { std::slice::from_raw_parts(src, src_len as usize) };
+    let src = std::str::from_utf8(src).unwrap_or("");
+    let bytes = unsafe { std::slice::from_raw_parts(bytes, bytes_len as usize) };
+    with(handle, |engine| match engine.provide_image(src, bytes) {
+        Ok(()) => status::OK,
+        Err(e) => fail(e.status, e.detail),
+    })
+}
+
+/// Presses and releases at a point, exactly as the window pump would.
+///
+/// The counterpart to `set_input_state`, and needed for a different reason. That one
+/// *asserts* a hover; this one **happens** — it runs the whole press path, so
+/// hit-testing, the disabled-control swallow, a label's forwarding and the activation
+/// behaviour all take part. A checkbox that ticks only when a real press reaches it
+/// cannot be tested by declaring the state it ends in.
+///
+/// ROADMAP A0 asks for "interaction tests — click → signal → repaint"; this is the
+/// entry point that makes one possible headlessly. Two calls rather than one so a
+/// caller can also hold a button down, which `:active` needs.
+#[no_mangle]
+pub extern "C" fn dziry_engine_mouse_down(handle: Handle, x: f32, y: f32) -> i32 {
+    with(handle, |engine| {
+        engine.mouse_down(x, y);
+        status::OK
+    })
+}
+
+/// Writes the selected range in `field`'s text run to `out` as two `i32`, or `(-1, -1)`.
+///
+/// The selection is engine state — it has no signal and crosses to Bun only as two numbers
+/// beside a keystroke — so from outside there is otherwise no way to ask what is selected.
+/// That makes the pointer half of the feature untestable: a drag either built the range it
+/// should have or it did not, and only the value after an edit would say, which is a test of
+/// two things at once.
+///
+/// # Safety
+/// `out` must be writable for two `i32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_selection(handle: Handle, field: i32, out: *mut i32) -> i32 {
+    if out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        let (start, end) = engine
+            .selection_of(field)
+            .map_or((-1, -1), |(s, e)| (s as i32, e as i32));
+        // SAFETY: the caller promises two writable `i32`, checked non-null above.
+        unsafe {
+            *out = start;
+            *out.add(1) = end;
+        }
+        status::OK
+    })
+}
+
+/// Scrolls the box at `(px, py)` by `(dx, dy)` pixels **and settles the glide**.
+///
+/// The settle is the whole reason this exists rather than exposing `scroll_at`. A wheel
+/// glides, so the position a caller reads back — or screenshots — right after aiming one is
+/// partway through the gesture and depends on how fast the machine ran. Finishing it here
+/// makes a scrolled frame reproducible, which is what a golden needs.
+///
+/// Pixels rather than notches, for the same reason: a notch is 48px today and that is an
+/// engine detail a scenario should not encode.
+///
+/// This exists because the harness could not scroll at all, and that was a structural blind
+/// spot rather than a missing convenience: every golden scenario is taller than the window it
+/// renders into, so nothing ever scrolled, and a picker drawn at its *unscrolled* position
+/// looked correct in every frame while being unusable in the real 1040x700 demo.
+/// `out` receives the offset the scrolled box actually settled at, as two `f32`.
+///
+/// Returned rather than assumed, because a scroll is **clamped to what the content can
+/// give** — asking for 560px of a page with 300px of overflow moves it 300. A caller that
+/// then aims a press by subtracting what it *asked for* misses by the difference, which is
+/// exactly the class of silent miss this whole entry point exists to stop.
+///
+/// # Safety
+/// `out` must be writable for two `f32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_scroll(
+    handle: Handle,
+    px: f32,
+    py: f32,
+    dx: f32,
+    dy: f32,
+    out: *mut f32,
+) -> i32 {
+    if out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        let node = engine.scrollable_node_at(px, py);
+        engine.scroll_at(px, py, dx, dy);
+        // One second of glide, which is past the point every easing here has arrived.
+        engine.advance_scrolls(1.0);
+        let [x, y] = node.map_or([0.0, 0.0], |n| engine.scroll_of(n));
+        // SAFETY: the caller promises two writable `f32`, checked non-null above.
+        unsafe {
+            *out = x;
+            *out.add(1) = y;
+        }
+        status::OK
+    })
+}
+
+/// Writes the selected option **indices** of a list box to `out`, and the count to `written`.
+///
+/// Exposed for the reason `dziry_engine_selection` is, and it is the same reason twice: this
+/// is engine state with no signal to hold it. The difference is that a text range is two
+/// numbers and this is a *set* — so it cannot ride in the `CHANGE` event the way a single
+/// select's chosen index does. One `i32` does not hold a set of unbounded size, and every
+/// encoding that nearly fits (a bitmask over 31 options) is silently wrong on the 32nd.
+///
+/// Indices into the list box's options, in document order, ascending. Node ids would be the
+/// other candidate and are the wrong currency: an author never sees one, while the index is
+/// the position in the list they wrote — the same choice the single select's `CHANGE` makes.
+///
+/// A node that is not a list box writes nothing and reports 0, which is indistinguishable
+/// from a list box with an empty selection. That is deliberate: both mean "no selected
+/// indices here", and the caller already knows which kind of control it asked about, because
+/// it read that from the same `controls` table the compiler filled.
+///
+/// # Safety
+/// `out` must be writable for `capacity` `i32`, and `written` for one `u32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_listbox_selection(
+    handle: Handle,
+    listbox: i32,
+    out: *mut i32,
+    capacity: u32,
+    written: *mut u32,
+) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() || written.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        let selected = engine.listbox_selection(listbox);
+        let n = selected.len().min(capacity as usize);
+        // SAFETY: the caller promises room for `capacity` i32, and `n` is clamped to it.
+        unsafe {
+            std::ptr::copy_nonoverlapping(selected.as_ptr(), out, n);
+            *written = n as u32;
+        }
+        status::OK
+    })
+}
+
+/// Writes the open `<select>` and the option it currently shows to `out`, as two `i32`.
+///
+/// `(-1, -1)` when no picker is open; `(select, -1)` for an open picker whose select has no
+/// checked option, which only a `<select>` with no options can be.
+///
+/// Exposed for the reason `dziry_engine_selection` is: both halves are engine state that
+/// reaches Bun only as an event, so from outside there is otherwise no way to ask. Without it
+/// a test of the picker could only assert on pixels — and "the dropdown is open" and "the
+/// dropdown is open on the right option" are the two things a golden is worst at telling
+/// apart, since a highlight is a few pixels of background.
+///
+/// # Safety
+/// `out` must be writable for two `i32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_open_select(handle: Handle, out: *mut i32) -> i32 {
+    if out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        let (select, option) = engine.open_selection();
+        // SAFETY: the caller promises two writable `i32`, checked non-null above.
+        unsafe {
+            *out = select;
+            *out.add(1) = option;
+        }
+        status::OK
+    })
+}
+
+/// Moves the pointer to a point, running the whole motion path.
+///
+/// The third of the trio, and it earns its place for the same reason `mouse_down` does over
+/// `set_input_state`: a **drag** only exists in motion. A press followed by a release cannot
+/// select a range however far apart the two points are, because the selection's focus follows
+/// `mouse_move` — so without this, the only selection reachable headlessly is one made with
+/// the keyboard, and the pointer path would go untested and unscreenshottable.
+///
+/// `clicks` and `shift` are deliberately absent here: motion carries neither.
+#[no_mangle]
+pub extern "C" fn dziry_engine_mouse_move(handle: Handle, x: f32, y: f32) -> i32 {
+    with(handle, |engine| {
+        engine.mouse_move(x, y);
+        status::OK
+    })
+}
+
+/// Presses at a point with a click count and Shift state, for a double click or a Shift+click.
+///
+/// A separate entry point rather than more arguments on `dziry_engine_mouse_down`, so the
+/// plain-click spelling stays two floats — which is what every existing caller wants and what
+/// `clickNode` is built on.
+#[no_mangle]
+pub extern "C" fn dziry_engine_mouse_down_with(
+    handle: Handle,
+    x: f32,
+    y: f32,
+    clicks: u32,
+    shift: u32,
+) -> i32 {
+    with(handle, |engine| {
+        engine.mouse_down_with(x, y, clicks as u8, shift != 0);
+        status::OK
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn dziry_engine_mouse_up(handle: Handle, x: f32, y: f32) -> i32 {
+    with(handle, |engine| {
+        engine.mouse_up(x, y);
+        status::OK
+    })
+}
+
+/// Deepest interactive node at a point, or -1.
+///
+/// # Safety
+/// `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_hit_test(
+    handle: Handle,
+    x: f32,
+    y: f32,
+    out: *mut i32,
+) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        // SAFETY: non-null, and writable by the caller's promise.
+        unsafe { *out = engine.hit_test(x, y) };
+        status::OK
+    })
+}
+
+/// A node's absolute bounds as `[x, y, width, height]`.
+///
+/// The host can also read these straight out of the layout table; this exists
+/// for one-off queries where wrapping a view would cost more than the call.
+///
+/// # Safety
+/// `out` must be writable for four `f32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_bounds(handle: Handle, node: u32, out: *mut f32) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        match engine.bounds_of(node as usize) {
+            Some(rect) => {
+                // SAFETY: non-null, and the caller promises room for four `f32`.
+                unsafe { std::ptr::copy_nonoverlapping(rect.as_ptr(), out, 4) };
+                status::OK
+            }
+            None => fail(status::INVALID_ARGUMENT, format!("no node {node}")),
+        }
+    })
+}
+
+/// `[width, height, rowBytes, frames]` — everything a screenshot needs to size
+/// its buffer, plus the frame counter for diagnostics.
+///
+/// # Safety
+/// `out` must be writable for four `u32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_surface_info(handle: Handle, out: *mut u32) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        let (width, height) = engine.size();
+        // SAFETY: non-null, and the caller promises room for four `u32` — so
+        // `add(3)` is the last element rather than one past it.
+        unsafe {
+            *out = width;
+            *out.add(1) = height;
+            *out.add(2) = width * 4;
+            *out.add(3) = engine.frame_count() as u32;
+        }
+        status::OK
+    })
+}
+
+/// Copies the last painted frame out as BGRA_8888.
+///
+/// # Safety
+/// `out` must be writable for `len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_read_pixels(handle: Handle, out: *mut u8, len: u32) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        let Some((pixels, _)) = engine.pixels() else {
+            return fail(status::SKIA, "the surface has no readable pixels");
+        };
+        if (len as usize) < pixels.len() {
+            return fail(
+                status::CAPACITY,
+                format!("frame is {} bytes, was given {len}", pixels.len()),
+            );
+        }
+        // SAFETY: non-null, and the length check above proved the caller's buffer
+        // is at least as long as the frame.
+        unsafe { std::ptr::copy_nonoverlapping(pixels.as_ptr(), out, pixels.len()) };
+        status::OK
+    })
+}
+
+/// Encodes the last painted frame as a PNG and reports its byte length.
+///
+/// Two calls rather than one, because the size is not knowable before encoding:
+/// this leaves the bytes in the engine, and [`dziry_engine_take_png`] copies them
+/// out. Skia already has the encoder, which is why the TypeScript runtime's
+/// hand-written one retires.
+///
+/// # Safety
+/// `out_len` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_encode_png(handle: Handle, out_len: *mut u32) -> i32 {
+    with(handle, |engine| {
+        if out_len.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        match engine.encode_png() {
+            Some(len) => {
+                // SAFETY: non-null, and writable by the caller's promise.
+                unsafe { *out_len = len as u32 };
+                status::OK
+            }
+            None => fail(status::SKIA, "Skia could not encode the frame as PNG"),
+        }
+    })
+}
+
+/// Copies out the bytes from the last [`dziry_engine_encode_png`] and clears them.
+///
+/// A refusal leaves the frame where it was, so the host can allocate properly and
+/// call again. The check has to come before the take for that to be true: taking
+/// first and checking after answers `CAPACITY` once and then `OK` with zero bytes
+/// forever, which reads as a successful screenshot of nothing.
+///
+/// # Safety
+/// `out` must be writable for `len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_take_png(handle: Handle, out: *mut u8, len: u32) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        let needed = engine.png_len();
+        if (len as usize) < needed {
+            return fail(
+                status::CAPACITY,
+                format!("PNG is {needed} bytes, was given {len}"),
+            );
+        }
+        let png = engine.take_png();
+        // SAFETY: non-null, and the capacity check above proved the buffer holds
+        // the whole PNG.
+        unsafe { std::ptr::copy_nonoverlapping(png.as_ptr(), out, png.len()) };
+        status::OK
+    })
+}
+
+/// The resolved font family, as UTF-8.
+///
+/// `*written` answers whichever question was asked, on the same terms as
+/// [`dziry_last_error`]: with `buf` null it is the byte length the name needs,
+/// with a buffer it is how many bytes were written — the longest whole-codepoint
+/// prefix that fits.
+///
+/// # Safety
+/// `buf` must be writable for `len` bytes, or null to query the length.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_font_family(
+    handle: Handle,
+    buf: *mut u8,
+    len: u32,
+    written: *mut u32,
+) -> i32 {
+    with(handle, |engine| {
+        if written.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        // Whole codepoints only, and `written` reports what was written rather than
+        // what was wanted — a system font family is exactly the kind of string that
+        // is not ASCII ("宋体", "맑은 고딕"). Same rule as `dziry_last_error`,
+        // because it is the same function.
+        // SAFETY: `written` is non-null, and `buf`/`len` are the caller's promise.
+        let n = unsafe { error::copy_utf8_prefix(engine.font_family(), buf, len) };
+        unsafe { *written = n };
+        status::OK
+    })
+}
+
+/// Shows a native modal message box, and blocks until the user dismisses it.
+///
+/// `level` is 0 information, 1 warning, 2 error; anything else is information, because a bad
+/// integer should not turn a notice into an alarm.
+///
+/// **The first thing to cross this boundary as text going *in*.** Everything else that carries
+/// a string — `dziry_last_error`, `dziry_engine_font_family` — writes one *out*, so there was
+/// no inbound convention to follow and this establishes the obvious one: a pointer and a byte
+/// length, UTF-8, no NUL. Not a C string, because the caller is Bun and a length is what it
+/// already has; requiring a terminator would mean a copy on that side to add one and a scan on
+/// this side to find it again.
+///
+/// Invalid UTF-8 is replaced rather than refused. The bytes come from a `TextEncoder` on the
+/// other side, so this cannot happen without memory corruption — and if it has happened, a
+/// dialog reading "saved ✔" with one broken glyph is a better outcome than an error status
+/// nobody was expecting from an alert.
+///
+/// # Safety
+/// `title` and `message` must each be readable for the length beside them, or null with a
+/// length of 0.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_alert(
+    handle: Handle,
+    level: u32,
+    title: *const u8,
+    title_len: u32,
+    message: *const u8,
+    message_len: u32,
+) -> i32 {
+    // SAFETY: the caller's promise, narrowed — a null pointer is read as an empty string
+    // rather than dereferenced, which is what a caller with nothing to say will pass.
+    let read = |ptr: *const u8, len: u32| -> String {
+        if ptr.is_null() || len == 0 {
+            return String::new();
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+
+    let title = read(title, title_len);
+    let message = read(message, message_len);
+
+    with(handle, |engine| {
+        match engine.alert(level, &title, &message) {
+            Ok(()) => status::OK,
+            // The error carries its own category, so it is reported rather than flattened.
+            Err(e) => fail(e.status, &e.to_string()),
+        }
+    })
+}
+
+/// [`dziry_engine_alert`] at error level, working **even on a poisoned engine**.
+///
+/// The one poison exemption, and the argument for it: poisoning exists because a
+/// panic leaves the *tables and trees* unreliable, and every other entry point
+/// reads them. This one touches nothing but SDL's message box — a native modal
+/// the platform draws — so the state a panic corrupted is not on its path. Without
+/// the exemption a dying engine could never say why: the failure poisons, and the
+/// report is then refused for being after a failure.
+///
+/// Headless (no window), a no-op that returns OK, like `alert`.
+///
+/// # Safety
+/// `title` and `message` must each be readable for the length beside them, or
+/// null with a length of 0.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_fatal_alert(
+    handle: Handle,
+    title: *const u8,
+    title_len: u32,
+    message: *const u8,
+    message_len: u32,
+) -> i32 {
+    // SAFETY: the caller's promise, narrowed as in `dziry_engine_alert`.
+    let read = |ptr: *const u8, len: u32| -> String {
+        if ptr.is_null() || len == 0 {
+            return String::new();
+        }
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, len as usize) };
+        String::from_utf8_lossy(bytes).into_owned()
+    };
+
+    let title = read(title, title_len);
+    let message = read(message, message_len);
+
+    with_gate(
+        handle,
+        |engine| match engine.alert(2, &title, &message) {
+            Ok(()) => status::OK,
+            Err(e) => fail(e.status, &e.to_string()),
+        },
+        true,
+    )
+}
+
+/// Milliseconds spent in the last `tick`.
+///
+/// # Safety
+/// `out` must be writable.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_last_frame_ms(handle: Handle, out: *mut f32) -> i32 {
+    with(handle, |engine| {
+        if out.is_null() {
+            return fail(status::INVALID_ARGUMENT, "null out pointer");
+        }
+        // SAFETY: non-null, and writable by the caller's promise.
+        unsafe { *out = engine.last_frame_ms() };
+        status::OK
+    })
+}
+
+/// Deliberately exported for the test suite: proves a panic inside the boundary
+/// becomes a status code and a message instead of an aborted process.
+#[no_mangle]
+pub extern "C" fn dziry_engine_panic_for_testing(handle: Handle) -> i32 {
+    with(handle, |_| {
+        panic!("deliberate panic from dziry_engine_panic_for_testing")
+    })
+}
+
+/// Opens the native OS file picker for `input[type="file"]` identified by `node`.
+///
+/// The dialog is asynchronous. When the user picks files (or cancels), the result
+/// is available via [`dziry_engine_take_file_dialog_result`].
+///
+/// `filters_json` is a pointer to a UTF-8 JSON array of `[name, pattern]` pairs
+/// (e.g. `[["Images", "png;jpg;gif"]]`). Pass null for no filter ("All files").
+/// `filters_len` is the byte length of the JSON.
+///
+/// `allow_many` is non-zero when the element has the `multiple` attribute.
+///
+/// The `out` parameter is unused (reserved for future use) and may be null.
+///
+/// # Safety
+/// `filters_json` must be readable for `filters_len` bytes, or null.
+/// `out` must be writable for one `i32`, or null.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_open_file_dialog(
+    handle: Handle,
+    node: i32,
+    filters_json: *const u8,
+    filters_len: u32,
+    allow_many: i32,
+    out: *mut i32,
+) -> i32 {
+    let filters: Vec<(String, String)> = if filters_json.is_null() || filters_len == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: checked non-null and len > 0.
+        let bytes = unsafe { std::slice::from_raw_parts(filters_json, filters_len as usize) };
+        match std::str::from_utf8(bytes) {
+            Ok(s) => match parse_filter_json(s) {
+                Some(f) => f,
+                None => Vec::new(),
+            },
+            Err(_) => Vec::new(),
+        }
+    };
+    let filter_refs: Vec<(&str, &str)> = filters
+        .iter()
+        .map(|(n, p)| (n.as_str(), p.as_str()))
+        .collect();
+    with(handle, |engine| {
+        match engine.open_file_dialog(node, &filter_refs, allow_many != 0) {
+            Ok(()) => {
+                if !out.is_null() {
+                    // SAFETY: checked non-null.
+                    unsafe { *out = 0 };
+                }
+                status::OK
+            }
+            Err(e) => fail(e.status, e.detail),
+        }
+    })
+}
+
+/// Minimal JSON parse for `[["name","pattern"],...]` — no serde dependency.
+/// Returns None on any malformed input.
+fn parse_filter_json(s: &str) -> Option<Vec<(String, String)>> {
+    let s = s.trim();
+    if !s.starts_with('[') || !s.ends_with(']') {
+        return None;
+    }
+    let inner = &s[1..s.len() - 1];
+    let mut out = Vec::new();
+    let mut rest = inner;
+    while !rest.trim().is_empty() {
+        let rest_trim = rest.trim_start();
+        if !rest_trim.starts_with('[') {
+            return None;
+        }
+        let close = rest_trim.find(']')?;
+        let pair = &rest_trim[1..close];
+        let mut parts = pair.splitn(2, ',');
+        let name = unquote(parts.next()?.trim())?;
+        let pattern = unquote(parts.next()?.trim())?;
+        out.push((name, pattern));
+        rest = &rest_trim[close + 1..];
+        let rest_trim2 = rest.trim_start();
+        if rest_trim2.starts_with(',') {
+            rest = &rest_trim2[1..];
+        } else if !rest_trim2.is_empty() {
+            return None;
+        }
+    }
+    Some(out)
+}
+
+fn unquote(s: &str) -> Option<String> {
+    let s = s.trim();
+    if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
+        Some(s[1..s.len() - 1].to_string())
+    } else {
+        None
+    }
+}
+
+/// Returns a pending file-dialog result, if one is ready.
+///
+/// When a result is available, writes the node id to `node_out`, copies up to
+/// `path_cap` bytes of a **newline-joined** UTF-8 path list into `path_buf`,
+/// and writes the actual byte length to `path_len_out`. A cancelled dialog gives
+/// `path_len_out = 0`.
+///
+/// When no result is ready, writes `-1` to `node_out` and `0` to `path_len_out`
+/// and still returns `OK` — the caller must check `node_out` rather than the status.
+///
+/// # Safety
+/// `node_out` and `path_len_out` must each be writable for one element.
+/// `path_buf` must be writable for `path_cap` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_take_file_dialog_result(
+    handle: Handle,
+    node_out: *mut i32,
+    path_buf: *mut u8,
+    path_cap: u32,
+    path_len_out: *mut u32,
+) -> i32 {
+    if node_out.is_null() || path_buf.is_null() || path_len_out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        match engine.take_file_dialog_result() {
+            None => {
+                // SAFETY: checked non-null above.
+                unsafe {
+                    *node_out = -1;
+                    *path_len_out = 0;
+                }
+            }
+            Some((node, paths)) => {
+                // SAFETY: checked non-null above.
+                unsafe {
+                    *node_out = node;
+                }
+                let joined = paths.join("\n");
+                let bytes = joined.as_bytes();
+                let len = bytes.len().min(path_cap as usize);
+                // SAFETY: path_buf is writable for path_cap bytes; len ≤ path_cap.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), path_buf, len);
+                    *path_len_out = len as u32;
+                }
+            }
+        }
+        status::OK
+    })
+}
+
+/// Returns the text behind the oldest undrained `PASTE` event, if any.
+///
+/// Copies up to `cap` bytes of UTF-8 into `buf` — truncating on a character
+/// boundary, though a caller sizing `buf` from the event's `a` (the byte
+/// length) never truncates — and writes the copied length to `len_out`.
+/// `len_out = 0` means no paste is pending; an empty string is never queued.
+///
+/// One string per `PASTE` event, in event order: the host calls this once per
+/// `PASTE` it drains, and the queue stays paired.
+///
+/// # Safety
+/// `buf` must be writable for `cap` bytes; `len_out` for one `u32`.
+#[no_mangle]
+pub unsafe extern "C" fn dziry_engine_take_paste_text(
+    handle: Handle,
+    buf: *mut u8,
+    cap: u32,
+    len_out: *mut u32,
+) -> i32 {
+    if buf.is_null() || len_out.is_null() {
+        return status::INVALID_ARGUMENT;
+    }
+    with(handle, |engine| {
+        match engine.take_paste_text() {
+            None => {
+                // SAFETY: checked non-null above.
+                unsafe { *len_out = 0 };
+            }
+            Some(text) => {
+                let bytes = text.as_bytes();
+                let mut len = bytes.len().min(cap as usize);
+                while len > 0 && !text.is_char_boundary(len) {
+                    len -= 1;
+                }
+                // SAFETY: buf is writable for cap bytes; len <= cap.
+                unsafe {
+                    std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, len);
+                    *len_out = len as u32;
+                }
+            }
+        }
+        status::OK
+    })
+}

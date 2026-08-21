@@ -9,16 +9,16 @@ The processes, threads and memory the system is made of. The build/run split is 
 id: 480afa24-3cef-4a72-8af1-5a17a6a9f850
 ---
 C4Container
-  title dziri — containers
+  title dziry — containers
 
-  Person(author, "App author", "Writes JSX, CSS and signals under windows/. Runs `dziri dev` and `dziri build`.")
+  Person(author, "App author", "Writes JSX, CSS and signals under windows/. Runs `dziry dev` and `dziry build`.")
   Person(enduser, "End user", "Runs the built desktop app. Clicks, types, scrolls, resizes.")
   System_Ext(os, "Operating system", "Window manager, input, clipboard, fonts. Reached only through SDL3.")
   System_Ext(gpu, "Display", "The raster surface Skia paints into, presented by SDL3.")
   System_Ext(tailwind, "Tailwind CLI", "Build-time only. Produces the CSS the compiler then resolves away.")
 
   System_Boundary(build, "Build time — runs once, ships nothing") {
-    Container(cli, "dziri CLI", "Bun, TypeScript", "`dev` and `build`. Drives the compiler, then launches the host.")
+    Container(cli, "dziry CLI", "Bun, TypeScript", "`dev` and `build`. Drives the compiler, then launches the host.")
     Container(compiler, "Compiler", "Bun, TypeScript", "Evaluates the JSX, resolves the whole cascade, interns styles, emits integer arrays. None of it ships.")
     ContainerDb(artifact, "Compiled window", "generated TypeScript", "`windows/<id>/ui.gen.ts` — typed arrays plus the handful of refs the runtime needs. The build/run seam.")
   }
@@ -31,7 +31,7 @@ C4Container
     Container(engine, "Engine", "Rust cdylib", "Taffy lays out, Skia paints, SDL3 owns the window. Nineteen `extern #quot;C#quot;` entry points, each catching panics and returning a status.")
   }
 
-  Rel(author, cli, "runs `dziri dev` / `dziri build`", "shell")
+  Rel(author, cli, "runs `dziry dev` / `dziry build`", "shell")
   Rel(cli, compiler, "compiles every window")
   Rel(tailwind, compiler, "supplies generated CSS", "file")
   Rel(compiler, artifact, "emits", "file write")
@@ -53,7 +53,7 @@ C4Container
 
 ## What each one is
 
-- **dziri CLI** *(Bun, TypeScript, build time)* — `dev` and `build`. Drives the compiler, then launches the host.
+- **dziry CLI** *(Bun, TypeScript, build time)* — `dev` and `build`. Drives the compiler, then launches the host.
   <br>`src/cli/index.ts`, `src/cli/build.ts`
 - **Compiler** *(Bun, TypeScript, build time)* — Evaluates the JSX, resolves the whole cascade, interns styles, emits integer arrays. None of it ships.
   <br>`src/compiler/build.ts`, `src/compiler/compile.ts`, `src/ir.ts`
@@ -66,6 +66,6 @@ C4Container
 - **Lock & flags** *(SharedArrayBuffer, Atomics, run time)* — The only state the two threads share outside the tables. The writer may block; the engine thread may only try.
   <br>`src/host/channel.ts`
 - **Shared tables** *(engine-owned memory, struct-of-arrays, run time)* — Typed-array views over engine allocations. A style patch or a list relink costs no FFI call at all.
-  <br>`src/engine/upload.ts`, `native-src/dziri-engine/src/tables.rs`
+  <br>`src/engine/upload.ts`, `native-src/dziry-engine/src/tables.rs`
 - **Engine** *(Rust cdylib, run time)* — Taffy lays out, Skia paints, SDL3 owns the window. Nineteen `extern "C"` entry points, each catching panics and returning a status.
-  <br>`native-src/dziri-engine/src/lib.rs`, `native-src/dziri-engine/src/engine.rs`
+  <br>`native-src/dziry-engine/src/lib.rs`, `native-src/dziry-engine/src/engine.rs`

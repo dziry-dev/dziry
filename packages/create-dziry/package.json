@@ -1,0 +1,22 @@
+{
+  "name": "create-dziry",
+  "version": "0.1.0-beta.1",
+  "type": "module",
+  "description": "Scaffold a dziry app — compiled UI on a native engine, no browser.",
+  "homepage": "https://dziry.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dziry-dev/dziry.git",
+    "directory": "packages/create-dziry"
+  },
+  "bugs": "https://github.com/dziry-dev/dziry/issues",
+  "bin": {
+    "create-dziry": "./index.ts"
+  },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "files": ["index.ts", "templates"],
+  "keywords": ["dziry", "desktop", "ui", "bun", "skia"],
+  "license": "MIT"
+}

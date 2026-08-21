@@ -1,5 +1,5 @@
 /**
- * Audits dziri's computed-style defaults against the CSS spec.
+ * Audits dziry's computed-style defaults against the CSS spec.
  *
  *   bun run spec-audit            # report, exit 1 on a real disagreement
  *   bun run spec-audit --all      # include fields deliberately not spec-shaped
@@ -12,7 +12,7 @@
  * The oracle is `mdn-data`, which is the data MDN's own "Formal definition"
  * tables are generated from. Pinned in package.json, offline, no scraping.
  *
- * Judgement lives in DELIBERATE below. Several of dziri's defaults differ from
+ * Judgement lives in DELIBERATE below. Several of dziry's defaults differ from
  * CSS on purpose and the reasoning is recorded in `src/ir.ts`; those are listed
  * with their justification rather than silently skipped, so that a *new*
  * divergence cannot hide among the known ones.
@@ -26,7 +26,7 @@ const ALL = argv.includes("--all");
 type Spec = { initial: string | string[]; inherited: boolean; status: string };
 const SPEC = cssProperties as unknown as Record<string, Spec>;
 
-/** dziri field -> the CSS longhand it is meant to be. */
+/** dziry field -> the CSS longhand it is meant to be. */
 const PROPERTY: Record<string, string> = {
   bg: "background-color",
   fg: "color",
@@ -108,12 +108,12 @@ const PROPERTY: Record<string, string> = {
 
 /** Shared by the four border width fields — see DELIBERATE. */
 const BORDER_WIDTH_REASON =
-  "spec `medium` (3px); dziri 0 — with no `border-style` field, style is always `none`, " +
+  "spec `medium` (3px); dziry 0 — with no `border-style` field, style is always `none`, " +
   "and a none-border computes to width 0. Revisit if border-style lands.";
 
 /** Shared by the four border colour fields — see DELIBERATE. */
 const BORDER_COLOR_REASON =
-  "spec `currentcolor`; dziri alpha-0 — the table-wide convention for \"nothing was said\" " +
+  "spec `currentcolor`; dziry alpha-0 — the table-wide convention for \"nothing was said\" " +
   "(scrollbar-color, accent-color and caret-color spell auto the same way). The live " +
   "currentcolor fallback is unimplemented, and BROWSER-FACTS.md (\"An omitted border colour " +
   "is currentcolor, not transparent\") records what implementing it would have to do.";
@@ -124,17 +124,17 @@ const BORDER_COLOR_REASON =
  * hide among the known ones.
  */
 const DELIBERATE: Record<string, string> = {
-  display: "spec `inline`; dziri FLEX — there is no inline layout, so every box is a flex container",
-  direction: "spec `row`; dziri COLUMN — HTML's block default stacks vertically (ir.ts)",
-  align: "spec `normal`; dziri UNSET — lets the engine use Taffy's per-display-mode default (ir.ts)",
-  alignSelf: "spec `auto`; dziri UNSET — a per-item override must not shadow the parent (ir.ts)",
-  justifyItems: "spec `legacy`; dziri UNSET — same reason as align",
-  justifySelf: "spec `auto`; dziri UNSET — same reason as alignSelf",
-  position: "spec `static`; dziri RELATIVE — there is no static/relative distinction without inline flow",
-  fg: "spec `canvastext` (system colour); dziri black — no system colour support",
-  fontSize: "spec `medium`; dziri 16 — `medium` is 16px at the default zoom",
-  gridColSpan: "not grid-column-end; dziri stores a span, not a line",
-  gridRowSpan: "not grid-row-end; dziri stores a span, not a line",
+  display: "spec `inline`; dziry FLEX — there is no inline layout, so every box is a flex container",
+  direction: "spec `row`; dziry COLUMN — HTML's block default stacks vertically (ir.ts)",
+  align: "spec `normal`; dziry UNSET — lets the engine use Taffy's per-display-mode default (ir.ts)",
+  alignSelf: "spec `auto`; dziry UNSET — a per-item override must not shadow the parent (ir.ts)",
+  justifyItems: "spec `legacy`; dziry UNSET — same reason as align",
+  justifySelf: "spec `auto`; dziry UNSET — same reason as alignSelf",
+  position: "spec `static`; dziry RELATIVE — there is no static/relative distinction without inline flow",
+  fg: "spec `canvastext` (system colour); dziry black — no system colour support",
+  fontSize: "spec `medium`; dziry 16 — `medium` is 16px at the default zoom",
+  gridColSpan: "not grid-column-end; dziry stores a span, not a line",
+  gridRowSpan: "not grid-row-end; dziry stores a span, not a line",
   gridCols: "0 means no explicit tracks; the spec's `none` has no numeric equivalent",
   gridRows: "0 means no explicit tracks; the spec's `none` has no numeric equivalent",
   borderTopWidth: BORDER_WIDTH_REASON,
@@ -146,32 +146,32 @@ const DELIBERATE: Record<string, string> = {
   borderBottomColor: BORDER_COLOR_REASON,
   borderLeftColor: BORDER_COLOR_REASON,
   outlineColor:
-    "spec `invert` (Chrome computes `currentcolor`); dziri alpha-0 — the \"nothing was said\" " +
+    "spec `invert` (Chrome computes `currentcolor`); dziry alpha-0 — the \"nothing was said\" " +
     "convention, and the live currentcolor fallback is the same unimplemented piece the " +
     "border colours record",
   outlineWidth:
-    "spec `medium` (3px); dziri 0 — no `outline-style` field, so style is always `none` " +
+    "spec `medium` (3px); dziry 0 — no `outline-style` field, so style is always `none` " +
     "and a none-outline computes to width 0, as with the border widths",
   decorationColor:
-    "spec `currentcolor`; dziri alpha-0 — and unlike the border colours this one *is* " +
+    "spec `currentcolor`; dziry alpha-0 — and unlike the border colours this one *is* " +
     "implemented: paint resolves alpha-0 to the run's own fg",
   decorationLine:
-    "spec says NOT inherited; dziri inherits — CSS propagates decorations to inline " +
-    "descendants and dziri's text runs are separate nodes, so inheritance is how " +
+    "spec says NOT inherited; dziry inherits — CSS propagates decorations to inline " +
+    "descendants and dziry's text runs are separate nodes, so inheritance is how " +
     "`underline` reaches the text. It also crosses block boundaries, which CSS stops at",
-  decorationStyle: "spec `solid`; dziri 0 — 0 *is* solid in the schema's encoding",
-  decorationThickness: "spec `auto`; dziri 0 — 0 means auto (the font's own metric)",
-  underlineOffset: "spec `auto`; dziri NaN — the table's \"nothing was said\" for lengths",
+  decorationStyle: "spec `solid`; dziry 0 — 0 *is* solid in the schema's encoding",
+  decorationThickness: "spec `auto`; dziry 0 — 0 means auto (the font's own metric)",
+  underlineOffset: "spec `auto`; dziry NaN — the table's \"nothing was said\" for lengths",
   // The transform is stored decomposed, so its initial `none` has to be spelled
   // as whatever each component's *identity* is — and for a scale that is 1, not
   // 0. A literal reading of the spec value here would mean every untransformed
   // node collapsed to a point.
-  scaleX: "spec `none`; dziri 1 — decomposed storage, and the identity scale is 1 (ir.ts)",
-  scaleY: "spec `none`; dziri 1 — same",
+  scaleX: "spec `none`; dziry 1 — decomposed storage, and the identity scale is 1 (ir.ts)",
+  scaleY: "spec `none`; dziry 1 — same",
   // Likewise the origin: the spec's initial is the percentage pair `50% 50%`,
   // which this stores as the fraction 0.5 per axis.
-  originPctX: "spec `50% 50%`; dziri 0.5 — stored as a fraction, and per axis",
-  originPctY: "spec `50% 50%`; dziri 0.5 — same",
+  originPctX: "spec `50% 50%`; dziry 0.5 — stored as a fraction, and per axis",
+  originPctY: "spec `50% 50%`; dziry 0.5 — same",
 };
 
 /**
@@ -179,11 +179,11 @@ const DELIBERATE: Record<string, string> = {
  *
  * `DELIBERATE` covers initial values only; it cannot excuse an inheritance flag,
  * and the decoration fields needed one — the spec's "not inherited" is paired
- * with *propagation to inline descendants*, and dziri's text runs are separate
+ * with *propagation to inline descendants*, and dziry's text runs are separate
  * nodes, so inheritance is the mechanism that reaches them.
  */
 const DELIBERATE_INHERIT: Record<string, string> = {
-  decorationLine: "propagates to inlines per spec; dziri's text runs are separate nodes",
+  decorationLine: "propagates to inlines per spec; dziry's text runs are separate nodes",
   decorationColor: "same — the colour follows the line",
   decorationStyle: "same",
   decorationThickness: "same",
@@ -191,7 +191,7 @@ const DELIBERATE_INHERIT: Record<string, string> = {
 };
 
 /**
- * Spec keywords that dziri encodes as a specific number, per field.
+ * Spec keywords that dziry encodes as a specific number, per field.
  *
  * Field-scoped rather than global because the same keyword means different
  * numbers in different places: `normal` is 400 for font-weight and 0 for a gap.
@@ -204,9 +204,9 @@ const KEYWORD: Record<string, Record<string, number>> = {
   gapCol: { normal: 0 },
 };
 
-/** Does dziri's numeric/sentinel default plausibly encode the spec's keyword? */
-function agrees(field: string, dziri: unknown, spec: string): boolean {
-  const v = dziri as number;
+/** Does dziry's numeric/sentinel default plausibly encode the spec's keyword? */
+function agrees(field: string, dziry: unknown, spec: string): boolean {
+  const v = dziry as number;
   const s = spec.trim();
 
   const mapped = KEYWORD[field]?.[s];
@@ -257,21 +257,21 @@ for (const [field] of STYLE_FIELDS as unknown as [string][]) {
     continue;
   }
 
-  const dziriInitial = (INITIAL_STYLE as unknown as Record<string, unknown>)[field];
+  const dziryInitial = (INITIAL_STYLE as unknown as Record<string, unknown>)[field];
   const specInitial = Array.isArray(spec.initial) ? `[shorthand: ${spec.initial.length} longhands]` : spec.initial;
 
-  const dziriInherits = (INHERITED_FIELDS as string[]).includes(field);
-  const inheritOk = dziriInherits === spec.inherited;
+  const dziryInherits = (INHERITED_FIELDS as string[]).includes(field);
+  const inheritOk = dziryInherits === spec.inherited;
 
-  const initialOk = Array.isArray(spec.initial) ? true : agrees(field, dziriInitial, spec.initial);
+  const initialOk = Array.isArray(spec.initial) ? true : agrees(field, dziryInitial, spec.initial);
 
   if (!inheritOk) {
     const why = DELIBERATE_INHERIT[field];
     if (why) {
-      known.push(`${field.padEnd(14)} inheritance: spec ${spec.inherited}, dziri ${dziriInherits} — ${why}`);
+      known.push(`${field.padEnd(14)} inheritance: spec ${spec.inherited}, dziry ${dziryInherits} — ${why}`);
     } else {
       problems.push(
-        `${field.padEnd(14)} ${prop.padEnd(22)} inheritance: spec says ${spec.inherited}, dziri says ${dziriInherits}`,
+        `${field.padEnd(14)} ${prop.padEnd(22)} inheritance: spec says ${spec.inherited}, dziry says ${dziryInherits}`,
       );
     }
     continue;
@@ -282,7 +282,7 @@ for (const [field] of STYLE_FIELDS as unknown as [string][]) {
     known.push(`${field.padEnd(14)} ${DELIBERATE[field]}`);
   } else {
     problems.push(
-      `${field.padEnd(14)} ${prop.padEnd(22)} initial: spec ${JSON.stringify(specInitial)}, dziri ${JSON.stringify(dziriInitial)}`,
+      `${field.padEnd(14)} ${prop.padEnd(22)} initial: spec ${JSON.stringify(specInitial)}, dziry ${JSON.stringify(dziryInitial)}`,
     );
   }
 }
@@ -303,7 +303,7 @@ if (known.length) {
 }
 
 if (unmapped.length) {
-  console.log("\nunmapped — no CSS longhand, or dziri-specific");
+  console.log("\nunmapped — no CSS longhand, or dziry-specific");
   for (const l of unmapped) console.log(`  ${l}`);
 }
 

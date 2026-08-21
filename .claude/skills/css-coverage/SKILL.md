@@ -1,6 +1,6 @@
 ---
 name: css-coverage
-description: Report what CSS exists versus what dziri supports, bucketed as supported / unsupported / committed non-goal. Use when planning A1, when asked "how much CSS do we support", before publishing any coverage claim, and when deciding which property to implement next. Runs `bun run css-coverage`.
+description: Report what CSS exists versus what dziry supports, bucketed as supported / unsupported / committed non-goal. Use when planning A1, when asked "how much CSS do we support", before publishing any coverage claim, and when deciding which property to implement next. Runs `bun run css-coverage`.
 ---
 
 # css-coverage
@@ -37,7 +37,7 @@ and the percentage appears — the same denominator `conformance` uses, so the t
 - **out of scope** — floats, tables, writing modes, fragmentation, multi-column, print, ruby,
   speech. ROADMAP commits to these as non-goals; they are listed as *features*, not gaps.
 
-Also reported: properties dziri parses that `mdn-data` does not list as standard. That number
+Also reported: properties dziry parses that `mdn-data` does not list as standard. That number
 should stay near zero — if it grows, either the compiler is accepting something invented, or the
 extraction regex has started matching a different switch statement. It did exactly that once,
 counting `px`, `rem` and `auto` as supported CSS properties.

@@ -11,12 +11,12 @@
  *
  * How it works, per case:
  *   1. write `<div class="probe">` + one rule into a temp html/css pair
- *   2. compile it with dziri, import the emitted module, read the probe's row
+ *   2. compile it with dziry, import the emitted module, read the probe's row
  *      out of the style table
  *   3. load the same html/css in headless Chrome, read getComputedStyle
  *   4. normalise both to a comparable string and compare
  *
- * Step 4 is where the judgement lives. dziri stores packed integers and floats;
+ * Step 4 is where the judgement lives. dziry stores packed integers and floats;
  * Chrome returns "rgb(24, 24, 27)" and "12px". A mismatch in *representation* is
  * not a conformance failure, so the normalisers below are part of the spec, not
  * incidental plumbing — and each is deliberately strict rather than forgiving,
@@ -33,14 +33,14 @@ const VERBOSE = argv.includes("--verbose");
 const onlyIdx = argv.indexOf("--only");
 const ONLY = onlyIdx > -1 ? argv[onlyIdx + 1] : null;
 
-/** dziri field -> the CSS property Chrome reports it under. */
+/** dziry field -> the CSS property Chrome reports it under. */
 type Check = {
   decl: string; // what goes inside `.probe { … }`
   field: string; // key in the emitted `styles` object
   prop: string; // CSS property to read from getComputedStyle
   kind: "color" | "px" | "number" | "int" | "keyword";
   /**
-   * For `keyword`: the CSS keyword each of dziri's enum values encodes, indexed
+   * For `keyword`: the CSS keyword each of dziry's enum values encodes, indexed
    * by the value. Per-check rather than global, for the same reason `spec-audit`
    * scopes its keyword table per field — the same word is a different number in
    * different properties, and a shared table would make one of them a false pass.
@@ -83,8 +83,8 @@ const CORPUS: Check[] = [
   },
 
   // `border-style` is deliberately spelled out. Chrome computes
-  // `border-*-width: 0` unless a style is set, and dziri has no `border-style`
-  // field at all — so bare `border-width: 2px` paints in dziri and paints
+  // `border-*-width: 0` unless a style is set, and dziry has no `border-style`
+  // field at all — so bare `border-width: 2px` paints in dziry and paints
   // nothing in a browser. Recorded in BROWSER-FACTS.md; testing the shorthand
   // here keeps this case about width rather than re-reporting that divergence.
   { decl: "border: 2px solid #3f3f46", field: "borderTopWidth", prop: "border-top-width", kind: "px" },
@@ -128,7 +128,7 @@ const CORPUS: Check[] = [
   { decl: "inset: 1px 2px 3px 4px; position: absolute", field: "insetL", prop: "left", kind: "px" },
   { decl: "inset: 1px 2px 3px 4px; position: absolute", field: "insetB", prop: "bottom", kind: "px" },
   // `inset: auto` is deliberately not a case, for the same reason `accent-color:
-  // auto` is not: the two sides answer different questions. dziri stores `auto` as
+  // auto` is not: the two sides answer different questions. dziry stores `auto` as
   // the `AUTO` sentinel — `NaN` — for Taffy to resolve during layout, while
   // `getComputedStyle` on a positioned element returns the *used* value, so Chrome
   // reports the resolved static position (`0px` here). Measured, and it is what
@@ -138,7 +138,7 @@ const CORPUS: Check[] = [
   { decl: "inset-inline: 2px 8px; position: absolute", field: "insetR", prop: "right", kind: "px" },
   { decl: "inset-block: 3px 9px; position: absolute", field: "insetB", prop: "bottom", kind: "px" },
 
-  // The logical sizing aliases. dziri has no writing mode, so the inline axis is
+  // The logical sizing aliases. dziry has no writing mode, so the inline axis is
   // the horizontal one and these are exact rather than approximate — but "exact"
   // is a claim about *Chrome's* mapping too, which is the half worth measuring:
   // these assert that Chrome reports `inline-size` under `width`.
@@ -153,7 +153,7 @@ const CORPUS: Check[] = [
    * `place-items` / `place-self`, both axes of each.
    *
    * Every keyword here is one CSS spells exactly one way — `center`, `stretch`,
-   * `baseline`. `end` and `start` are deliberately absent: dziri folds `end` and
+   * `baseline`. `end` and `start` are deliberately absent: dziry folds `end` and
    * `flex-end` onto one enum value while Chrome's computed value keeps whichever
    * was written, so a case on those would be asserting the normaliser's choice
    * rather than the compiler's behaviour.
@@ -217,7 +217,7 @@ const CORPUS: Check[] = [
   // the *computed value* is right, and that claim can be settled a milestone
   // before any pixel depends on it.
   //
-  // `auto` is deliberately not a case for either colour. dziri encodes it as
+  // `auto` is deliberately not a case for either colour. dziry encodes it as
   // alpha 0 and Chrome reports the resolved platform colour, so the two are
   // answering different questions — and pretending otherwise would need a
   // normaliser lenient enough to hide a real disagreement.
@@ -258,7 +258,7 @@ const CORPUS: Check[] = [
   // Opacity and the transform.
   //
   // `transform` itself is deliberately absent: Chrome computes it to a
-  // `matrix(a,b,c,d,e,f)`, which is six numbers against dziri's ten decomposed
+  // `matrix(a,b,c,d,e,f)`, which is six numbers against dziry's ten decomposed
   // fields, and this harness compares one field to one property. That comparison
   // is worth having and it exists — `css.test.ts` composes the decomposed fields
   // back into a matrix and asserts against the exact matrices Chromium 151
@@ -286,14 +286,14 @@ const page = (decl: string) =>
   `<body><div class="probe">x</div></body>`;
 
 const sheet = (decl: string) =>
-  // A fixed body so nothing inherits a UA default we did not ask for. dziri has
+  // A fixed body so nothing inherits a UA default we did not ask for. dziry has
   // no UA stylesheet yet, so anything left to a default would differ for reasons
   // that are not this test's subject.
   `body { margin: 0; padding: 0; font-size: 16px; color: #000; background: #fff }\n` +
   `.probe { ${decl} }\n`;
 
-// ── dziri side ───────────────────────────────────────────────────────────────
-function dziriValue(c: Check, i: number): number | null {
+// ── dziry side ───────────────────────────────────────────────────────────────
+function dziryValue(c: Check, i: number): number | null {
   const { result } = compileSnippet({
     html: `<body><div class="probe">x</div></body>`,
     css: sheet(c.decl),
@@ -309,14 +309,14 @@ function dziriValue(c: Check, i: number): number | null {
 }
 
 // ── chrome side ──────────────────────────────────────────────────────────────
-function normalise(c: Check, chrome: string, dziri: number): [string, string] {
+function normalise(c: Check, chrome: string, dziry: number): [string, string] {
   switch (c.kind) {
     case "color": {
-      // dziri packs ARGB into a u32; Chrome says "rgb(r, g, b)" / "rgba(...)".
-      const a = (dziri >>> 24) & 0xff;
-      const r = (dziri >>> 16) & 0xff;
-      const g = (dziri >>> 8) & 0xff;
-      const b = dziri & 0xff;
+      // dziry packs ARGB into a u32; Chrome says "rgb(r, g, b)" / "rgba(...)".
+      const a = (dziry >>> 24) & 0xff;
+      const r = (dziry >>> 16) & 0xff;
+      const g = (dziry >>> 8) & 0xff;
+      const b = dziry & 0xff;
 
       // `color(srgb r g b / a)` — Chrome serialises a `color-mix()` result in the
       // space it was mixed in, not as rgb(). The srgb form converts exactly:
@@ -326,8 +326,8 @@ function normalise(c: Check, chrome: string, dziri: number): [string, string] {
       //
       // The `oklab(...)` form Chrome returns for `in oklab` mixes is deliberately
       // NOT handled. Converting it would mean either duplicating the OKLab
-      // matrices here or borrowing dziri's own, and borrowing them would compare
-      // dziri against itself and make the conversion untestable. Mix `in srgb`
+      // matrices here or borrowing dziry's own, and borrowing them would compare
+      // dziry against itself and make the conversion untestable. Mix `in srgb`
       // when a case needs to assert a colour; observed 2026-08-02, Chrome returns
       // `color-mix(in oklab, red 50%, transparent)` as
       // `oklab(0.627966 0.22488 0.125859 / 0.5)`, which is red's exact oklab
@@ -346,23 +346,23 @@ function normalise(c: Check, chrome: string, dziri: number): [string, string] {
       return [`${parts[0]},${parts[1]},${parts[2]},${ca}`, `${r},${g},${b},${a}`];
     }
     case "px":
-      return [String(Math.round(parseFloat(chrome) * 100) / 100), String(Math.round(dziri * 100) / 100)];
+      return [String(Math.round(parseFloat(chrome) * 100) / 100), String(Math.round(dziry * 100) / 100)];
     case "number": {
       // Chrome renders aspect-ratio as "2 / 1"; take the ratio.
       const slash = chrome.match(/^([\d.]+)\s*\/\s*([\d.]+)$/);
       const v = slash ? Number(slash[1]) / Number(slash[2]) : parseFloat(chrome);
-      return [String(Math.round(v * 1000) / 1000), String(Math.round(dziri * 1000) / 1000)];
+      return [String(Math.round(v * 1000) / 1000), String(Math.round(dziry * 1000) / 1000)];
     }
     case "int":
-      return [String(parseInt(chrome, 10)), String(Math.round(dziri))];
+      return [String(parseInt(chrome, 10)), String(Math.round(dziry))];
     case "keyword":
-      // `?? String(dziri)` rather than a throw: an unmapped value should read as
+      // `?? String(dziry)` rather than a throw: an unmapped value should read as
       // a disagreement with the number in it, not as a crashed run.
-      return [chrome.trim().toLowerCase(), c.keywords?.[dziri] ?? String(dziri)];
+      return [chrome.trim().toLowerCase(), c.keywords?.[dziry] ?? String(dziry)];
   }
 }
 
-// No temp directory: the dziri side compiles in this process now, so there are no
+// No temp directory: the dziry side compiles in this process now, so there are no
 // paths to hand a subprocess and nothing to clean up.
 //
 // No server needed here either: each case is a single rule in one sheet, so inline
@@ -374,7 +374,7 @@ const session = await chromeSession();
 const cases = ONLY ? CORPUS.filter((c) => c.decl.includes(ONLY) || c.prop.includes(ONLY)) : CORPUS;
 let pass = 0;
 /**
- * Declarations where dziri differs from Chrome **on purpose**, keyed by the
+ * Declarations where dziry differs from Chrome **on purpose**, keyed by the
  * declaration exactly as it appears in CORPUS, valued by the reason.
  *
  * It exists so the first real divergence has somewhere to go that is not "delete
@@ -390,13 +390,13 @@ const KNOWN: Record<string, string> = {
   // behavioural one — which is exactly the kind this list was made for.
   //
   // `appearance`'s computed value is as-specified, so Chrome reports `button`.
-  // dziri's field stores the *effect*, and the spec says every `<compat-auto>`
+  // dziry's field stores the *effect*, and the spec says every `<compat-auto>`
   // keyword behaves as `auto`, so it stores `auto`. Both agree on what should be
   // drawn. Storing nine more enum variants to match the string would be nine
   // values nothing reads. Decision recorded in `css.ts`'s `appearance` case and
   // in BROWSER-FACTS.md.
   "appearance: button":
-    "dziri stores appearance as an effect, not the specified value; the spec says " +
+    "dziry stores appearance as an effect, not the specified value; the spec says " +
     "every <compat-auto> keyword behaves as auto, so `button` folds to it",
 };
 const matched = new Set<string>();
@@ -409,13 +409,13 @@ try {
   for (const [i, c] of cases.entries()) {
     let dz: number | null;
     try {
-      dz = dziriValue(c, i);
+      dz = dziryValue(c, i);
     } catch (e) {
-      errors.push(`${c.decl.padEnd(34)} dziri: ${(e as Error).message}`);
+      errors.push(`${c.decl.padEnd(34)} dziry: ${(e as Error).message}`);
       continue;
     }
     if (dz === null || dz === undefined) {
-      errors.push(`${c.decl.padEnd(34)} dziri emitted nothing for "${c.field}"`);
+      errors.push(`${c.decl.padEnd(34)} dziry emitted nothing for "${c.field}"`);
       continue;
     }
 
@@ -429,9 +429,9 @@ try {
       const why = KNOWN[c.decl];
       if (why) {
         matched.add(c.decl);
-        known.push(`${c.decl.padEnd(34)} ${c.prop}  chrome ${want} · dziri ${got}\n        — ${why}`);
+        known.push(`${c.decl.padEnd(34)} ${c.prop}  chrome ${want} · dziry ${got}\n        — ${why}`);
       } else {
-        fails.push(`${c.decl.padEnd(34)} ${c.prop}\n        chrome ${want}   dziri ${got}   (raw: "${chrome}" / ${dz})`);
+        fails.push(`${c.decl.padEnd(34)} ${c.prop}\n        chrome ${want}   dziry ${got}   (raw: "${chrome}" / ${dz})`);
       }
     }
   }

@@ -13,14 +13,14 @@
   import { log, report } from "./_harness.js";
 
   /**
-   * The question dziri needs answered.
+   * The question dziry needs answered.
    *
    * ROADMAP A3 names "focus and blur ordering" as a thing to measure before writing Rust,
    * and it is the one item on that list that was skipped — Tab order, `:focus-visible` and
    * activation were all probed and this was not. It is the gap between the focus model
    * being *built* and being *usable*: an app cannot validate a field on blur, cannot save
    * a draft when focus leaves, and cannot show a hint while a control has focus, because
-   * dziri emits no element focus event at all. `EventKind::FOCUS` is the window's.
+   * dziry emits no element focus event at all. `EventKind::FOCUS` is the window's.
    *
    * Three things have to be known before an event kind can be designed, and each one
    * changes the shape:
@@ -32,11 +32,11 @@
    *    *carry* the other node. If focus has already moved by the time the leaving element
    *    hears about it, then "who took my focus" is unanswerable without a field for it —
    *    and "where did focus come from" likewise.
-   * 3. **Whether the pair fires at all in the cases dziri produces**: a click, a Tab, and
+   * 3. **Whether the pair fires at all in the cases dziry produces**: a click, a Tab, and
    *    focus leaving for nothing. A pair that does not fire on one of those is a hole an
    *    app would have to work around.
    *
-   * `focus`/`blur` and `focusin`/`focusout` are both recorded. dziri has no bubbling, so
+   * `focus`/`blur` and `focusin`/`focusout` are both recorded. dziry has no bubbling, so
    * the distinction is not one it can reproduce — but which of the two a browser fires
    * *first* says which one is the primitive, and that is the one to copy.
    */
@@ -69,7 +69,7 @@
     for (const n of ["blur", "focusout", "focus", "focusin"]) {
       node.addEventListener(n, (e) => {
         // `relatedTarget` is the browser's own answer to "the other element" — the one
-        // dziri would have to add a field for if it wants the same. Recorded so the need
+        // dziry would have to add a field for if it wants the same. Recorded so the need
         // is measured rather than assumed.
         fired.push(`${node.id}:${n}(active=${name(document.activeElement)},rel=${name(e.relatedTarget)})`);
       });
@@ -91,7 +91,7 @@
     ["Tab (B -> field)", { key: "Tab" }],
     ["Shift+Tab (field -> B)", { key: "Tab", modifiers: 8 }],
 
-    // A press on something that cannot take focus. dziri focuses whatever it hits, so
+    // A press on something that cannot take focus. dziry focuses whatever it hits, so
     // this is the case where the two models most plausibly diverge — and an app that
     // saves on blur needs to know whether it gets one here.
     ["click a non-focusable div", { ...centre(el("dead")), down: 1, up: 1 }],
@@ -113,7 +113,7 @@
     log("");
     log("Reading it: a row whose `blur` reports active=BODY means focus had already left by");
     log("the time the old element was told, so `relatedTarget` is the only way to know who");
-    log("took it — and dziri would need a field for that.");
+    log("took it — and dziry would need a field for that.");
     report();
   };
 

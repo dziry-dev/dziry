@@ -1,17 +1,17 @@
 #!/usr/bin/env bun
 /**
- * `dziri` — the CLI.
+ * `dziry` — the CLI.
  *
- *   dziri compile [window]     compile every window under ./windows, or one
- *   dziri dev [-- flags]       compile, then run — and keep watching
- *   dziri build                one executable, engine included
+ *   dziry compile [window]     compile every window under ./windows, or one
+ *   dziry dev [-- flags]       compile, then run — and keep watching
+ *   dziry build                one executable, engine included
  *
  * The project is the working directory: whatever holds `windows/`. That is the
  * whole difference from `bun run window`, which always compiles this repository —
  * and it is why the compiler had to stop taking its own location for the project's.
  *
  * Flags the CLI does not recognise go to the app, which is what makes
- * `dziri dev --route products/new --size 400x600` mean what it looks like. The
+ * `dziry dev --route products/new --size 400x600` mean what it looks like. The
  * host's own flags are documented in `host/main.ts` and `host/worker.ts`.
  */
 import { existsSync } from "node:fs";
@@ -21,13 +21,13 @@ import { PACKAGE } from "../compiler/compile.ts";
 import { buildApp } from "./build.ts";
 import type { HotManifestEntry } from "../hot.ts";
 
-const HELP = `dziri — compiled UI on a native engine
+const HELP = `dziry — compiled UI on a native engine
 
 usage
-  dziri compile [window]        compile every window under ./windows, or just one
-  dziri dev [-- app flags]      compile, then run the app — watching for changes:
+  dziry compile [window]        compile every window under ./windows, or just one
+  dziry dev [-- app flags]      compile, then run the app — watching for changes:
                                 a CSS save swaps styles live, anything else restarts
-  dziri build [options]         package the app as one executable
+  dziry build [options]         package the app as one executable
 
 options
   --dump                        compile: also print the IR
@@ -47,7 +47,7 @@ app flags — anything not listed above is passed straight to the app
   --screenshot <file>           render one frame headlessly and exit
   --stats                       print frame timings
 
-  dziri dev --route products/new --size 520x700
+  dziry dev --route products/new --size 520x700
 `;
 
 const argv = process.argv.slice(2);
@@ -69,7 +69,7 @@ const STANDALONE = new Set([
 /**
  * Ours versus the app's, decided by recognition rather than by a separator.
  *
- * `dziri dev -- --screenshot out.png` was the original design, and it does not
+ * `dziry dev -- --screenshot out.png` was the original design, and it does not
  * survive contact with `bun run`: a package script written `bun run dev --
  * --screenshot x` arrives here having already lost the `--`, so the app's flag
  * looked like a window name and the compile failed with "no window
@@ -131,8 +131,8 @@ const projectDir = resolve(process.cwd());
 if (!existsSync(join(projectDir, "windows"))) {
   console.error(
     `  error: no ./windows directory here.\n` +
-      `  dziri compiles the project in the working directory, and a project is a folder\n` +
-      `  with windows/<id>/index.tsx in it. \`bun create dziri my-app\` makes one.`,
+      `  dziry compiles the project in the working directory, and a project is a folder\n` +
+      `  with windows/<id>/index.tsx in it. \`bun create dziry my-app\` makes one.`,
   );
   process.exit(1);
 }
@@ -154,7 +154,7 @@ async function compile(only?: string): Promise<void> {
 
 /**
 /**
- * The watch half of `dziri dev` (ROADMAP D1).
+ * The watch half of `dziry dev` (ROADMAP D1).
  *
  * Two children, with different lifetimes. The **compile server** is warm: it
  * loads the compiler and the app's module graph once, and a save re-imports
@@ -221,7 +221,7 @@ async function dev(theirs: string[], only?: string): Promise<void> {
         ipc(message) {
           if ((message as { t?: unknown } | null)?.t === "restart") void restart();
         },
-        env: { ...process.env, DZIRI_HOT: "1" },
+        env: { ...process.env, DZIRY_HOT: "1" },
       },
     );
 

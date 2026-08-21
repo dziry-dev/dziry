@@ -60,7 +60,7 @@ no `<select>` at all and stubs it with `option { display: none }`.
 
 **Done, protocol v18** — and the recommendation held: the picker waited for the layer, and the
 layer turned out to be one node flag rather than a subsystem. The reasoning about escaping window
-bounds was right about the requirement and wrong about the cost; dziri's picker is an ordinary
+bounds was right about the requirement and wrong about the cost; dziry's picker is an ordinary
 child node whose *turn in the paint walk* moves, not a second tree. `datalist` is still deferred
 and is now the odd one out here — it needs the same layer plus a filtered list, and nothing wants
 it yet.
@@ -73,7 +73,7 @@ it yet.
 Five engine features gate everything in Tier 2, and none is per-element work:
 
 1. ~~**New state predicates**~~ — **done for `:checked` and `:disabled`**
-   (`native-src/dziri-engine/src/protocol.rs:448-455`). It generalised even more cleanly than
+   (`native-src/dziry-engine/src/protocol.rs:448-455`). It generalised even more cleanly than
    "cleanly": the compiler names a predicate in one table and the run and engine work in bits, so
    the two states cost two entries there, two in `SUPPORTED_PSEUDO` and two bits — protocol v9. The
    compiler resolves them; **no engine reads them yet**, so a `:checked` node wears its base style
@@ -168,7 +168,7 @@ debug dump's `KIND_NAMES = ["box", "text", "button"]` (`src/compiler/compile.ts:
 
 ### 2.4 The paint path can draw exactly three things
 
-`Painter::node` (`native-src/dziri-engine/src/paint.rs:214-301`) is the whole renderer:
+`Painter::node` (`native-src/dziry-engine/src/paint.rs:214-301`) is the whole renderer:
 
 1. `bg` fill — `draw_rect` or `draw_round_rect` (`paint.rs:234-242`)
 2. border — one inset `draw_round_rect` stroke, uniform width and colour (`paint.rs:244-253`)
@@ -235,7 +235,7 @@ expressed today, because the properties and the state selectors it needs do not 
   named below as having nothing at all, is the one that arrived: `:open` on a `<select>` whose
   picker is showing. Still nothing for selected, indeterminate or invalid.
 - Ten event kinds exist: `NONE, QUIT, RESIZE, MOUSE_MOVE, MOUSE_DOWN, MOUSE_UP, CLICK, KEY_DOWN,
-  TEXT_INPUT, FOCUS` (`native-src/dziri-engine/src/protocol.rs:295-306`). No wheel, no drag, no
+  TEXT_INPUT, FOCUS` (`native-src/dziry-engine/src/protocol.rs:295-306`). No wheel, no drag, no
   double-click, no composition/IME events.
 - A node is interactive if it is a `BUTTON`, has a state style, or has a click handler
   (`src/compiler/compile.ts:884`).
@@ -1003,9 +1003,9 @@ spelling will eventually work.
 | `src/ir.ts:114-171`, `:205-266`, `:222`, `:363-376` | 46 style fields, `INITIAL_STYLE`, the COLUMN default, `ListTable` |
 | `src/protocol/schema.ts:264-268` | `NodeKind { BOX, TEXT, BUTTON, LIST }` |
 | `src/runtime/bindings.ts:71-95` | `typeInto` — append + backspace only |
-| `native-src/dziri-engine/src/paint.rs:214-301`, `:314-368` | the whole renderer; hit-testing |
-| `native-src/dziri-engine/src/protocol.rs:215-217`, `:287-291`, `:295-306` | flags, predicates, event kinds |
-| `native-src/dziri-engine/src/window.rs:72-82` | `SDL_StartTextInput` never called |
+| `native-src/dziry-engine/src/paint.rs:214-301`, `:314-368` | the whole renderer; hit-testing |
+| `native-src/dziry-engine/src/protocol.rs:215-217`, `:287-291`, `:295-306` | flags, predicates, event kinds |
+| `native-src/dziry-engine/src/window.rs:72-82` | `SDL_StartTextInput` never called |
 | `windows/main/pages/features.tsx:125`, `former windows/main/index.css line 5` | the sample's "text field" is a `div`; the only tag selector is `body` |
 | `ARCHITECTURE-REVIEW.md:70`, `:95-118` (§3), `:120-131` (§4) | fix-order authority; contains no element-coverage item |
 | `ROADMAP.md:213-214`, `:218-220`, `:237-238`, `:314-317`, `:354`, `:364-378`, `:388-394`, `:411-418`, `:437-447`, `:461-464`, `:466-478` | non-goals, Tailwind denominator, "not started", attribute selectors, A2/A3/A4/A5, B1, B4, semantics table, C2 tiers |

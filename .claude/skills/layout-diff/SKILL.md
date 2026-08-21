@@ -1,6 +1,6 @@
 ---
 name: layout-diff
-description: Use Chrome as an oracle for laid-out geometry — feed the same html+css to dziri and to headless Chrome, lay both out at the same viewport, and compare every box. Use when a frame is arranged wrongly rather than styled wrongly, after changing anything in layout.rs or Taffy style construction, when working on text wrapping, sizing, padding, flex distribution or the box model, and before claiming a layout behaviour matches CSS. Runs `bun run layout-diff`.
+description: Use Chrome as an oracle for laid-out geometry — feed the same html+css to dziry and to headless Chrome, lay both out at the same viewport, and compare every box. Use when a frame is arranged wrongly rather than styled wrongly, after changing anything in layout.rs or Taffy style construction, when working on text wrapping, sizing, padding, flex distribution or the box model, and before claiming a layout behaviour matches CSS. Runs `bun run layout-diff`.
 ---
 
 # layout-diff
@@ -39,11 +39,11 @@ Each `DIFFER` prints the scenario's `asks` line, so a failure explains what it w
 reading the corpus. `[chrome 3 lines]` on a text row is Chrome's line-box count — the fastest way
 to see that a wrap difference is a wrap difference.
 
-## Chrome gets a reset; dziri does not
+## Chrome gets a reset; dziry does not
 
-dziri ships no default stylesheet, so `RESET` spells out dziri's own `INITIAL_STYLE` as CSS —
+dziry ships no default stylesheet, so `RESET` spells out dziry's own `INITIAL_STYLE` as CSS —
 flex-column defaults, zero margin/padding/border, pinned font. Chrome needs the rules because they
-are not its defaults; dziri needs none because they *are* its defaults. `RESET` is injected only
+are not its defaults; dziry needs none because they *are* its defaults. `RESET` is injected only
 into Chrome and is never part of a scenario's css, so a scenario cannot accidentally test the reset.
 
 **The reset is itself capable of faking a bug.** It scopes to `body, body *` and not `*` because
@@ -54,7 +54,7 @@ bug. If you widen the reset, check node 0 first.
 
 ## Text rows are compared on `y` and `h` only
 
-Never on `x`/`w`. dziri makes a text run a real node that stretches to its container; Chrome makes
+Never on `x`/`w`. dziry makes a text run a real node that stretches to its container; Chrome makes
 it an anonymous flex item with no box you can measure. Their heights and positions are the same
 question; their widths are not the same measurement.
 
@@ -84,14 +84,14 @@ The remaining failure is new, and it arrived *with* the wrapping fix:
 ```
 DIFFER wrap-unbreakable
        asks: a token with no break opportunity overflows rather than being cut
-       node 1 div   chrome vs dziri: h 21 vs 42
-       node 2 #text chrome vs dziri: h 21 vs 42  [chrome 1 line]
+       node 1 div   chrome vs dziry: h 21 vs 42
+       node 2 #text chrome vs dziry: h 21 vs 42  [chrome 1 line]
 ```
 
-dziri puts `Unbreakablesupercalifragilistic` on two lines in a 120px box; Chrome keeps it on one and
+dziry puts `Unbreakablesupercalifragilistic` on two lines in a 120px box; Chrome keeps it on one and
 lets it overflow. CSS only breaks inside a word when asked (`overflow-wrap: break-word`,
 `word-break: break-all`), so Chrome is right and the wrapper is breaking words it should not. Note
-the direction: dziri is *taller* than Chrome here, the opposite of the pre-`724bdc0` failures.
+the direction: dziry is *taller* than Chrome here, the opposite of the pre-`724bdc0` failures.
 
 ## Traps found while building and running it
 
@@ -119,7 +119,7 @@ grows past the point where the whole output can be read at once, add it.
 prints `KNOWN` with its reason and does not count as a disagreement.
 
 **Empty today, and deliberately.** The one scenario that differs is `wrap-unbreakable`, and that is
-a bug — dziri splits a token with no break opportunity across two lines where Chrome keeps it on
+a bug — dziry splits a token with no break opportunity across two lines where Chrome keeps it on
 one and lets it overflow. Putting a bug here would be using the mechanism to make a red run green,
 which is the exact failure it is shaped against.
 

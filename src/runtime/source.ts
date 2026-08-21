@@ -1,13 +1,13 @@
 /**
  * `source()` — a signal fed from outside the process.
  *
- * The push half of dziri's reactivity: `signal` and `computed` are written
+ * The push half of dziry's reactivity: `signal` and `computed` are written
  * from inside; `source` is written by an external subscription. Two shapes,
  * one function — the second argument is the initial value, and the first is
  * "how to subscribe", a function that receives `set`:
  *
  * ```ts
- * // a callback source — no dependency but dziri
+ * // a callback source — no dependency but dziry
  * export const config = source<Config>(
  *   (set) => {
  *     const w = fs.watch("config.json", async () => set(await readConfig()));
@@ -21,13 +21,13 @@
  * ```
  *
  * The subscribe runs once, at launch (`effects.ts::startSources`), not at module
- * eval — so it does not fire while the compiler imports the module. dziri calls it
+ * eval — so it does not fire while the compiler imports the module. dziry calls it
  * with `set` and inspects what it returned: an unsubscribe function is kept for
  * window close; an Effect `Stream` (recognised by `Symbol.for("effect/Stream")`)
  * is run with `Stream.runForEach`, and quitting interrupts it.
  *
  * Effect stays optional: the callback shape never imports `effect`; the package
- * loads only when a returned value is a Stream. dziri cannot name `Stream<A>` to
+ * loads only when a returned value is a Stream. dziry cannot name `Stream<A>` to
  * infer `A` (its type parameter lives under a `unique symbol` only `effect`
  * exports), so the initial value carries the type.
  */

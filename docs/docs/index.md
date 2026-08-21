@@ -1,10 +1,10 @@
 ---
-title: dziri
+title: dziry
 sidebar_position: 0
 slug: /
 ---
 
-# dziri
+# dziry
 
 A UI framework that does its work before the app runs.
 
@@ -26,7 +26,7 @@ That `count` is a bare read. There is no `.value`, and no dependency array.
 ## Start
 
 ```bash
-bun create dziri my-app
+bun create dziry my-app
 cd my-app
 bun run dev
 ```
@@ -44,5 +44,5 @@ The API pages mark each surface **done**, **partial** or **planned**, and those 
 are read from `API.md` at build time rather than typed by hand — so a page cannot claim
 a feature works while the tracking table says it does not.
 
-`dziri build` produces a single executable with the engine embedded, but
+`dziry build` produces a single executable with the engine embedded, but
 cross-compilation, signing and notarization are not done yet.

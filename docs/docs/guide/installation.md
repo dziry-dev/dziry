@@ -6,25 +6,25 @@ sidebar_position: 2
 # Installation
 
 ```bash
-bun create dziri my-app
+bun create dziry my-app
 cd my-app
 bun run dev
 ```
 
-That is the whole of it. `bun create dziri` writes the project, installs
+That is the whole of it. `bun create dziry` writes the project, installs
 dependencies, and leaves you with a window that runs.
 
 ## Options
 
 | Flag | What it does |
 | --- | --- |
-| `--local <path>` | Depend on a dziri checkout instead of the published package. |
+| `--local <path>` | Depend on a dziry checkout instead of the published package. |
 | `--no-install` | Write the files and stop. |
 
 `--local` is what you want when working on the framework itself:
 
 ```bash
-bun create dziri my-app --local ../dziri
+bun create dziry my-app --local ../dziry
 ```
 
 ## What you get
@@ -41,7 +41,7 @@ CSS resolves at build time) are exactly what a new project trips over.
 ```
 my-app/
   package.json
-  tsconfig.json      # jsxImportSource: "dziri" — no per-file pragma
+  tsconfig.json      # jsxImportSource: "dziry" — no per-file pragma
   bunfig.toml
   windows/
     main/

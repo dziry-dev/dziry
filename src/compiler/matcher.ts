@@ -144,7 +144,7 @@ function describeEl(el: Element): string {
  *
  * All three of the awkward cases here were measured rather than reasoned about —
  * Chromium 151, `probes/structural-pseudo-root.html`, recorded in
- * BROWSER-FACTS.md — because dziri's IR gives a node to two things CSS does not
+ * BROWSER-FACTS.md — because dziry's IR gives a node to two things CSS does not
  * count as children, and getting either wrong is silent:
  *
  *   - Text runs do not count. A container written across several lines has a text
@@ -225,10 +225,10 @@ function positionOf(path: Element[], subject: number): SiblingPos {
  * invisible to everything that walks attributes — the JSX prop checks, the diagnostics —
  * which is right for something no author wrote.
  *
- * See `select[data-dziri-listbox]` in `ua-sheet.ts` for what it is for: the stacking and
+ * See `select[data-dziry-listbox]` in `ua-sheet.ts` for what it is for: the stacking and
  * clipping that make a list box a list, at UA origin so an author's own rule beats them.
  */
-const LISTBOX_ATTR = "data-dziri-listbox";
+const LISTBOX_ATTR = "data-dziry-listbox";
 
 function listboxMarker(el: Element): string | undefined {
   return listboxOf(el) !== null ? "" : undefined;

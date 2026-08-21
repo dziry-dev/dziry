@@ -609,7 +609,7 @@ test("tabindex overrides the tag rule in both directions", () => {
 test("autofocus keeps every focusable claim and refuses the rest", () => {
   // Three claims, two kept. The compiler deliberately does *not* choose between the two
   // focusable ones: measured, a browser walks to the next claim when one cannot be
-  // focused, and in dziri "cannot be focused right now" usually means "on a hidden route",
+  // focused, and in dziry "cannot be focused right now" usually means "on a hidden route",
   // which no compile-time answer can know. So this emits the candidates and the engine
   // walks them.
   const result = compile(
@@ -1251,7 +1251,7 @@ test("place-items and place-self set both axes, and `safe` binds forward", () =>
   // The trap. `safe center` is ONE value — Box Alignment writes each half as
   // `[safe | unsafe]? <position>` — so a whitespace split would read align as
   // `safe` and justify as `center`, silently giving the two axes different
-  // alignments. dziri has no overflow-alignment, so it is refused; what matters is
+  // alignments. dziry has no overflow-alignment, so it is refused; what matters is
   // that it is refused as one bad value rather than accepted as two good ones.
   // Tailwind emits exactly this, as `place-items-center-safe`.
   expect(() => styleOf(box, `.a { place-items: safe center }`, "align")).toThrow(

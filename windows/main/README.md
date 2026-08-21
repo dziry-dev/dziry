@@ -1,6 +1,6 @@
-# Tailwind, compiled by dziri
+# Tailwind, compiled by dziry
 
-Real Tailwind v4 output, through dziri's compiler, rendered by the Rust engine. No
+Real Tailwind v4 output, through dziry's compiler, rendered by the Rust engine. No
 browser, no DOM, no CSS parser at run time — the classes are resolved at build time
 into a style table.
 
@@ -28,8 +28,8 @@ agree, and if they ever disagree the exhibit is wrong.
 ## Why `app.css` is not just `@import "tailwindcss"`
 
 - **No preflight.** Tailwind's reset is a user-agent stylesheet written in selectors
-  dziri does not have — `:host`, `*`, `::before`, `[hidden]`. It is optional by
-  design, and dziri ships its own UA sheet, which is the same job done at the right
+  dziry does not have — `:host`, `*`, `::before`, `[hidden]`. It is optional by
+  design, and dziry ships its own UA sheet, which is the same job done at the right
   origin. So: `theme.css` + `utilities.css`, not the umbrella import.
 - **`source(none)` plus explicit `@source`.** Tailwind v4 otherwise scans the whole
   project, finds class-shaped strings inside the compiler's own TypeScript, and
@@ -40,7 +40,7 @@ agree, and if they ever disagree the exhibit is wrong.
 
 - **`oklch(98.5% 0 none)`** — Tailwind 4.3 emits `none` for the hue of every
   achromatic colour. CSS Color 4 §4.2 makes that a *missing component* computing to
-  zero, and dziri rejected it, so every neutral in the palette failed to parse while
+  zero, and dziry rejected it, so every neutral in the palette failed to parse while
   the saturated ones worked. Fixed, with a test.
 
 ## Known gaps visible from here
@@ -48,5 +48,5 @@ agree, and if they ever disagree the exhibit is wrong.
 `@media (hover: hover)`, `@property` and `@supports` are skipped at-rules. Masks,
 filters and SVG paint (`fill`, `stroke`) compile but are not rendered yet — the
 engine stores them and paints as if they were absent. What remains blocked is
-mostly 3D transforms (`rotate-x-*`, dziri is 2D) and the intrinsic sizing
+mostly 3D transforms (`rotate-x-*`, dziry is 2D) and the intrinsic sizing
 keywords (`w-fit`, `w-max`, `w-min`) — see `bun run tailwind-coverage`.

@@ -11,7 +11,7 @@
  * actually rot when the framework moves underneath a page:
  *
  *   1. **Examples compile.** Every ```ts / ```tsx block in the docs is extracted and
- *      typechecked against the real `dziri` types. Rename an export and the docs fail
+ *      typechecked against the real `dziry` types. Rename an export and the docs fail
  *      with it, in the same run, instead of six weeks later in someone's terminal.
  *
  *   2. **The public surface is covered.** Everything re-exported from `src/index.ts`
@@ -35,10 +35,10 @@ const DOCS = join(ROOT, "docs", "docs");
 /**
  * Extraction lives at the repo **root**, not under `docs/`.
  *
- * `docs/` is its own workspace package (`dziri-docs`), and a package self-reference
+ * `docs/` is its own workspace package (`dziry-docs`), and a package self-reference
  * resolves against the nearest ancestor `package.json`. Extract into `docs/` and the
- * nearest one is `dziri-docs`, which has no `dziri` export — so every example failed
- * with "Cannot find module 'dziri'" and, because that is not a per-file diagnostic,
+ * nearest one is `dziry-docs`, which has no `dziry` export — so every example failed
+ * with "Cannot find module 'dziry'" and, because that is not a per-file diagnostic,
  * the run reported them all as compiling. Two bugs stacked into a check that passed
  * while doing nothing.
  */
@@ -90,14 +90,14 @@ const FENCE = /^([ \t]*)```([A-Za-z0-9]+)([^\n]*)\n([\s\S]*?)^[ \t]*```[ \t]*$/g
  * The authoring surface, injected so a fragment need not repeat the import.
  *
  * **`alert` has to be here, and the reason is the feature's own footgun.** Bun defines a global
- * `alert(message?)`, so a snippet that did not import dziri's resolved to *that* one — and the
+ * `alert(message?)`, so a snippet that did not import dziry's resolved to *that* one — and the
  * two-argument example in the signals page failed with "Expected 0-1 arguments, but got 2",
  * which is exactly what an author who forgets the import gets at run time. Leaving it out would
  * have made this harness disagree with the page it was checking.
  */
 const PREAMBLE = [
-  'import { $, alert, batch, bind, cn, computed, createScope, effect, Fragment, isSignal, Outlet, signal, untrack, useRoute, useRouter, Window } from "dziri";',
-  'import type { AlertLevel, Args, Child, ClassArg, ClassSpec, Component, DisposalScope, MapOptions, Props, ReadonlySignal, Route, Router, Signal, StyleObject, WindowConfig, WindowProps } from "dziri";',
+  'import { $, alert, batch, bind, cn, computed, createScope, effect, Fragment, isSignal, Outlet, signal, untrack, useRoute, useRouter, Window } from "dziry";',
+  'import type { AlertLevel, Args, Child, ClassArg, ClassSpec, Component, DisposalScope, MapOptions, Props, ReadonlySignal, Route, Router, Signal, StyleObject, WindowConfig, WindowProps } from "dziry";',
 ].join("\n");
 
 type Example = { page: Page; startLine: number; lang: string; body: string; file: string };
@@ -107,7 +107,7 @@ const examples: Example[] = [];
  * Every fenced ts/tsx body, including the `no-check` ones.
  *
  * The phantom-import check reads these rather than the whole page. Prose *about* a
- * bad import — "a page teaching `import { foo } from \"dziri\"`" — is illustrative,
+ * bad import — "a page teaching `import { foo } from \"dziry\"`" — is illustrative,
  * and flagging it made this checker fail on the page documenting itself. Fenced
  * blocks are the ones presented as usable code, so they are the ones held to it.
  *
@@ -137,8 +137,8 @@ for (const page of all) {
     }
 
     const startLine = page.text.slice(0, m.index!).split("\n").length + 1;
-    // A snippet with its own dziri import must not get a second one.
-    const hasOwn = /^\s*import\b[^\n]*["']dziri["']/m.test(body);
+    // A snippet with its own dziry import must not get a second one.
+    const hasOwn = /^\s*import\b[^\n]*["']dziry["']/m.test(body);
     const source = hasOwn ? body : `${PREAMBLE}\n${body}`;
     const file = `ex${examples.length}.${lang === "tsx" ? "tsx" : "ts"}`;
     examples.push({ page, startLine, lang, body: source, file });
@@ -214,7 +214,7 @@ function checkExamples(): void {
     //
     // This is the failure that matters most, because its natural shape is a *silent
     // pass*: a config error (TS18003 "no inputs found", TS5058 "path does not
-    // exist", an unresolved `dziri`) produces output with no per-file diagnostic, so
+    // exist", an unresolved `dziry`) produces output with no per-file diagnostic, so
     // the loop above records nothing and the run cheerfully reports that every
     // example compiles. Both of those bugs happened here on 2026-08-02, stacked, and
     // the check reported "all 25 compile" while typechecking nothing at all.
@@ -317,16 +317,16 @@ if (undocumentedTypes.length && !QUIET) {
 
 /**
  * The reverse direction, and the one that actually misleads: a page teaching an
- * import that no longer exists. Only `from "dziri"` is checked — a deep path is the
+ * import that no longer exists. Only `from "dziry"` is checked — a deep path is the
  * emitter's business, not an author's.
  */
-const IMPORT_FROM_DZIRI = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']dziri["']/g;
+const IMPORT_FROM_DZIRY = /import\s+(?:type\s+)?\{([^}]*)\}\s*from\s*["']dziry["']/g;
 const known = new Set([...values, ...types]);
 const phantom = new Map<string, string[]>();
 
 for (const [rel, bodies] of fencedCode) {
   for (const body of bodies) {
-    for (const m of body.matchAll(IMPORT_FROM_DZIRI)) {
+    for (const m of body.matchAll(IMPORT_FROM_DZIRY)) {
       for (const raw of m[1]!.split(",")) {
         const name = raw.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0]?.trim();
         if (!name || !/^[A-Za-z_$][\w$]*$/.test(name)) continue;
@@ -340,7 +340,7 @@ for (const [rel, bodies] of fencedCode) {
 }
 
 if (phantom.size) {
-  fail(`\nPHANTOM IMPORT — documented as importable from "dziri", not exported (${phantom.size} page(s))`);
+  fail(`\nPHANTOM IMPORT — documented as importable from "dziry", not exported (${phantom.size} page(s))`);
   for (const [page, names] of phantom) console.log(`  ${page}  ${names.join(", ")}`);
 }
 

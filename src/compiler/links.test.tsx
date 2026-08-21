@@ -71,7 +71,7 @@ test("auditLinks: a good link is collected, a dead one is refused with the table
 });
 
 test("auditLinks: an interpolated href is refused by name, not half-checked", () => {
-  const root = asElement(<a href={"products/\0dziri:param\0id\0dziri:param\0"}>x</a>);
+  const root = asElement(<a href={"products/\0dziry:param\0id\0dziry:param\0"}>x</a>);
   const { links, errors } = auditLinks(root, TABLE);
   expect(links).toHaveLength(0);
   expect(errors[0]).toContain("interpolates a recorded value");
@@ -110,27 +110,27 @@ afterAll(() => {
 });
 
 function project(pageBody: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "dziri-links-"));
+  const dir = mkdtempSync(join(tmpdir(), "dziry-links-"));
   fixtures.push(dir);
   const mainDir = join(dir, "windows", "main");
   mkdirSync(join(mainDir, "pages"), { recursive: true });
   mkdirSync(join(dir, "node_modules"));
-  symlinkSync(REPO, join(dir, "node_modules", "dziri"), "junction");
+  symlinkSync(REPO, join(dir, "node_modules", "dziry"), "junction");
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "links-e2e", type: "module" }));
   writeFileSync(
     join(dir, "tsconfig.json"),
     JSON.stringify({
-      compilerOptions: { jsx: "react-jsx", jsxImportSource: "dziri" },
+      compilerOptions: { jsx: "react-jsx", jsxImportSource: "dziry" },
       include: ["windows"],
     }),
   );
   writeFileSync(
     join(mainDir, "state.ts"),
-    `import { signal } from "dziri";\nexport const route = signal("/");\n`,
+    `import { signal } from "dziry";\nexport const route = signal("/");\n`,
   );
   writeFileSync(
     join(mainDir, "index.tsx"),
-    `import { Outlet, Window } from "dziri";
+    `import { Outlet, Window } from "dziry";
 import { route } from "./state.ts";
 export default function Main() {
   return (

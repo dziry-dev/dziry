@@ -1,6 +1,6 @@
 ---
 name: golden
-description: Visual regression for the renderer — render scenarios headlessly and compare against blessed PNGs. Use after changing anything in native-src/dziri-engine/src/paint.rs, layout.rs or text.rs; after touching the cascade, style interning or variant/patch machinery; after upgrading skia-safe or Taffy; and before committing any change that could alter what a frame looks like. Runs `bun run golden`.
+description: Visual regression for the renderer — render scenarios headlessly and compare against blessed PNGs. Use after changing anything in native-src/dziry-engine/src/paint.rs, layout.rs or text.rs; after touching the cascade, style interning or variant/patch machinery; after upgrading skia-safe or Taffy; and before committing any change that could alter what a frame looks like. Runs `bun run golden`.
 ---
 
 # golden

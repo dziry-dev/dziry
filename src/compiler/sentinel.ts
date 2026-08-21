@@ -46,13 +46,13 @@ export type Sentinel = {
  * NUL-delimited, which is the part that makes `has` a guarantee rather than a
  * heuristic: a NUL cannot occur in authored markup, so a `.includes` against the
  * mark can only be true of a string this file produced. Two of the three copies
- * this replaces had drifted to a spaced ` dziri:param ` form, which an author could
+ * this replaces had drifted to a spaced ` dziry:param ` form, which an author could
  * in principle type; the strictest of the three is the one worth keeping.
  *
  * The kind is inside the mark, so `has` never confuses one family with another.
  */
 export function sentinel(kind: string): Sentinel {
-  const mark = `\0dziri:${kind}\0`;
+  const mark = `\0dziry:${kind}\0`;
 
   return {
     wrap: (payload) => `${mark}${payload}${mark}`,

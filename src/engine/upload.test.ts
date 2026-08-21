@@ -17,7 +17,7 @@
  * into exactly that — that `align-self` beats `align-items`, that `aspect-ratio` squares
  * a box, that a grid places four tracks — and they lived here only because the demo
  * happened to contain an example of each. They are now in
- * `native-src/dziri-engine/tests/bounds.rs`, against fixtures those tests own, which is
+ * `native-src/dziry-engine/tests/bounds.rs`, against fixtures those tests own, which is
  * what the paragraph above always said should happen.
  *
  * The move was not tidying. Nodes here are found by what they *are* rather than by id,

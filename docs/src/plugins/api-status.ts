@@ -112,7 +112,7 @@ export default function apiStatusPlugin(context: LoadContext): Plugin<ApiStatus>
   const apiPath = join(context.siteDir, "..", "API.md");
 
   return {
-    name: "dziri-api-status",
+    name: "dziry-api-status",
 
     async loadContent() {
       return parseApiStatus(readFileSync(apiPath, "utf8"));
@@ -121,7 +121,7 @@ export default function apiStatusPlugin(context: LoadContext): Plugin<ApiStatus>
     async contentLoaded({ content, actions }) {
       if (!content.rows.length) {
         throw new Error(
-          `dziri-api-status: parsed no status rows from ${apiPath}.\n` +
+          `dziry-api-status: parsed no status rows from ${apiPath}.\n` +
             `  The docs read their badges from that table, so an empty parse means every\n` +
             `  <Status/> would silently vanish. Either the table moved or its shape changed.`,
         );

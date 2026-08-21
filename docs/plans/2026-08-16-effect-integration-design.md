@@ -1,4 +1,4 @@
-# dziri × Effect-TS — integration design
+# dziry × Effect-TS — integration design
 
 Date: 2026-08-16 · Status: design (no code) · Doubles as a short Effect-TS study aid
 
@@ -6,14 +6,14 @@ Date: 2026-08-16 · Status: design (no code) · Doubles as a short Effect-TS stu
 
 Two goals, one artifact:
 
-1. Design dziri's Effect-TS integration up the concept ladder: types → layers → fibers → loaders → streams.
-2. Serve as a dziri-anchored study aid for Effect-TS. Each section carries a one-line **Effect note** (skim or skip), then the dziri design that uses it.
+1. Design dziry's Effect-TS integration up the concept ladder: types → layers → fibers → loaders → streams.
+2. Serve as a dziry-anchored study aid for Effect-TS. Each section carries a one-line **Effect note** (skim or skip), then the dziry design that uses it.
 
-The ladder is deliberately dziri's own trajectory: two rungs review code dziri already ships, three rungs design what is missing.
+The ladder is deliberately dziry's own trajectory: two rungs review code dziry already ships, three rungs design what is missing.
 
 ## The ruling that constrains everything
 
-dziri never imports `effect` at module scope. It recognises Effect values **structurally** (`Symbol.for("effect/Effect")`) and lazy-imports the package only when an app hands one over — an app without `effect` in its manifest loads zero bytes of it. Every design below must keep this true.
+dziry never imports `effect` at module scope. It recognises Effect values **structurally** (`Symbol.for("effect/Effect")`) and lazy-imports the package only when an app hands one over — an app without `effect` in its manifest loads zero bytes of it. Every design below must keep this true.
 
 The fragile point is the lazy-import dodge in `src/runtime/effects.ts`:
 
@@ -27,27 +27,27 @@ It survives Bun today (measured: a folded const grew the bundle from 9,582 to 1,
 
 **Effect note:** an Effect is a lazy description of a computation — `A` success, `E` typed failure, `R` required services. It runs only via a runtime; `runPromiseExit` returns an `Exit` (`Success` | `Failure`) instead of throwing.
 
-**dziri today — done.** `runDispatched` (`src/runtime/effects.ts`):
+**dziry today — done.** `runDispatched` (`src/runtime/effects.ts`):
 
 - detects an Effect by its registered symbol,
 - runs `Effect.runPromiseExit` (or the window runtime's) without `await`ing an Effect (it is not a Promise),
 - prints `Cause.pretty(cause)` on failure, silent on interruption.
 
-**Design:** none — review-only. This is the first worked example: dziri already does "recognise an Effect, run it, read its Exit."
+**Design:** none — review-only. This is the first worked example: dziry already does "recognise an Effect, run it, read its Exit."
 
 ## Rung 2 — Layers and `ManagedRuntime`
 
 **Effect note:** `Context.Tag` declares a service interface; a `Layer` provides it (`Layer.scoped` = an `acquireRelease` resource); `ManagedRuntime.make(layer)` builds a runtime that can satisfy the `R` channel; `runtime.dispose()` releases the layer.
 
-**dziri today — done.** `<Window layer={…}>` → `provideWindowLayer` → `ManagedRuntime.make` → forced `rt.runtime()` acquisition at launch → `disposeWindowRuntime` on quit. Invariant: **one window = one layer = one runtime.** Tested against effect 3.22.
+**dziry today — done.** `<Window layer={…}>` → `provideWindowLayer` → `ManagedRuntime.make` → forced `rt.runtime()` acquisition at launch → `disposeWindowRuntime` on quit. Invariant: **one window = one layer = one runtime.** Tested against effect 3.22.
 
-**Design:** none — review-only. The second worked example: dziri already does window-root DI with scoped finalizers.
+**Design:** none — review-only. The second worked example: dziry already does window-root DI with scoped finalizers.
 
 ## Rung 3 — Fibers and `Scope` (first gap)
 
 **Effect note:** a fiber is a computation that has been *started*; a `Scope` owns a tree of fibers, and closing it interrupts them and runs their finalizers.
 
-**dziri today — missing.** `runDispatched` wraps the run in a fire-and-forget `async () => { … await rt.runPromiseExit(value) … }`. The effect is an awaited promise, not a held fiber — nothing can interrupt it except process teardown.
+**dziry today — missing.** `runDispatched` wraps the run in a fire-and-forget `async () => { … await rt.runPromiseExit(value) … }`. The effect is an awaited promise, not a held fiber — nothing can interrupt it except process teardown.
 
 **Design.** Give the window an explicit `Scope` beside its `ManagedRuntime`:
 
@@ -61,7 +61,7 @@ It survives Bun today (measured: a folded const grew the bundle from 9,582 to 1,
 
 **Effect note:** a loader is the data-fetch that runs when you navigate to a route, before the screen renders — the one place typed errors, cancellation, and DI meet.
 
-**dziri today — author surface only.** `data-layer-design.md` §4 specifies the contract — `export const loader` on a route file, three shapes (sync / async / Effect), `loading.tsx` (presence decides navigation timing), `failure.tsx` (per-error-tag views), a parent's `provides` feeding a child's `R`. `Redirect`/`Cancel` are already exported. No compiler or runtime code exists.
+**dziry today — author surface only.** `data-layer-design.md` §4 specifies the contract — `export const loader` on a route file, three shapes (sync / async / Effect), `loading.tsx` (presence decides navigation timing), `failure.tsx` (per-error-tag views), a parent's `provides` feeding a child's `R`. `Redirect`/`Cancel` are already exported. No compiler or runtime code exists.
 
 **Design — the missing half.**
 
@@ -87,7 +87,7 @@ It survives Bun today (measured: a folded const grew the bundle from 9,582 to 1,
 
 **Effect note:** a `Stream<A,E,R>` is Effect's sequence over time (its Observable/async-iterable); `Stream.runForEach` consumes it, calling your callback per emission.
 
-**dziri today — missing.** `data-layer-design.md` §4 calls it "open edge, deliberately unresolved": nothing lets Effect's output over time flow into a dziri signal. The author writes the bridge by hand and owns its lifecycle:
+**dziry today — missing.** `data-layer-design.md` §4 calls it "open edge, deliberately unresolved": nothing lets Effect's output over time flow into a dziry signal. The author writes the bridge by hand and owns its lifecycle:
 
 ```ts
 export const todos = signal<Todo[]>([]);
@@ -113,7 +113,7 @@ export const todos = source(
 Stream.runForEach(stream, (emission) => cell.set(emission));
 ```
 
-That one line **is** the link: everything upstream is Effect (retries, schedules, error handling, DI, interruption), everything downstream is dziri (signal → binding → paint). `source()` is the compiler owning that line so the author writes one instead of three plus cleanup.
+That one line **is** the link: everything upstream is Effect (retries, schedules, error handling, DI, interruption), everything downstream is dziry (signal → binding → paint). `source()` is the compiler owning that line so the author writes one instead of three plus cleanup.
 
 **Why a factory `() => stream`, not the stream:** the stream needs the window layer's live services (rung 2), which do not exist at module-eval time. The factory runs once the `ManagedRuntime` is acquired — the same reason `provideWindowLayer` forces acquisition at launch; the "live service instances" ledger entry in `NOTES.md`.
 
@@ -131,7 +131,7 @@ That one line **is** the link: everything upstream is Effect (retries, schedules
 | loaders: typed failures, cancel-on-navigate, DI | design only | rung 4 |
 | Effect streams drive reactive UI | open edge | rung 5 |
 
-Rungs 1–2 are "dziri already does Effect correctly" (study aid). Rungs 3–5 are the work, and rung 5 is what makes "Effect drives the UI" true rather than "Effect runs in the background."
+Rungs 1–2 are "dziry already does Effect correctly" (study aid). Rungs 3–5 are the work, and rung 5 is what makes "Effect drives the UI" true rather than "Effect runs in the background."
 
 ## Dependencies and order
 

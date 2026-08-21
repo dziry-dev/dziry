@@ -1,21 +1,21 @@
-# dziri × LiveStore — the `dziri/livestore` binding design
+# dziry × LiveStore — the `dziry/livestore` binding design
 
 Date: 2026-08-18 · Status: design (approved in conversation; this doc precedes implementation)
 
 ## Purpose
 
-Make LiveStore (`@livestore/livestore`) usable in dziri with the same ergonomics as its React
-binding `@livestore/react`: one call turns a LiveStore query into a dziri signal that
-`{todos.length}`-style bindings re-render from. The store engine stays LiveStore; dziri
+Make LiveStore (`@livestore/livestore`) usable in dziry with the same ergonomics as its React
+binding `@livestore/react`: one call turns a LiveStore query into a dziry signal that
+`{todos.length}`-style bindings re-render from. The store engine stays LiveStore; dziry
 contributes only the reactive glue.
 
 ## The ruling that constrains everything
 
-`dziri/livestore` mirrors **`@livestore/react`**, not `@livestore/livestore`. It:
+`dziry/livestore` mirrors **`@livestore/react`**, not `@livestore/livestore`. It:
 
 - imports `@livestore/livestore` **type-only** — zero runtime bytes, the same seam as
   `src/effect.ts` (`export type { Effect } from "effect"`),
-- takes the store **as an explicit argument** — dziri has no component tree, so there is no
+- takes the store **as an explicit argument** — dziry has no component tree, so there is no
   `StoreProvider`/context and no `provideStore` registry; the module graph is the wiring,
 - returns **signals**, not plain values — the entire point is that `{todos.length}` re-renders
   on commit, which only a signal does.
@@ -23,16 +23,16 @@ contributes only the reactive glue.
 ## The surface (two exports)
 
 ```ts
-// dziri/livestore
+// dziry/livestore
 liveQuery(store, query)      → ReadonlySignal<TResult>    // the useQuery analog
 useSyncStatus(store)         → ReadonlySignal<SyncStatus> // sync UI
 ```
 
 Everything else in `@livestore/react` is deliberately absent:
 
-| React name | dziri | why |
+| React name | dziry | why |
 |---|---|---|
-| `useQuery` | `liveQuery` | `useQuery` collides with TanStack Query; dziri's `use*` are build-time hooks, this is a runtime source |
+| `useQuery` | `liveQuery` | `useQuery` collides with TanStack Query; dziry's `use*` are build-time hooks, this is a runtime source |
 | `useStore` | *dropped* | you already hold the store — you passed it in |
 | `StoreRegistryContext` / `<StoreProvider>` | *dropped* | no React tree; the store is an explicit argument |
 | `useSyncStatus` | `useSyncStatus` | kept verbatim — no collision, and name-parity aids discovery |
@@ -64,12 +64,12 @@ export function liveQuery<TResult>(
 }
 ```
 
-Mechanics, mapped to existing dziri machinery:
+Mechanics, mapped to existing dziry machinery:
 
 - **`source()` unchanged.** `liveQuery` is a plain `source()`; its subscribe returns a
   synchronous unsubscribe (kept for quit by `disposeWindowRuntime`). No change to
   `source.ts` / `effects.ts`.
-- **The async store.** `createStorePromise` returns `Promise<Store>`; dziri forbids top-level
+- **The async store.** `createStorePromise` returns `Promise<Store>`; dziry forbids top-level
   `await` (the compiler imports these modules synchronously). `liveQuery` resolves the promise
   *inside* the subscribe, which `startSources` runs at launch — the compiler never touches the
   store, and resolution happens while the first frame paints (the "built at launch" rule the
@@ -126,9 +126,9 @@ each change — the "render sync UI" this exists for.
   store while still requiring an actual `Store`. `TResult` infers from `query`, so the row type
   is never lost. (Refinement candidate: a generic `TSchema`/`TContext` pair if `any` is judged
   too loose in review.)
-- **Type-only import** means `@livestore/livestore` is a *devDependency* of dziri (for its own
+- **Type-only import** means `@livestore/livestore` is a *devDependency* of dziry (for its own
   `tsc`/tests — installed today via `bun add -d`) and an *optional peerDependency* for consumers —
-  required only by an app that imports `dziri/livestore`, which is precisely the app that creates a
+  required only by an app that imports `dziry/livestore`, which is precisely the app that creates a
   store anyway.
 
 ## Author usage
@@ -141,7 +141,7 @@ export const store = createStorePromise({ schema, adapter: makeAdapter({ storage
 
 // state.ts
 import { store } from "./store.ts";
-import { liveQuery, useSyncStatus } from "dziri/livestore";
+import { liveQuery, useSyncStatus } from "dziry/livestore";
 export const todos = liveQuery(store, todosQuery);
 export const sync  = useSyncStatus(store);
 
@@ -153,7 +153,7 @@ export const sync  = useSyncStatus(store);
 ## Files
 
 - new `src/livestore.ts`
-- new `src/livestore.test.ts` (fake structural store; tests the dziri half — seed → subscribe →
+- new `src/livestore.test.ts` (fake structural store; tests the dziry half — seed → subscribe →
   `set` → unsubscribe on close)
 - `package.json`: add `"./livestore": "./src/livestore.ts"` to `exports`
 - `docs/docs/guide/livestore.md` (author guide) — follow-up, not this pass

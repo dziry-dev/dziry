@@ -1,4 +1,4 @@
-# dziri — the data layer
+# dziry — the data layer
 
 **Status:** imagined API, not implemented. Written against the pre-A0 research doc
 `framework-design.md` §3–4 (screens, `Reactive<T>`, boundaries, planes) and ROADMAP A4
@@ -32,7 +32,7 @@ this write invalidate* — are both statically knowable here.
 | **Optimistic updates** | Kept for `async`/`worker`; a **compile error** on a `sync` mutation. | Optimism hides network latency. A local write completes before the next frame boundary, so the rollback path would be dead code that can still be wrong. |
 | **`useInfiniteQuery`** | **Rejected as a primitive.** A cursor query plus the list arena's `dataOffset` (ROADMAP A4) *is* infinite scroll. | Pages-array-then-flatten is a workaround for having no windowing. We have windowing, and it is the better half of the pattern. |
 | **RPC / server layer** | **None.** Bun is the backend, in-process. A remote database or HTTP service is just `mode: async`. | There is no client/server split to bridge. Inventing one would add a codec vocabulary for a boundary that does not exist. |
-| **The loader** | `export const loader` on a screen — a **sync function**, an **async function**, or an **Effect**, detected structurally at run time. One exit contract underneath; `Redirect`/`Cancel` are exported tags, not a middleware API. | The shapes are a gradient: the more the loader can say, the more UI the build can prove. Effect buys typed failure views, interruption on supersede, and route-chain DI through the R channel — with `effect` imported lazily, so dziri depends on nothing (the `validate={}` ruling, `forms.ts`). |
+| **The loader** | `export const loader` on a screen — a **sync function**, an **async function**, or an **Effect**, detected structurally at run time. One exit contract underneath; `Redirect`/`Cancel` are exported tags, not a middleware API. | The shapes are a gradient: the more the loader can say, the more UI the build can prove. Effect buys typed failure views, interruption on supersede, and route-chain DI through the R channel — with `effect` imported lazily, so dziry depends on nothing (the `validate={}` ruling, `forms.ts`). |
 | **TanStack Query itself** | **Not imported.** Semantics adopted; runtime replaced. ROADMAP's "TanStack Query core works" should be narrowed to "would run, and would duplicate the binding graph." | Same ruling as `react-reconciler`: it works and costs a parallel registry, an observer model with no mount to hook, and key hashing for keys we already have as integers. ~500 lines of runtime against 12–40 KB and a second source of truth. |
 
 ---
@@ -49,7 +49,7 @@ db/
 ```
 
 Queries may be colocated (`windows/main/regions/main/projects/queries.ts`) — the generator globs
-`**/queries.ts` plus any module that imports `dziri/data`. Location is convention; identity comes
+`**/queries.ts` plus any module that imports `dziry/data`. Location is convention; identity comes
 from the module path, so moving a file is a rename, not a key change.
 
 ---
@@ -58,7 +58,7 @@ from the module path, so moving a file is a rename, not a key change.
 
 ```ts
 // db/queries.ts
-import { defineQuery, defineMutation } from "dziri/data";
+import { defineQuery, defineMutation } from "dziry/data";
 import { db } from "./client.ts";
 import { projects, files } from "./schema.ts";
 import { eq, desc } from "drizzle-orm";
@@ -171,7 +171,7 @@ For data that is not the screen's subject — a sidebar count, a search field, a
 lifetime is the window rather than the navigation frame:
 
 ```tsx
-import { signal } from "dziri";
+import { signal } from "dziry";
 import { searchFiles } from "../../db/queries.ts";
 
 export function Search() {
@@ -206,7 +206,7 @@ Detected at run time, structurally, in a load-bearing order — Effect first, be
 the one shape that must not be `await`ed. Every Effect value carries `Symbol.for("effect/Effect")`,
 a *registered* symbol, so the test needs no import (measured, effect 3.22). Then thenable, then
 plain value. `effect` itself is imported lazily only to actually run one — the same dance
-`validate={}` documents in `forms.ts`, under the same ruling: dziri depends on none of them.
+`validate={}` documents in `forms.ts`, under the same ruling: dziry depends on none of them.
 
 The shapes are a gradient — the more the loader can say, the more UI the build can prove:
 
@@ -231,7 +231,7 @@ are combinators the author applies — so the router's entire contract is interp
 |---|---|
 | `Success<A>` | show the screen; `A` lands in `data` |
 | `Fail<E>`, tagged | show the matching failure view |
-| `Fail<Redirect>` / `Fail<Cancel>` | **control flow, not error** — navigate elsewhere / stay put. Two tags dziri exports; an auth guard is `Effect.fail(new Redirect("login"))`. Thrown from a function loader, they mean the same. |
+| `Fail<Redirect>` / `Fail<Cancel>` | **control flow, not error** — navigate elsewhere / stay put. Two tags dziry exports; an auth guard is `Effect.fail(new Redirect("login"))`. Thrown from a function loader, they mean the same. |
 | defect | the crash screen — a bug, distinguishable from a designed failure |
 | interruption | nothing; a superseded navigation |
 
@@ -316,7 +316,7 @@ export const onAddTodo = () =>
   Effect.gen(function* () {
     const store = yield* Store;                                   // ← the DI
     yield* Effect.sync(() => store.commit(events.todoCreated({ text: draft })));
-    draft.set("");                                                // bare reads, .set writes — dziri rules hold inside
+    draft.set("");                                                // bare reads, .set writes — dziry rules hold inside
   });
 ```
 
@@ -352,7 +352,7 @@ export const loader = () =>
 **Without `effect`, everything still works.** This is a constraint, not an aspiration: `loader`
 degrades to a sync or async function through the same exits, a guard is `throw new
 Redirect("login")`, handlers stay ordinary functions, and an absent `layer={}` builds nothing.
-dziri never imports `effect` at module scope — an Effect value is recognised by its registered
+dziry never imports `effect` at module scope — an Effect value is recognised by its registered
 symbol and the package is imported lazily only when the app handed one over (the `validate={}`
 ruling). An app without `effect` in its manifest never loads a byte of it, and `runtime-surface`
 keeps that honest.

@@ -4,8 +4,8 @@
  * The compiler's `fields.test.ts` asserts the table; this asserts the payload built from
  * it, plus the three validator shapes — a plain function, a Standard Schema, and a raw
  * Effect schema. The last two are checked against the real libraries rather than a stub,
- * because the whole claim is interoperability: a stub would only prove that dziri agrees
- * with dziri's idea of Zod.
+ * because the whole claim is interoperability: a stub would only prove that dziry agrees
+ * with dziry's idea of Zod.
  *
  * `zod` and `effect` are devDependencies for exactly this. Neither is a dependency of the
  * framework, and `forms.ts` imports neither.

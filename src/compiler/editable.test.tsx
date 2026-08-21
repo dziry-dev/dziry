@@ -5,7 +5,7 @@
  *
  * There is one fact here and it is a link between two files that never mention
  * each other. `hit_test` returns the innermost **`INTERACTIVE`** node
- * (`native-src/dziri-engine/src/paint.rs:1896`), focus is whatever that returned
+ * (`native-src/dziry-engine/src/paint.rs:1896`), focus is whatever that returned
  * (`engine.rs:1164`), and the host routes a keystroke by matching the focused node
  * against the `editables` table (`src/runtime/bindings.ts:96`). So an editable that
  * is not in `interactive` cannot be focused, and every keystroke aimed at it is

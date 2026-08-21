@@ -29,7 +29,7 @@ that lands in the runtime should come with a note saying which question was answ
 
 ## The Rust engine — what exists (2026-07-30)
 
-`native-src/dziri-engine` is a `cdylib` + `rlib`: SDL3 (built from source, statically
+`native-src/dziry-engine` is a `cdylib` + `rlib`: SDL3 (built from source, statically
 linked), `skia-safe` 0.87 with `textlayout`, and Taffy 0.9. It opens a window, lays out,
 paints and reports events. `bun run engine:test` is 112 tests; `bun run engine:shot`
 renders a frame with no window at all.
@@ -308,7 +308,7 @@ Measured on the first landing:
 | `measure_str("Hello")` @16px, Segoe UI | **36.85 px** — identical to the libSkiaSharp path |
 | Published bound for the same node | **37 px** — Taffy rounds layout to whole pixels by default |
 | Headless tick, 5 nodes, cold | 5.9 ms first frame, 1.6 ms warm |
-| `dziri_engine.dll` | **7.4 MB** |
+| `dziry_engine.dll` | **7.4 MB** |
 
 That size number needs a caveat, because it is smaller than the roadmap's 20+ MB estimate
 for a reason that will not last: **SkParagraph is not called yet**, so the linker drops
@@ -635,7 +635,7 @@ Everything not listed here is a compiler bug if it happens at run time.
 | Window size | An OS input |
 | One dirty bit | Drives event-driven repaint |
 | Scroll offset, and the target it is gliding to | Where the user left a box, plus the clock. Question 1 of the gate: neither the wheel nor the time exists at build time. Two `[f32; 2]` per node and one `exp` in `tick`; the curve and its time constant are compile-time constants and the host is never told a scroll happened |
-| A transition or animation in flight: which two interned rows, and how far between them | Question 1 again, and it answers the same way: the clock does not exist at build time. Everything *else* about a tween does — both endpoints are style rows the cascade already resolved, the mask is a compile-time bitmask, the curve is four control points in a table. So the runtime trace is one `Live` per *animating* node (not per node), holding a from, a to, a `t` and a direction, plus one `u16` per node recording the row it last resolved to — which is the whole change-detection mechanism, since a transition can only start when a node's slot changes. `runtime-surface` is unchanged at 7333 bytes: none of this is in `src/runtime/`, and Bun's per-frame cost is the `tick()` it was already calling. The list changes when a **predicate** changes, never when a frame passes, and a finished tween is dropped rather than kept settled — which is also what makes a reversal take the full duration when the first transition had completed and the shortened one when it had not, measured. See `native-src/dziri-engine/src/anim.rs` |
+| A transition or animation in flight: which two interned rows, and how far between them | Question 1 again, and it answers the same way: the clock does not exist at build time. Everything *else* about a tween does — both endpoints are style rows the cascade already resolved, the mask is a compile-time bitmask, the curve is four control points in a table. So the runtime trace is one `Live` per *animating* node (not per node), holding a from, a to, a `t` and a direction, plus one `u16` per node recording the row it last resolved to — which is the whole change-detection mechanism, since a transition can only start when a node's slot changes. `runtime-surface` is unchanged at 7333 bytes: none of this is in `src/runtime/`, and Bun's per-frame cost is the `tick()` it was already calling. The list changes when a **predicate** changes, never when a frame passes, and a finished tween is dropped rather than kept settled — which is also what makes a reversal take the full duration when the first transition had completed and the shortened one when it had not, measured. See `native-src/dziry-engine/src/anim.rs` |
 
 Known open problems: a dynamic class on a *container* restyles its descendants (measured: one
 root boolean changed 11 of 12 nodes on the sample app), so conditional classes are not a

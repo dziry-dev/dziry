@@ -10,8 +10,8 @@
  * never wrong. What was wrong is only observable as "a second compile of a
  * changed file carries the change", which is what this file asserts.
  *
- * The fixture is a minimal scaffolded project: `dziri` reaches it through a
- * junction in its node_modules, the way `create-dziri --local` links it.
+ * The fixture is a minimal scaffolded project: `dziry` reaches it through a
+ * junction in its node_modules, the way `create-dziry --local` links it.
  */
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -20,12 +20,12 @@ import { join, resolve } from "node:path";
 
 const REPO = resolve(import.meta.dir, "../..");
 
-const fixture = mkdtempSync(join(tmpdir(), "dziri-warm-e2e-"));
+const fixture = mkdtempSync(join(tmpdir(), "dziry-warm-e2e-"));
 const mainDir = join(fixture, "windows", "main");
 const pagesDir = join(mainDir, "pages");
 mkdirSync(pagesDir, { recursive: true });
 mkdirSync(join(fixture, "node_modules"));
-symlinkSync(REPO, join(fixture, "node_modules", "dziri"), "junction");
+symlinkSync(REPO, join(fixture, "node_modules", "dziry"), "junction");
 
 writeFileSync(
   join(fixture, "package.json"),
@@ -34,14 +34,14 @@ writeFileSync(
 writeFileSync(
   join(fixture, "tsconfig.json"),
   JSON.stringify({
-    compilerOptions: { jsx: "react-jsx", jsxImportSource: "dziri" },
+    compilerOptions: { jsx: "react-jsx", jsxImportSource: "dziry" },
     include: ["windows"],
   }),
 );
 
 writeFileSync(
   join(mainDir, "index.tsx"),
-  `import { Outlet, Window } from "dziri";
+  `import { Outlet, Window } from "dziry";
 
 export default function Main() {
   return (

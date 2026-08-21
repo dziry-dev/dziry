@@ -30,13 +30,13 @@ during `withPage`.
 
 ## Typing — generated, TanStack-style
 
-`routes.gen.ts` is regenerated on every compile (`dziri dev` and `dziri build` both run the compile;
-`dziri routes` regenerates on demand — the `emitRoutes` call already writes it). It imports Effect
+`routes.gen.ts` is regenerated on every compile (`dziry dev` and `dziry build` both run the compile;
+`dziry routes` regenerates on demand — the `emitRoutes` call already writes it). It imports Effect
 from a shipped, type-only re-export, so users never install effect themselves:
 
 ```ts
 // routes.gen.ts — generated, dev-only
-import type { Effect } from "dziri/effect";
+import type { Effect } from "dziry/effect";
 
 export type RouteParams = { "/products/$id": { id: string }; ... };
 type LoaderData<F>  = F extends Effect.Effect<infer A, any, any> ? A : Awaited<F>;
@@ -51,7 +51,7 @@ A loader returning `Effect<Product, DbError, Store>` yields `data: Product`, `er
 ## Zero-dependency, preserved
 
 - `effect` moves from devDependencies -> **dependencies** so its types always resolve.
-- A shipped, **type-only** re-export (`dziri/effect`) is the only thing the generated file imports.
+- A shipped, **type-only** re-export (`dziry/effect`) is the only thing the generated file imports.
 - Runtime is unchanged: `effects.ts` still lazy-`import("effect")` behind the property-read specifier,
   so an app that never uses an Effect loads **zero bytes** of it. Installed ≠ loaded.
 

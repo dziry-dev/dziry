@@ -59,7 +59,7 @@ export type LoaderError<F> =
  * A route object's component props: the loader's data, plus the route's params.
  *
  * Lives here rather than in the generated routes.gen.ts so a page imports it from
- * `dziri` — a stable specifier — instead of a generated file that does not exist
+ * `dziry` — a stable specifier — instead of a generated file that does not exist
  * until the first compile. The params come from the path literal itself (`Args`),
  * which is why nothing generated is needed.
  */

@@ -1,7 +1,7 @@
 /**
  * The route scan: what the filesystem means, and what it refuses to mean.
  *
- * Every route in dziri comes from a file path and nothing else — there is no
+ * Every route in dziry comes from a file path and nothing else — there is no
  * `route()` call to declare one and no registry to check against. That makes the
  * scan the whole specification of the router's input, so the interesting tests are
  * the rejections: two files claiming one route, two routes of one shape, and a
@@ -40,7 +40,7 @@ async function project(files: Record<string, string>): Promise<string> {
 const PAGE = "export default function P() { return null; }\n";
 
 beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), "dziri-routes-"));
+  dir = await mkdtemp(join(tmpdir(), "dziry-routes-"));
 });
 
 afterAll(async () => {

@@ -5,13 +5,13 @@ sidebar_position: 1
 
 # API
 
-Everything an app should need is exported from `dziri`:
+Everything an app should need is exported from `dziry`:
 
 ```ts no-check
-import { signal, computed, cn, Window, Outlet, useRouter } from "dziri";
+import { signal, computed, cn, Window, Outlet, useRouter } from "dziry";
 ```
 
-Deep paths (`dziri/runtime/signal.ts` and the rest) resolve, but they exist because
+Deep paths (`dziry/runtime/signal.ts` and the rest) resolve, but they exist because
 the **emitter** writes those specifiers into the generated artifact — not as an
 invitation. What is re-exported from the barrel is what is intended to keep working.
 

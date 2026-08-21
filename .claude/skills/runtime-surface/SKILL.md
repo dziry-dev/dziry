@@ -1,6 +1,6 @@
 ---
 name: runtime-surface
-description: Hold dziri's runtime to a ratchet — exported symbols and bundled bytes may fall freely and may not rise without editing the baseline in the same commit. Use before adding anything to src/runtime/, when reviewing a design that would add runtime state or a per-frame cost, when a feature is claimed to "need" to be dynamic, and to check whether the runtime is actually shrinking. Runs `bun run runtime-surface`.
+description: Hold dziry's runtime to a ratchet — exported symbols and bundled bytes may fall freely and may not rise without editing the baseline in the same commit. Use before adding anything to src/runtime/, when reviewing a design that would add runtime state or a per-frame cost, when a feature is claimed to "need" to be dynamic, and to check whether the runtime is actually shrinking. Runs `bun run runtime-surface`.
 ---
 
 # runtime-surface

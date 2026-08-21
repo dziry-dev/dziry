@@ -1,5 +1,5 @@
 /**
- * Keeps `create-dziri`'s template equal to the demo this repository develops
+ * Keeps `create-dziry`'s template equal to the demo this repository develops
  * against.
  *
  *   bun run template:sync     copy windows/ into the template
@@ -8,7 +8,7 @@
  * # Why a copy rather than one directory used twice
  *
  * The scaffold has to ship the window sources inside its own npm package — a
- * published `create-dziri` cannot reach back into this repository. So there are
+ * published `create-dziry` cannot reach back into this repository. So there are
  * necessarily two copies, and the only question is whether the second one is
  * *derived* or maintained by hand. Derived: a template edited by hand rots
  * silently, and the failure is a scaffolded app that does not compile against the
@@ -17,7 +17,7 @@
  *
  * Generated artifacts are excluded. `ui.gen.ts`, `windows.gen.ts` and
  * `entry.gen.ts` are compiler output, and shipping them would mean a new project
- * starting life with someone else's stale IR in it — `dziri dev` writes all three
+ * starting life with someone else's stale IR in it — `dziry dev` writes all three
  * on the first run.
  */
 import { Glob } from "bun";
@@ -26,7 +26,7 @@ import { dirname, join, relative } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1");
 const SOURCE = join(ROOT, "windows");
-const TARGET = join(ROOT, "packages", "create-dziri", "templates", "demo", "windows");
+const TARGET = join(ROOT, "packages", "create-dziry", "templates", "demo", "windows");
 
 const check = process.argv.includes("--check");
 
@@ -34,7 +34,7 @@ const check = process.argv.includes("--check");
  * What does not travel.
  *
  * `*.gen.ts` is compiler output — shipping it would mean a new project starting
- * life with someone else's stale IR in it, and `dziri dev` writes all three on the
+ * life with someone else's stale IR in it, and `dziry dev` writes all three on the
  * first run.
  *
  * A window's own `README.md` is about *this* repository's demo: it talks about

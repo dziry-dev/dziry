@@ -281,7 +281,7 @@ export const INITIAL_STYLE: ComputedStyle = {
   scrollPaddingLeft: 0,
   fontSize: 16,
   fontWeight: 400,
-  // `font-style: normal` and `font-family`'s initial, which for dziri is "the
+  // `font-style: normal` and `font-family`'s initial, which for dziry is "the
   // face the platform resolved at startup" — a generic slot, not a name.
   fontStyle: 0,
   fontFamily: 0,
@@ -533,7 +533,7 @@ export function emptyNumericTable(): NumericTable {
  * Which nodes are images, and where their bytes come from. Sparse and sorted by
  * `node`, for the reason `controls` is — and deliberately *only* a reference:
  * the bytes never cross the shared arena. The host resolves `src` (a file read
- * or a fetch, both Bun's) and hands the bytes to `dziri_engine_provide_image`,
+ * or a fetch, both Bun's) and hands the bytes to `dziry_engine_provide_image`,
  * which decodes once per distinct `src` and keeps the bitmap engine-side. See
  * `images.rs` and `schema.ts`'s `IMAGES`.
  */
@@ -882,7 +882,7 @@ export type FormKey = {
    * A path rather than a name because a `field` wrapper is a namespace, and nesting is
    * structural: the wrapper chain *is* the path. No browser does this (measured,
    * `probes/form-nested-names.html`: `name="user[email]"` is the literal key
-   * `"user[email]"`), so it is dziri's, and it is resolved here rather than parsed at run
+   * `"user[email]"`), so it is dziry's, and it is resolved here rather than parsed at run
    * time the way every server-side bracket parser does it.
    */
   path: string[];

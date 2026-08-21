@@ -2,16 +2,16 @@
 # `tsarch drift` compares this against what the code actually does.
 #
 # Scope note: this models the TypeScript side only. The native engine under
-# native-src/dziri-engine/ (Rust: SDL3 + skia-safe + Taffy) is invisible to
+# native-src/dziry-engine/ (Rust: SDL3 + skia-safe + Taffy) is invisible to
 # ts-arch, so the shared-memory/FFI boundary between `engine` and the Rust
 # crate is a seam the tool cannot check — protocol-guard covers that instead.
 
-system: dziri
+system: dziry
 description: "Compile-time UI framework: a Bun-side compiler turns JSX+CSS into static IR tables that a native Rust engine renders. Nothing stays dynamic unless proven it must (see compile-time-gate); src/runtime is being deleted."
 
 # Allowlist: the application is src/ plus the windows authored against it.
 # Excluded by omission: scripts/ (measurement/build tooling — user's call,
-# 2026-08-06), docs/ (Docusaurus site), packages/create-dziri/ (scaffolding;
+# 2026-08-06), docs/ (Docusaurus site), packages/create-dziry/ (scaffolding;
 # its template/ is a {{name}}-placeholder copy of windows/), characterize/
 # (generated golden fixtures), probes/ (browser-oracle probes), .claude/.
 include:

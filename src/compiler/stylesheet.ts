@@ -15,7 +15,7 @@
  *
  * # Why Tailwind runs in-process
  *
- * `@tailwindcss/node` and `@tailwindcss/oxide` are dziri's own dependencies, and
+ * `@tailwindcss/node` and `@tailwindcss/oxide` are dziry's own dependencies, and
  * `tailwindcss` is the *project's* — the same split `@tailwindcss/vite` uses, and
  * for the same reason. The engine that compiles the sheet belongs to the framework;
  * the theme and utilities the sheet imports belong to the app, so
@@ -38,7 +38,7 @@ export type CssSource = {
 };
 
 /**
- * A stylesheet dziri could not load, phrased for whoever wrote the import.
+ * A stylesheet dziry could not load, phrased for whoever wrote the import.
  *
  * Separate from `CssError`, which is a *parse* failure with an offset into a
  * sheet. By the time this throws there may be no sheet to point at.
@@ -72,7 +72,7 @@ const IMPORT_RULE = /@import\s+(?:url\(\s*)?["']([^"']+)["']\s*\)?\s*([^;]*);/g;
 /**
  * Inlines `@import` for a plain-CSS sheet.
  *
- * dziri's own parser skips statement at-rules — it has to, since Tailwind v4 opens
+ * dziry's own parser skips statement at-rules — it has to, since Tailwind v4 opens
  * with `@layer properties;` and mis-scanning that swallowed the entire theme block
  * behind it (see `css.ts`). Skipping is right for `@layer`; for `@import` it is a
  * silent hole, because the sheet parses fine and simply has none of the rules the
@@ -141,7 +141,7 @@ async function resolveCss(
   }
 
   // A bare specifier — `@import "@acme/theme/base.css"`. Resolved against the
-  // *project*, not against dziri, for the same reason Tailwind is.
+  // *project*, not against dziry, for the same reason Tailwind is.
   try {
     return Bun.resolveSync(specifier, projectDir);
   } catch {
@@ -170,7 +170,7 @@ function rel(path: string, projectDir: string): string {
  * Runs the project's Tailwind over a sheet.
  *
  * The two halves of the split, concretely: `compile()` and `Scanner` come from
- * dziri's dependencies, and everything the sheet *imports* comes from the project,
+ * dziry's dependencies, and everything the sheet *imports* comes from the project,
  * because `base` is the sheet's own directory.
  *
  * `sources` is what the sheet's `@source` rules resolved to; handing them straight
@@ -188,9 +188,9 @@ async function runTailwind(path: string, text: string, projectDir: string): Prom
     ({ Scanner } = await import("@tailwindcss/oxide"));
   } catch (cause) {
     throw new StylesheetError(
-      `${rel(path, projectDir)} uses Tailwind, but dziri's Tailwind support is not installed.\n` +
+      `${rel(path, projectDir)} uses Tailwind, but dziry's Tailwind support is not installed.\n` +
         `  This should not happen in a normal install — @tailwindcss/node and\n` +
-        `  @tailwindcss/oxide are dziri's own dependencies. Try reinstalling.\n` +
+        `  @tailwindcss/oxide are dziry's own dependencies. Try reinstalling.\n` +
         `  Cause: ${cause instanceof Error ? cause.message : String(cause)}`,
     );
   }
@@ -206,7 +206,7 @@ async function runTailwind(path: string, text: string, projectDir: string): Prom
     if (/cannot resolve|could not resolve|not found/i.test(message)) {
       throw new StylesheetError(
         `${rel(path, projectDir)}: Tailwind could not resolve one of its imports.\n` +
-          `  \`tailwindcss\` is the project's dependency, not dziri's, so that\n` +
+          `  \`tailwindcss\` is the project's dependency, not dziry's, so that\n` +
           `  \`@import "tailwindcss"\` resolves against your node_modules.\n` +
           `    bun add -d tailwindcss\n\n` +
           `  Tailwind said: ${message}`,
@@ -278,7 +278,7 @@ export class SheetMap {
     return null;
   }
 
-  /** The files that went in, in cascade order. For `dziri compile`'s report. */
+  /** The files that went in, in cascade order. For `dziry compile`'s report. */
   get paths(): string[] {
     return this.spans.map((s) => s.path);
   }

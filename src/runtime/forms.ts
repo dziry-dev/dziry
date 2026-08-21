@@ -174,7 +174,7 @@ export function formPayload(
 /**
  * Writes `value` at `path`, making the objects on the way.
  *
- * The whole of dziri's nesting at run time: the *paths* were resolved by the compiler from
+ * The whole of dziry's nesting at run time: the *paths* were resolved by the compiler from
  * the `field` wrappers, so there is no string to parse and no dialect to pick — which is the
  * one thing every server-side bracket parser has to do, and where they disagree with each
  * other. A conflicting path was already a build error, so nothing here has to decide what
@@ -578,7 +578,7 @@ export type Validated = { ok: true; value: unknown } | { ok: false; issues: Form
  * The Standard Schema surface, restated rather than imported.
  *
  * `@standard-schema/spec` is types-only and would still be a dependency for a shape that is
- * four lines. Restating it is what keeps dziri able to validate with Zod, Valibot or
+ * four lines. Restating it is what keeps dziry able to validate with Zod, Valibot or
  * ArkType while depending on none of them.
  */
 type StandardSchema = {
@@ -600,7 +600,7 @@ type StandardResult = {
  *    natively, and so does anything an author has wrapped.
  * 2. **An Effect schema.** Recognised by its `ast`, and converted with Effect's own
  *    `Schema.standardSchemaV1` after a *lazy* import, so that `validate={Login}` works
- *    unwrapped without dziri depending on `effect`. Measured on effect 3.22: a
+ *    unwrapped without dziry depending on `effect`. Measured on effect 3.22: a
  *    `Schema.Struct` does **not** carry `~standard` itself, which is why this branch has to
  *    exist rather than being covered by the one above.
  * 3. **A plain function.** `(data) => issues | null`. The no-library case, and the escape

@@ -3,7 +3,7 @@
  *
  * A browser builds a `<select>`'s internals for you — the closed button, the
  * selected option's text inside it, and the popover the options are drawn in. It
- * does that with a UA shadow tree. dziri has no shadow tree and does not need one:
+ * does that with a UA shadow tree. dziry has no shadow tree and does not need one:
  * the internals are ordinary nodes, and the compiler is already in the business of
  * turning one authored element into several. This is that step, and it runs before
  * the cascade, so everything downstream — selectors, pseudo-elements, inheritance,

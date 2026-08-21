@@ -267,7 +267,7 @@ test("a list box has its options in flow, with no overlay and no selectedcontent
 /**
  * What is selected at rest, which is a different rule for each shape.
  *
- * All three rows measured in `probes/select-listbox.html`, and dziri had the dropdown's
+ * All three rows measured in `probes/select-listbox.html`, and dziry had the dropdown's
  * rule in every position until then — so a list box came up with a row highlighted that
  * the user never chose.
  */

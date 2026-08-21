@@ -16,7 +16,7 @@
  * on an unrewritten module is a method on a signal object, which does not exist.
  *
  * Reached two ways. This repository preloads it from `bunfig.toml`, which covers
- * `bun test` and the harnesses; `dziri dev` passes `--preload` to the app it
+ * `bun test` and the harnesses; `dziry dev` passes `--preload` to the app it
  * spawns, so a scaffolded project needs no bunfig entry — and therefore has no
  * bunfig entry for a *packaged* app to trip over. See below.
  */
@@ -30,7 +30,7 @@
  * the compiler's dependencies are not inside it. A shipped app started next to any
  * project's bunfig would do the same.
  *
- * It is also pointless work even when it succeeds. `dziri build` applies the
+ * It is also pointless work even when it succeeds. `dziry build` applies the
  * rewrite through `Bun.build`'s plugin list, so the modules inside the executable
  * are *already* rewritten; installing a loader plugin over them would at best
  * change nothing.

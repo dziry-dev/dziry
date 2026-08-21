@@ -16,7 +16,7 @@
  * both callers share, not at a layer boundary.
  *
  * There was a third caller until this file existed. `src/window-host.ts` ran both
- * halves in one thread for `dziri dev --single`, and it carried its own copy of
+ * halves in one thread for `dziry dev --single`, and it carried its own copy of
  * everything here plus its own copy of the engine loop. It was deleted rather than
  * moved onto this module: it had no automated caller anywhere in the repo, and the
  * doc comment defending it claimed the golden harness rendered every scenario

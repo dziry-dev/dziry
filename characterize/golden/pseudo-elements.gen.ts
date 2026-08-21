@@ -6,10 +6,10 @@
 // 0 text bindings, 0 handlers.
 
 // Types, so this artifact is checked rather than asserted at the far end.
-import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable } from "dziri/ir.ts";
-import type { EditableRef, ImageBinding } from "dziri/runtime/bindings.ts";
-import type { ListBindingRef } from "dziri/runtime/list-runtime.ts";
-import type { StylePatchRef } from "dziri/runtime/patches.ts";
+import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable } from "dziry/ir.ts";
+import type { EditableRef, ImageBinding } from "dziry/runtime/bindings.ts";
+import type { ListBindingRef } from "dziry/runtime/list-runtime.ts";
+import type { StylePatchRef } from "dziry/runtime/patches.ts";
 
 /** Mutable past the static entries: text bindings overwrite their own slots. */
 export const strings: string[] = ["✓","“","”","mid"];

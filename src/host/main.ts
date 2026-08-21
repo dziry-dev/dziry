@@ -112,7 +112,7 @@ let workerOverride: string | null = null;
  * A standalone build cannot use `new URL("./worker.gen.ts", import.meta.url)`:
  * that resolves inside Bun's virtual filesystem, where the TypeScript source is
  * not present and would not be transpiled if it were — measured, the runtime
- * loads an embedded `.ts` verbatim and dies on the first `const`. So `dziri build`
+ * loads an embedded `.ts` verbatim and dies on the first `const`. So `dziry build`
  * bundles the app thread to JavaScript, embeds *that*, and calls this with the
  * path before the entry runs.
  */
@@ -154,14 +154,14 @@ export async function runMain(options: MainOptions): Promise<void> {
   let worker = new Worker(workerOverride ?? options.worker, { preload } as WorkerOptions);
   const send = (message: ToWorker) => worker.postMessage(message);
 
-  /* Hot reload: `dziri dev` watches the project. A recompile that moved only
+  /* Hot reload: `dziry dev` watches the project. A recompile that moved only
      style values arrives as "hot" and is forwarded to the worker; anything else
      arrives as "reload" and swaps the worker outright (see reloadApp below).
      Registered only under the watcher's env var: `process.on("message")` on a
      process with no channel never fires, but some platforms keep the process
      alive for it, which a packaged build cannot afford. */
   let reloadApp: () => void = () => {};
-  if (process.env.DZIRI_HOT === "1") {
+  if (process.env.DZIRY_HOT === "1") {
     process.on("message", (message: unknown) => {
       const t = (message as { t?: unknown } | null)?.t;
       /* A message that lands while the window is closing finds a terminated
@@ -703,7 +703,7 @@ export async function runMain(options: MainOptions): Promise<void> {
            Then a *clean* shutdown: before this existed the throw skipped `stop`,
            `engine.close()` and `worker.terminate()` on its way out of the process,
            and the window simply vanished. */
-        engine.fatalAlert("dziri: the engine failed", tickFailure.message);
+        engine.fatalAlert("dziry: the engine failed", tickFailure.message);
         failure = tickFailure;
         break;
       }

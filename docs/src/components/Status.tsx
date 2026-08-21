@@ -21,7 +21,7 @@ const LABEL: Record<StatusKind, string> = {
 };
 
 export function useApiStatus(): ApiStatus {
-  return usePluginData("dziri-api-status") as ApiStatus;
+  return usePluginData("dziry-api-status") as ApiStatus;
 }
 
 export default function Status({ of, note }: { of: string; note?: boolean }): React.JSX.Element {

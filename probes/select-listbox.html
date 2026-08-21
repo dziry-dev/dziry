@@ -13,13 +13,13 @@
 
   /**
    * `select-multiple.html` measured how a listbox *behaves*. Two questions it never asked
-   * decide how dziri compiles one, and both were about to be answered from memory:
+   * decide how dziry compiles one, and both were about to be answered from memory:
    *
    * 1. **Is `multiple` what makes it a listbox?** HTML says `size` does too — a
    *    `<select size="4">` with no `multiple` is a list, not a dropdown. If that is true
-   *    then keying dziri's whole structural fork on the `multiple` attribute is wrong for
+   *    then keying dziry's whole structural fork on the `multiple` attribute is wrong for
    *    a shape authors really write, and the fork has to be on the pair.
-   * 2. **What is selected at rest?** dziri's single select checks `selected`, else the
+   * 2. **What is selected at rest?** dziry's single select checks `selected`, else the
    *    first option — `uaParts.chosen`, and the closed button's baked label depends on it.
    *    A listbox that inherited that rule would come up with a row highlighted that the
    *    user never chose, and would submit a value nobody picked. The suspicion is that a
@@ -76,7 +76,7 @@
   const initial = [
     ["single, no `selected`", `<select>${opts()}</select>`],
     ["single, third `selected`", `<select>${opts((i) => (i === 2 ? "selected" : ""))}</select>`],
-    // dziri's dropdown takes the *first* option marked `selected`. Nothing measured that
+    // dziry's dropdown takes the *first* option marked `selected`. Nothing measured that
     // — the shape has one marked option in every earlier row — and the `size=4` row below
     // says a single-selection list box takes the last. If a dropdown does too, the
     // existing code is wrong for markup that is legal and not rare.
@@ -98,7 +98,7 @@
 
   log("");
   log("=== does the row height follow font-size? ===");
-  // dziri cannot bake Chrome's 17px: it lays out with its own font and its own metrics, so
+  // dziry cannot bake Chrome's 17px: it lays out with its own font and its own metrics, so
   // what it needs from this is the *rule* — whether a listbox's height is `size` times a
   // row, with the row coming from the font. A constant here and a ratio there are different
   // implementations, and only the second survives an author setting font-size.

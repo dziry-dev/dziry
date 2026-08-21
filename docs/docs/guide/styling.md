@@ -32,13 +32,13 @@ is generated onto disk, so there is no built copy to rebuild or to go stale.
 @import "tailwindcss";
 ```
 
-dziri's compiler then resolves the result against your tree: selectors match,
+dziry's compiler then resolves the result against your tree: selectors match,
 specificity sorts, inheritance applies, shorthands expand, units convert.
 
 What comes out is a style table of integers and floats. The engine never sees a
 selector.
 
-A utility that dziri cannot compile makes the build **say so**, naming the property.
+A utility that dziry cannot compile makes the build **say so**, naming the property.
 That is the honest part: a page that renders is a page whose utilities work.
 
 ## Static classes
@@ -119,7 +119,7 @@ its own row in — so `:invalid` can be true for row 3 and false for row 4, and
 
 ## Coverage
 
-dziri supports a subset of CSS, and the subset is defined by what Tailwind emits.
+dziry supports a subset of CSS, and the subset is defined by what Tailwind emits.
 
 Do not trust a number written in prose — measure it:
 
@@ -144,7 +144,7 @@ list rather than trusting this one.
   resolve at all.
 - `::selection` takes `background-color` and `color` and nothing else — a selection is a range
   inside a box rather than a box, so there is nothing for a padding or a border to apply to,
-  which is also the short list CSS gives the highlight pseudo-elements. dziri's default is a
+  which is also the short list CSS gives the highlight pseudo-elements. dziry's default is a
   UA-sheet rule on `body::selection`, and it is a stated convention: Chromium does not expose
   its own highlight colour to script, so there is nothing to match.
 - `box-shadow` supports the **ring** subset only: no offset, no blur, a solid spread.
@@ -156,8 +156,8 @@ list rather than trusting this one.
 
 ## Why not Tailwind's preflight
 
-dziri ships its own user-agent stylesheet. Tailwind's reset is written in selectors
-dziri does not have — `:host`, `*`, `::before`, `[hidden]` — and it is optional by
+dziry ships its own user-agent stylesheet. Tailwind's reset is written in selectors
+dziry does not have — `:host`, `*`, `::before`, `[hidden]` — and it is optional by
 design. So the entry imports `theme.css` and `utilities.css` rather than the umbrella
 `@import "tailwindcss"`.
 

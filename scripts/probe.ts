@@ -56,7 +56,7 @@ async function rmProfile(dir: string) {
 async function sweepStaleProfiles() {
   const dir = tmpdir();
   for (const name of await readdir(dir).catch(() => [] as string[])) {
-    if (name.startsWith("dziri-probe-")) await rmProfile(join(dir, name));
+    if (name.startsWith("dziry-probe-")) await rmProfile(join(dir, name));
   }
 }
 
@@ -133,7 +133,7 @@ const deadline = <T>(p: Promise<T>, ms: number, what: string) =>
 
 /** Chrome prints `DevTools listening on ws://…` to stderr; port 0 means it picks. */
 async function launch() {
-  const profile = await mkdtemp(join(tmpdir(), "dziri-probe-"));
+  const profile = await mkdtemp(join(tmpdir(), "dziry-probe-"));
   const proc = Bun.spawn(
     [
       findChrome(),
@@ -236,7 +236,7 @@ const VK: Record<string, number> = {
   // held — see `driveMouse`.
   a: 65,
   // `F4` opens a closed `<select>` on Windows, and `Alt+ArrowDown` is the other spelling —
-  // both worth measuring rather than assuming, since dziri only implements the plain arrows.
+  // both worth measuring rather than assuming, since dziry only implements the plain arrows.
   F4: 115,
 };
 

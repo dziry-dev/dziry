@@ -19,7 +19,7 @@ count === 3       // false, for ever
 count ? a : b     // always the first branch
 ```
 
-The usual answer is `.value` everywhere, or a proxy with `Symbol.toPrimitive`. dziri
+The usual answer is `.value` everywhere, or a proxy with `Symbol.toPrimitive`. dziry
 does neither.
 
 ## The answer: rewrite the source

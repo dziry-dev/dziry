@@ -8,7 +8,7 @@ sidebar_position: 3
 JSX, compiled. Your components run once at build time and are gone from the shipped
 app — what survives is a node tree and a style table.
 
-There is no `@jsxImportSource` pragma to write: `jsxImportSource: "dziri"` is set once
+There is no `@jsxImportSource` pragma to write: `jsxImportSource: "dziry"` is set once
 in `tsconfig.json`, and Bun's transpiler reads it too.
 
 ## cn
@@ -206,7 +206,7 @@ named one — is a build error, because either answer would silently drop a fiel
 
 No browser does this. `name="user[email]"` is the literal string key `"user[email]"` in
 `FormData`, and the bracket convention belongs to server-side parsers, each with its own
-dialect. dziri nests by structure because a compiler can see structure: nothing is parsed at
+dialect. dziry nests by structure because a compiler can see structure: nothing is parsed at
 run time, and there is no dialect to pick.
 
 **Radios are the exception.** A radio set has to share a `name` — that is what makes it a set —
@@ -261,7 +261,7 @@ input's border and the message's visibility both come from a class on the wrappe
 is JavaScript. Twenty fields can share the class string and stay independent.
 
 Write the Tailwind variant in the **prefix** form shown above. Tailwind's default form emits
-`:is(:where(.group\/error) *)`, and the `*` inside `:is()` is not a selector dziri parses.
+`:is(:where(.group\/error) *)`, and the `*` inside `:is()` is not a selector dziry parses.
 
 `<span error />` marks where the message goes; its text becomes a binding to a cell the compiler
 declares, and anything you write inside it is placeholder prose that never ships.
@@ -318,7 +318,7 @@ export const showErrors = (issues: { path: (string | number)[]; message: string 
 
 `validate` checks the payload before `onSubmit` sees it. It accepts any **Standard Schema** —
 which Zod 4, Valibot and ArkType are — any **Effect** schema, or a plain function returning issues.
-dziri depends on none of them: the standard ones are used through their `~standard` property, and
+dziry depends on none of them: the standard ones are used through their `~standard` property, and
 an Effect schema is converted with Effect's own `Schema.standardSchemaV1` behind an import that
 only happens if you actually pass one.
 
@@ -361,7 +361,7 @@ JSX desugars to it automatically; the export exists so it can be named directly.
 
 <Status of="Show" />
 ```tsx
-import { Show, signal } from "dziri";
+import { Show, signal } from "dziry";
 
 const open = signal(false);
 
@@ -425,7 +425,7 @@ To deliberately snapshot rather than build a live list, copy the array first:
 ## Types
 
 ```ts
-import type { Child, ClassArg, ClassSpec, Component, Props, StyleObject } from "dziri";
+import type { Child, ClassArg, ClassSpec, Component, Props, StyleObject } from "dziry";
 ```
 
 `Props` is the base prop type; extend it for your own components:

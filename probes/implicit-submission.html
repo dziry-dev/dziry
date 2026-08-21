@@ -17,17 +17,17 @@
    * Already measured (2026-08-05, `keyboard-activation.html`): Enter in a text field
    * inside a `<form>` clicks the form's submit button and then fires `submit`. That is
    * the *headline* and it is the easy half. The conditions are the half that decides how
-   * much dziri has to build, and every one of them is a rule people state from memory:
+   * much dziry has to build, and every one of them is a rule people state from memory:
    *
    * - **No submit button.** Does Enter submit anyway? If it does, `onSubmit` cannot be
    *   implemented as "click the default button" — there would be nothing to click.
    * - **More than one field.** HTML has a rule here that almost nobody can quote, and if
-   *   it is real then dziri needs to count something at run time.
+   *   it is real then dziry needs to count something at run time.
    * - **`<textarea>`.** Enter must insert a newline. If that is a property of the *tag*
    *   rather than of a submit rule, it is one exclusion; if it is a longer list of types,
    *   it is a table.
    * - **Which button**, when there are several, and whether `type="button"` and a
-   *   disabled one are skipped. dziri's answer has to name a specific node.
+   *   disabled one are skipped. dziry's answer has to name a specific node.
    *
    * Every form here cancels its own `submit`, or the first success would navigate the
    * page away and every later row would measure a blank document.
@@ -54,14 +54,14 @@
     // skip-then-fall-through rule predicts a submit and the block rule predicts nothing.
     ["disabled submit, 1 field", `<input name=a><button type=submit disabled>go</button>`],
     // Does a checkbox count towards "exactly one field"? If it does not, the blocking set
-    // is text-like types rather than form controls, and dziri needs to know which list.
+    // is text-like types rather than form controls, and dziry needs to know which list.
     ["no button, 1 text + checkbox", `<input name=a><input type=checkbox name=c>`],
     ["no button, 1 text + select", `<input name=a><select name=s><option>x</option></select>`],
     // Does a <textarea> count towards "exactly one"? It is a text field by every intuition
     // and the spec's blocking list is written in terms of `input` *types*, which would
-    // exclude it. The two readings disagree here and dziri has to pick one.
+    // exclude it. The two readings disagree here and dziry has to pick one.
     ["no button, 1 text + textarea", `<input name=a><textarea></textarea>`],
-    // Is `<input type=submit>` a default button? Only <button> was tested above, and dziri
+    // Is `<input type=submit>` a default button? Only <button> was tested above, and dziry
     // would otherwise be implementing a rule from the spec rather than from a measurement.
     ["input[type=submit], 2 fields", `<input name=a><input name=b><input type=submit value=go>`],
     // Which one is "the" default: first in tree order, or something subtler.
@@ -85,7 +85,7 @@
     });
     // A click on the button is the mechanism the headline finding describes, so it is
     // recorded separately from the submit it causes — "submitted" and "clicked a button
-    // that submitted" are different implementations and dziri has to pick one.
+    // that submitted" are different implementations and dziry has to pick one.
     for (const b of form.querySelectorAll("button, input[type=submit]")) {
       b.addEventListener("click", () => seen.push("click:" + (b.id || b.type)));
     }

@@ -35,7 +35,7 @@ bun run routes    # print the table
 A window owns its route:
 
 ```ts title="windows/main/router.ts" no-check
-import { signal } from "dziri";
+import { signal } from "dziry";
 
 export const route = signal("/");
 ```
@@ -53,7 +53,7 @@ the route table, and writes `hidden` over the routes that left the chain.
 
 It is passed in rather than imported from the framework because a route belongs to a
 window — two windows on different routes is the normal case, and a module-level
-`currentRoute` inside dziri would make them share one.
+`currentRoute` inside dziry would make them share one.
 
 ## What a route change costs
 
@@ -130,10 +130,10 @@ click that silently does nothing — and a checked link navigates by itself:
 An `onClick` on the link wins over the synthesized navigation, for the cases where
 navigating is only part of what the click does.
 
-For navigation outside a link, `navigate` and `back` come from `dziri`:
+For navigation outside a link, `navigate` and `back` come from `dziry`:
 
 ```ts no-check
-import { navigate, back } from "dziri";
+import { navigate, back } from "dziry";
 
 export const goLayout = () => navigate("layout");
 ```

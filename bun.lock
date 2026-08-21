@@ -26,7 +26,7 @@
       },
     },
     "docs": {
-      "name": "dziri-docs",
+      "name": "dziry-docs",
       "version": "0.0.0",
       "dependencies": {
         "@docusaurus/core": "3.10.2",
@@ -47,11 +47,11 @@
         "typescript": "^5",
       },
     },
-    "packages/create-dziri": {
-      "name": "create-dziri",
+    "packages/create-dziry": {
+      "name": "create-dziry",
       "version": "0.0.0",
       "bin": {
-        "create-dziri": "./index.ts",
+        "create-dziry": "./index.ts",
       },
     },
   },
@@ -1462,7 +1462,7 @@
 
     "cosmiconfig": ["cosmiconfig@8.3.6", "", { "dependencies": { "import-fresh": "^3.3.0", "js-yaml": "^4.1.0", "parse-json": "^5.2.0", "path-type": "^4.0.0" }, "peerDependencies": { "typescript": ">=4.9.5" }, "optionalPeers": ["typescript"] }, "sha512-kcZ6+W5QzcJ3P1Mt+83OUv/oHFqZHIx8DuxG6eZ5RGMERoLqp4BuGjhHLYGK+Kf5XVkQvqBSmAy/nGWN3qDgEA=="],
 
-    "create-dziri": ["create-dziri@workspace:packages/create-dziri"],
+    "create-dziry": ["create-dziry@workspace:packages/create-dziry"],
 
     "cross-spawn": ["cross-spawn@7.0.6", "", { "dependencies": { "path-key": "^3.1.0", "shebang-command": "^2.0.0", "which": "^2.0.1" } }, "sha512-uV2QOWP2nWzsy2aMp8aRibhi9dlzF5Hgh5SHaB9OiTGEyDTiJJyx0uy51QXdyWbtAHNua4XJzUKca3OzKUd3vA=="],
 
@@ -1642,7 +1642,7 @@
 
     "duplexer": ["duplexer@0.1.2", "", {}, "sha512-jtD6YG370ZCIi/9GTaJKQxWTZD045+4R4hTk/x1UyoqadyJ9x9CgSi1RlVDQF8U2sxLLSnFkCaMihqljHIWgMg=="],
 
-    "dziri-docs": ["dziri-docs@workspace:docs"],
+    "dziry-docs": ["dziry-docs@workspace:docs"],
 
     "eastasianwidth": ["eastasianwidth@0.2.0", "", {}, "sha512-I88TYZWc9XiYHRQ4/3c5rjjfgkjhLyW2luGIheGERbNQ6OY7yTybanSpDXZa8y7VUP9YmDcYa+eyq4ca7iLqWA=="],
 

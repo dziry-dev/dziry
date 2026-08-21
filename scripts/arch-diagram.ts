@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Architecture diagrams for dziri — C4 levels 1-3 from the model, level 4 read
+ * Architecture diagrams for dziry — C4 levels 1-3 from the model, level 4 read
  * out of the source, and the refactor queries that use the same graph.
  *
  *   bun run arch-diagram                 # validate the model, emit diagrams/
@@ -126,7 +126,7 @@ const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
 };
 
 /**
- * The self-reference is not cosmetic: the emitter writes `dziri/host/main.ts`
+ * The self-reference is not cosmetic: the emitter writes `dziry/host/main.ts`
  * into generated entry points, and the demo under `windows/` imports the package
  * by name so that it *is* the scaffolding template rather than something a
  * codemod rewrites. Resolving it is what connects those halves of the graph.
@@ -226,7 +226,7 @@ function scanRust(path: string, code: string): string[] {
       mods.add(m[1]!);
     }
   }
-  for (const m of code.matchAll(/\buse[ \t]+(?:crate|dziri_engine)::([\s\S]*?);/g)) {
+  for (const m of code.matchAll(/\buse[ \t]+(?:crate|dziry_engine)::([\s\S]*?);/g)) {
     const tail = m[1]!.trim();
     if (tail.startsWith("{")) {
       // `use crate::{tables::X, error::Y}` — take the head of each top-level item.
@@ -521,26 +521,26 @@ const esc = (s: string) => s.replaceAll('"', "#quot;");
 const fence = (body: string) => "```mermaid\n" + body.trim() + "\n```";
 
 function contextDiagram(): string {
-  const l: string[] = ["C4Context", "  title dziri — system context", ""];
+  const l: string[] = ["C4Context", "  title dziry — system context", ""];
   for (const p of PEOPLE) l.push(`  Person(${p.id}, "${esc(p.label)}", "${esc(p.descr)}")`);
   l.push("");
-  l.push(`  System(dziri, "dziri", "A UI framework that resolves CSS, the cascade and every interaction state before the app runs, then hands a native engine shared memory instead of a call surface.")`);
+  l.push(`  System(dziry, "dziry", "A UI framework that resolves CSS, the cascade and every interaction state before the app runs, then hands a native engine shared memory instead of a call surface.")`);
   l.push("");
   for (const e of EXTERNALS) l.push(`  System_Ext(${e.id}, "${esc(e.label)}", "${esc(e.descr)}")`);
   l.push("");
-  l.push(`  Rel(author, dziri, "writes windows/, runs the CLI")`);
-  l.push(`  Rel(dziri, tailwind, "reads generated CSS at build time", "file")`);
-  l.push(`  Rel(dziri, os, "window, input, clipboard, fonts", "SDL3")`);
-  l.push(`  Rel(dziri, gpu, "presents frames", "Skia raster")`);
-  l.push(`  Rel(enduser, dziri, "clicks, types, resizes")`);
-  l.push(`  Rel(chrome, dziri, "measured against, in the guards only", "CDP")`);
+  l.push(`  Rel(author, dziry, "writes windows/, runs the CLI")`);
+  l.push(`  Rel(dziry, tailwind, "reads generated CSS at build time", "file")`);
+  l.push(`  Rel(dziry, os, "window, input, clipboard, fonts", "SDL3")`);
+  l.push(`  Rel(dziry, gpu, "presents frames", "Skia raster")`);
+  l.push(`  Rel(enduser, dziry, "clicks, types, resizes")`);
+  l.push(`  Rel(chrome, dziry, "measured against, in the guards only", "CDP")`);
   l.push("");
   l.push(`  UpdateLayoutConfig($c4ShapeInRow="3", $c4BoundaryInRow="1")`);
   return l.join("\n");
 }
 
 function containerDiagram(): string {
-  const l: string[] = ["C4Container", "  title dziri — containers", ""];
+  const l: string[] = ["C4Container", "  title dziry — containers", ""];
   for (const p of PEOPLE) l.push(`  Person(${p.id}, "${esc(p.label)}", "${esc(p.descr)}")`);
   for (const e of EXTERNALS.filter((x) => x.id !== "chrome")) {
     l.push(`  System_Ext(${e.id}, "${esc(e.label)}", "${esc(e.descr)}")`);
@@ -572,7 +572,7 @@ function componentDiagram(containerId?: string): string {
   const targets = CONTAINERS.filter(
     (c) => COMPONENTS.some((x) => x.container === c.id) && (!containerId || c.id === containerId),
   );
-  const l: string[] = ["C4Component", `  title dziri — components${containerId ? ` (${containerId})` : ""}`, ""];
+  const l: string[] = ["C4Component", `  title dziry — components${containerId ? ` (${containerId})` : ""}`, ""];
   for (const c of targets) {
     l.push(`  Container_Boundary(b_${c.id}, "${esc(c.label)}") {`);
     for (const comp of COMPONENTS.filter((x) => x.container === c.id)) {
@@ -697,7 +697,7 @@ function moduleDiagram(g: Graph, layerId: LayerId, opts: { tests: boolean }): st
 function boundaryDiagram(): string {
   const l: string[] = ["flowchart LR"];
   l.push(`  writer["<b>App thread</b><br/>src/host/worker.ts"]`);
-  l.push(`  reader["<b>Engine</b><br/>native-src/dziri-engine/src/tables.rs"]`);
+  l.push(`  reader["<b>Engine</b><br/>native-src/dziry-engine/src/tables.rs"]`);
   l.push(`  subgraph shared["Shared memory · protocol v${PROTOCOL_VERSION} · struct-of-arrays"]`);
   for (const t of TABLES) {
     const bytes = t.fields.reduce((n, f) => n + ELEM_SIZE[f.type], 0);
@@ -799,7 +799,7 @@ function emitAll(g: Graph): void {
       "01-context.md",
       doc(
         "Context",
-        "Who uses dziri and what it touches. Note where Chrome sits: it is an oracle the guards measure against, not something the framework depends on.",
+        "Who uses dziry and what it touches. Note where Chrome sits: it is an oracle the guards measure against, not something the framework depends on.",
         fence(contextDiagram()),
       ),
     ),
@@ -929,7 +929,7 @@ function emitAll(g: Graph): void {
   written.push(
     write(
       "README.md",
-      `# dziri — architecture diagrams\n\n` +
+      `# dziry — architecture diagrams\n\n` +
         `> Generated by \`bun run arch-diagram\`. Do not edit these files — regenerate them.\n\n` +
         `C4 levels 1–3 come from \`scripts/lib/arch-model.ts\`, which is hand-written and whose every ` +
         `citation is checked against the repo. Level 4 — layers, modules, health — is parsed out of the ` +

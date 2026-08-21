@@ -32,7 +32,7 @@
   import { log, tick, frame, report } from "./_harness.js";
 
   /**
-   * The question dziri needs answered, and why it is not obvious.
+   * The question dziry needs answered, and why it is not obvious.
    *
    * `:focus-visible` is implemented here as a *modality* bit: set by a keystroke,
    * cleared by a pointer press. Focus that arrives from `autofocus` or from a script
@@ -47,11 +47,11 @@
    *     place is exactly the case a sighted keyboard user needs marked.
    *
    * Whichever Chromium implements is one assignment in `set_focus`. The cost is entirely
-   * in knowing which, and the visible consequence is large: every dziri page with an
+   * in knowing which, and the visible consequence is large: every dziry page with an
    * autofocused field either opens wearing a ring or does not.
    *
    * The second half — script `.focus()` — is the same question with a different cause,
-   * and dziri needs it too because a runtime `focus()` API is coming. It is asked here
+   * and dziry needs it too because a runtime `focus()` API is coming. It is asked here
    * rather than in focus-visible.html because that probe's script-focus block runs after
    * nine Tabs, so it can only ever report the keyboard answer.
    */
@@ -79,7 +79,7 @@
   // update-the-rendering steps, not from parsing — so a deferred module script like this
   // one can legitimately observe the pre-focus state, and reporting only the frame-later
   // reading would hide that autofocus is a render-time effect rather than a parse-time
-  // one. dziri cares: its tree arrives before the first frame either way, but "which
+  // one. dziry cares: its tree arrives before the first frame either way, but "which
   // frame" decides whether the first painted frame already has the ring.
   log("=== autofocus (no input has reached the page) ===");
   row("module script runs");
@@ -91,7 +91,7 @@
 
   // --- 2. does autofocus fire for an element inserted after load? -------------------
   //
-  // The load-bearing question for dziri, and the cheaper answer is the better one. If
+  // The load-bearing question for dziry, and the cheaper answer is the better one. If
   // autofocus is a once-per-document effect, it is a single compile-time field consulted
   // at startup and never again. If a later insertion also steals focus, then every list
   // row appended at run time has to be checked for it, and a `<For>` over rows carrying

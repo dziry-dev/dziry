@@ -94,7 +94,7 @@ export type ToWorker =
   /**
    * The watcher's recompile failed; paint the formatted build error in the
    * window. Same origin as `hot` — the CLI's IPC channel, forwarded by the
-   * engine thread — so it exists only under `dziri dev`.
+   * engine thread — so it exists only under `dziry dev`.
    */
   | { t: "redbox"; title: string; detail: string }
   /** The recompile after a failure succeeded; put the overlay's hidden byte back. */

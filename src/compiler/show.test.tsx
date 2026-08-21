@@ -2,7 +2,7 @@
  * `<Show>` — compiled conditional rendering, proven on real emitter output.
  *
  * The fixture pattern is `suspense.test.tsx`'s: a temp project with a junction
- * to this repo as `node_modules/dziri`, compiled with the real `compileProject`,
+ * to this repo as `node_modules/dziry`, compiled with the real `compileProject`,
  * asserted by importing the artifact it wrote. What only this can prove is the
  * whole path — the marker dissolving, the condition crossing the file boundary
  * as a live cell (by name or as a re-created inline computed), the hidden
@@ -31,31 +31,31 @@ afterAll(() => {
 });
 
 function project(pageBody: string, state?: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "dziri-show-"));
+  const dir = mkdtempSync(join(tmpdir(), "dziry-show-"));
   fixtures.push(dir);
   const mainDir = join(dir, "windows", "main");
   mkdirSync(join(mainDir, "pages"), { recursive: true });
   mkdirSync(join(dir, "node_modules"));
-  symlinkSync(REPO, join(dir, "node_modules", "dziri"), "junction");
+  symlinkSync(REPO, join(dir, "node_modules", "dziry"), "junction");
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "show-e2e", type: "module" }));
   writeFileSync(
     join(dir, "tsconfig.json"),
     JSON.stringify({
-      compilerOptions: { jsx: "react-jsx", jsxImportSource: "dziri" },
+      compilerOptions: { jsx: "react-jsx", jsxImportSource: "dziry" },
       include: ["windows"],
     }),
   );
   writeFileSync(
     join(mainDir, "state.ts"),
     state ??
-      `import { $, computed, signal } from "dziri";
+      `import { $, computed, signal } from "dziry";
 export const open = signal(false);
 export const closed = computed(() => $(open) === false);
 `,
   );
   writeFileSync(
     join(mainDir, "index.tsx"),
-    `import { Outlet, Window } from "dziri";
+    `import { Outlet, Window } from "dziry";
 export default function Main() {
   return (
     <Window title="show">
@@ -67,7 +67,7 @@ export default function Main() {
   );
   writeFileSync(
     join(mainDir, "pages", "index.tsx"),
-    `import { Show } from "dziri";
+    `import { Show } from "dziry";
 import { closed, open } from "../state.ts";
 export default function Home() {
   return ${pageBody};

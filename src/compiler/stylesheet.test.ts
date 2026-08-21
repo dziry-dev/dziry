@@ -29,7 +29,7 @@ async function withFiles(
   files: Record<string, string>,
   run: (dir: string) => Promise<void>,
 ): Promise<void> {
-  const dir = mkdtempSync(join(tmpdir(), "dziri-css-"));
+  const dir = mkdtempSync(join(tmpdir(), "dziry-css-"));
   try {
     for (const [name, text] of Object.entries(files)) writeFileSync(join(dir, name), text);
     await run(dir);
@@ -63,7 +63,7 @@ describe("Tailwind detection", () => {
 });
 
 describe("@import", () => {
-  // dziri's parser skips statement at-rules — it must, since mis-scanning
+  // dziry's parser skips statement at-rules — it must, since mis-scanning
   // `@layer properties;` once swallowed an entire Tailwind theme. That makes an
   // unresolved `@import` silent: the sheet parses and simply has none of the rules.
   test("inlines a relative import in place", async () => {

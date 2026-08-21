@@ -1,6 +1,6 @@
 ---
 name: conformance
-description: Measure dziri's CSS against Chrome as an oracle — compile a declaration, compare the emitted style value with getComputedStyle. Use when adding or changing a CSS property in src/compiler/css.ts or STYLE_FIELDS in src/ir.ts, when working on A1 Tailwind coverage, when asked "do we support X correctly", and before claiming any coverage number. Runs `bun run conformance`.
+description: Measure dziry's CSS against Chrome as an oracle — compile a declaration, compare the emitted style value with getComputedStyle. Use when adding or changing a CSS property in src/compiler/css.ts or STYLE_FIELDS in src/ir.ts, when working on A1 Tailwind coverage, when asked "do we support X correctly", and before claiming any coverage number. Runs `bun run conformance`.
 ---
 
 # conformance
@@ -19,12 +19,12 @@ bun run conformance --verbose          # show agreements too
 ## How a case works
 
 1. Write `<div class="probe">` plus one rule into a temp html/css pair.
-2. Compile with dziri, import the emitted module, read the probe's row out of the style table.
+2. Compile with dziry, import the emitted module, read the probe's row out of the style table.
 3. Set the same markup and CSS in headless Chrome, read `getComputedStyle`.
 4. Normalise both sides and compare.
 
 Step 4 is where the judgement lives, and the normalisers are **part of the spec, not plumbing**.
-dziri stores packed ARGB integers and raw floats; Chrome returns `rgb(24, 24, 27)` and `12px`. A
+dziry stores packed ARGB integers and raw floats; Chrome returns `rgb(24, 24, 27)` and `12px`. A
 representation mismatch is not a conformance failure — but each normaliser is deliberately strict,
 because a lenient one converts a real bug into a pass. If you loosen one, say why in a comment.
 
@@ -42,13 +42,13 @@ unsupported value tests nothing and permanently depresses the number.
 
 ## When a case fails, suspect the case first
 
-The first run found `border-width: 2px` disagreeing: Chrome said `0px`, dziri said `2`. Chrome was
+The first run found `border-width: 2px` disagreeing: Chrome said `0px`, dziry said `2`. Chrome was
 right — `border-style` defaults to `none` and a none-border computes to zero width. That turned out
-to be a **real divergence** (dziri has no `border-style` at all, so it paints a border where a
+to be a **real divergence** (dziry has no `border-style` at all, so it paints a border where a
 browser paints nothing) and it is recorded in `BROWSER-FACTS.md`.
 
 So the order is: is my declaration valid CSS in isolation? Does the property need a companion
-declaration to take effect? Only then is it a dziri bug — and if it is, record it in
+declaration to take effect? Only then is it a dziry bug — and if it is, record it in
 `BROWSER-FACTS.md` before fixing, because the measurement is the durable part.
 
 ## Scope
@@ -63,7 +63,7 @@ no download, throwaway profile cleaned up on exit.
 
 ## Known divergences
 
-`KNOWN` maps a declaration — the string exactly as it appears in `CORPUS` — to the reason dziri
+`KNOWN` maps a declaration — the string exactly as it appears in `CORPUS` — to the reason dziry
 differs from Chrome on purpose. A matched case prints `KNOWN` with its reason and does not count as
 a disagreement.
 

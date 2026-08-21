@@ -8,7 +8,7 @@ Inside the three containers with enough moving parts to be worth opening: the co
 
 ```mermaid
 C4Component
-  title dziri — components (compiler)
+  title dziry — components (compiler)
 
   Container_Boundary(b_compiler, "Compiler") {
     Component(jsx, "JSX evaluation", "src/compiler/jsx-runtime.ts", "Runs the author's module and builds a real element tree — no virtual DOM, no diff.")
@@ -33,7 +33,7 @@ C4Component
 
 ```mermaid
 C4Component
-  title dziri — components (appThread)
+  title dziry — components (appThread)
 
   Container_Boundary(b_appThread, "App thread") {
     Component(signals, "Signals", "src/runtime/signal.ts", "The whole reactivity core. Bare reads; the plugin did the wiring at build time.")
@@ -57,15 +57,15 @@ C4Component
 
 ```mermaid
 C4Component
-  title dziri — components (engine)
+  title dziry — components (engine)
 
   Container_Boundary(b_engine, "Engine") {
-    Component(rsEngine, "Engine core", "native-src/dziri-engine/src/engine.rs", "Handle registry, the tick, staged/live commit.")
-    Component(rsLayout, "Layout", "native-src/dziri-engine/src/layout.rs", "Builds Taffy styles from the shared tables and runs the solve.")
-    Component(rsPaint, "Paint", "native-src/dziri-engine/src/paint.rs", "Skia: boxes, borders, radii, shadows, clips.")
-    Component(rsText, "Text", "native-src/dziri-engine/src/text.rs", "SkParagraph: shaping, measurement, wrapping.")
-    Component(rsWindow, "Window & input", "native-src/dziri-engine/src/window.rs", "SDL3, plus the event watcher that draws during an OS-modal resize drag.")
-    Component(rsError, "Error guard", "native-src/dziri-engine/src/error.rs", "`catch_unwind` at every entry point; a panic becomes a status, never a crash.")
+    Component(rsEngine, "Engine core", "native-src/dziry-engine/src/engine.rs", "Handle registry, the tick, staged/live commit.")
+    Component(rsLayout, "Layout", "native-src/dziry-engine/src/layout.rs", "Builds Taffy styles from the shared tables and runs the solve.")
+    Component(rsPaint, "Paint", "native-src/dziry-engine/src/paint.rs", "Skia: boxes, borders, radii, shadows, clips.")
+    Component(rsText, "Text", "native-src/dziry-engine/src/text.rs", "SkParagraph: shaping, measurement, wrapping.")
+    Component(rsWindow, "Window & input", "native-src/dziry-engine/src/window.rs", "SDL3, plus the event watcher that draws during an OS-modal resize drag.")
+    Component(rsError, "Error guard", "native-src/dziry-engine/src/error.rs", "`catch_unwind` at every entry point; a panic becomes a status, never a crash.")
   }
 
   Rel(rsEngine, rsLayout, "solve")

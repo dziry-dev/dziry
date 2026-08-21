@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { installCssGraph, stylesheetsFor } from "./css-imports.ts";
 
-const dir = mkdtempSync(join(tmpdir(), "dziri-css-graph-"));
+const dir = mkdtempSync(join(tmpdir(), "dziry-css-graph-"));
 
 // entry.ts imports a.ts then b.css; a.ts imports theme.css then shared.ts;
 // shared.ts imports base.css. ES evaluation order is depth-first in source

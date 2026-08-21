@@ -7,7 +7,7 @@
  *   bun run window -o out.ts       # divert the artifact, for `characterize`
  *
  * The work is in `compiler/build.ts`; this is the argv in front of it. Kept as a
- * separate entry from `dziri compile` because the harnesses call it by path and
+ * separate entry from `dziry compile` because the harnesses call it by path and
  * because it always compiles *this* repository, whereas the CLI compiles whatever
  * directory it was run in.
  */

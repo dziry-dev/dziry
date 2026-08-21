@@ -279,7 +279,7 @@ const STYLES: Table = {
     //
     //   0 0 #0000, 0 0 #0000, 0 0 0 2px #000, 0 0 0 calc(2px + 2px) #38bdf8, 0 0 #0000
     //
-    // through dziri's own `var()` and `@property` machinery. See BROWSER-FACTS.md and
+    // through dziry's own `var()` and `@property` machinery. See BROWSER-FACTS.md and
     // `properties.ts::parseBoxShadow`, which refuses the layers that do not fit rather than
     // approximating them.
     //
@@ -312,7 +312,7 @@ const STYLES: Table = {
     // The **default is a convention, not a measurement**: Chromium does not expose its
     // highlight colour through `getComputedStyle` — a selection with no author rule reports
     // `rgba(0, 0, 0, 0)` — so it is unmeasurable from script, in the same category as the
-    // caret's width and blink rate. dziri's default therefore lives in its own UA sheet,
+    // caret's width and blink rate. dziry's default therefore lives in its own UA sheet,
     // where a UA default belongs, and `::selection` is what makes it overridable. See
     // BROWSER-FACTS.md, which records the refusal.
     //
@@ -344,7 +344,7 @@ const STYLES: Table = {
     // auto likewise. All paint: a decoration never moves a line.
     //
     // Marked inherited even though the spec says the property is not: CSS
-    // *propagates* a decoration to inline descendants, and dziri's text runs
+    // *propagates* a decoration to inline descendants, and dziry's text runs
     // are separate nodes — so inheritance is how `underline` on an element
     // reaches its text. The divergence: it also crosses block boundaries,
     // which CSS stops at. Underlining one more box beats not underlining the
@@ -404,7 +404,7 @@ const STYLES: Table = {
     // a percentage summed with an absolute part, `calc(100% - 2rem)`.
     //
     // The small/large/dynamic viewport variants fold to the plain unit at
-    // compile time: a dziri window has no browser chrome, so the four sizes a
+    // compile time: a dziry window has no browser chrome, so the four sizes a
     // mobile browser distinguishes are one size here.
     //
     // Padding, margin and gap have no `Pct` companions — percentages are valid
@@ -442,7 +442,7 @@ const STYLES: Table = {
     { name: "insetBottomPct", type: "f32", affects: "layout", ir: "insetBPct" },
     { name: "insetLeftPct", type: "f32", affects: "layout", ir: "insetLPct" },
     // `border-spacing` — horizontal and vertical space between table borders.
-    // CSS property for `<table>`, but dziri doesn't render tables; paint-only as a no-op.
+    // CSS property for `<table>`, but dziry doesn't render tables; paint-only as a no-op.
     // Two f32 fields for H and V spacing. NaN means unset (use browser default 2px).
     { name: "borderSpacingH", type: "f32", affects: "paint" },
     { name: "borderSpacingV", type: "f32", affects: "paint" },
@@ -474,7 +474,7 @@ const STYLES: Table = {
     // measure callback exactly as the two above do. `fontStyle` is a slant flag
     // rather than an angle: CSS `oblique <angle>` is a non-goal until a probe
     // shows something needs it. `fontFamily` is a *generic* family, not a name —
-    // dziri resolves one concrete face per generic at startup, which is the
+    // dziry resolves one concrete face per generic at startup, which is the
     // compile-time-first answer to font selection: an author names a category,
     // never a file. 0 is whatever the platform gave `Measurer::new`.
     { name: "fontStyle", type: "u8", affects: "layout", inherited: true, doc: "0 normal, 1 italic" },
@@ -504,7 +504,7 @@ const STYLES: Table = {
     { name: "overflowX", type: "u8", affects: "layout", doc: "0 visible, 1 hidden, 2 ellipsis, 3 scroll" },
     { name: "overflowY", type: "u8", affects: "layout", doc: "0 visible, 1 hidden, 2 ellipsis, 3 scroll" },
     // `scrollbar-width`, and paint-only *because* the gutter is not reserved:
-    // dziri's bars are overlay, so thickness changes what is covered rather than
+    // dziry's bars are overlay, so thickness changes what is covered rather than
     // what fits. It stops being paint-only the day a gutter exists.
     { name: "scrollbarWidth", type: "u8", affects: "paint", doc: "0 auto, 1 thin, 2 none" },
     // `scrollbar-color`, thumb then track, exactly as CSS orders them. Alpha 0
@@ -518,7 +518,7 @@ const STYLES: Table = {
     // like any colour or keyword — and the alternative is discovering at A3 that
     // adding three style fields is also a protocol bump.
     //
-    // `appearance` is on the wire at all *because* dziri draws its own controls:
+    // `appearance` is on the wire at all *because* dziry draws its own controls:
     // it is the author's switch between "you draw it" and "I draw it", and only
     // the side holding the canvas can act on it. See ROADMAP C2.
     //
@@ -577,7 +577,7 @@ const STYLES: Table = {
     { name: "filter", type: "u8", affects: "paint", doc: "0 none, 1 has filter functions" },
     { name: "backdropFilter", type: "u8", affects: "paint", doc: "0 none, 1 has backdrop filter functions" },
     // `z-index` — stacking order. i32, NaN→auto is not expressible, so i32::MIN is
-    // the auto sentinel. Paint-only: dziri paints in tree order and does not sort.
+    // the auto sentinel. Paint-only: dziry paints in tree order and does not sort.
     { name: "zIndex", type: "i32", affects: "paint", doc: "i32::MIN = auto" },
     // `letter-spacing` — extra space between glyphs, px. 0 = normal. Layout,
     // because it changes the measured width of a text run.
@@ -589,13 +589,13 @@ const STYLES: Table = {
     { name: "mixBlendMode", type: "u8", affects: "paint", doc: "BlendMode enum; 0 normal" },
     { name: "backgroundBlendMode", type: "u8", affects: "paint", doc: "BlendMode enum; 0 normal" },
     // `columns` — multi-column layout, as count (0 = auto) and width (NaN = auto).
-    // dziri has no column layout; parsed and stored so utilities compile.
+    // dziry has no column layout; parsed and stored so utilities compile.
     { name: "columnCount", type: "u16", affects: "layout", doc: "0 = auto" },
     { name: "columnWidth", type: "f32", affects: "layout", doc: "px; NaN = auto" },
     // `zoom` — a real scale in a browser; here parsed and stored, engine ignores.
     { name: "zoom", type: "f32", affects: "layout", doc: "multiplier; NaN = unset" },
     // `touch-action` — which gestures a touch may start. Bitmask: 1 pan-x,
-    // 2 pan-y, 4 pinch-zoom; 0 none, 7 auto/manipulation. Paint-only: dziri's
+    // 2 pan-y, 4 pinch-zoom; 0 none, 7 auto/manipulation. Paint-only: dziry's
     // pointer is a mouse, and the engine reads no gesture state.
     { name: "touchAction", type: "u8", affects: "paint", doc: "bitmask: 1 pan-x, 2 pan-y, 4 pinch-zoom; 0 none, 7 auto" },
     // `white-space` — how text wraps and collapses. Layout, because it changes
@@ -607,7 +607,7 @@ const STYLES: Table = {
     // `mask-position` — where mask layers sit. Keywords/lengths, validated and
     // stored as presence beside `maskImage` (no mask rendering yet).
     { name: "maskPosition", type: "u8", affects: "paint", doc: "0 initial, 1 set" },
-    // `fill`, `stroke`, `stroke-width` — SVG paint properties. dziri does not
+    // `fill`, `stroke`, `stroke-width` — SVG paint properties. dziry does not
     // render SVG, so these are parsed and stored but never painted. Alpha 0 is
     // "nothing said" for the colours, the borderColor convention; NaN for the width.
     { name: "fill", type: "u32", affects: "paint", interp: "color", doc: "SVG fill; alpha 0 = unset" },
@@ -656,7 +656,7 @@ const STYLES: Table = {
  *
  * What is *not* here is any timing per property. CSS allows it — `transition:
  * opacity 1s, transform 2s` computes to `duration: [1s, 2s]`, measured — and
- * dziri does not: one timing governs every field in `mask`. Tailwind never emits
+ * dziry does not: one timing governs every field in `mask`. Tailwind never emits
  * the other shape (every utility sets one `transition-duration` for its whole
  * list), and the compiler warns by name rather than silently picking one.
  */
@@ -858,7 +858,7 @@ const STRINGS: Table = {
  * The table holds only the *reference*. The bytes never cross the shared arena:
  * the host resolves `src` — a file read or a fetch, both of which are Bun's and
  * not the engine's, which stays off the network — and hands them over with
- * `dziri_engine_provide_image`, which decodes once and keeps the Skia image
+ * `dziry_engine_provide_image`, which decodes once and keeps the Skia image
  * engine-side. What the table would otherwise need a status column for, the
  * loader already knows: it made the request.
  */
@@ -1152,7 +1152,7 @@ export const ENUMS: EnumDef[] = [
        * `Controls::rescan` re-reads on every commit — and this reads it back out.
        *
        * It is `:invalid` rather than `:user-invalid`, which is the pseudo-class a browser
-       * would use for the same *timing*: dziri already gates error display on `validateOn`
+       * would use for the same *timing*: dziry already gates error display on `validateOn`
        * plus "has this field moved off its compiled value", so the "only after the user has
        * had a go" part is decided before the bit is ever set. Two spellings for one state
        * would mean the gate lived in two places.
@@ -1278,7 +1278,7 @@ export const ENUMS: EnumDef[] = [
        * and no `change`, and clicking a *label* fires `click` on the label as
        * well as on the control. A host wanting "the value changed" cannot get it
        * by counting clicks. The converse holds too — a `CLICK` on a picker's row
-       * still names the row, because dziri has no bubbling and the node a click
+       * still names the row, because dziry has no bubbling and the node a click
        * names is the node that was clicked.
        */
       CHANGE: 10,
@@ -1288,8 +1288,8 @@ export const ENUMS: EnumDef[] = [
        *
        * Named `FOCUS_IN` only because `FOCUS` above is already the *window*'s. It
        * is the non-bubbling `focus`, not the bubbling `focusin` — measured, the
-       * two fire in that order, so `focus` is the primitive and the one dziri
-       * copies. dziri has no bubbling for the distinction to matter to.
+       * two fire in that order, so `focus` is the primitive and the one dziry
+       * copies. dziry has no bubbling for the distinction to matter to.
        */
       FOCUS_IN: 11,
       /**
@@ -1320,7 +1320,7 @@ export const ENUMS: EnumDef[] = [
        * The text itself is NOT in the event: `Event.text` is a 32-byte inline
        * buffer sized for an IME commit, and a paste has no upper bound. The
        * engine holds the string and the host fetches it with
-       * `dziri_engine_take_paste_text` while draining — the same
+       * `dziry_engine_take_paste_text` while draining — the same
        * fetch-beside-the-drain pattern as a list box's `CHANGE` selection,
        * because the worker that will splice it has no engine handle.
        *
@@ -1389,7 +1389,7 @@ export const ENUMS: EnumDef[] = [
       /**
        * An `<a href>`. Enter activates it; **Space does not** — measured, and the
        * one asymmetry that makes a link a different kind from a button rather than
-       * a synonym for one. (Space scrolls the page in a browser, which dziri does
+       * a synonym for one. (Space scrolls the page in a browser, which dziry does
        * not implement and should not fake.)
        *
        * A link with no `href` gets no row, matching the tab-stop set: it is not
@@ -1451,7 +1451,7 @@ export const ENUMS: EnumDef[] = [
     name: "Status",
     doc:
       "Return code of every FFI entry point. Negative is failure, and the " +
-      "detail is in `dziri_last_error`.",
+      "detail is in `dziry_last_error`.",
     ty: "i32",
     values: {
       OK: 0,
@@ -1501,7 +1501,7 @@ export const ENUMS: EnumDef[] = [
  * v4 is where the engine handle stopped being a pointer and became a `u32` token
  * into a handle table. `SCHEMA_HASH` cannot cover that: it hashes the tables, and
  * a stale binary would pass both checks and then be handed a 4-byte out-parameter
- * where it expects 8. `dziri_protocol_version` takes no arguments, so it is the one
+ * where it expects 8. `dziry_protocol_version` takes no arguments, so it is the one
  * call that is safe to make against a binary of unknown vintage — which is why the
  * ABI's own version lives here.
  *
@@ -1557,7 +1557,7 @@ export const ENUMS: EnumDef[] = [
  * It also grows `Event` by one `i32`: `b` carries the caret and `c` now carries the
  * selection anchor, because splicing a range needs both ends and the host had only one
  * number. **`Event` is outside the generator** — its layout is written by hand in
- * `engine.rs` and again as byte offsets in `host.ts` — so `dziri_engine_event_size` was
+ * `engine.rs` and again as byte offsets in `host.ts` — so `dziry_engine_event_size` was
  * added for `host.ts` to check its own constant against at open time. That check is the
  * point: the two had agreed on 56 bytes only because someone kept them in sync, which is
  * precisely the failure this file's header says the generator exists to prevent.
@@ -1637,7 +1637,7 @@ export const ENUMS: EnumDef[] = [
  * v23 adds **`EventKind.FOCUS_IN` and `FOCUS_OUT`**, the element focus pair. Two enum
  * values, invisible to the hash, hand-bumped.
  *
- * Until now dziri emitted no element focus event of any kind — `FOCUS` is the window's —
+ * Until now dziry emitted no element focus event of any kind — `FOCUS` is the window's —
  * so an app could not validate a field on blur, save a draft when focus left, or show a
  * hint while a control had it. The focus *model* has been complete since v19 and none of
  * it was observable from outside the engine.
@@ -1675,7 +1675,7 @@ export const ENUMS: EnumDef[] = [
  * `rows` is a column rather than a compiled height because the height is not compilable.
  * Measured across a 4× font-size range, a list box's content height is `size` times the
  * option's own row height — a ratio, not the 17px constant it looks like at the default
- * font — and dziri's row height comes from Skia's ascent + descent + line gap at layout
+ * font — and dziry's row height comes from Skia's ascent + descent + line gap at layout
  * time. So the row *count* crosses the boundary and the multiplication happens in
  * `layout.rs`, which is the one place that knows both numbers.
  *
@@ -1718,7 +1718,7 @@ export const ENUMS: EnumDef[] = [
  * sees both.
  */
 /*
- * v44 — `dziri_engine_reset`. A new tree under a live window for dev hot
+ * v44 — `dziry_engine_reset`. A new tree under a live window for dev hot
  * reload: the engine drops hover/press/focus/picker/scroll state keyed to the
  * old tree's node ids and rebuilds on the next tick. A new symbol, no layout
  * change — the bump is so a host that calls it cannot load a binary without it.
@@ -1764,7 +1764,7 @@ export const NodeFlags = {
    * content has no say at all, and a `contenteditable` div behaves the same way. A
    * plain block box does the opposite: `<div></div>` is 0 high.
    *
-   * So the floor cannot live in `measure` for every empty string. dziri only ever
+   * So the floor cannot live in `measure` for every empty string. dziry only ever
    * emits a text node with an empty string for a *dynamic* binding, so doing it
    * unconditionally would work by accident today and diverge the moment a
    * non-editable binding renders `""` — Chrome gives that 0 height, and a counter
@@ -1872,7 +1872,7 @@ export const NodeFlags = {
    * A flag rather than a scalar, and the reason it could not have been a scalar is the
    * interesting half. The compiler cannot resolve `autofocus` to one id: measured
    * (`probes/autofocus-hidden.html`), an unfocusable claim is walked past rather than
-   * honoured, and in dziri thirteen of a page's fourteen routes are hidden on the first
+   * honoured, and in dziry thirteen of a page's fourteen routes are hidden on the first
    * frame — so several claims are the normal case and which one is showing is runtime
    * state. The engine walks the flagged nodes and takes the first that is visible.
    *

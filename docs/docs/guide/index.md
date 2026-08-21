@@ -1,19 +1,19 @@
 ---
-title: How dziri works
+title: How dziry works
 sidebar_position: 1
 ---
 
-# How dziri works
+# How dziry works
 
 Most UI frameworks do their work while the app runs. They build a tree, diff it,
 match selectors, resolve a cascade, and lay out boxes — every frame, on the user's
 machine.
 
-dziri does that work once, on your machine, before the app ships.
+dziry does that work once, on your machine, before the app ships.
 
 ## What "compiled" actually means here
 
-When you run the build, dziri **imports your module**. That import *is* the component
+When you run the build, dziry **imports your module**. That import *is* the component
 pass: your functions run, they return a tree, and that tree is the one that gets
 compiled. There is no renderer and no virtual DOM.
 
@@ -34,7 +34,7 @@ from. Nearly all of them are the same rule:
 
 > Anything the runtime must reach by name has to *have* a name at build time.
 
-That one constraint explains most of what is surprising about authoring in dziri:
+That one constraint explains most of what is surprising about authoring in dziry:
 
 - A signal is normally a module-level export, because the generated artifact imports
   it by name. (Component-local `signal()` also works — it is registered in a slot
@@ -51,7 +51,7 @@ component to be gone by the time the app runs.
 
 ## The read is the name
 
-The one place dziri refuses to make you pay for its architecture is reading state.
+The one place dziry refuses to make you pay for its architecture is reading state.
 
 ```tsx
 const count = signal(0);
@@ -73,7 +73,7 @@ own modules — that is where `$` is defined — which is why you may see `.valu
 
 ## Where to go next
 
-- **[Installation](./installation.md)** — `bun create dziri`, and what the template contains.
+- **[Installation](./installation.md)** — `bun create dziry`, and what the template contains.
 - **[Getting started](./getting-started.md)** — the file layout, and a window that runs.
 - **[Reactivity](./reactivity.md)** — signals, computeds, writes, and the rules above in detail.
 - **[Styling](./styling.md)** — Tailwind, `cn`, conditional classes, inline styles.

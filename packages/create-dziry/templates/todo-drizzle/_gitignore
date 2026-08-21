@@ -1,0 +1,10 @@
+node_modules/
+
+# Compiler output. `dziry compile` writes these; none of them is source.
+windows/**/*.gen.ts
+
+# `dziry build` output.
+dist/
+
+# The SQLite database on disk — written by the app at run time, not source.
+todos.sqlite

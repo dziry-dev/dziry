@@ -249,6 +249,6 @@ test("a Rust panic returns a status code instead of killing the process", () => 
  * asserted beside it.
  */
 test("the fatal alert still works on the poisoned engine", () => {
-  expect(engine.fatalAlert.bind(engine, "dziri: the engine failed", "why")).not.toThrow();
+  expect(engine.fatalAlert.bind(engine, "dziry: the engine failed", "why")).not.toThrow();
   expect(engine.tick.bind(engine)).toThrow(); // everything else keeps refusing
 });

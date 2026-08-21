@@ -16,7 +16,7 @@
   log("html:nth-child(1)       " + hits(":nth-child(1)"));
   log("");
 
-  // dziri resolves `:last-child` off its own tree, where a container written with
+  // dziry resolves `:last-child` off its own tree, where a container written with
   // newlines between its tags has a text run after the final element. If a text
   // node counted, nothing would ever be the last child and `space-y-*` would put a
   // trailing margin on every row.
@@ -29,7 +29,7 @@
   log("last element, text after it, :last-child      " + two.matches(":last-child"));
   log("");
 
-  // The other half of the same question: dziri gives ::before and ::after real
+  // The other half of the same question: dziry gives ::before and ::after real
   // nodes in the IR, so it has to know whether CSS counts them.
   log("=== do ::before / ::after count as children? ===");
   mount('<style>#b::before{content:"x"}#b::after{content:"y"}</style><div id=b><i id=solo></i></div>');

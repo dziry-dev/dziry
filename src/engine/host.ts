@@ -34,14 +34,14 @@ const { i32, u32, f32, ptr: PTR } = FFIType;
  * The two extra `u32` over v11 are `tween_capacity` and `keyframe_capacity`, and
  * they moved every byte after them — which is one of the reasons v12 is a version
  * bump and not only a hash change. v43's `image_capacity` did the same again.
- * `dziri_protocol_version` takes no arguments, so it is still answerable by a
+ * `dziry_protocol_version` takes no arguments, so it is still answerable by a
  * binary of any vintage and the refusal happens before anything reads this struct.
  */
 const CONFIG_SIZE = 88;
 /**
  * Matches `Event` in `engine.rs`: seven 4-byte fields plus 32 inline text bytes.
  *
- * **Checked against the engine at open time**, by `dziri_engine_event_size`. Every table
+ * **Checked against the engine at open time**, by `dziry_engine_event_size`. Every table
  * layout in this codebase is generated from `schema.ts` and every offset is reported by the
  * engine at runtime; `Event` is the one struct outside that, written there and again as byte
  * offsets below. The two agreed on 56 bytes only because somebody kept them in step by hand,
@@ -61,55 +61,55 @@ export const EVENT_SIZE = 60;
  * to read through it; it is a token.
  */
 const SYMBOLS = {
-  dziri_protocol_version: { args: [], returns: u32 },
-  dziri_schema_hash: { args: [], returns: u32 },
-  dziri_engine_event_size: { args: [], returns: u32 },
-  dziri_last_error: { args: [PTR, u32], returns: u32 },
-  dziri_engine_create: { args: [PTR, PTR], returns: i32 },
-  dziri_engine_destroy: { args: [u32], returns: i32 },
-  dziri_engine_span_count: { args: [u32, PTR], returns: i32 },
-  dziri_engine_describe: { args: [u32, PTR, u32, PTR], returns: i32 },
-  dziri_engine_generation: { args: [u32, PTR], returns: i32 },
-  dziri_engine_tick: { args: [u32], returns: i32 },
-  dziri_engine_pump: { args: [u32], returns: i32 },
-  dziri_engine_drain_events: { args: [u32, PTR, u32, PTR], returns: i32 },
-  dziri_engine_grow: { args: [u32, PTR], returns: i32 },
-  dziri_engine_resize: { args: [u32, u32, u32], returns: i32 },
-  dziri_engine_reset: { args: [u32, u32], returns: i32 },
-  dziri_engine_set_input_state: { args: [u32, i32, i32, i32], returns: i32 },
-  dziri_engine_set_time_step: { args: [u32, f32], returns: i32 },
-  dziri_engine_hit_test: { args: [u32, f32, f32, PTR], returns: i32 },
-  dziri_engine_mouse_down: { args: [u32, f32, f32], returns: i32 },
-  dziri_engine_mouse_move: { args: [u32, f32, f32], returns: i32 },
-  dziri_engine_mouse_down_with: { args: [u32, f32, f32, u32, u32], returns: i32 },
-  dziri_engine_mouse_up: { args: [u32, f32, f32], returns: i32 },
-  dziri_engine_bounds: { args: [u32, u32, PTR], returns: i32 },
-  dziri_engine_selection: { args: [u32, i32, PTR], returns: i32 },
-  dziri_engine_open_select: { args: [u32, PTR], returns: i32 },
-  dziri_engine_listbox_selection: { args: [u32, i32, PTR, u32, PTR], returns: i32 },
-  dziri_engine_scroll: { args: [u32, f32, f32, f32, f32, PTR], returns: i32 },
-  dziri_engine_surface_info: { args: [u32, PTR], returns: i32 },
-  dziri_engine_read_pixels: { args: [u32, PTR, u32], returns: i32 },
-  dziri_engine_encode_png: { args: [u32, PTR], returns: i32 },
-  dziri_engine_take_png: { args: [u32, PTR, u32], returns: i32 },
-  dziri_engine_font_family: { args: [u32, PTR, u32, PTR], returns: i32 },
-  dziri_engine_alert: { args: [u32, u32, PTR, u32, PTR, u32], returns: i32 },
-  dziri_engine_provide_image: { args: [u32, PTR, u32, PTR, u32], returns: i32 },
-  dziri_engine_last_frame_ms: { args: [u32, PTR], returns: i32 },
-  dziri_engine_panic_for_testing: { args: [u32], returns: i32 },
-  dziri_engine_open_file_dialog: { args: [u32, i32, PTR, u32, i32, PTR], returns: i32 },
-  dziri_engine_take_file_dialog_result: { args: [u32, PTR, PTR, u32, PTR], returns: i32 },
-  dziri_engine_take_paste_text: { args: [u32, PTR, u32, PTR], returns: i32 },
-  dziri_engine_fatal_alert: { args: [u32, PTR, u32, PTR, u32], returns: i32 },
+  dziry_protocol_version: { args: [], returns: u32 },
+  dziry_schema_hash: { args: [], returns: u32 },
+  dziry_engine_event_size: { args: [], returns: u32 },
+  dziry_last_error: { args: [PTR, u32], returns: u32 },
+  dziry_engine_create: { args: [PTR, PTR], returns: i32 },
+  dziry_engine_destroy: { args: [u32], returns: i32 },
+  dziry_engine_span_count: { args: [u32, PTR], returns: i32 },
+  dziry_engine_describe: { args: [u32, PTR, u32, PTR], returns: i32 },
+  dziry_engine_generation: { args: [u32, PTR], returns: i32 },
+  dziry_engine_tick: { args: [u32], returns: i32 },
+  dziry_engine_pump: { args: [u32], returns: i32 },
+  dziry_engine_drain_events: { args: [u32, PTR, u32, PTR], returns: i32 },
+  dziry_engine_grow: { args: [u32, PTR], returns: i32 },
+  dziry_engine_resize: { args: [u32, u32, u32], returns: i32 },
+  dziry_engine_reset: { args: [u32, u32], returns: i32 },
+  dziry_engine_set_input_state: { args: [u32, i32, i32, i32], returns: i32 },
+  dziry_engine_set_time_step: { args: [u32, f32], returns: i32 },
+  dziry_engine_hit_test: { args: [u32, f32, f32, PTR], returns: i32 },
+  dziry_engine_mouse_down: { args: [u32, f32, f32], returns: i32 },
+  dziry_engine_mouse_move: { args: [u32, f32, f32], returns: i32 },
+  dziry_engine_mouse_down_with: { args: [u32, f32, f32, u32, u32], returns: i32 },
+  dziry_engine_mouse_up: { args: [u32, f32, f32], returns: i32 },
+  dziry_engine_bounds: { args: [u32, u32, PTR], returns: i32 },
+  dziry_engine_selection: { args: [u32, i32, PTR], returns: i32 },
+  dziry_engine_open_select: { args: [u32, PTR], returns: i32 },
+  dziry_engine_listbox_selection: { args: [u32, i32, PTR, u32, PTR], returns: i32 },
+  dziry_engine_scroll: { args: [u32, f32, f32, f32, f32, PTR], returns: i32 },
+  dziry_engine_surface_info: { args: [u32, PTR], returns: i32 },
+  dziry_engine_read_pixels: { args: [u32, PTR, u32], returns: i32 },
+  dziry_engine_encode_png: { args: [u32, PTR], returns: i32 },
+  dziry_engine_take_png: { args: [u32, PTR, u32], returns: i32 },
+  dziry_engine_font_family: { args: [u32, PTR, u32, PTR], returns: i32 },
+  dziry_engine_alert: { args: [u32, u32, PTR, u32, PTR, u32], returns: i32 },
+  dziry_engine_provide_image: { args: [u32, PTR, u32, PTR, u32], returns: i32 },
+  dziry_engine_last_frame_ms: { args: [u32, PTR], returns: i32 },
+  dziry_engine_panic_for_testing: { args: [u32], returns: i32 },
+  dziry_engine_open_file_dialog: { args: [u32, i32, PTR, u32, i32, PTR], returns: i32 },
+  dziry_engine_take_file_dialog_result: { args: [u32, PTR, PTR, u32, PTR], returns: i32 },
+  dziry_engine_take_paste_text: { args: [u32, PTR, u32, PTR], returns: i32 },
+  dziry_engine_fatal_alert: { args: [u32, PTR, u32, PTR, u32], returns: i32 },
 } as const;
 
 /** The engine's file name on this platform. */
 export function libraryName(): string {
   return process.platform === "win32"
-    ? "dziri_engine.dll"
+    ? "dziry_engine.dll"
     : process.platform === "darwin"
-      ? "libdziri_engine.dylib"
-      : "libdziri_engine.so";
+      ? "libdziry_engine.dylib"
+      : "libdziry_engine.so";
 }
 
 /** Where the engine is, when something already knows. See {@link useEngineLibrary}. */
@@ -140,7 +140,7 @@ function libraryPath(): string {
   const name = libraryName();
 
   const candidates = [
-    join(import.meta.dir, "..", "..", "native-src", "dziri-engine", "target", "release", name),
+    join(import.meta.dir, "..", "..", "native-src", "dziry-engine", "target", "release", name),
     join(import.meta.dir, "..", "..", "native", `${process.platform}-${process.arch}`, name),
   ];
 
@@ -224,7 +224,7 @@ const EMPTY: readonly number[] = Object.freeze([]) as readonly number[];
  * bound on a number that crossed the ABI, not because the engine needs it.
  */
 export function lastError(): string {
-  const written = engine.dziri_last_error(ptr(errorBuf) as Pointer, errorBuf.length);
+  const written = engine.dziry_last_error(ptr(errorBuf) as Pointer, errorBuf.length);
   return decoder.decode(errorBuf.subarray(0, Math.min(written, errorBuf.length)));
 }
 
@@ -301,7 +301,7 @@ export class Engine {
   }
 
   static open(options: EngineOptions): Engine {
-    const version = engine.dziri_protocol_version();
+    const version = engine.dziry_protocol_version();
     if (version !== PROTOCOL_VERSION) {
       throw new Error(
         `protocol mismatch: this build speaks v${PROTOCOL_VERSION}, ` +
@@ -313,7 +313,7 @@ export class Engine {
        fields, or a retype all keep the version and every field count identical
        while changing what the bytes mean — so the version alone cannot tell a
        matching pair from a stale binary. */
-    const hash = engine.dziri_schema_hash();
+    const hash = engine.dziry_schema_hash();
     if (hash !== SCHEMA_HASH) {
       throw new Error(
         `schema mismatch: the generated modules hash to ` +
@@ -330,7 +330,7 @@ export class Engine {
        `Event`, so growing it by a field leaves both untouched while moving `text` under a
        reader still using the old stride. That reads as keystrokes arriving corrupted, which
        is a much worse thing to debug than this message. */
-    const eventSize = engine.dziri_engine_event_size();
+    const eventSize = engine.dziry_engine_event_size();
     if (eventSize !== EVENT_SIZE) {
       throw new Error(
         `event layout mismatch: this build decodes ${EVENT_SIZE}-byte events, the engine ` +
@@ -340,7 +340,7 @@ export class Engine {
       );
     }
 
-    const title = new TextEncoder().encode(options.title ?? "dziri");
+    const title = new TextEncoder().encode(options.title ?? "dziry");
     const config = new ArrayBuffer(CONFIG_SIZE);
     const u32v = new Uint32Array(config);
     const u8v = new Uint8Array(config);
@@ -379,8 +379,8 @@ export class Engine {
     // One `u32`, not a pointer-sized slot: the handle is a table token.
     const out = new Uint32Array(1);
     check(
-      engine.dziri_engine_create(ptr(config) as Pointer, ptr(out) as Pointer),
-      "dziri_engine_create",
+      engine.dziry_engine_create(ptr(config) as Pointer, ptr(out) as Pointer),
+      "dziry_engine_create",
     );
 
     const handle = out[0]!;
@@ -401,20 +401,20 @@ export class Engine {
   describe(): Span[] {
     const count = new Uint32Array(1);
     check(
-      engine.dziri_engine_span_count(this.#handle, ptr(count) as Pointer),
-      "dziri_engine_span_count",
+      engine.dziry_engine_span_count(this.#handle, ptr(count) as Pointer),
+      "dziry_engine_span_count",
     );
 
     const raw = new ArrayBuffer(count[0]! * SPAN_SIZE);
     const written = new Uint32Array(1);
     check(
-      engine.dziri_engine_describe(
+      engine.dziry_engine_describe(
         this.#handle,
         ptr(raw) as Pointer,
         count[0]!,
         ptr(written) as Pointer,
       ),
-      "dziri_engine_describe",
+      "dziry_engine_describe",
     );
 
     return readSpans(raw, written[0]!);
@@ -429,8 +429,8 @@ export class Engine {
 
     const generation = new BigUint64Array(1);
     check(
-      engine.dziri_engine_generation(this.#handle, ptr(generation) as Pointer),
-      "dziri_engine_generation",
+      engine.dziry_engine_generation(this.#handle, ptr(generation) as Pointer),
+      "dziry_engine_generation",
     );
     this.#generation = generation[0]!;
   }
@@ -458,7 +458,7 @@ export class Engine {
    * dangling.
    */
   tick(): void {
-    check(engine.dziri_engine_tick(this.#handle), "dziri_engine_tick");
+    check(engine.dziry_engine_tick(this.#handle), "dziry_engine_tick");
     this.#rebindIfMoved();
   }
 
@@ -471,15 +471,15 @@ export class Engine {
    * not a frame of wrong pixels.
    */
   pump(): void {
-    check(engine.dziri_engine_pump(this.#handle), "dziri_engine_pump");
+    check(engine.dziry_engine_pump(this.#handle), "dziry_engine_pump");
     this.#rebindIfMoved();
   }
 
   #rebindIfMoved(): void {
     const generation = new BigUint64Array(1);
     check(
-      engine.dziri_engine_generation(this.#handle, ptr(generation) as Pointer),
-      "dziri_engine_generation",
+      engine.dziry_engine_generation(this.#handle, ptr(generation) as Pointer),
+      "dziry_engine_generation",
     );
     if (generation[0]! !== this.#generation) this.#bindTables();
   }
@@ -488,13 +488,13 @@ export class Engine {
     const raw = new ArrayBuffer(max * EVENT_SIZE);
     const written = new Uint32Array(1);
     check(
-      engine.dziri_engine_drain_events(
+      engine.dziry_engine_drain_events(
         this.#handle,
         ptr(raw) as Pointer,
         max,
         ptr(written) as Pointer,
       ),
-      "dziri_engine_drain_events",
+      "dziry_engine_drain_events",
     );
 
     const view = new DataView(raw);
@@ -538,16 +538,16 @@ export class Engine {
 
   bounds(node: number): [number, number, number, number] {
     check(
-      engine.dziri_engine_bounds(this.#handle, node, ptr(scratch) as Pointer),
-      "dziri_engine_bounds",
+      engine.dziry_engine_bounds(this.#handle, node, ptr(scratch) as Pointer),
+      "dziry_engine_bounds",
     );
     return [scratchF32[0]!, scratchF32[1]!, scratchF32[2]!, scratchF32[3]!];
   }
 
   hitTest(x: number, y: number): number {
     check(
-      engine.dziri_engine_hit_test(this.#handle, x, y, ptr(scratch) as Pointer),
-      "dziri_engine_hit_test",
+      engine.dziry_engine_hit_test(this.#handle, x, y, ptr(scratch) as Pointer),
+      "dziry_engine_hit_test",
     );
     return scratch32[0]!;
   }
@@ -564,22 +564,22 @@ export class Engine {
    * to render `:active`.
    */
   mouseDown(x: number, y: number): void {
-    check(engine.dziri_engine_mouse_down(this.#handle, x, y), "dziri_engine_mouse_down");
+    check(engine.dziry_engine_mouse_down(this.#handle, x, y), "dziry_engine_mouse_down");
   }
 
   mouseUp(x: number, y: number): void {
-    check(engine.dziri_engine_mouse_up(this.#handle, x, y), "dziri_engine_mouse_up");
+    check(engine.dziry_engine_mouse_up(this.#handle, x, y), "dziry_engine_mouse_up");
   }
 
   mouseMove(x: number, y: number): void {
-    check(engine.dziri_engine_mouse_move(this.#handle, x, y), "dziri_engine_mouse_move");
+    check(engine.dziry_engine_mouse_move(this.#handle, x, y), "dziry_engine_mouse_move");
   }
 
   /** A press carrying a click count and Shift, for a double click or a Shift+click. */
   mouseDownWith(x: number, y: number, clicks: number, shift: boolean): void {
     check(
-      engine.dziri_engine_mouse_down_with(this.#handle, x, y, clicks, shift ? 1 : 0),
-      "dziri_engine_mouse_down_with",
+      engine.dziry_engine_mouse_down_with(this.#handle, x, y, clicks, shift ? 1 : 0),
+      "dziry_engine_mouse_down_with",
     );
   }
 
@@ -621,8 +621,8 @@ export class Engine {
    * Shows the platform's own modal message box, and **blocks until it is dismissed**.
    *
    * `SDL_ShowSimpleMessageBox` behind the FFI, so it is a Win32 task dialog, an `NSAlert`, or
-   * the GTK/portal box — nothing dziri draws. There was no need to vendor anyone's
-   * implementation of this: SDL3 is already linked, and a dialog drawn by dziri would be the
+   * the GTK/portal box — nothing dziry draws. There was no need to vendor anyone's
+   * implementation of this: SDL3 is already linked, and a dialog drawn by dziry would be the
    * one part of an app that does not look like the system it is running on.
    *
    * **Must be called on the engine thread**, which the handle guard enforces anyway: SDL
@@ -640,7 +640,7 @@ export class Engine {
     const titleBytes = new TextEncoder().encode(title);
     const messageBytes = new TextEncoder().encode(message);
     check(
-      engine.dziri_engine_alert(
+      engine.dziry_engine_alert(
         this.#handle,
         level,
         // A zero-length `Uint8Array` has no address to take, so an empty title is passed as a
@@ -650,7 +650,7 @@ export class Engine {
         messageBytes.length === 0 ? null : (ptr(messageBytes) as Pointer),
         messageBytes.length,
       ),
-      "dziri_engine_alert",
+      "dziry_engine_alert",
     );
   }
 
@@ -665,7 +665,7 @@ export class Engine {
   fatalAlert(title: string, message: string): void {
     const titleBytes = new TextEncoder().encode(title);
     const messageBytes = new TextEncoder().encode(message);
-    engine.dziri_engine_fatal_alert(
+    engine.dziry_engine_fatal_alert(
       this.#handle,
       titleBytes.length === 0 ? null : (ptr(titleBytes) as Pointer),
       titleBytes.length,
@@ -684,8 +684,8 @@ export class Engine {
    */
   selectionOf(node: number): [number, number] | null {
     check(
-      engine.dziri_engine_selection(this.#handle, node, ptr(scratch) as Pointer),
-      "dziri_engine_selection",
+      engine.dziry_engine_selection(this.#handle, node, ptr(scratch) as Pointer),
+      "dziry_engine_selection",
     );
     const [start, end] = [scratch32[0]!, scratch32[1]!];
     return start < 0 ? null : [start, end];
@@ -702,8 +702,8 @@ export class Engine {
    */
   openSelect(): { select: number; option: number } | null {
     check(
-      engine.dziri_engine_open_select(this.#handle, ptr(scratch) as Pointer),
-      "dziri_engine_open_select",
+      engine.dziry_engine_open_select(this.#handle, ptr(scratch) as Pointer),
+      "dziry_engine_open_select",
     );
     const [select, option] = [scratch32[0]!, scratch32[1]!];
     return select < 0 ? null : { select, option };
@@ -725,14 +725,14 @@ export class Engine {
     const out = new Int32Array(cap);
     const written = new Uint32Array(1);
     check(
-      engine.dziri_engine_listbox_selection(
+      engine.dziry_engine_listbox_selection(
         this.#handle,
         node,
         ptr(out) as Pointer,
         cap,
         ptr(written) as Pointer,
       ),
-      "dziri_engine_listbox_selection",
+      "dziry_engine_listbox_selection",
     );
     return Array.from(out.subarray(0, written[0]!));
   }
@@ -750,8 +750,8 @@ export class Engine {
    */
   scroll(x: number, y: number, dx: number, dy: number): [number, number] {
     check(
-      engine.dziri_engine_scroll(this.#handle, x, y, dx, dy, ptr(scratch) as Pointer),
-      "dziri_engine_scroll",
+      engine.dziry_engine_scroll(this.#handle, x, y, dx, dy, ptr(scratch) as Pointer),
+      "dziry_engine_scroll",
     );
     return [scratchF32[0]!, scratchF32[1]!];
   }
@@ -765,8 +765,8 @@ export class Engine {
 
   setInputState(hovered: number, pressed: number, focused: number): void {
     check(
-      engine.dziri_engine_set_input_state(this.#handle, hovered, pressed, focused),
-      "dziri_engine_set_input_state",
+      engine.dziry_engine_set_input_state(this.#handle, hovered, pressed, focused),
+      "dziry_engine_set_input_state",
     );
   }
 
@@ -779,7 +779,7 @@ export class Engine {
    * frame at an exact `t`.
    */
   setTimeStep(dt: number): void {
-    check(engine.dziri_engine_set_time_step(this.#handle, dt), "dziri_engine_set_time_step");
+    check(engine.dziry_engine_set_time_step(this.#handle, dt), "dziry_engine_set_time_step");
   }
 
   /**
@@ -794,14 +794,14 @@ export class Engine {
   provideImage(src: string, bytes: Uint8Array): void {
     const srcBytes = new TextEncoder().encode(src);
     check(
-      engine.dziri_engine_provide_image(
+      engine.dziry_engine_provide_image(
         this.#handle,
         ptr(srcBytes) as Pointer,
         srcBytes.length,
         ptr(bytes) as Pointer,
         bytes.length,
       ),
-      "dziri_engine_provide_image",
+      "dziry_engine_provide_image",
     );
   }
 
@@ -828,12 +828,12 @@ export class Engine {
     buf[10] = caps.stringBytes;
     buf[11] = caps.images;
 
-    check(engine.dziri_engine_grow(this.#handle, ptr(buf) as Pointer), "dziri_engine_grow");
+    check(engine.dziry_engine_grow(this.#handle, ptr(buf) as Pointer), "dziry_engine_grow");
 
     const generation = new BigUint64Array(1);
     check(
-      engine.dziri_engine_generation(this.#handle, ptr(generation) as Pointer),
-      "dziri_engine_generation",
+      engine.dziry_engine_generation(this.#handle, ptr(generation) as Pointer),
+      "dziry_engine_generation",
     );
     if (generation[0]! === this.#generation) return false;
 
@@ -842,7 +842,7 @@ export class Engine {
   }
 
   resize(width: number, height: number): void {
-    check(engine.dziri_engine_resize(this.#handle, width, height), "dziri_engine_resize");
+    check(engine.dziry_engine_resize(this.#handle, width, height), "dziry_engine_resize");
   }
 
   /**
@@ -853,15 +853,15 @@ export class Engine {
    * full. The window, the surface and the user's place on the screen stay put.
    */
   reset(root: number): void {
-    check(engine.dziri_engine_reset(this.#handle, root), "dziri_engine_reset");
+    check(engine.dziry_engine_reset(this.#handle, root), "dziry_engine_reset");
   }
 
   /** `[width, height, rowBytes, frames]`. */
   surfaceInfo(): [number, number, number, number] {
     const out = new Uint32Array(4);
     check(
-      engine.dziri_engine_surface_info(this.#handle, ptr(out) as Pointer),
-      "dziri_engine_surface_info",
+      engine.dziry_engine_surface_info(this.#handle, ptr(out) as Pointer),
+      "dziry_engine_surface_info",
     );
     return [out[0]!, out[1]!, out[2]!, out[3]!];
   }
@@ -871,8 +871,8 @@ export class Engine {
     const [, height, rowBytes] = this.surfaceInfo();
     const out = new Uint8Array(height * rowBytes);
     check(
-      engine.dziri_engine_read_pixels(this.#handle, ptr(out) as Pointer, out.length),
-      "dziri_engine_read_pixels",
+      engine.dziry_engine_read_pixels(this.#handle, ptr(out) as Pointer, out.length),
+      "dziry_engine_read_pixels",
     );
     return out;
   }
@@ -886,14 +886,14 @@ export class Engine {
   readPng(): Uint8Array {
     const size = new Uint32Array(1);
     check(
-      engine.dziri_engine_encode_png(this.#handle, ptr(size) as Pointer),
-      "dziri_engine_encode_png",
+      engine.dziry_engine_encode_png(this.#handle, ptr(size) as Pointer),
+      "dziry_engine_encode_png",
     );
 
     const out = new Uint8Array(size[0]!);
     check(
-      engine.dziri_engine_take_png(this.#handle, ptr(out) as Pointer, out.length),
-      "dziri_engine_take_png",
+      engine.dziry_engine_take_png(this.#handle, ptr(out) as Pointer, out.length),
+      "dziry_engine_take_png",
     );
     return out;
   }
@@ -902,28 +902,28 @@ export class Engine {
     const buf = new Uint8Array(128);
     const written = new Uint32Array(1);
     check(
-      engine.dziri_engine_font_family(
+      engine.dziry_engine_font_family(
         this.#handle,
         ptr(buf) as Pointer,
         buf.length,
         ptr(written) as Pointer,
       ),
-      "dziri_engine_font_family",
+      "dziry_engine_font_family",
     );
     return decoder.decode(buf.subarray(0, Math.min(written[0]!, buf.length)));
   }
 
   lastFrameMs(): number {
     check(
-      engine.dziri_engine_last_frame_ms(this.#handle, ptr(scratch) as Pointer),
-      "dziri_engine_last_frame_ms",
+      engine.dziry_engine_last_frame_ms(this.#handle, ptr(scratch) as Pointer),
+      "dziry_engine_last_frame_ms",
     );
     return scratchF32[0]!;
   }
 
   /** Proves a Rust panic reaches here as a status code rather than an abort. */
   panicForTesting(): number {
-    return engine.dziri_engine_panic_for_testing(this.#handle);
+    return engine.dziry_engine_panic_for_testing(this.#handle);
   }
 
   /** Opens the native OS file picker for the FILE input identified by `node`. */
@@ -932,7 +932,7 @@ export class Engine {
       ? new TextEncoder().encode(JSON.stringify(filters))
       : null;
     check(
-      engine.dziri_engine_open_file_dialog(
+      engine.dziry_engine_open_file_dialog(
         this.#handle,
         node,
         filtersJson ? (ptr(filtersJson) as Pointer) : null,
@@ -940,7 +940,7 @@ export class Engine {
         multiple ? 1 : 0,
         null,
       ),
-      "dziri_engine_open_file_dialog",
+      "dziry_engine_open_file_dialog",
     );
   }
 
@@ -955,14 +955,14 @@ export class Engine {
     const pathBuf = new Uint8Array(65536);
     const lenBuf = new Uint32Array(1);
     check(
-      engine.dziri_engine_take_file_dialog_result(
+      engine.dziry_engine_take_file_dialog_result(
         this.#handle,
         ptr(nodeBuf) as Pointer,
         ptr(pathBuf) as Pointer,
         65536,
         ptr(lenBuf) as Pointer,
       ),
-      "dziri_engine_take_file_dialog_result",
+      "dziry_engine_take_file_dialog_result",
     );
     if (nodeBuf[0]! === -1) return null;
     const len = lenBuf[0]!;
@@ -982,20 +982,20 @@ export class Engine {
     const buf = new Uint8Array(Math.max(1, byteLen));
     const lenBuf = new Uint32Array(1);
     check(
-      engine.dziri_engine_take_paste_text(
+      engine.dziry_engine_take_paste_text(
         this.#handle,
         ptr(buf) as Pointer,
         buf.length,
         ptr(lenBuf) as Pointer,
       ),
-      "dziri_engine_take_paste_text",
+      "dziry_engine_take_paste_text",
     );
     return decoder.decode(buf.subarray(0, lenBuf[0]!));
   }
 
   close(): void {
     if (this.#handle === 0) return;
-    check(engine.dziri_engine_destroy(this.#handle), "dziri_engine_destroy");
+    check(engine.dziry_engine_destroy(this.#handle), "dziry_engine_destroy");
     // 0 is never a valid handle, so a call after `close` is refused by the engine's
     // handle table even if this object is still reachable.
     this.#handle = 0;

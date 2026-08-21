@@ -6,7 +6,7 @@
  * decoding and painting is the engine's. This module is the middle step. It
  * reads the staged images table directly out of shared memory — the whole point
  * of the protocol is that a table scan needs no call — and hands resolved bytes
- * back over the one FFI entry point that does copy: `dziri_engine_provide_image`.
+ * back over the one FFI entry point that does copy: `dziry_engine_provide_image`.
  *
  * ## What counts as resolved
  *

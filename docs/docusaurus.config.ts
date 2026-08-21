@@ -10,7 +10,7 @@
  *   rather than merely written.
  *
  * Search is `@easyops-cn/docusaurus-search-local` rather than Algolia: DocSearch
- * requires a *public* site to qualify, and dziri is not published yet. Swapping to
+ * requires a *public* site to qualify, and dziry is not published yet. Swapping to
  * Algolia later is a themeConfig change, nothing more.
  */
 import { themes as prismThemes } from "prism-react-renderer";
@@ -25,11 +25,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, "..");
 
 /**
- * Citations become links once there is a remote to link to. Until then they render
- * as code with a tooltip naming the resolved file — set this and they light up.
- * e.g. "https://github.com/<you>/dziri/blob/main/{path}#L{line}"
+ * Citations link to the public repo by default; `DZIRY_SOURCE_URL` overrides it —
+ * useful for a fork, or for pointing at a branch while reviewing.
  */
-const SOURCE_URL = process.env.DZIRI_SOURCE_URL;
+const SOURCE_URL =
+  process.env.DZIRY_SOURCE_URL ?? "https://github.com/dziry-dev/dziry/blob/main/{path}#L{line}";
 
 const citations = [
   remarkCitations,
@@ -43,11 +43,11 @@ const citations = [
 ];
 
 const config: Config = {
-  title: "dziri",
+  title: "dziry",
   tagline: "A UI framework that does its work before the app runs",
   favicon: "img/favicon.svg",
 
-  url: "https://dziri.dev",
+  url: "https://dziry.dev",
   baseUrl: "/",
   trailingSlash: false,
 
@@ -109,7 +109,7 @@ const config: Config = {
   themeConfig: {
     colorMode: { defaultMode: "dark", respectPrefersColorScheme: true },
     navbar: {
-      title: "dziri",
+      title: "dziry",
       items: [
         { type: "docSidebar", sidebarId: "guide", position: "left", label: "Guide" },
         { type: "docSidebar", sidebarId: "api", position: "left", label: "API" },
@@ -119,7 +119,7 @@ const config: Config = {
     },
     footer: {
       style: "dark",
-      copyright: "dziri — compiled UI. Docs built from a tree that is checked, not remembered.",
+      copyright: "dziry — compiled UI. Docs built from a tree that is checked, not remembered.",
     },
     prism: {
       theme: prismThemes.github,

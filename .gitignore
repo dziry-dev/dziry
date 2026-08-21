@@ -61,7 +61,7 @@ vendor/mdn/
 
 # Code examples extracted from the docs by `bun run docs-check`, typechecked, and
 # deleted again. At the repo root rather than under docs/ because a package
-# self-reference (`import … from "dziri"`) resolves against the nearest ancestor
+# self-reference (`import … from "dziry"`) resolves against the nearest ancestor
 # package.json, and docs/ is its own workspace.
 .docs-examples/
 
@@ -69,5 +69,5 @@ vendor/mdn/
 docs/build/
 docs/.docusaurus/
 
-# `dziri build` output — a 117 MB executable and the wrapper entry it generates.
+# `dziry build` output — a 117 MB executable and the wrapper entry it generates.
 dist/

@@ -12,7 +12,7 @@
   import { log, report } from "./_harness.js";
 
   /**
-   * dziri is considering `name="user[email]"` — or `user.email` — collapsing into a nested
+   * dziry is considering `name="user[email]"` — or `user.email` — collapsing into a nested
    * object. Before designing that, the question is whether it would be *reproducing* a
    * browser behaviour or *inventing* one, because those two need different amounts of
    * justification and the answer is usually assumed rather than checked.
@@ -20,14 +20,14 @@
    * Four things are asked, and each is a claim someone might make from memory:
    *
    * 1. **Does `FormData` nest?** The bracket convention is old enough that it feels like
-   *    part of the platform. If `entries()` shows `user` holding an object, dziri should
-   *    match it exactly; if it shows the literal string as a key, dziri would be adding
+   *    part of the platform. If `entries()` shows `user` holding an object, dziry should
+   *    match it exactly; if it shows the literal string as a key, dziry would be adding
    *    something HTML does not have.
    * 2. **Does the *wire format* nest?** `FormData` is an API, and what a server receives is
    *    a urlencoded body — a different layer, and the one every server-side parser reads.
    * 3. **Do the dialects survive intact?** `a[b]`, `a[b][c]`, `a[]`, `a.b`, `a[0]`, and the
    *    odd ones out — an unclosed `a[b`, a leading `[a]`, an empty `a[][]`. Whatever a
-   *    browser does to these is the constraint on what dziri could parse.
+   *    browser does to these is the constraint on what dziry could parse.
    * 4. **Is there an enctype for it?** `application/json` was a real W3C proposal for
    *    exactly this — the vendored MDN prose lists only three enctypes, so it should have
    *    shipped nowhere. Worth checking rather than trusting the doc, since the doc is prose.

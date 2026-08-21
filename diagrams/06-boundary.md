@@ -7,7 +7,7 @@ Read directly from `src/protocol/schema.ts`, so it cannot disagree with the prot
 ```mermaid
 flowchart LR
   writer["<b>App thread</b><br/>src/host/worker.ts"]
-  reader["<b>Engine</b><br/>native-src/dziri-engine/src/tables.rs"]
+  reader["<b>Engine</b><br/>native-src/dziry-engine/src/tables.rs"]
   subgraph shared["Shared memory · protocol v10 · struct-of-arrays"]
     t_nodes["<b>nodes</b><br/>9 fields · 23 B/elem<br/><small>sized by nodes</small>"]
     t_styles["<b>styles</b><br/>58 fields · 177 B/elem<br/><small>sized by styles</small>"]

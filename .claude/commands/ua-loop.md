@@ -2,7 +2,7 @@
 description: Grow the UA stylesheet until html-coverage stops improving
 ---
 
-Grow dziri's UA stylesheet until `html-coverage` stops improving.
+Grow dziry's UA stylesheet until `html-coverage` stops improving.
 
 Run this with `/loop /ua-loop` to self-pace it, or plain `/ua-loop` for a single pass.
 

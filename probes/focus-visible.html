@@ -17,7 +17,7 @@
   import { log, report } from "./_harness.js";
 
   /**
-   * The question dziri needs answered.
+   * The question dziry needs answered.
    *
    * ROADMAP A3 wants `:focus-visible` as a bit distinct from `:focus`, "the
    * difference between polished and broken". That is a *rule*, and nobody has
@@ -35,7 +35,7 @@
    * table nobody should assert. This measures the whole grid.
    *
    * `outline` is carried alongside because it is the consequence: `:focus-visible`
-   * matching is only interesting if the UA sheet hangs a ring on it, and dziri has
+   * matching is only interesting if the UA sheet hangs a ring on it, and dziry has
    * to decide whether the ring is its own default or something an author opts into.
    */
 
@@ -95,7 +95,7 @@
     ["click link", { ...centre(el("link")), down: 1, up: 1 }],
 
     // The picker's own highlight, and it has to sit *here*, inside the pointer
-    // section. dziri draws the highlight with `option:focus` (measured in
+    // section. dziry draws the highlight with `option:focus` (measured in
     // select-picker.html: the activeElement while a picker is open is an <option>),
     // so whether that focus is *visible* focus decides whether a ring lands on the
     // highlighted row as well as a fill.
@@ -144,7 +144,7 @@
     log("");
     // A separate, smaller question with a separate answer: which of these is
     // focusable *at all* by script, as opposed to reachable by Tab. The two sets
-    // differ and dziri's compile-time table is the second one.
+    // differ and dziry's compile-time table is the second one.
     log("script-focusable (el.focus() then activeElement === el):");
     for (const id of ["btn", "text", "check", "radio", "link", "div", "sel"]) {
       const node = el(id);

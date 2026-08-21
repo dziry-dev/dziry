@@ -94,7 +94,7 @@ thread's commit can never land in the middle of a batch.
 
 ## Debugging
 
-`dziri dev --single` runs both halves in one thread, on the pre-Worker path. If
+`dziry dev --single` runs both halves in one thread, on the pre-Worker path. If
 something behaves differently under `--single`, the difference is in the threading
 rather than in your app.
 

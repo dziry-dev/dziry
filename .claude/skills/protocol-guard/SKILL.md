@@ -28,8 +28,8 @@ bun run protocol-guard --fix    # regenerate in place, then re-check
 3. **Regenerating is a no-op.** Anything else means someone forgot to run codegen, or hand-edited
    a generated file.
 4. **The built binary agrees with the source.** Loads the engine and calls
-   `dziri_protocol_version` / `dziri_schema_hash`. This is the one that catches a stale
-   `dziri_engine.dll` — source can be perfectly self-consistent while the binary was built before
+   `dziry_protocol_version` / `dziry_schema_hash`. This is the one that catches a stale
+   `dziry_engine.dll` — source can be perfectly self-consistent while the binary was built before
    the last schema change, which is the same corruption arriving by a different route.
 
 Check 4 resolves the library exactly as `engine/host.ts` does — cargo's `target/release` first,

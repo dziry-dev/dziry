@@ -11,7 +11,7 @@
  * `signal.ts` would import its own helpers through the transform that needs them.
  * Authored windows are the only code that should be getting this.
  *
- * On by default, and `DZIRI_REACTIVE=0` turns it off. It has to be on: the authoring
+ * On by default, and `DZIRY_REACTIVE=0` turns it off. It has to be on: the authoring
  * types now say a signal behaves as its value — `count * 2` type-checks — and only
  * the rewrite makes that true. A build with the types and without the rewrite would
  * accept code it then compiles wrong, which is worse than either half alone.
@@ -46,7 +46,7 @@ const HELPERS = `${PACKAGE}/compiler/reactive-runtime.ts`;
 
 /** Whether the rewrite is on for this build. */
 export function reactiveEnabled(): boolean {
-  return process.env.DZIRI_REACTIVE !== "0";
+  return process.env.DZIRY_REACTIVE !== "0";
 }
 
 /**
@@ -71,7 +71,7 @@ export function isAuthored(file: string): boolean {
 }
 
 export const reactivePlugin: BunPlugin = {
-  name: "dziri-reactive",
+  name: "dziry-reactive",
   setup(build) {
     // The filter does the scoping, not a check inside the callback.
     //

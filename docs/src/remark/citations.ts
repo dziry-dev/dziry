@@ -22,7 +22,7 @@ export type CitationOptions = {
   root: string;
   /**
    * Link target for a resolved citation, e.g.
-   * `https://github.com/you/dziri/blob/main/{path}#L{line}`.
+   * `https://github.com/you/dziry/blob/main/{path}#L{line}`.
    * Omitted — as it is today, the repo having no remote — renders a tooltip instead.
    */
   sourceUrl?: string;

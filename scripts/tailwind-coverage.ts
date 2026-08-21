@@ -1,5 +1,5 @@
 /**
- * What fraction of Tailwind actually works in dziri, and what is blocking the rest.
+ * What fraction of Tailwind actually works in dziry, and what is blocking the rest.
  *
  *   bun run tailwind-coverage             # summary + ranked blockers
  *   bun run tailwind-coverage --missing   # every unsupported property
@@ -40,16 +40,16 @@ const SAMPLE = sampleIdx > -1 ? argv[sampleIdx + 1]! : null;
 
 const SPEC = cssProperties as unknown as Record<string, { initial: string | string[]; groups?: string[] }>;
 
-// ── what dziri parses ────────────────────────────────────────────────────────
+// ── what dziry parses ────────────────────────────────────────────────────────
 /**
- * What dziri parses, from the compiler's own property table.
+ * What dziry parses, from the compiler's own property table.
  *
  * Was a regex over `css.ts`'s source. The `if (!spec) continue` below used to be
  * load-bearing for a second reason — the regex matched `case` at any depth, so value
  * keywords from nested switches arrived here and had to be filtered out. They no
  * longer do; the guard now only skips properties `mdn-data` does not know.
  */
-function dziriSupported(): Set<string> {
+function dzirySupported(): Set<string> {
   const out = new Set<string>();
   for (const name of Object.keys(PROPERTIES)) {
     const spec = SPEC[name];
@@ -60,7 +60,7 @@ function dziriSupported(): Set<string> {
   }
   out.add("overflow-x");
   out.add("overflow-y"); // `overflow`'s initial is single-valued, so the test above misses it
-  out.add("-webkit-backdrop-filter"); // vendor-prefixed; not in mdn-data, parsed by dziri
+  out.add("-webkit-backdrop-filter"); // vendor-prefixed; not in mdn-data, parsed by dziry
   return out;
 }
 
@@ -268,7 +268,7 @@ function rulesByClass(css: string, known: Set<string>): Map<string, { props: Set
  * number on its own.
  */
 
-const supported = dziriSupported();
+const supported = dzirySupported();
 const classes = await tailwindClasses();
 console.log(`tailwind-coverage  ${classes.length} classes from the installed tailwindcss\n`);
 
@@ -294,7 +294,7 @@ for (const m of css.matchAll(/@property\s+(--[\w-]+)\s*\{([^}]*)\}/g)) {
  * Resolves `var()` the way the cascade would for a class standing alone: the
  * class's own `--*` declarations, then the `@property` initials, then the
  * fallback inside the `var()`. `null` when a variable is unresolvable — which is
- * not a blocker: CSS drops the declaration, and so does dziri's compiler, so the
+ * not a blocker: CSS drops the declaration, and so does dziry's compiler, so the
  * class computes exactly as a browser computes it.
  */
 function resolveVars(
@@ -313,7 +313,7 @@ function resolveVars(
 
 // Not every enumerable class emits a rule on its own — some only produce one in a
 // variant or container context. They are outside the denominator because there is
-// nothing for dziri to succeed or fail at, but the count is printed rather than
+// nothing for dziry to succeed or fail at, but the count is printed rather than
 // dropped silently: a denominator that quietly excludes classes reads as coverage.
 const noRule = classes.filter((c) => !rules.has(c)).length;
 

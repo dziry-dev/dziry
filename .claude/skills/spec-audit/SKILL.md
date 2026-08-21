@@ -1,6 +1,6 @@
 ---
 name: spec-audit
-description: Check dziri's computed-style defaults against the CSS spec using mdn-data — initial values and inheritance flags for every field in STYLE_FIELDS. Use after adding or changing a style field, after editing INITIAL_STYLE or INHERITED_FIELDS in src/ir.ts, when a property behaves oddly with no rule setting it, and before claiming CSS conformance. Runs `bun run spec-audit`.
+description: Check dziry's computed-style defaults against the CSS spec using mdn-data — initial values and inheritance flags for every field in STYLE_FIELDS. Use after adding or changing a style field, after editing INITIAL_STYLE or INHERITED_FIELDS in src/ir.ts, when a property behaves oddly with no rule setting it, and before claiming CSS conformance. Runs `bun run spec-audit`.
 ---
 
 # spec-audit
@@ -20,7 +20,7 @@ bun run spec-audit --all   # also list the fields that agree
 
 ## Three buckets
 
-**agree** — dziri matches the spec. Nothing to do.
+**agree** — dziry matches the spec. Nothing to do.
 
 **deliberate** — a divergence that is a decision, listed with its reasoning in the `DELIBERATE`
 table in `scripts/spec-audit.ts`. These are **listed, not skipped**, on purpose: the point of an
@@ -33,7 +33,7 @@ being visible and start being folklore.
 
 Ask in this order:
 
-1. **Is the comparator wrong?** dziri stores integers and sentinels; the spec says keywords. Two
+1. **Is the comparator wrong?** dziry stores integers and sentinels; the spec says keywords. Two
    of the first four findings were this — `nowrap` is `FlexWrap.NO_WRAP` (0) and `normal` is
    font-weight 400. Keyword mappings live in `KEYWORD`, deliberately **field-scoped**, because
    `normal` means 400 for font-weight and 0 for a gap; one global table would have made one of
@@ -46,8 +46,8 @@ Ask in this order:
 
 ## It found a real one on its first run
 
-`borderColor`'s initial value is `currentcolor` — the element's own `color` — and dziri had it as
-transparent. So `border: 2px solid` with no colour is invisible in dziri and text-coloured in a
+`borderColor`'s initial value is `currentcolor` — the element's own `color` — and dziry had it as
+transparent. So `border: 2px solid` with no colour is invisible in dziry and text-coloured in a
 browser. Confirmed against Chromium 151 and recorded in `BROWSER-FACTS.md`.
 
 Worth noticing *why* that fix is cheap: `currentcolor` looks dynamic and is not. The cascade

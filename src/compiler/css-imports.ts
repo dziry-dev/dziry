@@ -102,7 +102,7 @@ export function installCssGraph(): void {
   installed = true;
 
   plugin({
-    name: "dziri:css-graph",
+    name: "dziry:css-graph",
     setup(build) {
       build.onResolve({ filter: /.*/ }, (args) => {
         // An entry point has no importer. Nothing to attribute it to, and the

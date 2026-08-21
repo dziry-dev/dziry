@@ -167,7 +167,7 @@ type BuiltNode = {
  *
  * The one place a per-node predicate is named. Everything downstream — the mask,
  * the run, the patch machinery, the engine — works on bits, so widening the set of
- * states dziri understands is an entry here plus one in `SUPPORTED_PSEUDO`.
+ * states dziry understands is an entry here plus one in `SUPPORTED_PSEUDO`.
  * `:checked` and `:disabled` are the first two added since that became true, and
  * they cost exactly that (ROADMAP C2).
  */
@@ -789,7 +789,7 @@ const TEXT_ENTRY_TYPES = new Set([
    *
    * An `<input type="number">` compiled to a box with no editor and no line height: four
    * pixels of border, which is what the forms demo drew where its age field should have been.
-   * A browser routes it to the same text editor and adds chrome dziri does not have — a
+   * A browser routes it to the same text editor and adds chrome dziry does not have — a
    * spinner — so being typeable is the part that transfers.
    *
    * `range` *was* here on the same argument and left when it became a real control: a
@@ -842,7 +842,7 @@ function isTextEntry(el: Element): boolean {
  *
  * HTML calls this "interactive content" and excludes it from a label's activation
  * behaviour, which is why a button inside a label does not tick the checkbox beside
- * it. dziri can only produce two kinds of it — a control and a `<button>` — so this
+ * it. dziry can only produce two kinds of it — a control and a `<button>` — so this
  * is that category narrowed to what is reachable, not a general implementation of
  * it.
  *
@@ -897,7 +897,7 @@ const TAB_STOP_TAGS = new Set(["input", "textarea", "select"]);
  * support here — see [`tabIndexOf`]. It needed no new bit and no protocol change, which
  * was worth checking rather than assuming: `NodeFlags.TAB_STOP`'s own comment anticipated
  * a second bit for "focusable but not tabbable", and that second set turns out to be
- * empty in dziri today. A pointer press focuses whatever it hits regardless of any flag,
+ * empty in dziry today. A pointer press focuses whatever it hits regardless of any flag,
  * so `tabindex="-1"` is exactly "not a tab stop" and one bit says it.
  */
 function isTabStop(el: Element, path: Element[]): boolean {
@@ -916,7 +916,7 @@ function isTabStop(el: Element, path: Element[]): boolean {
  * the whole positive group sorts ahead of everything else, and `div[tabindex="3"]` was
  * reached *after* the document wrapped, as the first stop of the next cycle.
  *
- * dziri refuses that, and the refusal is structural rather than a missing feature.
+ * dziry refuses that, and the refusal is structural rather than a missing feature.
  * ROADMAP A3's design is that the order **is** a walk of the live tree; honouring a
  * positive `tabindex` would make it a sort with a walk as its tiebreak, which is a
  * different algorithm and one that cannot be a walk at all. The element still becomes a
@@ -2090,7 +2090,7 @@ export function compileTree(
         `tabindex="${explicitTabIndex}" on <${el.tag}> is treated as tabindex="0".\n` +
           `    A positive tabindex does not sit where it is written: browsers sort the whole\n` +
           `    positive group ahead of every other stop (measured, probes/tab-order.html), which\n` +
-          `    makes tab order a sort rather than a walk of the tree. dziri walks.\n` +
+          `    makes tab order a sort rather than a walk of the tree. dziry walks.\n` +
           `    The element is still reachable by Tab, in document order.\n` +
           `    ${where}`,
       );
@@ -2119,7 +2119,7 @@ export function compileTree(
         node: self,
         tag: el.tag,
         // Focusable is wider than tabbable by exactly `tabindex="-1"`, and `autofocus`
-        // is the first thing in dziri that needs the wider set: a browser will autofocus
+        // is the first thing in dziry that needs the wider set: a browser will autofocus
         // an element script can focus, whether or not Tab can reach it.
         focusable: isTabStop(el, path) || tabIndexOf(el) !== null,
         where,
@@ -3146,9 +3146,9 @@ function buildTabStops(nodes: BuiltNode[]): Int32Array {
  * Marks every element that can hold focus and asked for it, and warns about the rest.
  *
  * **Every** one, not the winner. Choosing is the engine's job, and the reason is a
- * measurement plus a fact about dziri. Measured (`probes/autofocus-hidden.html`): an
+ * measurement plus a fact about dziry. Measured (`probes/autofocus-hidden.html`): an
  * unfocusable claim neither wins nor aborts — Chromium walks past it to the next. And in
- * dziri a page is fourteen routes with thirteen hidden on the first frame, so several
+ * dziry a page is fourteen routes with thirteen hidden on the first frame, so several
  * claims are normal and which of them is *showing* is the only thing that decides, which
  * is runtime state. Resolving here would either pick a hidden node or need a compile-time
  * model of routing that would be wrong the first time anything navigated.
@@ -3255,7 +3255,7 @@ function resolveForms(
     if (raw === "submit" || raw === "change" || raw === "blur") return raw;
     warn(
       `validateOn="${raw}" is not one of submit, change or blur — treated as "submit".\n` +
-        `    dziri names the trigger rather than the handler, so it is "change" and not\n` +
+        `    dziry names the trigger rather than the handler, so it is "change" and not\n` +
         `    "onChange". There is no "touched" or "all": a form re-validates as its fields\n` +
         `    change once a submit has failed, whatever this says.`,
     );
@@ -3863,7 +3863,7 @@ function typedArray(ctor: string, values: number[]): string {
  * One string, in one place, because it appears in emitted *text*: get it wrong
  * and the failure is a module the author never wrote failing to resolve.
  */
-export const PACKAGE = "dziri";
+export const PACKAGE = "dziry";
 
 /**
  * A cheap non-cryptographic hash, for fingerprints that answer "did this change?"
@@ -4774,7 +4774,7 @@ export const routeSignal: ReadonlySignal<string> | null = ${routing.routeSignal 
  * The window's Effect layer — \`<Window layer={…}>\` — or null.
  *
  * The host builds a ManagedRuntime from it at launch and disposes it on quit, so
- * layer finalizers run. \`unknown\` because dziri does not depend on effect; the
+ * layer finalizers run. \`unknown\` because dziry does not depend on effect; the
  * value is recognised and run through a lazy import (runtime/effects.ts).
  *
  * \`windowLayer\`, not \`layer\`: the app's own export is conventionally named
@@ -4786,7 +4786,7 @@ export const windowLayer: unknown = ${routing.layer ?? "null"};
 /**
  * Route loaders, indexed by route — the function to run on navigation, or null.
  * Loosely typed for the same reason windowLayer is:
- * dziri does not depend on effect, and the returned value's shape is decided at
+ * dziry does not depend on effect, and the returned value's shape is decided at
  * run time (runtime/effects.ts::runLoader).
  */
 export const loaders: (((args: Record<string, string>) => unknown) | null)[] = [

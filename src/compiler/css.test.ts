@@ -40,7 +40,7 @@ function diagnose(src: string): string | null {
 test("an unsupported selector is reported at its own line and column", () => {
   // This used to use `input[type=text]`, which is now supported — attribute
   // selectors were built so a UA stylesheet could name one control among the
-  // twenty-two that share the `input` tag. A pseudo-element dziri does not have
+  // twenty-two that share the `input` tag. A pseudo-element dziry does not have
   // is the current example, and a better one: it is refused *by name*, so the
   // diagnostic says which feature is missing rather than "syntax".
   const out = diagnose(".ok { color: red }\n\nselect::picker-icon { color: red }\n");
@@ -223,7 +223,7 @@ test("the 1-to-4-value box shorthand maps as CSS says", () => {
 /**
  * Tailwind's ring utilities, as the compiler actually receives them.
  *
- * Not hand-written approximations of the CSS: these are the strings dziri's own
+ * Not hand-written approximations of the CSS: these are the strings dziry's own
  * `var()`/`@property` machinery produces from real Tailwind v4.3.3 output, measured and
  * recorded in BROWSER-FACTS.md. The four transparent placeholders are the unset
  * `--tw-*-shadow` variables reaching their `@property` initial values, and they matter —
@@ -411,7 +411,7 @@ test("`flex` with a length basis keeps the basis", () => {
 
 test("`border` resets style to none and honours it, as CSS says", () => {
   // A shorthand with no style keyword resets style to its `none` initial, so a
-  // browser paints nothing here — and now neither does dziri.
+  // browser paints nothing here — and now neither does dziry.
   expect(expand("border", "#ff0000")).toEqual({
     borderTopWidth: 0,
     borderRightWidth: 0,
@@ -544,7 +544,7 @@ test("appearance folds <compat-auto> to auto and keeps base-select distinct", ()
   expect(expand("appearance", "base-select")).toEqual({ appearance: 2 });
 
   // "The values all behave as `auto`" — so they are accepted and folded, not
-  // refused. dziri's field stores the effect; Chrome's computed value is
+  // refused. dziry's field stores the effect; Chrome's computed value is
   // as-specified, which is a representation divergence recorded in conformance.
   for (const v of ["button", "checkbox", "radio", "menulist", "listbox", "meter", "progress-bar", "searchfield", "textarea"]) {
     expect(expand("appearance", v)).toEqual({ appearance: 1 });
@@ -559,7 +559,7 @@ test("appearance folds <compat-auto> to auto and keeps base-select distinct", ()
   // Specified but unimplemented anywhere, and Chromium drops the declaration.
   expect(() => expand("appearance", "base")).toThrow(CssError);
 
-  // `<compat-special>`: real distinct effects, and dziri has neither an input-type
+  // `<compat-special>`: real distinct effects, and dziry has neither an input-type
   // system nor a picker to apply them to. Refusing beats accepting-and-ignoring.
   expect(() => expand("appearance", "textfield")).toThrow(CssError);
   expect(() => expand("appearance", "menulist-button")).toThrow(CssError);
@@ -880,7 +880,7 @@ test("a percentage length keeps the fraction and zeroes the px", () => {
 
 test("a viewport length is a fraction of the window, dvh included", () => {
   expect(expand("height", "100vh")).toEqual({ height: 0, heightPct: 0, heightVp: 1 });
-  // No browser chrome in a dziri window, so the small/large/dynamic sizes are one.
+  // No browser chrome in a dziry window, so the small/large/dynamic sizes are one.
   expect(expand("height", "100dvh")).toEqual({ height: 0, heightPct: 0, heightVp: 1 });
   // The header-offset pattern: viewport and absolute parts sum.
   expect(expand("height", "calc(100vh - 4rem)")).toEqual({ height: -64, heightPct: 0, heightVp: 1 });
@@ -1219,7 +1219,7 @@ const rad = (deg: number) => (deg * Math.PI) / 180;
 
 /**
  * The decomposed fields composed back into one matrix, in the single order
- * dziri stores: translate, rotate, skewX, skewY, scale. The engine has to do
+ * dziry stores: translate, rotate, skewX, skewY, scale. The engine has to do
  * this same composition at paint time.
  */
 function composed(f: Record<string, number>): Mat {
@@ -1343,14 +1343,14 @@ test("a transform list out of canonical order is refused, not reordered", () => 
   // the reverse puts it, so silently reordering would render something the
   // author cannot get a browser to show them.
   expect(() => expand("transform", "rotate(45deg) translateX(10px)")).toThrow(
-    /not in an order dziri can store/,
+    /not in an order dziry can store/,
   );
   expect(() => expand("transform", "scale(2) rotate(45deg)")).toThrow(/order/i);
   // Same rank either way round, so this one is fine.
   expect(() => expand("transform", "translateX(10px) translateY(5px)")).not.toThrow();
 });
 
-test("transform functions dziri cannot store are refused by name", () => {
+test("transform functions dziry cannot store are refused by name", () => {
   expect(() => expand("transform", "matrix(1,0,0,1,10,20)")).toThrow(/matrix\(\) is not supported/);
   expect(() => expand("transform", "translate3d(1px,2px,3px)")).toThrow(/3D/);
   expect(() => expand("transform", "rotateZ(45deg)")).toThrow(/use that/);
@@ -1422,7 +1422,7 @@ test("transform-origin refuses what CSS refuses", () => {
     /names the X axis but sits in the Y/,
   );
   expect(() => expand("transform-origin", "left right")).toThrow(/names the X axis twice/);
-  // The third value is a Z origin, and dziri is 2D.
+  // The third value is a Z origin, and dziry is 2D.
   expect(() => expand("transform-origin", "50% 50% 5px")).toThrow(/2D/);
 });
 
@@ -1583,7 +1583,7 @@ test("the easing keywords carry the control points the spec gives them", () => {
   });
 });
 
-test("an easing dziri cannot express is refused rather than approximated", () => {
+test("an easing dziry cannot express is refused rather than approximated", () => {
   // An `x` outside 0..1 makes the curve not a function of time, and CSS rejects it.
   expect(parseEasing("cubic-bezier(1.5, 0, 0.2, 1)")).toBe(null);
   // `y` outside it is legal, and is how an overshoot is written.
@@ -1663,8 +1663,8 @@ test("transition-property becomes a mask, and refuses layout by name", () => {
   expect(warned[0]).toContain("width");
   expect(warned[0]).toContain("changes layout");
 
-  // A property dziri does not have at all is dropped in silence — Tailwind's default
-  // `.transition` names twenty-two of them and dziri has six, so warning would print
+  // A property dziry does not have at all is dropped in silence — Tailwind's default
+  // `.transition` names twenty-two of them and dziry has six, so warning would print
   // sixteen lines per build and bury the one that matters.
   const quietWarned: string[] = [];
   expect(transitionMask(["filter", "fill", "box-shadow"], (m) => quietWarned.push(m))).toBe(0);

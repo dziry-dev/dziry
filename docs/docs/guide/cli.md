@@ -6,13 +6,13 @@ sidebar_position: 10
 # The CLI
 
 ```bash
-dziri compile [window]        # compile every window under ./windows, or just one
-dziri dev [-- app flags]      # compile, then run the app
-dziri build [options]         # package the app as one executable
+dziry compile [window]        # compile every window under ./windows, or just one
+dziry dev [-- app flags]      # compile, then run the app
+dziry build [options]         # package the app as one executable
 ```
 
 In a framework checkout these are `bun run cli <command>`; in a scaffolded app the
-`dziri` bin is on the path.
+`dziry` bin is on the path.
 
 The CLI operates on the **working directory**. That sounds obvious and was not: the
 compiler used to take its own location for the project's, which is true exactly once
@@ -21,9 +21,9 @@ and false for every scaffolded app.
 ## compile
 
 ```bash
-dziri compile              # every window
-dziri compile main         # just this one
-dziri compile --dump       # ...and print the IR
+dziry compile              # every window
+dziry compile main         # just this one
+dziry compile --dump       # ...and print the IR
 ```
 
 Compiles each window — shell plus every route — into one tree, resolves the cascade,
@@ -40,9 +40,9 @@ measured: two pages of one design system shared six of eight style rows.
 ## dev
 
 ```bash
-dziri dev
-dziri dev --route products/new --size 520x700
-dziri dev --screenshot shot.png
+dziry dev
+dziry dev --route products/new --size 520x700
+dziry dev --screenshot shot.png
 ```
 
 Compiles, then runs. Anything the CLI does not recognise is passed to the app:
@@ -57,14 +57,14 @@ Compiles, then runs. Anything the CLI does not recognise is passed to the app:
 | `--stats` | Print frame timings. |
 
 You can also write `--` explicitly to separate them:
-`dziri dev -- --route products/new`.
+`dziry dev -- --route products/new`.
 
 `--single` runs both halves in one thread — the pre-Worker path. It exists for
 debugging and comparison; see [Threads](../internals/threads.md) for what it gives up.
 
 ### Hot reload
 
-`dziri dev` watches `windows/` while the app runs. What happens on save depends on
+`dziry dev` watches `windows/` while the app runs. What happens on save depends on
 what changed:
 
 - **A `.css` save that only moves style *values*** — a colour, a padding, an
@@ -82,7 +82,7 @@ what changed:
   not carried; they cannot cross a worker boundary as themselves.)
 - **A save that does not compile** prints the error and keeps the running app.
 
-Compiles are warm. `dziri dev` runs the compiler as a persistent process, so a
+Compiles are warm. `dziry dev` runs the compiler as a persistent process, so a
 save re-imports only the files that changed and whatever imports them — the rest
 of the module graph (the compiler itself, Tailwind, Effect, LiveStore, your
 untouched modules) stays loaded. Measured on a small LiveStore app: 2.8s cold,
@@ -96,12 +96,12 @@ fallback when the IPC channel itself is gone.
 ## build
 
 ```bash
-dziri build
-dziri build --out release --name Fabric
+dziry build
+dziry build --out release --name Fabric
 ```
 
 One executable. The app is bundled with `bun build --compile` over the same
-`windows/entry.gen.ts` that `dziri dev` runs — so a bug that only appears in the
+`windows/entry.gen.ts` that `dziry dev` runs — so a bug that only appears in the
 packaged app is a *packaging* bug, not a different code path.
 
 | Flag | Default | What it does |

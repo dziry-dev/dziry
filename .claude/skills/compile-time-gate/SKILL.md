@@ -1,6 +1,6 @@
 ---
 name: compile-time-gate
-description: Apply dziri's governing principle before adding anything to the runtime. Use whenever a feature is proposed, designed or implemented that would add runtime code, runtime state, a per-frame cost or a new dynamic capability — including anything in src/runtime/, the engine's tick path, or a new entry in the shared-memory schema. Also use when reviewing a design doc or an API proposal, and when someone says a feature "needs" to be dynamic.
+description: Apply dziry's governing principle before adding anything to the runtime. Use whenever a feature is proposed, designed or implemented that would add runtime code, runtime state, a per-frame cost or a new dynamic capability — including anything in src/runtime/, the engine's tick path, or a new entry in the shared-memory schema. Also use when reviewing a design doc or an API proposal, and when someone says a feature "needs" to be dynamic.
 ---
 
 # compile-time-gate

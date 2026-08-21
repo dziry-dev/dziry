@@ -69,14 +69,14 @@ test("non-file inputs have no accept/multiple", () => {
 
 // --- fileInfo / readFile helpers -----------------------------------------------
 
-const TMP_FILE = join(tmpdir(), "dziri-test-file.txt");
-const TMP_CONTENT = "hello dziri";
+const TMP_FILE = join(tmpdir(), "dziry-test-file.txt");
+const TMP_CONTENT = "hello dziry";
 
 test("fileInfo returns name, size, type for a text file", async () => {
   writeFileSync(TMP_FILE, TMP_CONTENT);
   try {
     const info = await fileInfo(TMP_FILE);
-    expect(info.name).toBe("dziri-test-file.txt");
+    expect(info.name).toBe("dziry-test-file.txt");
     expect(info.size).toBe(TMP_CONTENT.length);
     expect(info.type).toBe("text/plain");
   } finally {
@@ -121,7 +121,7 @@ test("fileInfo strips file:// prefix", async () => {
   writeFileSync(TMP_FILE, TMP_CONTENT);
   try {
     const info = await fileInfo(`file://${TMP_FILE.replace(/\\/g, "/")}`);
-    expect(info.name).toBe("dziri-test-file.txt");
+    expect(info.name).toBe("dziry-test-file.txt");
     expect(info.size).toBe(TMP_CONTENT.length);
   } finally {
     unlinkSync(TMP_FILE);

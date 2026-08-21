@@ -171,7 +171,7 @@ export type Props = {
    * With a `validate={…}` the argument is that schema's **output** instead, and this does
    * not run at all when validation fails — see [`onInvalid`].
    *
-   * There is no event object and nothing to `preventDefault`: dziri never navigates, so a
+   * There is no event object and nothing to `preventDefault`: dziry never navigates, so a
    * submission is only ever a call into app code.
    *
    * **Enter does not always submit**, and the conditions are measured rather than
@@ -199,7 +199,7 @@ export type Props = {
    * and ArkType implement natively — is used through it. An **Effect** schema does not
    * carry it (measured on effect 3.22), so it is recognised by its `ast` and converted with
    * Effect's own `Schema.standardSchemaV1` after a lazy import; `effect` is never a
-   * dependency of dziri, only of the app that passed one.
+   * dependency of dziry, only of the app that passed one.
    *
    * A schema **narrows what `onSubmit` receives**: the payload goes in, the schema's output
    * comes out, so `Schema.NumberFromString` or `z.coerce.date()` hands the handler the
@@ -282,7 +282,7 @@ export type Props = {
    *
    * A **positive** value is refused with a build warning and treated as `0`. Browsers
    * sort the whole positive group ahead of every other stop — measured — which makes tab
-   * order a sort rather than the walk of the live tree dziri is built on. The element
+   * order a sort rather than the walk of the live tree dziry is built on. The element
    * still gets a stop, in document order; see `tabIndexOf` in the compiler.
    */
   tabindex?: number | string;
@@ -296,7 +296,7 @@ export type Props = {
    * It fires exactly once. An element carrying `autofocus` that appears later, from a
    * list growing or a route showing, does not steal the caret: measured in Chromium
    * (`probes/focus-without-interaction.html`), and a stronger requirement here than
-   * there, since dziri republishes its tables whenever any signal changes.
+   * there, since dziry republishes its tables whenever any signal changes.
    */
   autofocus?: boolean;
   readOnly?: boolean;
@@ -309,7 +309,7 @@ export type Props = {
    * `probes/select-listbox.html`, same box and same in-flow options as a `multiple`. So
    * this is not a cosmetic hint — it decides which of two elements the tag compiles to.
    *
-   * Also `<input size=…>`, which dziri does not implement. Typed as a string or a number
+   * Also `<input size=…>`, which dziry does not implement. Typed as a string or a number
    * because both spellings are ordinary in JSX and the compiler parses it either way.
    */
   size?: number | string;
@@ -1051,7 +1051,7 @@ type ElementProps = Props & {
    * **Not a browser attribute.** HTML has no nesting at all: `name="user[email]"` is the
    * literal key `"user[email]"` in `FormData`, and the bracket convention is invented by
    * server-side parsers, each with its own dialect (measured, `probes/form-nested-names.html`).
-   * dziri nests by *structure* instead, because a compiler can see the structure — so there is
+   * dziry nests by *structure* instead, because a compiler can see the structure — so there is
    * no path syntax to parse, and a conflict is a build error rather than the silent
    * last-write-wins every one of those parsers has.
    */
@@ -1073,7 +1073,7 @@ type ElementProps = Props & {
    * With Tailwind, define the variant in its **prefix** form — `@custom-variant error
    * (.group\/error &)` — which emits `.group\/error .error\:block`, a plain descendant
    * selector. Tailwind's default form emits `:is(:where(.group\/error) *)`, and the `*`
-   * inside `:is()` is not a selector dziri parses.
+   * inside `:is()` is not a selector dziry parses.
    *
    * A wrapper is in error when any issue's path has the wrapper's path as a **prefix**, so a
    * `field="position"` wrapper lights up for an issue at `position.x`.

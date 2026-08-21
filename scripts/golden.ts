@@ -68,8 +68,8 @@ let broke = 0;
 let blessed = 0;
 
 for (const s of list) {
-  const tmp = join(tmpdir(), `dziri-golden-${s.name}-${process.pid}.png`);
-  // The generated entry, which is what `dziri dev` and `dziri build` both run —
+  const tmp = join(tmpdir(), `dziry-golden-${s.name}-${process.pid}.png`);
+  // The generated entry, which is what `dziry dev` and `dziry build` both run —
   // so a golden proves the app, not a second way of starting it.
   const proc = Bun.spawn(["bun", "run", "windows/entry.gen.ts", "--screenshot", tmp, ...s.args], {
     cwd: ROOT,

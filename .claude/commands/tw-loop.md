@@ -2,7 +2,7 @@
 description: Grow Tailwind class coverage until tailwind-coverage stops improving
 ---
 
-Grow the fraction of Tailwind that works in dziri until `tailwind-coverage` stops improving.
+Grow the fraction of Tailwind that works in dziry until `tailwind-coverage` stops improving.
 
 Run this with `/loop /tw-loop` to self-pace it, or plain `/tw-loop` for a single pass.
 
@@ -71,7 +71,7 @@ files.
 
 **The logical border family is *not* Tier A, though it looks like it.** An earlier version of this
 file claimed `border-inline-color` and friends fold onto the single `borderColor` field for ~1,746
-easy classes. They do not. dziri has *one* `borderColor` and *one* `borderWidth`
+easy classes. They do not. dziry has *one* `borderColor` and *one* `borderWidth`
 (`src/ir.ts:124-129`), and `paint.rs:987-1018` strokes a single uniform border — one width
 subtracted equally on all four sides. Folding `border-inline-width` onto that makes `border-x-2`
 paint all four edges, and `border-2 border-x-red-500` colour all four red. There is no `borderStyle`
@@ -109,7 +109,7 @@ read the ranked list with masks removed: `bun run tailwind-coverage --what-if "c
 
 ## Hard constraints
 
-- **Never add a row that does not implement the property.** `dziriSupported()`
+- **Never add a row that does not implement the property.** `dzirySupported()`
   (`scripts/tailwind-coverage.ts:51-59`) detects support by reading `Object.keys(PROPERTIES)` from
   `src/compiler/properties.ts`. A row whose `parse` drops the value, or a `handledByCaller` entry
   added for a property no caller actually expands, raises the coverage number while changing
@@ -121,7 +121,7 @@ read the ranked list with masks removed: `bun run tailwind-coverage --what-if "c
   `thin` and `none` in as candidate properties. The table replaced the switch and the scrape.)
 - **Check what the value parsers do with the values Tailwind actually emits, before adding the
   row.** Support is measured per *property*, but `parseLength` and `parseColor` reject whole
-  classes of *value*. Adding a row for a property whose values dziri cannot parse converts
+  classes of *value*. Adding a row for a property whose values dziry cannot parse converts
   "warned and ignored" (`properties.ts:1177`) into a fatal build error, because
   `src/compile.ts:111` rethrows `CssError` — and the coverage number goes *up* while the class
   goes from silently inert to breaking the build. `parseLength` throws on every percentage

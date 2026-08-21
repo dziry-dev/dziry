@@ -203,7 +203,7 @@ export type FieldArray = {
 const typeOf = (el: Element): string => (el.attrs.get("type") ?? "").toLowerCase();
 
 /**
- * The elements a form owns — HTML's "form-associated" ones, narrowed to what dziri has.
+ * The elements a form owns — HTML's "form-associated" ones, narrowed to what dziry has.
  *
  * `<button>` is in it and is not a field: it is here because *ownership* decides which
  * button Enter clicks, which is a different question from what the payload contains.
@@ -628,7 +628,7 @@ export function collectFields(
       if (el.tag === "input" && typeOf(el) === "file" && name !== "") {
         warn(
           `<input type="file" name="${name}"> is not in the payload.\n` +
-            `    dziri has no file picker, so there is no file to submit and no File to put in\n` +
+            `    dziry has no file picker, so there is no file to submit and no File to put in\n` +
             `    the entry. The element still compiles to a box; it just contributes nothing.`,
         );
       }
@@ -928,7 +928,7 @@ export function formKeys(
         : first.kind === "radio" || first.kind === "submitter"
           ? "one"
           : first.kind === "checkbox"
-            // A lone valueless checkbox is the one place dziri deliberately parts company
+            // A lone valueless checkbox is the one place dziry deliberately parts company
             // with the payload a browser builds. A browser omits an unchecked box entirely,
             // which makes `terms` present-or-absent; here it is `true` or `false`, because
             // that is what a schema wants and what an author reading `data.terms` expects.

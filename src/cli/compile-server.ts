@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * `dziri dev`'s warm compiler — a persistent process, because the alternative
+ * `dziry dev`'s warm compiler — a persistent process, because the alternative
  * was the bottleneck.
  *
  * A dev compile imports the app's modules to evaluate its components, and a
@@ -38,7 +38,7 @@ const only = process.argv[3];
 
 const sendRaw = (process as unknown as { send?: (m: unknown) => void }).send;
 if (!sendRaw) {
-  console.error("  the compile server is spawned by `dziri dev` — it needs its IPC channel.");
+  console.error("  the compile server is spawned by `dziry dev` — it needs its IPC channel.");
   process.exit(1);
 }
 const send: (m: unknown) => void = (m) => sendRaw.call(process, m);

@@ -2,7 +2,7 @@
  * `<Suspense>` — the compiled boundary, proven on real emitter output.
  *
  * The fixture pattern is `links.test.tsx`'s: a temp project with a junction to
- * this repo as `node_modules/dziri`, compiled with the real `compileProject`,
+ * this repo as `node_modules/dziry`, compiled with the real `compileProject`,
  * asserted by importing the artifact it wrote. What only this can prove is the
  * whole path — the marker dissolving before the cascade, the boundary's node ids
  * surviving the walk, the resource crossing as a named import, and the hidden
@@ -29,30 +29,30 @@ afterAll(() => {
 });
 
 function project(pageBody: string, state?: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "dziri-suspense-"));
+  const dir = mkdtempSync(join(tmpdir(), "dziry-suspense-"));
   fixtures.push(dir);
   const mainDir = join(dir, "windows", "main");
   mkdirSync(join(mainDir, "pages"), { recursive: true });
   mkdirSync(join(dir, "node_modules"));
-  symlinkSync(REPO, join(dir, "node_modules", "dziri"), "junction");
+  symlinkSync(REPO, join(dir, "node_modules", "dziry"), "junction");
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "suspense-e2e", type: "module" }));
   writeFileSync(
     join(dir, "tsconfig.json"),
     JSON.stringify({
-      compilerOptions: { jsx: "react-jsx", jsxImportSource: "dziri" },
+      compilerOptions: { jsx: "react-jsx", jsxImportSource: "dziry" },
       include: ["windows"],
     }),
   );
   writeFileSync(
     join(mainDir, "state.ts"),
     state ??
-      `import { resource } from "dziri";
+      `import { resource } from "dziry";
 export const stats = resource(() => Promise.resolve("42 users"), "");
 `,
   );
   writeFileSync(
     join(mainDir, "index.tsx"),
-    `import { Outlet, Window } from "dziri";
+    `import { Outlet, Window } from "dziry";
 export default function Main() {
   return (
     <Window title="suspense">
@@ -64,7 +64,7 @@ export default function Main() {
   );
   writeFileSync(
     join(mainDir, "pages", "index.tsx"),
-    `import { Suspense } from "dziri";
+    `import { Suspense } from "dziry";
 import { stats } from "../state.ts";
 export default function Home() {
   return ${pageBody};
@@ -140,7 +140,7 @@ test("on={…} with a plain signal is refused — it has no pending state to wat
     `<Suspense fallback={<div>wait</div>} on={[stats]}>
       <div>static</div>
     </Suspense>`,
-    `import { signal } from "dziri";\nexport const stats = signal("not a resource");\n`,
+    `import { signal } from "dziry";\nexport const stats = signal("not a resource");\n`,
   );
   expect(compileProject({ projectDir: dir, hot: new Map() })).rejects.toThrow(BuildError);
   await compileProject({ projectDir: dir, hot: new Map() }).catch((e: Error) => {

@@ -33,7 +33,7 @@
    *
    * `base-select` is the spec's opt-in that moves the picker *into* the page, which
    * is what makes `:open`, `toggle` events and `::picker(select)` exist at all. It is
-   * also the model dziri is copying — `ua-structure.ts` already builds the
+   * also the model dziry is copying — `ua-structure.ts` already builds the
    * `<button><selectedcontent>` half of it — so this measures the thing being
    * implemented rather than a legacy widget nobody is reproducing.
    */
@@ -135,7 +135,7 @@
     // padding — which answers "where does focus go when you click nothing", not the
     // question B1 needs: does the dismissing click also *reach* what it hit? That is
     // the inverse of "a click on an overlay must not reach nodes beneath it", and the
-    // answer decides whether dziri's dismissal swallows the press or lets it through.
+    // answer decides whether dziry's dismissal swallows the press or lets it through.
     ["click the outside button", { ...centre(out), down: 1, up: 1 }],
     // Arrowing a *focused, closed* select. The first run arrowed while focus was on
     // BODY, so it measured nothing and read as "closed arrows do nothing". Chrome is
@@ -177,7 +177,7 @@
 
     // **Does the arrow wrap at the end of the list, or stop?**
     //
-    // dziri clamps, and the comment in `Engine::picker_key` states that a browser's
+    // dziry clamps, and the comment in `Engine::picker_key` states that a browser's
     // picker "stops at the last option" as though it were measured. It was not — the
     // rows above only ever pressed an arrow twice on a three-option list, which cannot
     // reach an end. An assertion of fact with no measurement behind it is exactly what
@@ -201,7 +201,7 @@
     ["Up 2", { key: "ArrowUp" }],
     ["Up 3 (at the start?)", { key: "ArrowUp" }],
     ["Up 4 (wrapped?)", { key: "ArrowUp" }],
-    // Home and End are the other two keys a listbox is expected to answer, and dziri
+    // Home and End are the other two keys a listbox is expected to answer, and dziry
     // implements neither. One press each says whether that is a gap or a non-issue.
     ["Home in the picker", { key: "Home" }],
     ["End in the picker", { key: "End" }],

@@ -14,13 +14,13 @@
   import { log, report } from "./_harness.js";
 
   /**
-   * Two questions left open by `form-data.html`, both of which dziri now has to answer.
+   * Two questions left open by `form-data.html`, both of which dziry now has to answer.
    *
    * **The form owner is not the ancestor.** A `form="id"` attribute re-parents a control, and
    * *for which purposes* is the part worth measuring rather than assuming. The payload is the
    * obvious one and is already measured. Implicit submission asks two more — which button
    * Enter clicks, and how many fields block it — and both are counts over "the form's
-   * controls". If ownership feeds those too, then dziri's `resolveForms`, which scans a
+   * controls". If ownership feeds those too, then dziry's `resolveForms`, which scans a
    * subtree, is the wrong shape and not merely incomplete.
    *
    * **Where the submitter's entry goes.** The earlier probe measured *that* a named submit
@@ -95,7 +95,7 @@
 
   // --- ownership, as implicit submission sees it -----------------------------
   //
-  // The half that decides how much dziri has to rebuild, and the half that needs real keys:
+  // The half that decides how much dziry has to rebuild, and the half that needs real keys:
   // a synthetic Enter runs listeners and performs no default action, so implicit submission
   // is unreachable from page script. Every case is built up front and driven by the runner —
   // click the field, press Enter — which is the same shape `implicit-submission.html` uses.

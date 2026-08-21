@@ -100,7 +100,7 @@ let broke = 0;
 let blessed = 0;
 
 for (const c of list) {
-  const tmp = join(tmpdir(), `dziri-char-${c.name}-${process.pid}.ts`);
+  const tmp = join(tmpdir(), `dziry-char-${c.name}-${process.pid}.ts`);
   const command = c.command
     ? c.command(tmp)
     : ["bun", "run", "src/compile.ts", c.input, c.css, "-o", tmp];

@@ -9,7 +9,7 @@
  * Two rewrites, and neither needs type information. That is the whole trick and it
  * is worth stating plainly, because the obvious design does need it: to rewrite
  * `count` you would think you must first know `count` is a signal, which means
- * resolving its declaration — across modules, since dziri's signals are exported
+ * resolving its declaration — across modules, since dziry's signals are exported
  * from `state.ts` and imported by pages. Svelte pays exactly that cost, and it is
  * why `export let count = $state(0)` cannot work there.
  *

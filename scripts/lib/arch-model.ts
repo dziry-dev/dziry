@@ -1,5 +1,5 @@
 /**
- * The C4 model of dziri, as data.
+ * The C4 model of dziry, as data.
  *
  * This is the half a machine cannot derive: what each piece is *for*, which
  * process or thread it runs in, and what may not import what. The other half —
@@ -96,8 +96,8 @@ export const LAYERS: Layer[] = [
     label: "Protocol",
     roots: [
       "src/protocol/",
-      "native-src/dziri-engine/src/protocol.rs",
-      "native-src/dziri-engine/src/tables.rs",
+      "native-src/dziry-engine/src/protocol.rs",
+      "native-src/dziry-engine/src/tables.rs",
     ],
     blurb:
       "One schema generates both sides' field identities; the engine reports byte offsets " +
@@ -114,7 +114,7 @@ export const LAYERS: Layer[] = [
   {
     id: "engine",
     label: "Engine",
-    roots: ["native-src/dziri-engine/"],
+    roots: ["native-src/dziry-engine/"],
     blurb:
       "Rust cdylib: Taffy lays out, Skia paints, SDL3 owns the window and input. Reads " +
       "Bun-written memory as untrusted input and never lets a panic cross back.",
@@ -227,7 +227,7 @@ export const PEOPLE: Person[] = [
   {
     id: "author",
     label: "App author",
-    descr: "Writes JSX, CSS and signals under windows/. Runs `dziri dev` and `dziri build`.",
+    descr: "Writes JSX, CSS and signals under windows/. Runs `dziry dev` and `dziry build`.",
   },
   {
     id: "enduser",
@@ -252,7 +252,7 @@ export const EXTERNALS: Ext[] = [
     id: "chrome",
     label: "Headless Chrome",
     descr:
-      "Oracle, not a dependency. Guards diff dziri's CSS, layout and defaults against it over CDP.",
+      "Oracle, not a dependency. Guards diff dziry's CSS, layout and defaults against it over CDP.",
   },
 ];
 
@@ -274,7 +274,7 @@ export type Container = {
 export const CONTAINERS: Container[] = [
   {
     id: "cli",
-    label: "dziri CLI",
+    label: "dziry CLI",
     tech: "Bun, TypeScript",
     descr: "`dev` and `build`. Drives the compiler, then launches the host.",
     phase: "build",
@@ -341,7 +341,7 @@ export const CONTAINERS: Container[] = [
       "FFI call at all.",
     phase: "run",
     db: true,
-    files: ["src/engine/upload.ts", "native-src/dziri-engine/src/tables.rs"],
+    files: ["src/engine/upload.ts", "native-src/dziry-engine/src/tables.rs"],
   },
   {
     id: "engine",
@@ -351,7 +351,7 @@ export const CONTAINERS: Container[] = [
       "Taffy lays out, Skia paints, SDL3 owns the window. Nineteen `extern \"C\"` entry " +
       "points, each catching panics and returning a status.",
     phase: "run",
-    files: ["native-src/dziri-engine/src/lib.rs", "native-src/dziri-engine/src/engine.rs"],
+    files: ["native-src/dziry-engine/src/lib.rs", "native-src/dziry-engine/src/engine.rs"],
   },
 ];
 
@@ -363,7 +363,7 @@ export type ContainerRel = {
 };
 
 export const CONTAINER_RELS: ContainerRel[] = [
-  { from: "author", to: "cli", label: "runs `dziri dev` / `dziri build`", tech: "shell" },
+  { from: "author", to: "cli", label: "runs `dziry dev` / `dziry build`", tech: "shell" },
   { from: "cli", to: "compiler", label: "compiles every window" },
   { from: "tailwind", to: "compiler", label: "supplies generated CSS", tech: "file" },
   { from: "compiler", to: "artifact", label: "emits", tech: "file write" },
@@ -483,42 +483,42 @@ export const COMPONENTS: Component[] = [
     container: "engine",
     label: "Engine core",
     descr: "Handle registry, the tick, staged/live commit.",
-    files: ["native-src/dziri-engine/src/engine.rs"],
+    files: ["native-src/dziry-engine/src/engine.rs"],
   },
   {
     id: "rsLayout",
     container: "engine",
     label: "Layout",
     descr: "Builds Taffy styles from the shared tables and runs the solve.",
-    files: ["native-src/dziri-engine/src/layout.rs"],
+    files: ["native-src/dziry-engine/src/layout.rs"],
   },
   {
     id: "rsPaint",
     container: "engine",
     label: "Paint",
     descr: "Skia: boxes, borders, radii, shadows, clips.",
-    files: ["native-src/dziri-engine/src/paint.rs"],
+    files: ["native-src/dziry-engine/src/paint.rs"],
   },
   {
     id: "rsText",
     container: "engine",
     label: "Text",
     descr: "SkParagraph: shaping, measurement, wrapping.",
-    files: ["native-src/dziri-engine/src/text.rs"],
+    files: ["native-src/dziry-engine/src/text.rs"],
   },
   {
     id: "rsWindow",
     container: "engine",
     label: "Window & input",
     descr: "SDL3, plus the event watcher that draws during an OS-modal resize drag.",
-    files: ["native-src/dziri-engine/src/window.rs"],
+    files: ["native-src/dziry-engine/src/window.rs"],
   },
   {
     id: "rsError",
     container: "engine",
     label: "Error guard",
     descr: "`catch_unwind` at every entry point; a panic becomes a status, never a crash.",
-    files: ["native-src/dziri-engine/src/error.rs"],
+    files: ["native-src/dziry-engine/src/error.rs"],
   },
 ];
 

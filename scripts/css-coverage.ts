@@ -1,5 +1,5 @@
 /**
- * What CSS exists, versus what dziri supports. Named css-coverage, not coverage,
+ * What CSS exists, versus what dziry supports. Named css-coverage, not coverage,
  * because bare "coverage" reads as test coverage — and `coverage/` is where test
  * tooling writes its output.
  *
@@ -15,7 +15,7 @@
  *
  * So every standard property lands in exactly one bucket:
  *
- *   supported     dziri parses it today
+ *   supported     dziry parses it today
  *   in scope      a UI framework needs it and we do not have it  <- the backlog
  *   out of scope  a committed non-goal, listed as a feature not a gap
  *
@@ -75,7 +75,7 @@ const isOutOfScope = (name: string, spec: Spec) =>
   (spec.groups ?? []).some((g) => OUT_OF_SCOPE_GROUPS.includes(g.toLowerCase()));
 
 /**
- * What dziri parses today: the keys of the compiler's own property table.
+ * What dziry parses today: the keys of the compiler's own property table.
  *
  * This used to be a regex over `css.ts`, which made the *layout* of that file's
  * source part of its interface — indentation included. It matched `case` at any
@@ -95,7 +95,7 @@ const parsed = new Set(Object.keys(PROPERTIES));
 const notAProperty = [...parsed].filter((p) => !SPEC[p]);
 
 /**
- * Supporting a shorthand means supporting its longhands: dziri parses `padding`
+ * Supporting a shorthand means supporting its longhands: dziry parses `padding`
  * and expands it, so `padding-top` is covered even with no `case "padding-top"`.
  * mdn-data marks a shorthand by giving it an array-valued `initial` listing the
  * longhands it sets, so this needs no table of our own.

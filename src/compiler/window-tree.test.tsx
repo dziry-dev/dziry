@@ -40,7 +40,7 @@ const page = (path: string, parent: number, nodes: Node | Node[]): PageTree => (
 
 test("a route's page replaces the shell's outlet, wherever the outlet is nested", () => {
   const shell = Window({
-    title: "dziri",
+    title: "dziry",
     children: (
       <div className="chrome">
         <div className="header" />
@@ -61,7 +61,7 @@ test("a route's page replaces the shell's outlet, wherever the outlet is nested"
 });
 
 test("sibling routes are spliced in table order, all resident", () => {
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
 
   const { root } = spliceWindow(shell, [
     page("/", -1, <div className="home" />),
@@ -75,7 +75,7 @@ test("sibling routes are spliced in table order, all resident", () => {
 });
 
 test("a page that renders an outlet is a layout, and its children nest inside it", () => {
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
 
   const { root, roots } = spliceWindow(shell, [
     page("/", -1, <div className="home" />),
@@ -109,7 +109,7 @@ test("nesting recurses, so a layout inside a layout works with no extra rule", (
     </div>
   );
 
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
 
   const { root } = spliceWindow(shell, [
     page("a", -1, layout("a")),
@@ -121,7 +121,7 @@ test("nesting recurses, so a layout inside a layout works with no extra rule", (
 });
 
 test("a layout that is only an outlet owns no nodes, so hiding it hides nothing", () => {
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
 
   const { root, roots } = spliceWindow(shell, [
     page("products", -1, <Outlet />),
@@ -136,7 +136,7 @@ test("a layout that is only an outlet owns no nodes, so hiding it hides nothing"
 });
 
 test("a page returning a fragment owns each of its top-level nodes", () => {
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
 
   const { roots } = spliceWindow(shell, [
     page("/", -1, [<div className="one" />, <div className="two" />]),
@@ -150,7 +150,7 @@ test("a page returning a fragment owns each of its top-level nodes", () => {
 // ---------------------------------------------------------------------------
 
 test("routes nesting inside a page with no outlet is an error naming them", () => {
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
 
   const run = () =>
     spliceWindow(shell, [
@@ -164,21 +164,21 @@ test("routes nesting inside a page with no outlet is an error naming them", () =
 });
 
 test("an outlet with no route to fill it is an error, not empty markup", () => {
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
 
   const run = () => spliceWindow(shell, [page("about", -1, layoutOf("about"))]);
   expect(run).toThrow(/no route extends "about"/);
 });
 
 test("a window with no outlet cannot show any of its routes", () => {
-  const shell = Window({ title: "dziri", children: <div className="chrome" /> });
+  const shell = Window({ title: "dziry", children: <div className="chrome" /> });
 
   const run = () => spliceWindow(shell, [page("/", -1, <div className="home" />)]);
   expect(run).toThrow(/window renders no <Outlet\/>/);
 });
 
 test("two outlets in one page have no non-arbitrary answer, so they are an error", () => {
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
 
   const run = () =>
     spliceWindow(shell, [
@@ -198,7 +198,7 @@ test("two outlets in one page have no non-arbitrary answer, so they are an error
 
 test("two outlets in the window shell are the same error", () => {
   const shell = Window({
-    title: "dziri",
+    title: "dziry",
     children: (
       <div className="chrome">
         <Outlet />
@@ -225,7 +225,7 @@ function layoutOf(name: string): Element {
 test("<Window layer={…}> is captured beside the tree and never becomes an attribute", () => {
   const layer = { pipe: () => {} }; // any object export-shaped value
   const shell = Window({
-    title: "dziri",
+    title: "dziry",
     layer,
     children: <Outlet />,
   });
@@ -237,12 +237,12 @@ test("<Window layer={…}> is captured beside the tree and never becomes an attr
 });
 
 test("a window without a layer records none", () => {
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
   expect(layerOf(shell)).toBeUndefined();
 });
 
 test("every window carries the failure overlay: last child, hidden shape, own dyntext slots", () => {
-  const shell = Window({ title: "dziri", children: <Outlet /> });
+  const shell = Window({ title: "dziry", children: <Outlet /> });
 
   const { root, redbox } = spliceWindow(shell, [page("/", -1, <div className="home" />)]);
 

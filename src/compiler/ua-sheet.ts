@@ -1,11 +1,11 @@
 /**
- * dziri's user-agent stylesheet.
+ * dziry's user-agent stylesheet.
  *
- * Until this file existed, dziri rendered every element as an identical empty
+ * Until this file existed, dziry rendered every element as an identical empty
  * box: `<h1>` was not bold, `<b>` was not bold, `<audio>` drew a box where a
  * browser draws nothing. `html-coverage` measures exactly that gap against
  * Chrome, and its output *is* the specification for this file — 63 of its 80
- * findings are properties dziri already has and simply never sets.
+ * findings are properties dziry already has and simply never sets.
  *
  * **This is a compile-time constant, not a runtime sheet.** It is parsed and
  * cascaded during compilation like any other stylesheet and then discarded; the
@@ -28,18 +28,18 @@
  * another browser's sheet, and the handful of values no API exposes are marked
  * as stated conventions where they sit.
  *
- * Properties dziri has no field for yet cannot be set here at all. As of
+ * Properties dziry has no field for yet cannot be set here at all. As of
  * 2026-08-12 that is down to one: `list-style-type` for `li`, which is a marker
  * paint feature rather than a plain field. `font-style`, `font-family` and
  * `text-decoration-line` landed with protocol v26 and are set below.
  */
 export const UA_SHEET = `
-/* Tier 0a — never rendered. Chrome's sheet hides these; dziri drew empty boxes
+/* Tier 0a — never rendered. Chrome's sheet hides these; dziry drew empty boxes
    in the flow, which pushes every following sibling down by their height. */
 base, basefont, datalist, head, link, meta, noembed, noframes, param, rp, script,
 style, template, title { display: none }
 
-/* audio without controls is display:none in Chrome's sheet. dziri has no
+/* audio without controls is display:none in Chrome's sheet. dziry has no
    controls attribute selector yet, and no audio element either way. */
 audio { display: none }
 
@@ -52,7 +52,7 @@ audio { display: none }
    reports, which encodes a 16px root — revisit every number here if a root
    font-size ever becomes settable.
 
-   h4 gets no font-size because Chrome's 1em already equals dziri's 16px default. */
+   h4 gets no font-size because Chrome's 1em already equals dziry's 16px default. */
 h1 { font-weight: 700; font-size: 32px;    margin-block-start: 21.44px;   margin-block-end: 21.44px }
 h2 { font-weight: 700; font-size: 24px;    margin-block-start: 19.92px;   margin-block-end: 19.92px }
 h3 { font-weight: 700; font-size: 18.72px; margin-block-start: 18.72px;   margin-block-end: 18.72px }
@@ -68,7 +68,7 @@ h6 { font-weight: 700; font-size: 10.72px; margin-block-start: 24.9776px; margin
    The decoration rules joined the italic and monospace ones when the
    decorationLine field landed: underline for a/u/ins, line-through for del/s,
    which is what Chrome's own sheet sets. a is keyed on the tag rather than
-   -webkit-any-link, which dziri has no equivalent of — a bare anchor gets an
+   -webkit-any-link, which dziry has no equivalent of — a bare anchor gets an
    underline a browser would not draw, the one deliberate overreach here.
 
    16px margins written as px, not 1em, for the reason the headings' are: em
@@ -128,7 +128,7 @@ geolocation { padding-inline-start: 16px }
    borders, colours, a transform — it just does not decide what is drawn.
 
    No *vertical* inset, and that one is a limitation rather than a choice: the spec
-   anchors a picker with top:anchor(bottom), dziri's nearest spelling would be
+   anchors a picker with top:anchor(bottom), dziry's nearest spelling would be
    top:100%, and css.ts refuses percentage lengths. (No backticks in this comment,
    and that is not a style choice — the whole sheet is a template literal, so one
    would end the string. It has now cost two builds.) So the engine offsets the
@@ -140,13 +140,13 @@ geolocation { padding-inline-start: 16px }
    positioned box with both inline insets set is stretched to its containing block,
    so a picker comes out exactly as wide as its select. That is the spec's
    min-inline-size:anchor-size(self-inline) reached with two plain lengths instead
-   of a function dziri does not have — and unlike a width in a theme it cannot drift,
+   of a function dziry does not have — and unlike a width in a theme it cannot drift,
    because there is no second number to keep in step. A picker narrower than the
    control it belongs to was the visible bug this replaced.
 
    It is a *minimum* in the spec and a fixed size here: a picker whose longest
    option is wider than the select will not grow to fit it. That wants max-content
-   sizing against a floor, which is min-inline-size, and dziri has the field but no
+   sizing against a floor, which is min-inline-size, and dziry has the field but no
    percentage or anchor-size value to put in it.
 
    Appearance — the picker's background and border, the tick on a checkbox — used
@@ -269,7 +269,7 @@ textarea {
   background-color: #ffffff;
   font-size: 13.3333px;
   /* Chrome's sheet puts a textarea in monospace where the other controls go to
-     Arial; monospace is a generic dziri can express, so this one is set. */
+     Arial; monospace is a generic dziry can express, so this one is set. */
   font-family: monospace;
 }
 
@@ -290,15 +290,15 @@ button, input[type="submit"], input[type="reset"], input[type="button"] {
   font-size: 13.3333px;
 }
 
-/* Two approximations of inline flow, which dziri does not have.
+/* Two approximations of inline flow, which dziry does not have.
 
    A label computes display:inline in Chrome, so a checkbox and its words share a
-   line; dziri's default box is a column, which stacked every label's control on
+   line; dziry's default box is a column, which stacked every label's control on
    top of its own caption. A row that centres its items is the nearest true
    thing, and it is what every hand-written form was already doing (app.css ROW).
 
    A select and a button are inline-blocks: they shrink to their content where a
-   column's stretch makes them page-wide bars. dziri has no fit-content width, so
+   column's stretch makes them page-wide bars. dziry has no fit-content width, so
    align-self:flex-start is the spelling that stops the stretch — in a row parent
    it top-aligns instead, which is roughly where a baseline would put them. An
    author's own align-self or width wins on origin, like everything here.
@@ -415,7 +415,7 @@ select:disabled {
    set shows. Scoped to the listbox attribute because a dropdown's committed option
    also carries :checked, and painting it in the picker would show two bars — the
    focus the arrows move plus a phantom — where Chromium shows one. */
-select[data-dziri-listbox] option:checked {
+select[data-dziry-listbox] option:checked {
   background-color: #3390ff;
   color: #ffffff;
 }
@@ -428,7 +428,7 @@ select[data-dziri-listbox] option:checked {
    So none of the picker rules above apply to it — and they do not have to be undone
    either, because it has no picker box and no button for them to match.
 
-   display:block is what makes the options stack. dziri's default display is flex, whose
+   display:block is what makes the options stack. dziry's default display is flex, whose
    default direction is row, so without this the rows come out side by side — which is
    what the first render of this showed, six options in a line spilling out of the box.
    Block is also the measured display of the options themselves, so the two agree.
@@ -450,7 +450,7 @@ select[data-dziri-listbox] option:checked {
    something this sheet can match. It sits at UA origin like everything else here, which
    is the point of doing it this way rather than in the engine — an author's own
    overflow or display beats it. */
-select[data-dziri-listbox] { display: block; overflow-y: scroll }
+select[data-dziry-listbox] { display: block; overflow-y: scroll }
 
 /* A placeholder overlays the text rather than occupying room beside it.
 
@@ -498,20 +498,20 @@ input::placeholder, textarea::placeholder {
 
    The value is a **stated convention**, like the ::selection colours below and for the
    same reason: Chromium's outline:auto 1px -webkit-focus-ring-color is unexpressible
-   here twice over. dziri has no outline property at all, no auto width, and the
+   here twice over. dziry has no outline property at all, no auto width, and the
    platform colour is not exposed to getComputedStyle. So this is a 2px ring in the
    same blue ::selection uses — one accent in this file rather than two, since neither
    is measured and a second invented colour would just be a second thing to keep in
    step.
 
-   box-shadow, because that is the property dziri has: the ring* fields are the
+   box-shadow, because that is the property dziry has: the ring* fields are the
    concentric-band subset of it, which is exactly a ring and nothing else. An author's
    own focus ring writes the same fields and so wins on origin, which is why adding
    this does not double up any ring already in a theme.
 
    **Listed per tag rather than written as a bare :focus-visible**, and that is not
    tidiness — it is the difference between 62 variant rows and 986. Chromium can write
-   the universal form because it resolves style on demand; dziri precompiles one style
+   the universal form because it resolves style on demand; dziry precompiles one style
    row per combination of the predicates a node's rules mention, so a rule matching
    everything gives *every node in the document* a two-entry run, including the 900-odd
    that can never hold focus. The output is identical either way. The general lesson,

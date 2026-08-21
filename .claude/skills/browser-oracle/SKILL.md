@@ -1,11 +1,11 @@
 ---
 name: browser-oracle
-description: Measure what a browser actually does, then record it. Use whenever a dziri decision depends on browser behaviour — focus and blur semantics, what a cascade or specificity edge case resolves to, default/UA styles, list markers, form control behaviour, scroll anchoring, event order, IME, HiDPI rounding — or whenever anyone (user or assistant) is about to assert "browsers do X" from memory. Also use before writing any browser-behaviour claim into API.md, BROWSER-FACTS.md, ROADMAP.md or a code comment. Runs a probe in headless Chrome/Edge over CDP via `bun run probe <name>`.
+description: Measure what a browser actually does, then record it. Use whenever a dziry decision depends on browser behaviour — focus and blur semantics, what a cascade or specificity edge case resolves to, default/UA styles, list markers, form control behaviour, scroll anchoring, event order, IME, HiDPI rounding — or whenever anyone (user or assistant) is about to assert "browsers do X" from memory. Also use before writing any browser-behaviour claim into API.md, BROWSER-FACTS.md, ROADMAP.md or a code comment. Runs a probe in headless Chrome/Edge over CDP via `bun run probe <name>`.
 ---
 
 # Browser oracle
 
-dziri reimplements browser behaviour for an audience of web developers, so decisions constantly
+dziry reimplements browser behaviour for an audience of web developers, so decisions constantly
 rest on *"what does a browser actually do here?"* **Recalled answers are wrong often enough to
 change decisions.** On 2026-07-31 two separate confidently-stated claims were refuted by
 measurement within an hour, one of which had already been written into `API.md` as a design
@@ -126,7 +126,7 @@ because these are engine behaviours, not "browser" behaviours.
 - **Say "Chromium 151", never "browsers".** Different engines, different answers; and the
   installed browser may be Edge.
 - **Record in `BROWSER-FACTS.md`**: date, engine + version, the table, and what it means for
-  dziri. Append a new dated block; never overwrite an earlier finding. If a new run corrects an
+  dziry. Append a new dated block; never overwrite an earlier finding. If a new run corrects an
   old one, say so explicitly and say what was wrong — a superseded claim may already have been
   built on.
 

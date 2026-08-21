@@ -22,10 +22,10 @@ import { parseHtml, type Element } from "./html.ts";
 import { signal } from "../runtime/signal.ts";
 
 test("<Window> produces a body element with its config in the side table", () => {
-  const root = Window({ title: "dziri", width: 800, height: 600, children: [] });
+  const root = Window({ title: "dziry", width: 800, height: 600, children: [] });
   expect(root.tag).toBe("body");
   expect(configOf(root)).toEqual({
-    title: "dziri",
+    title: "dziry",
     width: 800,
     height: 600,
     minWidth: undefined,

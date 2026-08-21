@@ -36,7 +36,7 @@ export type ArchData = {
 
 export default function archDataPlugin(context: LoadContext): Plugin<ArchData> {
   return {
-    name: "dziri-arch-data",
+    name: "dziry-arch-data",
 
     async loadContent() {
       return {

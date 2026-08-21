@@ -1,14 +1,21 @@
 {
-  "name": "dziri",
-  "version": "0.0.0",
+  "name": "dziry",
+  "version": "0.1.0-beta.1",
   "private": true,
   "type": "module",
+  "description": "A UI framework for real desktop apps in TypeScript, HTML and CSS — compiled ahead of time, rendered by a native engine. No browser, no DOM, no webview.",
+  "homepage": "https://dziry.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dziry-dev/dziry.git"
+  },
+  "bugs": "https://github.com/dziry-dev/dziry/issues",
   "workspaces": [
     "docs",
     "packages/*"
   ],
   "bin": {
-    "dziri": "./src/cli/index.ts"
+    "dziry": "./src/cli/index.ts"
   },
   "engines": {
     "bun": ">=1.4.0"
@@ -21,8 +28,8 @@
     "",
     "Two tiers, and the split is the API-versus-internal policy D4 asks for. The named",
     "entries are the authoring surface. The wildcards exist because the generated",
-    "artifact imports `dziri/ir.ts` and `dziri/runtime/*.ts` by construction — emit()",
-    "writes those specifiers — and because the host reaches for dziri/engine/*. They are",
+    "artifact imports `dziry/ir.ts` and `dziry/runtime/*.ts` by construction — emit()",
+    "writes those specifiers — and because the host reaches for dziry/engine/*. They are",
     "not a promise."
   ],
   "exports": {
@@ -45,7 +52,7 @@
   "scripts": {
     "test": "bun test && bun run engine:test",
     "check": "tsc --noEmit",
-    "lint": "cd native-src/dziri-engine && cargo fmt --check && cargo clippy --release --all-targets",
+    "lint": "cd native-src/dziry-engine && cargo fmt --check && cargo clippy --release --all-targets",
     "gen:protocol": "bun run scripts/gen-protocol.ts",
     "probe": "bun run scripts/probe.ts",
     "signals": "bun run scripts/signals.tsx",
@@ -66,11 +73,11 @@
     "probe:serve": "bun run scripts/probe-server.ts",
     "arch-diagram": "bun run scripts/arch-diagram.ts",
     "arch:check": "bun run scripts/arch-diagram.ts --check",
-    "engine": "cd native-src/dziri-engine && cargo build --release",
-    "engine:test": "cd native-src/dziri-engine && cargo test --release",
+    "engine": "cd native-src/dziry-engine && cargo build --release",
+    "engine:test": "cd native-src/dziry-engine && cargo test --release",
     "engine:smoke": "bun test src/engine/smoke.test.ts",
-    "engine:window": "cd native-src/dziri-engine && cargo run --release --example window",
-    "engine:shot": "cd native-src/dziri-engine && cargo run --release --example window -- --screenshot ../../engine-frame.png",
+    "engine:window": "cd native-src/dziry-engine && cargo run --release --example window",
+    "engine:shot": "cd native-src/dziry-engine && cargo run --release --example window -- --screenshot ../../engine-frame.png",
     "compile": "bun run src/compile.ts",
     "routes": "bun run src/routes.ts",
     "window": "bun run src/compile-window.ts",

@@ -8,7 +8,7 @@
  *
  * # It is removed, not hidden
  *
- * A browser gives `<style>` `display: none` and leaves it in the document. dziri
+ * A browser gives `<style>` `display: none` and leaves it in the document. dziry
  * deletes it, because there is no run-time document for it to be in — its text has
  * already become integers in the style table by the time anything renders, and a
  * node that exists only to be invisible would still cost a row in every table, a

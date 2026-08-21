@@ -51,11 +51,11 @@ test("a malformed --size is an error naming the flag, not a silent fallback", ()
 });
 
 test("applyMinSize lifts the floor through the environment the engine reads", () => {
-  delete process.env.DZIRI_MIN_WINDOW;
+  delete process.env.DZIRY_MIN_WINDOW;
   applyMinSize(["--min-size", "none"]);
   // Reflect.get because TypeScript narrows a literal-key access to `undefined`
   // after the `delete` above; the point is what the process environment holds.
-  expect(Reflect.get(process.env, "DZIRI_MIN_WINDOW")).toBe("none");
+  expect(Reflect.get(process.env, "DZIRY_MIN_WINDOW")).toBe("none");
 });
 
 test("applyMinSize without a value is an error, not an empty override", () => {
@@ -63,5 +63,5 @@ test("applyMinSize without a value is an error, not an empty override", () => {
 });
 
 afterEach(() => {
-  delete process.env.DZIRI_MIN_WINDOW;
+  delete process.env.DZIRY_MIN_WINDOW;
 });

@@ -5,7 +5,7 @@
  * // windows/main/index.tsx
  * export default function Main() {
  *   return (
- *     <Window title="dziri">
+ *     <Window title="dziry">
  *       <Header />
  *       <Outlet />
  *     </Window>
@@ -49,7 +49,7 @@ export const OUTLET_TAG = "#outlet";
  * settled, rather than to guess now.
  *
  * `minWidth` is the one with a consequence elsewhere: its absence is why
- * `window.rs` hardcodes a 564x320 floor and reads `DZIRI_MIN_WINDOW` from the
+ * `window.rs` hardcodes a 564x320 floor and reads `DZIRY_MIN_WINDOW` from the
  * environment to escape it. Once this reaches the wire, that constant becomes this
  * default and the environment variable goes back to being a debug hatch.
  */
@@ -77,7 +77,7 @@ export type WindowProps = Props &
      * ManagedRuntime from it at launch and disposes it when the window closes,
      * so `Layer.scoped` finalizers actually run.
      *
-     * Typed `unknown` because dziri does not depend on `effect` — the value is
+     * Typed `unknown` because dziry does not depend on `effect` — the value is
      * recognised structurally at run time and the library is imported lazily.
      * A window without one carries no effect machinery at all.
      */

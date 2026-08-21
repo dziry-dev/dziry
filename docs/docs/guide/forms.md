@@ -5,7 +5,7 @@ sidebar_position: 7
 
 # Forms
 
-A form in dziri is markup, CSS and a schema. There is no form library, no per-field state, and
+A form in dziry is markup, CSS and a schema. There is no form library, no per-field state, and
 nothing to wire up: the compiler can see the whole form, so it works out what the payload looks
 like before the app runs.
 
@@ -94,7 +94,7 @@ once — that is a build error, not a coin toss.
 server-side parsers (PHP, Rack, `qs`), each with its own dialect, each guessing at structure
 after the fact.
 
-dziri nests by structure instead, because a compiler can see structure. Nothing is parsed at run
+dziry nests by structure instead, because a compiler can see structure. Nothing is parsed at run
 time, there is no dialect to pick, and a conflicting path is reported instead of resolved.
 :::
 
@@ -239,7 +239,7 @@ export const Login = z.object({ email: z.email(), age: z.number().min(18) });
 ```
 
 `validate` accepts any **Standard Schema** — Zod 4, Valibot and ArkType implement it natively —
-any **Effect** schema, or a plain function returning issues. dziri depends on none of them: the
+any **Effect** schema, or a plain function returning issues. dziry depends on none of them: the
 first kind is used through its `~standard` property, and an Effect schema is converted with
 Effect's own helper behind an import that only happens if you pass one.
 
@@ -328,7 +328,7 @@ from a field that is never wrong.
 
 `@custom-variant error (.group\/error &)` emits `.group\/error .error\:block`, a plain
 descendant selector. Tailwind's default form emits `:is(:where(.group\/error) *)`, and the `*`
-inside `:is()` is not a selector dziri parses.
+inside `:is()` is not a selector dziry parses.
 :::
 
 Many fields can share the class name and stay independent — patches are keyed on the field's own
@@ -369,7 +369,7 @@ cell the way `bind:value` already does for text. It is not built.
 ## Telling the user
 
 ```tsx no-check
-import { alert } from "dziri";
+import { alert } from "dziry";
 
 export const onSignUp = (data: unknown) => {
   alert(JSON.stringify(data, null, 2), { title: "onSubmit received" });
@@ -395,7 +395,7 @@ export const picked = signal("");
 newline-joined. Three helpers turn the path into something useful:
 
 ```ts no-check
-import { fileInfo, readFile, readFileText } from "dziri";
+import { fileInfo, readFile, readFileText } from "dziry";
 
 const info = await fileInfo(picked);      // { path, name, size, type }
 const bytes = await readFile(picked);     // Uint8Array — what <img src> needs
@@ -416,7 +416,7 @@ const text = await readFileText(picked);  // string — for .txt, .json, .csv
   picker and the chosen *path* lands in its bound signal, but there is no `File` object here,
   so it is not a form field. Read it with `fileInfo`/`readFile`/`readFileText` (above).
 - **A named submit button adds no entry of its own** — a browser includes `name=value` for the
-  button that submitted, and dziri does not. In a two-button form, use two `onClick`s.
+  button that submitted, and dziry does not. In a two-button form, use two `onClick`s.
 
 `form="id"` **is** supported, and fully: a control it moves is that form's for every purpose —
 its payload, its default button, and its implicit-submission rules — even when written outside

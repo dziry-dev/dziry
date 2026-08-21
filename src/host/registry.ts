@@ -118,5 +118,5 @@ export function applyMinSize(argv: readonly string[]): void {
   const i = argv.indexOf("--min-size");
   const raw = i !== -1 ? argv[i + 1] : null;
   if (i !== -1 && !raw) throw new Error(`--min-size takes WxH or "none"`);
-  if (raw) process.env.DZIRI_MIN_WINDOW = raw;
+  if (raw) process.env.DZIRY_MIN_WINDOW = raw;
 }

@@ -62,7 +62,7 @@ export async function rmProfile(dir: string) {
 export async function sweepStaleProfiles() {
   const dir = tmpdir();
   for (const name of await readdir(dir).catch(() => [] as string[])) {
-    if (name.startsWith("dziri-probe-")) await rmProfile(join(dir, name));
+    if (name.startsWith("dziry-probe-")) await rmProfile(join(dir, name));
   }
 }
 
@@ -121,7 +121,7 @@ export type Session = {
 
 export async function chromeSession(opts: { headed?: boolean; width?: number; height?: number } = {}): Promise<Session> {
   await sweepStaleProfiles();
-  const profile = await mkdtemp(join(tmpdir(), "dziri-probe-"));
+  const profile = await mkdtemp(join(tmpdir(), "dziry-probe-"));
   const w = opts.width ?? 1024;
   const h = opts.height ?? 768;
 

@@ -83,7 +83,7 @@ type Manifest = {
 const TREES = {
   demo: { roots: ["windows"], skip: [/\.gen\.ts$/, /\.png$/] },
   code: {
-    roots: ["src", "native-src/dziri-engine/src"],
+    roots: ["src", "native-src/dziry-engine/src"],
     skip: [/\.gen\.ts$/, /\.test\.ts$/, /\.test\.tsx$/],
   },
 } as const;
@@ -142,7 +142,7 @@ async function compileWindow(): Promise<void> {
  * Keyed by checkout so two working trees do not overwrite each other, but constant
  * within one, so both halves genuinely emit from the same place.
  */
-const STAGE = join(tmpdir(), `dziri-neutral-${createHash("sha256").update(ROOT).digest("hex").slice(0, 8)}`);
+const STAGE = join(tmpdir(), `dziry-neutral-${createHash("sha256").update(ROOT).digest("hex").slice(0, 8)}`);
 
 /**
  * The emitted artifacts, as text, written to {@link STAGE}.
@@ -300,7 +300,7 @@ const saved = JSON.parse(await readFile(MANIFEST, "utf8")) as Manifest;
 const nowDemo = await hashTree(TREES.demo.roots, TREES.demo.skip);
 const nowCode = await hashTree(TREES.code.roots, TREES.code.skip);
 
-const tmp = join(tmpdir(), `dziri-neutral-frames-${process.pid}`);
+const tmp = join(tmpdir(), `dziry-neutral-frames-${process.pid}`);
 await compileWindow();
 const names = await emitArtifacts();
 const broke = ARTIFACTS_ONLY ? [] : await render(join(tmp, "renders"));

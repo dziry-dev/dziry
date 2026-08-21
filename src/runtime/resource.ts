@@ -39,7 +39,7 @@ export type Resource<T> = ReadonlySignal<T> & {
 };
 
 /** The brand `compile.ts` tests to collect a boundary's resources from bindings. */
-const RESOURCE = Symbol.for("dziri.resource");
+const RESOURCE = Symbol.for("dziry.resource");
 
 export function isResource(value: unknown): value is Resource<unknown> {
   return typeof value === "object" && value !== null && RESOURCE in value;

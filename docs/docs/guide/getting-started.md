@@ -5,7 +5,7 @@ sidebar_position: 3
 
 # Getting started
 
-What [`bun create dziri`](./installation.md) gives you, and what each part is for.
+What [`bun create dziry`](./installation.md) gives you, and what each part is for.
 
 ## The layout
 
@@ -39,7 +39,7 @@ depth, so `products/new` matches before `products/$id`.
 ## The window
 
 ```tsx title="windows/main/index.tsx" no-check
-import { cn, Outlet, Window } from "dziri";
+import { cn, Outlet, Window } from "dziry";
 import { Nav } from "./Nav.tsx";
 import { route } from "./router.ts";
 import { isLight } from "./state.ts";
@@ -47,7 +47,7 @@ import { isLight } from "./state.ts";
 export default function Main() {
   return (
     <Window
-      title="dziri — compiled UI"
+      title="dziry — compiled UI"
       width={1040}
       height={700}
       minWidth={520}
@@ -64,7 +64,7 @@ export default function Main() {
 }
 ```
 
-No `@jsxImportSource` pragma — `jsxImportSource: "dziri"` is set once in
+No `@jsxImportSource` pragma — `jsxImportSource: "dziry"` is set once in
 `tsconfig.json`, and Bun's transpiler reads it too, so `bun run` and `tsc` agree.
 
 `title` is required: it is what the OS puts in the title bar and the task switcher,
@@ -72,7 +72,7 @@ and there is no sensible default. Sizes are compile-time integers in physical pi
 
 `route` is passed **in** rather than imported from the framework. A route belongs to a
 window — two windows on different routes is the normal case — so a module-level
-`currentRoute` inside dziri would make every window share one.
+`currentRoute` inside dziry would make every window share one.
 
 `<Outlet />` is where the matched page renders.
 
@@ -81,7 +81,7 @@ window — two windows on different routes is the normal case — so a module-le
 Signals live in a module and are exported, so the compiler can name them.
 
 ```ts title="windows/main/state.ts" no-check
-import { computed, signal } from "dziri";
+import { computed, signal } from "dziry";
 
 export const draft = signal("");
 export const todos = signal<Todo[]>([]);
@@ -102,7 +102,7 @@ a value or a function of the previous value.
 ## A page
 
 ```tsx title="windows/main/pages/index.tsx" no-check
-import { cn } from "dziri";
+import { cn } from "dziry";
 import { addTodo, draft, remaining } from "../state.ts";
 
 export default function Home() {
@@ -123,9 +123,9 @@ A page default-exports a component. That is the whole contract.
 ## Running it
 
 ```bash
-dziri dev                                   # compile every window, then run
-dziri dev --route products/new --size 520x700
-dziri dev --screenshot shot.png             # one frame headlessly, then exit
+dziry dev                                   # compile every window, then run
+dziry dev --route products/new --size 520x700
+dziry dev --screenshot shot.png             # one frame headlessly, then exit
 ```
 
 `dev` compiles every window into its `ui.gen.ts` artifact and opens the app. A
@@ -136,7 +136,7 @@ passed to the app.
 In a framework checkout these are `bun run cli <command>`, and the engine must be built
 once with `bun run engine`.
 
-See [The CLI](./cli.md) for every command and flag, including `dziri build`.
+See [The CLI](./cli.md) for every command and flag, including `dziry build`.
 
 Your application code runs in a Worker, not on the thread that owns the window — so a
 slow handler cannot freeze the UI. See [Two threads](../internals/threads.md).

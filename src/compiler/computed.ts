@@ -238,7 +238,7 @@ function resolveValue(
  * because the content that spills would have nowhere to go.
  *
  * This was a real divergence, not a nicety. `app.css` sets only `overflow-y: auto` on the
- * body; dziri computed `overflow-x: visible`, so a window too narrow for its content
+ * body; dziry computed `overflow-x: visible`, so a window too narrow for its content
  * clipped the right-hand column with **no way to reach it**. The layout matched Chromium
  * exactly; only the reachability was wrong.
  *
@@ -478,7 +478,7 @@ function resolveTiming(
   if (transition !== null && transition.duration > 0) {
     const mask = transitionMask(transition.properties, warn);
     // A mask of zero is a transition over nothing — either `transition-property:
-    // none`, or a list naming only properties dziri cannot interpolate. Emitting a
+    // none`, or a list naming only properties dziry cannot interpolate. Emitting a
     // row for it would cost the engine a per-frame tween that can never move a
     // pixel, so there is nothing to emit.
     if (mask !== 0) {
@@ -622,7 +622,7 @@ function resolveKeyframes(
       try {
         expandDeclaration(prop, resolved, patch);
       } catch {
-        // A keyframe declaring something dziri cannot express is dropped, which is
+        // A keyframe declaring something dziry cannot express is dropped, which is
         // what CSS does with an invalid declaration inside a keyframe too. Silent
         // because `@keyframes` in a Tailwind sheet is boilerplate the author did
         // not write, and the fields that matter are covered by the mask.

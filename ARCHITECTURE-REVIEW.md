@@ -1,9 +1,9 @@
-# dziri — architecture review
+# dziry — architecture review
 
 Date: 2026-07-30 · Reviewed against the working tree, before the repo was placed under git.
 
 > **`src/window-host.ts` no longer exists.** It ran both halves in one thread for
-> `dziri dev --single`, and it was deleted because it was a second, hand-maintained
+> `dziry dev --single`, and it was deleted because it was a second, hand-maintained
 > implementation of everything in `src/host/worker.ts` with no automated caller. Findings
 > below that cite it were written against it; their line numbers have been removed, and the
 > equivalent code is in `src/host/worker.ts` (the app half), `src/host/main.ts` (the engine
@@ -179,7 +179,7 @@ than first claimed.
 
 `soundness` · `protocol-codegen/descriptor-check-is-count-only`
 
-**Where:** `src/engine/host.ts:272`, `src/engine/host.ts:243`, `src/engine/host.ts:257`, `native-src/dziri-engine/src/tables.rs:50`, `native-src/dziri-engine/src/protocol.rs:135`, `src/protocol/schema.ts:8`
+**Where:** `src/engine/host.ts:272`, `src/engine/host.ts:243`, `src/engine/host.ts:257`, `native-src/dziry-engine/src/tables.rs:50`, `native-src/dziry-engine/src/protocol.rs:135`, `src/protocol/schema.ts:8`
 
 **Claim.** schema.ts claims offsets are "checked against the generated field count", and that is literally all that is checked: the descriptor carries no field name and its `elem_size` is never compared against the schema's, so a same-width reorder or a compatible retype passes every guard and silently reads the wrong bytes.
 
@@ -200,7 +200,7 @@ const Ctor = (FIELD_VIEWS[name] as ...)[field];   // width from TS, not from the
 
 **Recommendation.** Put the identity in the descriptor. Either (a) add `name_hash: u32` (FNV of the generated FIELD_NAMES entry) to `SpanDesc` and have `#bindTables` compare it against a hash the generator emits into generated.ts alongside FIELD_VIEWS, or (b) cheaper and sufficient: emit `ELEM_SIZES` into generated.ts from the same `ELEM_SIZE[f.type]` the Rust side uses and assert `elemSize === ELEM_SIZES[name][field]` per span in the loop at host.ts:238-267. (b) is three generator lines and catches every retype; (a) additionally catches every reorder. Both are strictly better than counting.
 
-**Verifier — confirmed.** I tried to find any width/identity check and there is none. `SpanDesc` is exactly `{table:i32, field:i32, ptr:u64, elem_size:u32, capacity:u32}` (native-src/dziri-engine/src/tables.rs:50-58) — no name, no hash. `protocol::field_names()` exists (protocol.rs:51) but its only consumers are tables.rs:255 (Rust-internal plan building uses `elem_sizes`) and tests/bounds.rs:402-410 — never transmitted, confirmed by grep over src/ and tests/. Host-side, host.ts:243 reads `elemSize` and uses it only for `toArrayBuffer(address, 0, elemSize * capacity)`; the constructor at host.ts:257 comes from `FIELD_VIEWS[name][field]`, i.e. the TS generated schema, and is never compared against the engine's reported width. The only cross-side assertion is the count loop at host.ts:272-279. I also verified the accidental-guard claim: `new Uint32Array(buffer)` over a 96-byte buffer (u16 elem_size 2 x styles capacity 48) yields 24 elements and does not throw; only an odd capacity makes byteLength%4!=0 and raises RangeError. The gen-protocol.ts TS emitter emits `FIELD_VIEWS` but no `ELEM_SIZES` (scripts/gen-protocol.ts:150-155), so recommendation (b) is indeed three lines. The one mitigation the finding omits is the `dziri_protocol_version()` handshake (host.ts:167-174), which would catch a stale binary — but PROTOCOL_VERSION is a hand-edited constant (schema.ts:326-329) with no enforcement, so it is a policy, not a guard. Severity holds.
+**Verifier — confirmed.** I tried to find any width/identity check and there is none. `SpanDesc` is exactly `{table:i32, field:i32, ptr:u64, elem_size:u32, capacity:u32}` (native-src/dziry-engine/src/tables.rs:50-58) — no name, no hash. `protocol::field_names()` exists (protocol.rs:51) but its only consumers are tables.rs:255 (Rust-internal plan building uses `elem_sizes`) and tests/bounds.rs:402-410 — never transmitted, confirmed by grep over src/ and tests/. Host-side, host.ts:243 reads `elemSize` and uses it only for `toArrayBuffer(address, 0, elemSize * capacity)`; the constructor at host.ts:257 comes from `FIELD_VIEWS[name][field]`, i.e. the TS generated schema, and is never compared against the engine's reported width. The only cross-side assertion is the count loop at host.ts:272-279. I also verified the accidental-guard claim: `new Uint32Array(buffer)` over a 96-byte buffer (u16 elem_size 2 x styles capacity 48) yields 24 elements and does not throw; only an odd capacity makes byteLength%4!=0 and raises RangeError. The gen-protocol.ts TS emitter emits `FIELD_VIEWS` but no `ELEM_SIZES` (scripts/gen-protocol.ts:150-155), so recommendation (b) is indeed three lines. The one mitigation the finding omits is the `dziry_protocol_version()` handshake (host.ts:167-174), which would catch a stale binary — but PROTOCOL_VERSION is a hand-edited constant (schema.ts:326-329) with no enforcement, so it is a policy, not a guard. Severity holds.
 
 <a id="f-protocol-codegen-max-fields-64-no-static-assert"></a>
 
@@ -208,7 +208,7 @@ const Ctor = (FIELD_VIEWS[name] as ...)[field];   // width from TS, not from the
 
 `soundness` · `protocol-codegen/max-fields-64-no-static-assert`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:582`, `native-src/dziri-engine/src/tables.rs:291`, `native-src/dziri-engine/src/tables.rs:334`, `native-src/dziri-engine/src/protocol.rs:133`
+**Where:** `native-src/dziry-engine/src/tables.rs:582`, `native-src/dziry-engine/src/tables.rs:291`, `native-src/dziry-engine/src/tables.rs:334`, `native-src/dziry-engine/src/protocol.rs:133`
 
 **Claim.** The (table, field) → span index is a flat array strided by a hand-written `MAX_FIELDS = 64` that is not generated from the schema and not asserted against it. The styles table already has 48 fields, and the roadmap has the compiler "growing into the schema"; the 65th style field silently aliases into the next table's slots.
 
@@ -226,7 +226,7 @@ and `plan_of`: `let i = self.index[table * MAX_FIELDS + field]; debug_assert!(i 
 
 **Recommendation.** Generate the stride. Emit from gen-protocol.ts `pub const MAX_FIELD_COUNT: usize = <max over tables>;` and use it in place of the literal, or keep the literal and add `const _: () = assert!(protocol::MAX_FIELD_COUNT <= MAX_FIELDS);` — a const assert turns this into a compile error. Better still, drop the flat index for `Vec<Vec<i32>>` sized by the real per-table field count, which removes the constant entirely.
 
-**Verifier — confirmed.** I tried to find a guard and there is none: grep for MAX_FIELDS across native-src/dziri-engine returns only tables.rs:291, 294, 334 and the definition at 582 (plus rlib binaries) — no `const _: () = assert!`, no debug_assert relating it to protocol::FIELD_COUNTS, and no test in bounds.rs/boundary.rs. The collision arithmetic checks out exactly as claimed: TABLE_COUNT is 6 so the index vec is 384 entries; with styles (table 1) at 65 fields, build_index writes `index[1*64 + 64] = index[128]`, in bounds and therefore no panic, and `plan_of(2, 0)` — states.node, since the table order is nodes, styles, states, lists, layout, strings — reads `index[128]` and returns the styles field-64 span. `debug_assert!(i >= 0)` at tables.rs:335 cannot fire because the entry is populated, just by the wrong span, and the typed_view! macro (tables.rs:610-630) only debug-asserts size/alignment, both of which a f32 styles span satisfies. Release builds read the wrong table silently. The likelihood argument the finding gives ("the compiler growing into the schema") is actually the wrong citation — upload.ts:5-11 means the compiler emitting the *existing* extras, not new fields — but ROADMAP.md:323 does commit to a "Property sweep: gradients, shadows, transforms, opacity, overflow, space-*, divide-*", which is comfortably 17 more style fields. The fix is one const assert. Severity holds.
+**Verifier — confirmed.** I tried to find a guard and there is none: grep for MAX_FIELDS across native-src/dziry-engine returns only tables.rs:291, 294, 334 and the definition at 582 (plus rlib binaries) — no `const _: () = assert!`, no debug_assert relating it to protocol::FIELD_COUNTS, and no test in bounds.rs/boundary.rs. The collision arithmetic checks out exactly as claimed: TABLE_COUNT is 6 so the index vec is 384 entries; with styles (table 1) at 65 fields, build_index writes `index[1*64 + 64] = index[128]`, in bounds and therefore no panic, and `plan_of(2, 0)` — states.node, since the table order is nodes, styles, states, lists, layout, strings — reads `index[128]` and returns the styles field-64 span. `debug_assert!(i >= 0)` at tables.rs:335 cannot fire because the entry is populated, just by the wrong span, and the typed_view! macro (tables.rs:610-630) only debug-asserts size/alignment, both of which a f32 styles span satisfies. Release builds read the wrong table silently. The likelihood argument the finding gives ("the compiler growing into the schema") is actually the wrong citation — upload.ts:5-11 means the compiler emitting the *existing* extras, not new fields — but ROADMAP.md:323 does commit to a "Property sweep: gradients, shadows, transforms, opacity, overflow, space-*, divide-*", which is comfortably 17 more style fields. The fix is one const assert. Severity holds.
 
 <a id="f-protocol-codegen-no-regeneration-gate"></a>
 
@@ -234,11 +234,11 @@ and `plan_of`: `let i = self.index[table * MAX_FIELDS + field]; debug_assert!(i 
 
 `process` · `protocol-codegen/no-regeneration-gate`
 
-**Where:** `package.json:7`, `package.json:8`, `native-src/dziri-engine/build.rs:4`, `scripts/gen-protocol.ts:8`
+**Where:** `package.json:7`, `package.json:8`, `native-src/dziry-engine/build.rs:4`, `scripts/gen-protocol.ts:8`
 
 **Claim.** `bun run gen:protocol` is a manual, standalone script; no other script depends on it, `build.rs` has no `cargo:rerun-if-changed` on schema.ts, and there is no CI directory. Editing schema.ts and running the app is a silent no-op, which is the exact stale-generated-file failure the generator's own doc comment claims to eliminate.
 
-**Evidence.** package.json: `"gen:protocol": "bun run scripts/gen-protocol.ts"`, `"engine": "cd native-src/dziri-engine && cargo build --release"`, `"dev": "bun run src/compile.ts && bun run src/app.ts"` — `dev` never regenerates, `engine` never regenerates. build.rs (10 lines) only emits Windows link libs. No `.github`. gen-protocol.ts:8 asserts "so nobody edits either output" — but nothing verifies the outputs correspond to the input.
+**Evidence.** package.json: `"gen:protocol": "bun run scripts/gen-protocol.ts"`, `"engine": "cd native-src/dziry-engine && cargo build --release"`, `"dev": "bun run src/compile.ts && bun run src/app.ts"` — `dev` never regenerates, `engine` never regenerates. build.rs (10 lines) only emits Windows link libs. No `.github`. gen-protocol.ts:8 asserts "so nobody edits either output" — but nothing verifies the outputs correspond to the input.
 
 **Impact.** Three distinct silent failures. (1) Edit schema.ts, run `bun run dev`: both generated files are stale but mutually consistent, so every guard passes and the schema change simply has no effect. (2) Run `gen:protocol` but forget `bun run engine`: generated.ts is new, the .dll is old. Caught by the count backstop only if the field count changed. (3) A same-width reorder in case (2) is caught by nothing (see descriptor-check-is-count-only). The design's whole safety argument rests on the generated files being current, and that is currently a habit.
 
@@ -252,7 +252,7 @@ and `plan_of`: `let i = self.index[table * MAX_FIELDS + field]; debug_assert!(i 
 
 `correctness` · `protocol-codegen/enum-addition-policy-unsafe`
 
-**Where:** `src/protocol/schema.ts:206`, `native-src/dziri-engine/src/layout.rs:383`, `native-src/dziri-engine/src/layout.rs:390`, `native-src/dziri-engine/src/layout.rs:396`, `native-src/dziri-engine/src/layout.rs:406`, `native-src/dziri-engine/src/layout.rs:332`
+**Where:** `src/protocol/schema.ts:206`, `native-src/dziry-engine/src/layout.rs:383`, `native-src/dziry-engine/src/layout.rs:390`, `native-src/dziry-engine/src/layout.rs:396`, `native-src/dziry-engine/src/layout.rs:406`, `native-src/dziry-engine/src/layout.rs:332`
 
 **Claim.** The schema states "adding one does not bump `PROTOCOL_VERSION` — only changing an existing value does", but the engine decodes every u8 enum with a catch-all arm that is load-bearing for `UNSET`. An added value the engine has never heard of is therefore indistinguishable from "the author said nothing", and renders as a default.
 
@@ -267,7 +267,7 @@ and `align_of` (layout.rs:322-333) with the comment "`UNSET` and anything unreco
 
 **Impact.** Add `Display.INLINE_FLEX = 4` to schema.ts, regenerate, ship the compiler without rebuilding the engine. PROTOCOL_VERSION is unchanged by policy, the field count is unchanged, the descriptor is unchanged — every guard passes and every `inline-flex` box lays out as `flex`. Same for a new `NodeKind` (paint.rs:213-219 falls through to the plain-text branch), a new `Overflow`, a new `Position`. The break is semantic, invisible, and specifically blessed by the policy comment.
 
-**Recommendation.** Separate "unset" from "unknown". Reserve 255 as the only fall-through and make everything else explicit: `match v { 0..=3 => .., UNSET => None, other => { self.protocol_warning(f::DISPLAY, other); None } }`, surfaced through `dziri_last_error` on first occurrence. Structurally better: have the generator emit `pub const MAX_VALUE: u8` per enum and add an `ENUM_VERSION: u32` to the handshake, bumped automatically from a hash of the ENUMS array — so the policy is enforced by codegen rather than by a comment asking humans to reason about it.
+**Recommendation.** Separate "unset" from "unknown". Reserve 255 as the only fall-through and make everything else explicit: `match v { 0..=3 => .., UNSET => None, other => { self.protocol_warning(f::DISPLAY, other); None } }`, surfaced through `dziry_last_error` on first occurrence. Structurally better: have the generator emit `pub const MAX_VALUE: u8` per enum and add an `ENUM_VERSION: u32` to the handshake, bumped automatically from a hash of the ENUMS array — so the policy is enforced by codegen rather than by a comment asking humans to reason about it.
 
 **Verifier — weakened.** The catch-all arms do conflate "unset" with "unknown", and the enum-exemption in the version policy removes the only automatic detector for that class of change. But the consequence is degradation to a documented default (an added Display value lays out as flex), not silent corruption, and it requires a mismatched binary pair or a forgotten arm. Medium, not high.
 
@@ -313,7 +313,7 @@ and `align_of` (layout.rs:322-333) with the comment "`UNSET` and anything unreco
 
 `soundness` · `protocol-codegen/ffi-structs-outside-the-schema`
 
-**Where:** `src/engine/host.ts:30`, `src/engine/host.ts:179`, `src/engine/host.ts:402`, `native-src/dziri-engine/src/engine.rs:81`, `native-src/dziri-engine/src/tables.rs:65`, `native-src/dziri-engine/src/lib.rs:285`
+**Where:** `src/engine/host.ts:30`, `src/engine/host.ts:179`, `src/engine/host.ts:402`, `native-src/dziry-engine/src/engine.rs:81`, `native-src/dziry-engine/src/tables.rs:65`, `native-src/dziry-engine/src/lib.rs:285`
 
 **Claim.** The schema covers the shared tables but not the structs that cross the FFI boundary. Their layouts are restated in host.ts as literal sizes and typed-array indices, with a comment reasoning about `#[repr(C)]` padding by hand — and `Capacities`/`SpanDesc`/`Event` carry no version or length, so a Rust-side field addition is an out-of-bounds read of a JS ArrayBuffer.
 
@@ -321,7 +321,7 @@ and `align_of` (layout.rs:322-333) with the comment "`UNSET` and anything unreco
 
 **Impact.** Add a seventh capacity to `Capacities` (plausible: a second arena kind, or a text-scratch capacity) and rebuild the engine only. `*caps` copies 28 bytes from a 24-byte `Uint32Array` — a genuine out-of-bounds read of JS heap, and the seventh capacity is whatever JavaScriptCore had after the buffer. `PROTOCOL_VERSION` cannot catch it: it lives inside `EngineConfig`, not `Capacities`, and the policy comment (schema.ts:326) ties bumps to "the tables above", which `Capacities` is not. `SpanDesc` and `Event` have the same exposure in the other two directions.
 
-**Recommendation.** Put these structs in the schema and generate both sides. gen-protocol.ts already knows `ELEM_SIZE` and `#[repr(C)]` alignment rules; add a `STRUCTS` array (`{ name: "Capacities", fields: [...] }`) and emit the Rust `#[repr(C)]` definitions plus TS `CAPACITIES_SIZE`/`CAPACITIES_OFFSETS` and a writer, so host.ts stops containing `u64v[6]`. Independently and cheaply today: pass a byte length with every struct pointer (`dziri_engine_grow(handle, caps, caps_len)`) and reject `caps_len != size_of::<Capacities>()` with `INVALID_ARGUMENT` — that converts a silent OOB read into a status code.
+**Recommendation.** Put these structs in the schema and generate both sides. gen-protocol.ts already knows `ELEM_SIZE` and `#[repr(C)]` alignment rules; add a `STRUCTS` array (`{ name: "Capacities", fields: [...] }`) and emit the Rust `#[repr(C)]` definitions plus TS `CAPACITIES_SIZE`/`CAPACITIES_OFFSETS` and a writer, so host.ts stops containing `u64v[6]`. Independently and cheaply today: pass a byte length with every struct pointer (`dziry_engine_grow(handle, caps, caps_len)`) and reject `caps_len != size_of::<Capacities>()` with `INVALID_ARGUMENT` — that converts a silent OOB read into a status code.
 
 **Verifier — weakened.** The four boundary structs are indeed mirrored by hand and `Capacities`/`SpanDesc`/`Event` carry no length, so a Rust-side field addition without the matching host edit is an out-of-bounds read. But this is a documented, scheduled deferral (NOTES.md:149-152, "the obvious next candidate for generation if it grows"), the hand-computed offsets are all correct today, and EngineConfig — the one struct where a version could help — does carry and validate protocol_version. Severity medium, not high.
 
@@ -331,25 +331,25 @@ and `align_of` (layout.rs:322-333) with the comment "`UNSET` and anything unreco
 
 `architecture` · `protocol-codegen/two-rebind-sites-one-notifier`
 
-**Where:** `src/engine/host.ts:318`, `src/engine/host.ts:326`, `src/engine/upload.ts:144`, `native-src/dziri-engine/src/tables.rs:701`
+**Where:** `src/engine/host.ts:318`, `src/engine/host.ts:326`, `src/engine/upload.ts:144`, `native-src/dziry-engine/src/tables.rs:701`
 
 **Claim.** `Engine.tick()` re-reads the descriptor and replaces `#tables` whenever the generation moves, but the only consumer that caches views (`Uploader`) refreshes solely inside `ensureCapacity()`. The generation contract is enforced at one of the two places that can break it, and the unenforced one is exactly the growth path the comments describe.
 
 **Evidence.** host.ts:318-327:
 ```ts
 tick(): void {
-  check(engine.dziri_engine_tick(this.#handle), "dziri_engine_tick");
+  check(engine.dziry_engine_tick(this.#handle), "dziry_engine_tick");
   ...
   if (generation[0]! !== this.#generation) this.#bindTables();
 }
 ```
 documented as "Re-reads the descriptor when the engine reports a new generation: a list arena regrowing reallocates the tables". upload.ts:144-153 refreshes only when `this.#engine.grow(want)` returns true. tables.rs:701-739 warns "**every pointer from a previous descriptor is dangling**".
 
-**Impact.** Today `Tables::grow` is reachable only from `dziri_engine_grow` (engine.rs:515 is the sole internal caller, invoked from lib.rs:277), so tick's rebind is dead code and nothing breaks. The moment the engine grows during a tick — which host.ts:317 and tables.rs:29-32 both describe as the intended design — `Engine.#tables` is refreshed and `Uploader.#tables` is not, and the very next `uploadStyles()` writes 48 columns into freed Rust arenas. `engine.grow(want)` will then return false (the generation was already consumed), so `ensureCapacity` never notices.
+**Impact.** Today `Tables::grow` is reachable only from `dziry_engine_grow` (engine.rs:515 is the sole internal caller, invoked from lib.rs:277), so tick's rebind is dead code and nothing breaks. The moment the engine grows during a tick — which host.ts:317 and tables.rs:29-32 both describe as the intended design — `Engine.#tables` is refreshed and `Uploader.#tables` is not, and the very next `uploadStyles()` writes 48 columns into freed Rust arenas. `engine.grow(want)` will then return false (the generation was already consumed), so `ensureCapacity` never notices.
 
 **Recommendation.** Make the generation the trigger rather than the return value of `grow`. Expose `get generation(): bigint` on `Engine` and have `Uploader` compare it at the top of every upload method, re-reading `#tables` and forcing a full re-upload on change — one comparison per frame, correct regardless of which side initiated growth. Alternatively have `Engine` hold a listener list invoked from `#bindTables()`, so every view-holder is notified from the single place that invalidates them.
 
-**Verifier — confirmed.** I tried to find a second notification path and there is none. `Tables::grow` (tables.rs:701-739) has exactly three callers: engine.rs:515 (`Engine::grow`), and two unit tests at tables.rs:850-851; `Engine::grow` in turn has one caller, lib.rs:285 in `dziri_engine_grow`. So growth is host-initiated only and tick's rebind (host.ts:318-327) is currently unreachable — the finding says so itself. Uploader refreshes `#tables` solely inside ensureCapacity, gated on `const grew = this.#engine.grow(want)` (upload.ts:144-153), and `Engine.grow` returns false whenever the generation already matches (host.ts:418) — so the described trap is exact: if tick ever rebinds first, `#generation` has already advanced, the next `grow(want)` returns false, ensureCapacity reports nothing changed, and Uploader keeps writing 48 columns through views into a freed arena. The design does point that way: host.ts:317 and tables.rs:26-32 both describe engine-side growth invalidating every host pointer, and NOTES.md:169-172 has the engine taking over its own frame loop as A0 step 3. Making the generation (not grow's return value) the trigger is the right fix. Latent today, so medium is right.
+**Verifier — confirmed.** I tried to find a second notification path and there is none. `Tables::grow` (tables.rs:701-739) has exactly three callers: engine.rs:515 (`Engine::grow`), and two unit tests at tables.rs:850-851; `Engine::grow` in turn has one caller, lib.rs:285 in `dziry_engine_grow`. So growth is host-initiated only and tick's rebind (host.ts:318-327) is currently unreachable — the finding says so itself. Uploader refreshes `#tables` solely inside ensureCapacity, gated on `const grew = this.#engine.grow(want)` (upload.ts:144-153), and `Engine.grow` returns false whenever the generation already matches (host.ts:418) — so the described trap is exact: if tick ever rebinds first, `#generation` has already advanced, the next `grow(want)` returns false, ensureCapacity reports nothing changed, and Uploader keeps writing 48 columns through views into a freed arena. The design does point that way: host.ts:317 and tables.rs:26-32 both describe engine-side growth invalidating every host pointer, and NOTES.md:169-172 has the engine taking over its own frame loop as A0 step 3. Making the generation (not grow's return value) the trigger is the right fix. Latent today, so medium is right.
 
 <a id="f-protocol-codegen-nodeflags-hardcoded-in-generator"></a>
 
@@ -357,7 +357,7 @@ documented as "Re-reads the descriptor when the engine reports a new generation:
 
 `cleanliness` · `protocol-codegen/nodeflags-hardcoded-in-generator`
 
-**Where:** `src/protocol/schema.ts:329`, `scripts/gen-protocol.ts:136`, `scripts/gen-protocol.ts:201`, `src/protocol/generated.ts:218`, `native-src/dziri-engine/src/protocol.rs:190`
+**Where:** `src/protocol/schema.ts:329`, `scripts/gen-protocol.ts:136`, `scripts/gen-protocol.ts:201`, `src/protocol/generated.ts:218`, `native-src/dziry-engine/src/protocol.rs:190`
 
 **Claim.** `schema.ts` exports `NodeFlags` as "shared by both sides", but gen-protocol.ts never imports or reads it — it emits the bit values as literal text into both outputs. There are three hand-written copies of the same two constants, and editing the one in the single source of truth produces no change in either generated file.
 
@@ -377,12 +377,12 @@ documented as "Re-reads the descriptor when the engine reports a new generation:
 
 **Where:** `src/engine/host.ts:498`, `src/engine/host.ts:156`, `src/engine/host.ts:302`, `src/engine/upload.ts:135`
 
-**Claim.** `close()` calls `dziri_engine_destroy` (which drops the three `Arena`s) and then clears `#buffers` — but `#tables` and `#stringBytes` still hold the typed arrays, `get tables()` still returns them, and the `Uploader` holds its own reference. Clearing `#buffers` frees nothing, because `toArrayBuffer` was deliberately called without a finalizer.
+**Claim.** `close()` calls `dziry_engine_destroy` (which drops the three `Arena`s) and then clears `#buffers` — but `#tables` and `#stringBytes` still hold the typed arrays, `get tables()` still returns them, and the `Uploader` holds its own reference. Clearing `#buffers` frees nothing, because `toArrayBuffer` was deliberately called without a finalizer.
 
 **Evidence.** ```ts
 close(): void {
   if (!this.#handle) return;
-  check(engine.dziri_engine_destroy(this.#handle), "dziri_engine_destroy");
+  check(engine.dziry_engine_destroy(this.#handle), "dziry_engine_destroy");
   this.#handle = 0 as Pointer;
   /* Dropped together: every view points into memory the engine just freed. */
   this.#buffers = [];
@@ -402,7 +402,7 @@ The comment is wrong in both halves: the views are not dropped (`#tables` still 
 
 `performance` · `protocol-codegen/soa-argues-the-wrong-thing`
 
-**Where:** `native-src/dziri-engine/src/paint.rs:161`, `native-src/dziri-engine/src/layout.rs:374`, `native-src/dziri-engine/src/tables.rs:333`, `native-src/dziri-engine/src/tables.rs:4`
+**Where:** `native-src/dziry-engine/src/paint.rs:161`, `native-src/dziry-engine/src/layout.rs:374`, `native-src/dziry-engine/src/tables.rs:333`, `native-src/dziry-engine/src/tables.rs:4`
 
 **Claim.** The stated reason for SoA — "a style patch touches one array and paint reads stay monomorphic" — is half right. The patch half is correct and load-bearing. The paint half is not: paint visits style slots in tree order (random), so SoA's sequential-access benefit never materialises, and the per-field access pattern costs three dependent loads plus a slice reconstruction per field per node.
 
@@ -424,7 +424,7 @@ and `Painter::node` calls them for RADIUS, BG, BORDER_WIDTH, BORDER_COLOR, FONT_
 
 `correctness` · `protocol-codegen/spare-style-slot-fill-covers-3-of-46`
 
-**Where:** `src/engine/upload.ts:224`, `src/engine/upload.ts:213`, `src/ir.ts:169`, `native-src/dziri-engine/src/tables.rs:392`
+**Where:** `src/engine/upload.ts:224`, `src/engine/upload.ts:213`, `src/ir.ts:169`, `native-src/dziry-engine/src/tables.rs:392`
 
 **Claim.** `uploadStyles` recognises that a zeroed spare style slot is dangerous and fixes `width`, `height` and `alignSelf` — but `INITIAL_STYLE` names eight more non-zero unset values (`maxW`/`maxH: Infinity`, `basis`, `aspectRatio`, `insetT/R/B/L: NaN`, `justifyItems`/`justifySelf: UNSET`), all of which stay zero in a spare slot.
 
@@ -457,7 +457,7 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 - **medium** · [grow() validates no capacity and turns allocation failure into permanent poisoning](#f-ffi-soundness-grow-unvalidated-and-oom-panics)
 - **low** · [Tables::grow copies the live string arena into the new staged arena, leaving live zeroed](#f-ffi-soundness-grow-string-arena-asymmetric)
 - **low** · [surface_info reports width*4 not Skia's row_bytes, and it and bounds() take no length](#f-ffi-soundness-surface-info-rowbytes-and-arity)
-- **low** · [dziri_last_error is the one export with no catch_unwind, and its state is thread-local](#f-ffi-soundness-last-error-unguarded-and-thread-local)
+- **low** · [dziry_last_error is the one export with no catch_unwind, and its state is thread-local](#f-ffi-soundness-last-error-unguarded-and-thread-local)
 - **low** · [Two independent bump allocators write the same UTF-8 arena with no interlock](#f-ffi-soundness-two-cursors-one-string-arena)
 - **low** · [Native addresses round-trip through Number() with no exactness check](#f-ffi-soundness-pointers-through-js-doubles)
 - **low** · [Poisoning triggers on the body returning status::PANIC, not on a panic being caught](#f-ffi-soundness-poisoning-keyed-on-return-value)
@@ -468,15 +468,15 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 `soundness` · `ffi-soundness/js-views-outlive-rust-memory`
 
-**Where:** `src/engine/host.ts:246`, `src/engine/host.ts:498`, `native-src/dziri-engine/src/tables.rs:736`, `src/engine/upload.ts:135`, `src/engine/smoke.test.ts:54`
+**Where:** `src/engine/host.ts:246`, `src/engine/host.ts:498`, `native-src/dziry-engine/src/tables.rs:736`, `src/engine/upload.ts:135`, `src/engine/smoke.test.ts:54`
 
 **Claim.** The magic-number defence covers only the FFI call path; the shared-memory path — which carries essentially every write in the system — has no equivalent, so a stale typed-array view writes into freed heap silently.
 
-**Evidence.** host.ts:246 `const buffer = toArrayBuffer(address as Pointer, 0, elemSize * capacity);` then host.ts:498-504 `close(){ ... engine.dziri_engine_destroy(this.#handle); this.#handle = 0 as Pointer; /* Dropped together: every view points into memory the engine just freed. */ this.#buffers = []; }` — `#buffers = []` drops only *the Engine's* references. `Uploader` holds its own copy (`upload.ts:135 this.#tables = engine.tables;`) and `src/engine/smoke.test.ts:54 const { nodes, styles, variants, layout } = engine.tables;` destructures the views into consts. On the grow path the free happens *inside* the Rust call — `tables.rs:736 *self = grown;` drops the old `Arena`s (tables.rs:136-142 `dealloc`) before `dziri_engine_grow` even returns, so every view the host holds is already dangling by the time host.ts:420 `this.#bindTables()` runs.
+**Evidence.** host.ts:246 `const buffer = toArrayBuffer(address as Pointer, 0, elemSize * capacity);` then host.ts:498-504 `close(){ ... engine.dziry_engine_destroy(this.#handle); this.#handle = 0 as Pointer; /* Dropped together: every view points into memory the engine just freed. */ this.#buffers = []; }` — `#buffers = []` drops only *the Engine's* references. `Uploader` holds its own copy (`upload.ts:135 this.#tables = engine.tables;`) and `src/engine/smoke.test.ts:54 const { nodes, styles, variants, layout } = engine.tables;` destructures the views into consts. On the grow path the free happens *inside* the Rust call — `tables.rs:736 *self = grown;` drops the old `Arena`s (tables.rs:136-142 `dealloc`) before `dziry_engine_grow` even returns, so every view the host holds is already dangling by the time host.ts:420 `this.#bindTables()` runs.
 
 **Impact.** `uploader.uploadNodes()` after `engine.close()`, or any holder that did not re-read `engine.tables` after a grow, is a write to freed memory: heap corruption with no status code, no MAGIC mismatch and no diagnostic — the exact failure lib.rs:11-13 says the boundary exists to prevent ("a stale pointer is a magic-number mismatch rather than a segfault, which matters because the host is a scripting language that can easily hold one past `destroy`"). It is latent only because app.ts happens to route every write through `Uploader.ensureCapacity()` and does nothing after `close()`. The generation check is enforced by remembering, not by construction.
 
-**Recommendation.** Retire, do not free. Move superseded `Arena`s into a `Vec<Arena>` graveyard on the `Engine` instead of dropping them in `Tables::grow`, and graveyard (or leak) the arenas in `dziri_engine_destroy` rather than deallocating — an engine is process-lifetime, growth is rare, and the bounded memory cost buys "a stale view writes harmless retired scratch" instead of "a stale view corrupts the heap". Optionally add `dziri_engine_release_generation(n)` so the host can free the graveyard explicitly. On the TS side stop handing out raw views: have `get tables()` return an accessor that captures `#generation` and throws when `#bindTables` has bumped it, and delete `Uploader.#tables` in favour of reading `this.#engine.tables` per use (a field read, not a call). Detaching the old ArrayBuffers with `structuredClone(buf,{transfer:[buf]})` is a cheaper variant that turns stale access into a `TypeError`, if JSC permits transfer of an externally-backed buffer.
+**Recommendation.** Retire, do not free. Move superseded `Arena`s into a `Vec<Arena>` graveyard on the `Engine` instead of dropping them in `Tables::grow`, and graveyard (or leak) the arenas in `dziry_engine_destroy` rather than deallocating — an engine is process-lifetime, growth is rare, and the bounded memory cost buys "a stale view writes harmless retired scratch" instead of "a stale view corrupts the heap". Optionally add `dziry_engine_release_generation(n)` so the host can free the graveyard explicitly. On the TS side stop handing out raw views: have `get tables()` return an accessor that captures `#generation` and throws when `#bindTables` has bumped it, and delete `Uploader.#tables` in favour of reading `this.#engine.tables` per use (a field read, not a call). Detaching the old ArrayBuffers with `structuredClone(buf,{transfer:[buf]})` is a cheaper variant that turns stale access into a `TypeError`, if JSC permits transfer of an externally-backed buffer.
 
 **Verifier — weakened.** Stale-view protection on the shared-memory path exists and is structural, not incidental: the generation check lives inside `Engine.tick()`/`Engine.grow()`, which are the only two calls that can invalidate views, and `Uploader` re-reads correctly. The genuine defect is narrower — `Engine.close()` leaves `#tables`/`#stringBytes` pointing at freed arenas instead of clearing them or making the getters throw, so a write after `close()` is a silent write to freed heap.
 
@@ -486,7 +486,7 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 `security` · `ffi-soundness/host-lengths-trusted-for-slices`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:262`, `native-src/dziri-engine/src/lib.rs:209`, `native-src/dziri-engine/src/engine.rs:551`
+**Where:** `native-src/dziry-engine/src/lib.rs:262`, `native-src/dziry-engine/src/lib.rs:209`, `native-src/dziry-engine/src/engine.rs:551`
 
 **Claim.** `drain_events` constructs `&mut [Event]` of exactly the length the host claims, with no validation of any kind, then writes up to that many events — so an over-claimed capacity is a heap overflow write, not a refusal.
 
@@ -504,7 +504,7 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 `soundness` · `ffi-soundness/abi-struct-sizes-not-generated`
 
-**Where:** `src/engine/host.ts:29`, `scripts/gen-protocol.ts:1`, `src/protocol/schema.ts:327`, `native-src/dziri-engine/src/engine.rs:39`, `native-src/dziri-engine/src/tables.rs:48`
+**Where:** `src/engine/host.ts:29`, `scripts/gen-protocol.ts:1`, `src/protocol/schema.ts:327`, `native-src/dziry-engine/src/engine.rs:39`, `native-src/dziry-engine/src/tables.rs:48`
 
 **Claim.** The point of `schema.ts` → `gen-protocol.ts` is that no layout is hand-copied, but the three `#[repr(C)]` structs that actually cross the ABI are hand-copied, and `PROTOCOL_VERSION` explicitly excludes them.
 
@@ -512,7 +512,7 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 **Impact.** Add a field to `Event` (a modifier bitmask, a timestamp — both plausible for A3 keyboard work) and: `EVENT_SIZE` stays 56, `drainEvents` allocates `max*56`, passes `max` as capacity, and `drain_events` writes `max*64` bytes into it — the heap overflow from the sibling finding, with a green protocol handshake. Reorder `EngineConfig` and `Engine::new` reads a garbage `windowed` flag and a garbage `title` pointer out of a correctly sized buffer. Both are silent.
 
-**Recommendation.** Two things, both cheap. (1) Export the sizes and check them at `dlopen`: add `dziri_abi_sizes(out: *mut u32)` returning `[size_of::<SpanDesc>(), size_of::<EngineConfig>(), size_of::<Event>(), align_of::<EngineConfig>()]` and assert against the TS constants before the first call — a startup `throw` instead of corruption, ~15 lines. (2) Better, move the three structs into `schema.ts` as first-class records and have `gen-protocol.ts` emit both the Rust `#[repr(C)]` definitions and the TS sizes/offsets, so `EngineConfig`'s 4-byte hole before `title` is computed rather than commented; then fold them into the version rule and fix the schema.ts:325-326 comment to say so.
+**Recommendation.** Two things, both cheap. (1) Export the sizes and check them at `dlopen`: add `dziry_abi_sizes(out: *mut u32)` returning `[size_of::<SpanDesc>(), size_of::<EngineConfig>(), size_of::<Event>(), align_of::<EngineConfig>()]` and assert against the TS constants before the first call — a startup `throw` instead of corruption, ~15 lines. (2) Better, move the three structs into `schema.ts` as first-class records and have `gen-protocol.ts` emit both the Rust `#[repr(C)]` definitions and the TS sizes/offsets, so `EngineConfig`'s 4-byte hole before `title` is computed rather than commented; then fold them into the version rule and fix the schema.ts:325-326 comment to say so.
 
 **Verifier — weakened.** Accurate as a gap, overstated as severity: all three constants and the hand-derived `EngineConfig` offsets in host.ts:189-193 match the Rust `#[repr(C)]` layouts today, so nothing is currently corrupt. This is a latent-on-future-edit hazard (medium) against ROADMAP.md:167-172's own 'generate, do not hand-copy' decision, not a present defect.
 
@@ -522,11 +522,11 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 `soundness` · `ffi-soundness/magic-check-reads-freed-memory`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:149`, `native-src/dziri-engine/src/lib.rs:53`, `native-src/dziri-engine/tests/boundary.rs:98`
+**Where:** `native-src/dziry-engine/src/lib.rs:149`, `native-src/dziry-engine/src/lib.rs:53`, `native-src/dziry-engine/tests/boundary.rs:98`
 
 **Claim.** `destroy` frees the `Handle`, so every later `with()`/`destroy()` reads `magic` out of a deallocated allocation — the advertised safety property depends on reading memory Rust has already returned to the allocator.
 
-**Evidence.** lib.rs:152-155 `(*handle).magic = 0; drop(Box::from_raw(handle));` — the sentinel is written and then freed with it. lib.rs:53-54 then does, on any later call, `let handle = unsafe { &mut *handle }; if handle.magic != MAGIC {` — a read, and in fact a `&mut` construction, over freed memory. boundary.rs:100-105 codifies it as intended: `assert_eq!(unsafe { dziri_engine_destroy(handle) }, status::INVALID_HANDLE); assert_eq!(dziri_engine_tick(handle), status::INVALID_HANDLE);`. The `#[repr(C)] struct Handle { magic: u64, engine: Engine }` part is fine — repr(C) guarantees field order and offset 0 for `magic` even though `Engine`'s layout is unspecified, so the check reads the bytes it means to — but it reads them from a dead allocation.
+**Evidence.** lib.rs:152-155 `(*handle).magic = 0; drop(Box::from_raw(handle));` — the sentinel is written and then freed with it. lib.rs:53-54 then does, on any later call, `let handle = unsafe { &mut *handle }; if handle.magic != MAGIC {` — a read, and in fact a `&mut` construction, over freed memory. boundary.rs:100-105 codifies it as intended: `assert_eq!(unsafe { dziry_engine_destroy(handle) }, status::INVALID_HANDLE); assert_eq!(dziry_engine_tick(handle), status::INVALID_HANDLE);`. The `#[repr(C)] struct Handle { magic: u64, engine: Engine }` part is fine — repr(C) guarantees field order and offset 0 for `magic` even though `Engine`'s layout is unspecified, so the check reads the bytes it means to — but it reads them from a dead allocation.
 
 **Impact.** Textbook use-after-free read: UB, an immediate ASAN/Miri failure, and a fault if the allocator ever returns the page (the `Handle` is large — Skia surface, Taffy tree, several `Vec`s — so a size-class change or a hardened allocator can decommit it). It cannot be made robust by widening the sentinel; the check is unsound at its foundation. And because a test asserts the behaviour, the bug is now load-bearing and will be defended rather than found.
 
@@ -540,17 +540,17 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 `correctness` · `ffi-soundness/grow-unvalidated-and-oom-panics`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:281`, `native-src/dziri-engine/src/tables.rs:113`, `native-src/dziri-engine/src/tables.rs:117`, `native-src/dziri-engine/src/tables.rs:714`
+**Where:** `native-src/dziry-engine/src/lib.rs:281`, `native-src/dziry-engine/src/tables.rs:113`, `native-src/dziry-engine/src/tables.rs:117`, `native-src/dziry-engine/src/tables.rs:714`
 
-**Claim.** `dziri_engine_grow` accepts any six `u32`s and the allocation path answers an unreasonable request with `assert!`/`expect`, which `with()` converts into a permanently poisoned engine — contradicting the boundary's own rule that failures are status codes.
+**Claim.** `dziry_engine_grow` accepts any six `u32`s and the allocation path answers an unreasonable request with `assert!`/`expect`, which `with()` converts into a permanently poisoned engine — contradicting the boundary's own rule that failures are status codes.
 
 **Evidence.** lib.rs:281-287 does nothing but a null check: `if caps.is_null() { return fail(...); } engine.grow(*caps); status::OK`. `Tables::grow` calls `Tables::new(caps)` (tables.rs:714), whose arena allocation is `AllocLayout::from_size_align(size, ARENA_ALIGN).expect("arena layout")` (tables.rs:113) and `assert!(!ptr.is_null(), "out of memory allocating {size} bytes")` (tables.rs:117). Span sizing is unbounded: `byte_len` is `elem_size as usize * capacity as usize` (tables.rs:165) accumulated in `plan()`, so `nodes: 4_000_000_000` asks for tens of gigabytes across the node-sized spans, twice (staged and live) — and the *existing* arenas are still alive until tables.rs:736 `*self = grown;`, so peak is old + new.
 
 **Impact.** A capacity request that is merely too large — a runaway list, or a slip in `capacitiesFor` (upload.ts:106 `Math.ceil(ui.nodes.count * NODE_HEADROOM) + 16`) — kills the engine for the rest of the process: `guard` catches the panic, `with()` sets `poisoned = true` (lib.rs:68-70), and every later call including `describe` and `generation` returns `POISONED`. There is no recovery short of `close()` and re-open, and the host cannot tell "you asked for too much" from "the engine has a bug". `grow` is the one entry point where an expected condition (out of memory) sits on the panic path instead of the status path.
 
-**Recommendation.** Validate and return. Give `Capacities` a `fn validate(&self) -> Result<(), String>` with per-field ceilings (nodes/styles/strings ≤ a few million, `string_bytes` ≤ a few hundred MB) and reject with `status::CAPACITY` in `dziri_engine_grow` before touching the allocator. Change `Arena::new` to `try_new(size) -> Result<Self, String>` — `from_size_align(...).map_err(...)?` plus a null check returning `Err` — and thread the `Result` through `Tables::new`/`Tables::grow`/`Engine::grow` so OOM becomes `status::CAPACITY` with a message. While there, drop the 2x peak by growing one arena at a time (allocate new staged, copy, free old, then live) instead of building a whole second `Tables`.
+**Recommendation.** Validate and return. Give `Capacities` a `fn validate(&self) -> Result<(), String>` with per-field ceilings (nodes/styles/strings ≤ a few million, `string_bytes` ≤ a few hundred MB) and reject with `status::CAPACITY` in `dziry_engine_grow` before touching the allocator. Change `Arena::new` to `try_new(size) -> Result<Self, String>` — `from_size_align(...).map_err(...)?` plus a null check returning `Err` — and thread the `Result` through `Tables::new`/`Tables::grow`/`Engine::grow` so OOM becomes `status::CAPACITY` with a message. While there, drop the 2x peak by growing one arena at a time (allocate new staged, copy, free old, then live) instead of building a whole second `Tables`.
 
-**Verifier — confirmed.** I tried to find a ceiling and there is none. lib.rs:281-287 does only `if caps.is_null()` and then `engine.grow(*caps)`. `Capacities` (tables.rs:65-93) has no `validate`; `Engine::new` (engine.rs:151-158) only applies `.max(1)`; `Tables::grow` (tables.rs:701-714) takes the field-wise max and calls `Tables::new(caps)`, whose allocation path is `AllocLayout::from_size_align(size, ARENA_ALIGN).expect("arena layout")` (tables.rs:113) and `assert!(!ptr.is_null(), "out of memory allocating {size} bytes")` (tables.rs:117). Span sizing is genuinely unbounded (`elem_size as usize * capacity as usize` accumulated in `plan()`, tables.rs:164-167 and 255-285) and the old arenas are still alive until tables.rs:736 `*self = grown`, so peak is old+new as claimed. The poisoning consequence is exactly as described and is the part that makes this more than a crash: `guard` returns `status::PANIC` (error.rs:114), lib.rs:67-70 sets `poisoned = true`, and lib.rs:60-65 then refuses every later call — including `dziri_engine_generation`, which is the one call the host needs to work out whether its views are still valid. So an oversized request is unrecoverable without `close()` and re-open, and the host cannot distinguish 'you asked for too much' from 'the engine has a bug'. `grow` is indeed the one entry point where an expected condition sits on the panic path; `dziri_engine_create` has the same allocation path but there the panic surfaces as a create-time `PANIC` on a handle that never existed, which is benign by comparison. Severity medium is right — reachable only from a runaway `capacitiesFor` (upload.ts:101-115) or a genuinely OOM machine, but silent and terminal when it happens.
+**Verifier — confirmed.** I tried to find a ceiling and there is none. lib.rs:281-287 does only `if caps.is_null()` and then `engine.grow(*caps)`. `Capacities` (tables.rs:65-93) has no `validate`; `Engine::new` (engine.rs:151-158) only applies `.max(1)`; `Tables::grow` (tables.rs:701-714) takes the field-wise max and calls `Tables::new(caps)`, whose allocation path is `AllocLayout::from_size_align(size, ARENA_ALIGN).expect("arena layout")` (tables.rs:113) and `assert!(!ptr.is_null(), "out of memory allocating {size} bytes")` (tables.rs:117). Span sizing is genuinely unbounded (`elem_size as usize * capacity as usize` accumulated in `plan()`, tables.rs:164-167 and 255-285) and the old arenas are still alive until tables.rs:736 `*self = grown`, so peak is old+new as claimed. The poisoning consequence is exactly as described and is the part that makes this more than a crash: `guard` returns `status::PANIC` (error.rs:114), lib.rs:67-70 sets `poisoned = true`, and lib.rs:60-65 then refuses every later call — including `dziry_engine_generation`, which is the one call the host needs to work out whether its views are still valid. So an oversized request is unrecoverable without `close()` and re-open, and the host cannot distinguish 'you asked for too much' from 'the engine has a bug'. `grow` is indeed the one entry point where an expected condition sits on the panic path; `dziry_engine_create` has the same allocation path but there the panic surfaces as a create-time `PANIC` on a handle that never existed, which is benign by comparison. Severity medium is right — reachable only from a runaway `capacitiesFor` (upload.ts:101-115) or a genuinely OOM machine, but silent and terminal when it happens.
 
 <a id="f-ffi-soundness-grow-string-arena-asymmetric"></a>
 
@@ -558,7 +558,7 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 `correctness` · `ffi-soundness/grow-string-arena-asymmetric`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:731`, `native-src/dziri-engine/src/tables.rs:716`
+**Where:** `native-src/dziry-engine/src/tables.rs:731`, `native-src/dziry-engine/src/tables.rs:716`
 
 **Claim.** The string-bytes region is the one span `grow` handles by hand, and it is wrong in two directions: host writes staged but not yet committed are discarded, and the new tables' live copy is never populated.
 
@@ -576,11 +576,11 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 `correctness` · `ffi-soundness/surface-info-rowbytes-and-arity`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:366`, `native-src/dziri-engine/src/lib.rs:374`, `native-src/dziri-engine/src/engine.rs:255`, `src/engine/host.ts:439`
+**Where:** `native-src/dziry-engine/src/lib.rs:366`, `native-src/dziry-engine/src/lib.rs:374`, `native-src/dziry-engine/src/engine.rs:255`, `src/engine/host.ts:439`
 
 **Claim.** The host sizes its pixel buffer from a stride the engine computes rather than the one Skia actually used, and neither `surface_info` nor `bounds` accepts a length, so their out-pointer arity is enforced by doc comment only.
 
-**Evidence.** lib.rs:371-376: `let (width, height) = engine.size(); *out = width; *out.add(1) = height; *out.add(2) = width * 4; *out.add(3) = engine.frame_count() as u32;` — four `u32` writes, no `len` parameter, stride *derived*. The real stride comes from the pixmap: engine.rs:255-259 `let pixmap = self.surface.peek_pixels()?; let row_bytes = pixmap.row_bytes();`. host.ts:439-447 then does `const [, height, rowBytes] = this.surfaceInfo(); const out = new Uint8Array(height * rowBytes);` while `read_pixels` copies `pixels.len()` = `height * real_row_bytes` after `if (len as usize) < pixels.len()` (lib.rs:397). `dziri_engine_bounds` has the same shape: lib.rs:352 `copy_nonoverlapping(rect.as_ptr(), out, 4)` with the count only in the doc comment (lib.rs:339 "`out` must be writable for four `f32`"). Every other copy-out — `describe`, `read_pixels`, `take_png`, `font_family`, `last_error` — takes a length.
+**Evidence.** lib.rs:371-376: `let (width, height) = engine.size(); *out = width; *out.add(1) = height; *out.add(2) = width * 4; *out.add(3) = engine.frame_count() as u32;` — four `u32` writes, no `len` parameter, stride *derived*. The real stride comes from the pixmap: engine.rs:255-259 `let pixmap = self.surface.peek_pixels()?; let row_bytes = pixmap.row_bytes();`. host.ts:439-447 then does `const [, height, rowBytes] = this.surfaceInfo(); const out = new Uint8Array(height * rowBytes);` while `read_pixels` copies `pixels.len()` = `height * real_row_bytes` after `if (len as usize) < pixels.len()` (lib.rs:397). `dziry_engine_bounds` has the same shape: lib.rs:352 `copy_nonoverlapping(rect.as_ptr(), out, 4)` with the count only in the doc comment (lib.rs:339 "`out` must be writable for four `f32`"). Every other copy-out — `describe`, `read_pixels`, `take_png`, `font_family`, `last_error` — takes a length.
 
 **Impact.** Whenever Skia pads a raster row (`minRowBytes` is width*4 for N32 today, but that is an implementation choice and changes for non-N32 or aligned surfaces), `readPixels()` allocates too little and the call fails with `CAPACITY` — a screenshot path that breaks on a width the tests never used, with an error blaming the host. The missing length is the other half: the two functions with no arity in their signature are the two that cannot be bounds-checked, which is exactly the pattern that becomes an overflow when a caller or a future field count is wrong. (`width * 4` can also wrap in release, though surface allocation fails first at those sizes.)
 
@@ -590,19 +590,19 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 <a id="f-ffi-soundness-last-error-unguarded-and-thread-local"></a>
 
-### LOW · dziri_last_error is the one export with no catch_unwind, and its state is thread-local
+### LOW · dziry_last_error is the one export with no catch_unwind, and its state is thread-local
 
 `soundness` · `ffi-soundness/last-error-unguarded-and-thread-local`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:90`, `native-src/dziri-engine/src/lib.rs:4`, `native-src/dziri-engine/src/error.rs:88`, `native-src/dziri-engine/src/error.rs:25`
+**Where:** `native-src/dziry-engine/src/lib.rs:90`, `native-src/dziry-engine/src/lib.rs:4`, `native-src/dziry-engine/src/error.rs:88`, `native-src/dziry-engine/src/error.rs:25`
 
-**Claim.** lib.rs opens by asserting every `extern "C"` function cannot unwind; `dziri_last_error` is not wrapped in `guard`, and it is the function the host calls on every failure path.
+**Claim.** lib.rs opens by asserting every `extern "C"` function cannot unwind; `dziry_last_error` is not wrapped in `guard`, and it is the function the host calls on every failure path.
 
-**Evidence.** lib.rs:4-8: "every one of those functions has the same three properties: 1. **It cannot unwind.** [`error::guard`] catches panics…". But lib.rs:90-93 is `pub unsafe extern "C" fn dziri_last_error(buf: *mut u8, len: u32) -> u32 { error::read_last_error(buf, len) }` — no `guard`. `read_last_error` does `LAST_ERROR.with(|slot| { let text = slot.borrow(); ... })` (error.rs:89-97); `thread_local!`'s `with` panics with `AccessError` when the slot is being destroyed, and `RefCell::borrow` panics on a conflicting borrow. `error::install_hook()` is also called outside the guard (lib.rs:104, before the `guard(||…)` on line 106). Separately both slots are thread-local (error.rs:25-32) while `guard` and the hook assume the panicking thread and the calling thread are the same.
+**Evidence.** lib.rs:4-8: "every one of those functions has the same three properties: 1. **It cannot unwind.** [`error::guard`] catches panics…". But lib.rs:90-93 is `pub unsafe extern "C" fn dziry_last_error(buf: *mut u8, len: u32) -> u32 { error::read_last_error(buf, len) }` — no `guard`. `read_last_error` does `LAST_ERROR.with(|slot| { let text = slot.borrow(); ... })` (error.rs:89-97); `thread_local!`'s `with` panics with `AccessError` when the slot is being destroyed, and `RefCell::borrow` panics on a conflicting borrow. `error::install_hook()` is also called outside the guard (lib.rs:104, before the `guard(||…)` on line 106). Separately both slots are thread-local (error.rs:25-32) while `guard` and the hook assume the panicking thread and the calling thread are the same.
 
-**Impact.** A panic escaping `dziri_last_error` unwinds straight into Bun's C++ frame and aborts the process with no diagnostic — the outcome error.rs:1-7 exists to prevent, on the one path that runs when something has already gone wrong (host.ts:112-119 `lastError()` is called from `check()` on every non-OK status). The thread-locality is a second, scheduled failure: once the engine owns its frame loop (engine.rs:11-17), a panic on the render thread records into that thread's `LAST_PANIC`/`LAST_ERROR` and `dziri_last_error` from Bun's thread returns an empty string — blank exactly when the poisoned-engine message matters. Nothing stops Bun calling these symbols from a Worker today either, and `Engine` is neither `Send` nor `Sync`.
+**Impact.** A panic escaping `dziry_last_error` unwinds straight into Bun's C++ frame and aborts the process with no diagnostic — the outcome error.rs:1-7 exists to prevent, on the one path that runs when something has already gone wrong (host.ts:112-119 `lastError()` is called from `check()` on every non-OK status). The thread-locality is a second, scheduled failure: once the engine owns its frame loop (engine.rs:11-17), a panic on the render thread records into that thread's `LAST_PANIC`/`LAST_ERROR` and `dziry_last_error` from Bun's thread returns an empty string — blank exactly when the poisoned-engine message matters. Nothing stops Bun calling these symbols from a Worker today either, and `Engine` is neither `Send` nor `Sync`.
 
-**Recommendation.** Wrap `dziri_last_error` in a `guard` variant that yields 0 on panic (it returns `u32`, not a status), and move `install_hook()` inside `dziri_engine_create`'s `guard`. Then make the error slots process-global rather than thread-local — `static LAST_ERROR: Mutex<String>` and `static LAST_PANIC: Mutex<Option<String>>` — so a panic anywhere in the library is readable from anywhere; record the thread name into the message if per-thread detail is wanted. Cheap, and it removes an assumption the roadmap is about to break.
+**Recommendation.** Wrap `dziry_last_error` in a `guard` variant that yields 0 on panic (it returns `u32`, not a status), and move `install_hook()` inside `dziry_engine_create`'s `guard`. Then make the error slots process-global rather than thread-local — `static LAST_ERROR: Mutex<String>` and `static LAST_PANIC: Mutex<Option<String>>` — so a panic anywhere in the library is readable from anywhere; record the thread name into the message if per-thread detail is wanted. Cheap, and it removes an assumption the roadmap is about to break.
 
 **Verifier — weakened.** The unguarded export is real but has no reachable panic: `read_last_error` contains no panicking operation given a live thread and no re-entrant borrow, and `install_hook` cannot panic outside a nested panic. The thread-local error slots are documented behaviour (lib.rs:85, error.rs:26-28), and the render-thread case that breaks them is the roadmap step ROADMAP.md:673-676 explicitly defers. Low severity, worth the 3-line guard for invariant hygiene.
 
@@ -648,7 +648,7 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 `cleanliness` · `ffi-soundness/poisoning-keyed-on-return-value`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:67`, `native-src/dziri-engine/src/error.rs:104`
+**Where:** `native-src/dziry-engine/src/lib.rs:67`, `native-src/dziry-engine/src/error.rs:104`
 
 **Claim.** `with()` cannot distinguish "guard caught an unwind" from "the body returned -1", so the poisoning invariant rests on no call site ever using `status::PANIC` as an ordinary failure code.
 
@@ -658,7 +658,7 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 **Recommendation.** Change `guard` to return `Result<i32, i32>`, or a two-variant `enum Outcome { Returned(i32), Panicked(i32) }`, and have `with()` match on it: `Outcome::Panicked(code) => { handle.engine.poisoned = true; code }`. Five lines, and the invariant becomes structural.
 
-**Verifier — confirmed.** Exactly as described and I found no other signal. lib.rs:67-71 is `let code = guard(|| body(&mut handle.engine)); if code == status::PANIC { handle.engine.poisoned = true; } code` — the integer is the only evidence. `guard` (error.rs:104-117) matches on `catch_unwind`'s `Ok`/`Err` and collapses both arms to `i32`, discarding the distinction it already has. I grepped the whole crate for `status::PANIC`: the only producer is error.rs:114 and the only consumers are lib.rs:68 and boundary.rs:78, so nothing calls `fail(status::PANIC, …)` today and the invariant currently holds — by numbering coincidence, as claimed. The failure modes named are both real: a first ordinary `fail(status::PANIC, …)` would permanently poison a healthy engine (lib.rs:60-65 then refuses every call including `dziri_engine_generation`), and a `guard` variant mapping some panics to another code would silently stop poisoning, which is the property error.rs:9-14's `AssertUnwindSafe` argument rests on. The `Outcome`/`Result` fix is five lines and makes it structural. Low severity is correct — no present misbehaviour.
+**Verifier — confirmed.** Exactly as described and I found no other signal. lib.rs:67-71 is `let code = guard(|| body(&mut handle.engine)); if code == status::PANIC { handle.engine.poisoned = true; } code` — the integer is the only evidence. `guard` (error.rs:104-117) matches on `catch_unwind`'s `Ok`/`Err` and collapses both arms to `i32`, discarding the distinction it already has. I grepped the whole crate for `status::PANIC`: the only producer is error.rs:114 and the only consumers are lib.rs:68 and boundary.rs:78, so nothing calls `fail(status::PANIC, …)` today and the invariant currently holds — by numbering coincidence, as claimed. The failure modes named are both real: a first ordinary `fail(status::PANIC, …)` would permanently poison a healthy engine (lib.rs:60-65 then refuses every call including `dziry_engine_generation`), and a `guard` variant mapping some panics to another code would silently stop poisoning, which is the property error.rs:9-14's `AssertUnwindSafe` argument rests on. The `Outcome`/`Result` fix is five lines and makes it structural. Low severity is correct — no present misbehaviour.
 
 ---
 
@@ -703,7 +703,7 @@ against ir.ts:169-221 `INITIAL_STYLE`, which sets `basis: AUTO`, `maxW: Infinity
 
 `correctness` · `compiler-css/align-items-initial-wrong`
 
-**Where:** `src/ir.ts:191`, `src/ir.ts:188-192`, `native-src/dziri-engine/src/layout.rs:409`, `former windows/main/index.css line 14`
+**Where:** `src/ir.ts:191`, `src/ir.ts:188-192`, `native-src/dziry-engine/src/layout.rs:409`, `former windows/main/index.css line 14`
 
 **Claim.** `align: Align.START` is emitted for every node that does not declare `align-items`, and layout.rs converts FLEX_START into `Some(AlignItems::FlexStart)`, forcing start alignment and overriding Taffy's stretch default. CSS's initial value is `normal`, which behaves as `stretch` in flex containers — and block children fill their parent's inline size — so every undeclared container cross-shrink-wraps its children where a browser stretches them.
 
@@ -725,7 +725,7 @@ Secondary claim also confirmed: compile.ts:589-592 passes `[]` as the path when 
 
 `correctness` · `compiler-css/materialized-state-not-interactive`
 
-**Where:** `src/compiler/compile.ts:783-800`, `src/compiler/compile.ts:697-703`, `src/compiler/variants.ts`, `native-src/dziri-engine/src/paint.rs:272`
+**Where:** `src/compiler/compile.ts:783-800`, `src/compiler/compile.ts:697-703`, `src/compiler/variants.ts`, `native-src/dziry-engine/src/paint.rs:272`
 
 **Claim.** On the variants path `emit` builds the state table from `hasState(variants, i)` but builds `interactive` from the baseline `nodes` array, so a node whose hover/active/focus slot exists only because a toggle introduces it gets a state row and no INTERACTIVE flag — and `hit_test` gates on that flag, so the node can never become hovered.
 
@@ -783,7 +783,7 @@ The strictness inconsistency is confirmed too: `*` throws ('could not parse comp
 
 `architecture` · `compiler-css/fixed-three-state-roles`
 
-**Where:** `src/ir.ts:243-265`, `src/protocol/schema.ts:144-153`, `native-src/dziri-engine/src/paint.rs:89-101`, `src/compiler/compile.ts:222-232`, `src/compiler/variant-compile.ts:162-163`, `src/compiler/css.ts:32-38`
+**Where:** `src/ir.ts:243-265`, `src/protocol/schema.ts:144-153`, `native-src/dziry-engine/src/paint.rs:89-101`, `src/compiler/compile.ts:222-232`, `src/compiler/variant-compile.ts:162-163`, `src/compiler/css.ts:32-38`
 
 **Claim.** The interaction-state representation is three named columns replicated across `BuiltNode`, `StateTable`, `schema.ts` (hence generated.ts and protocol.rs), `paint.rs::style_for`, and `ROLE_NAMES`; it can express 'one style per fixed role, pick one by precedence' and nothing else. Every A1 item touching variants — group-*/peer-*, data-[state=], :focus-visible, media queries — needs more predicates or predicates owned by a different node, and `Selector.pseudo` is one scalar for the whole selector rather than per-compound.
 
@@ -1112,7 +1112,7 @@ The related pushText claim is confirmed too: html.ts:246-250 collapses then `tri
 
 `architecture` · `runtime-reactivity/paint-only-still-relayouts`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:273`, `native-src/dziri-engine/src/engine.rs:299`, `native-src/dziri-engine/src/engine.rs:311`, `native-src/dziri-engine/src/tables.rs:542`, `native-src/dziri-engine/src/layout.rs:124`, `src/runtime/patches.ts:48`, `src/window-host.ts`
+**Where:** `native-src/dziry-engine/src/engine.rs:273`, `native-src/dziry-engine/src/engine.rs:299`, `native-src/dziry-engine/src/engine.rs:311`, `native-src/dziry-engine/src/tables.rs:542`, `native-src/dziry-engine/src/layout.rs:124`, `src/runtime/patches.ts:48`, `src/window-host.ts`
 
 **Claim.** `affectsLayout` is resolved at build time and carried into the patch, but nothing downstream consumes it: the engine's diff drops style *field* identity, `resync` pushes every affected node's style into Taffy (which marks it dirty), and `tick` runs `compute` on `diff.any`. A colour-only theme toggle forces a full relayout and re-measure.
 
@@ -1130,7 +1130,7 @@ The related pushText claim is confirmed too: html.ts:246-250 collapses then `tri
 
 `architecture` · `runtime-reactivity/structural-diff-rebuilds-whole-taffy-tree`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:304`, `native-src/dziri-engine/src/layout.rs:62`, `native-src/dziri-engine/src/tables.rs:529`, `src/runtime/list-runtime.ts:290`
+**Where:** `native-src/dziry-engine/src/engine.rs:304`, `native-src/dziry-engine/src/layout.rs:62`, `native-src/dziry-engine/src/tables.rs:529`, `src/runtime/list-runtime.ts:290`
 
 **Claim.** `diff.structure` is span-granular — it says "some firstChild/nextSibling byte changed" and nothing more — so every list append, delete or reorder allocates a brand-new `TaffyTree` with one leaf per node, re-`set_children` for every node, and re-pushes every style, turning an O(1) relink into O(all nodes).
 
@@ -1214,7 +1214,7 @@ for (let i = 0; i < items.length; i++) {
 
 **Evidence.** upload.ts:275-278 `for (let i = 0; i < strings.length; i++) { if (force || this.#uploaded[i] !== strings[i]) needed += strings[i]!.length * 3; }` then upload.ts:285 loops every slot again. `capacitiesFor` runs every frame via `ensureCapacity()` (src/window-host.ts) and opens with upload.ts:102 `for (const s of ui.strings) bytes += s.length * 3;`. Orphans: list-runtime.ts:146-150 `for (const binding of ref.bindings) { ui.strings.push(""); … }` mints `capacity * bindings.length` new slots per growth while the previous arena's slots stay in `ui.strings` forever (`ref.slotStart` just moves past them). The doc at upload.ts:266-268 claims "Dynamic text mints a new string on every keystroke, so this is the one upload that must not be O(all strings)."
 
-**Impact.** Three full passes over the string table per frame at 125 Hz, plus one `dziri_engine_grow` FFI call per frame that returns false. A 100k-row list with 2 bindings is ~200k live slots plus ~200k orphans from the doubling history: ~600k string comparisons and a `.length` sum over 400k strings every frame, to discover that one draft slot changed.
+**Impact.** Three full passes over the string table per frame at 125 Hz, plus one `dziry_engine_grow` FFI call per frame that returns false. A 100k-row list with 2 bindings is ~200k live slots plus ~200k orphans from the doubling history: ~600k string comparisons and a `.length` sum over 400k strings every frame, to discover that one draft slot changed.
 
 **Recommendation.** Have the writers report: `applyTextBindings` (bindings.ts:35) and `updateList` (list-runtime.ts:280) already know the exact slot indices they mutated — push them onto a shared `dirtySlots` array that `uploadStrings` consumes and clears, making the steady state O(changed). Maintain `capacitiesFor`'s byte total incrementally at the same sites instead of recomputing, and call `engine.grow` only when `ui.nodes.count`/`ui.strings.length` actually changed — both change only in `growArena`.
 
@@ -1226,7 +1226,7 @@ for (let i = 0; i < items.length; i++) {
 
 `performance` · `runtime-reactivity/frame-loop-polls-and-memcmps-everything`
 
-**Where:** `src/window-host.ts`, `src/window-host.ts`, `native-src/dziri-engine/src/tables.rs:498`, `src/engine/host.ts:329`, `src/engine/host.ts:318`
+**Where:** `src/window-host.ts`, `src/window-host.ts`, `native-src/dziry-engine/src/tables.rs:498`, `src/engine/host.ts:329`, `src/engine/host.ts:318`
 
 **Claim.** `commit()` is the engine's only change detection and it is O(total shared bytes) per tick; the host ticks unconditionally every 8 ms even when its own `dirty` flag is false, and drains events exactly once per frame with no re-drain when the buffer fills.
 
@@ -1294,7 +1294,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `runtime-reactivity/engine-input-state-not-invalidated-on-relink`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:414`, `native-src/dziri-engine/src/engine.rs:303`, `src/runtime/list-runtime.ts:196`
+**Where:** `native-src/dziry-engine/src/engine.rs:414`, `native-src/dziry-engine/src/engine.rs:303`, `src/runtime/list-runtime.ts:196`
 
 **Claim.** `InputState` holds raw node ids and is recomputed only on a mouse event; nothing in `commit`/`resync` re-resolves it when the tree that gave those ids meaning changes underneath.
 
@@ -1312,11 +1312,11 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `architecture` · `runtime-reactivity/dataoffset-absent-lists-table-unread`
 
-**Where:** `src/ir.ts:305`, `src/protocol/schema.ts:156`, `src/engine/upload.ts:249`, `native-src/dziri-engine/src/tables.rs:525`
+**Where:** `src/ir.ts:305`, `src/protocol/schema.ts:156`, `src/engine/upload.ts:249`, `native-src/dziry-engine/src/tables.rs:525`
 
 **Claim.** The arena shape does admit O(visible) virtualization, but none of the three required pieces exists: the field is absent from the shared schema, the reconciler is O(all items) not O(visible), and the engine never reads the list table at all.
 
-**Evidence.** ir.ts:317-321 claims "`dataOffset` makes virtualization the same mechanism rather than a second one: cap `capacity` at the visible count and scrolling is an integer write, since slots are recomputed from `items[dataOffset + i]`" and ir.ts:322 declares the field. schema.ts:160-166 lists only `node, arenaStart, stride, capacity, active`; `grep -rn dataOffset src/protocol/generated.ts native-src/dziri-engine/src/*.rs` returns nothing, and `uploadLists` (upload.ts:249-258) does not upload it. `updateList` never reads it and always iterates all of `items` (lines 233, 265, 295). `grep -rn 'Table::Lists|lists::' native-src/dziri-engine/src/` matches only protocol.rs metadata — layout.rs and paint.rs traverse `firstChild`/`nextSibling` exclusively. `classify` (tables.rs:525-562) has no Lists branch, so a list-table-only change sets `diff.any = true` with no category and buys a full `compute()` for nothing.
+**Evidence.** ir.ts:317-321 claims "`dataOffset` makes virtualization the same mechanism rather than a second one: cap `capacity` at the visible count and scrolling is an integer write, since slots are recomputed from `items[dataOffset + i]`" and ir.ts:322 declares the field. schema.ts:160-166 lists only `node, arenaStart, stride, capacity, active`; `grep -rn dataOffset src/protocol/generated.ts native-src/dziry-engine/src/*.rs` returns nothing, and `uploadLists` (upload.ts:249-258) does not upload it. `updateList` never reads it and always iterates all of `items` (lines 233, 265, 295). `grep -rn 'Table::Lists|lists::' native-src/dziry-engine/src/` matches only protocol.rs metadata — layout.rs and paint.rs traverse `firstChild`/`nextSibling` exclusively. `classify` (tables.rs:525-562) has no Lists branch, so a list-table-only change sets `diff.any = true` with no category and buys a full `compute()` for nothing.
 
 **Impact.** The ROADMAP promise is not one integer write away: it needs the protocol field, an `items[dataOffset + i]` rewrite of a reconciler whose matching loop is over all items, engine-side clipping (`overflow` is in the schema at schema.ts:138 and unimplemented) and a scroll event. Meanwhile five spans are copied and memcmp'd every frame for no consumer, and the missing `classify` case is a live trap: the moment the engine does read `lists.active`, `resync` will not be told it changed.
 
@@ -1330,7 +1330,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `soundness` · `runtime-reactivity/grow-string-arena-asymmetry`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:731`, `native-src/dziri-engine/src/tables.rs:716`
+**Where:** `native-src/dziry-engine/src/tables.rs:731`, `native-src/dziry-engine/src/tables.rs:716`
 
 **Claim.** Every table span is copied staged→staged and live→live, but the string byte region is copied live→staged only, so growth discards whatever Bun had staged and starts the new live arena empty.
 
@@ -1367,7 +1367,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `soundness` · `engine-layout/parent-child-cycle-stack-overflow`
 
-**Where:** `native-src/dziri-engine/src/layout.rs:88`, `native-src/dziri-engine/src/layout.rs:94`, `native-src/dziri-engine/src/layout.rs:201`, `native-src/dziri-engine/tests/bounds.rs:334`
+**Where:** `native-src/dziry-engine/src/layout.rs:88`, `native-src/dziry-engine/src/layout.rs:94`, `native-src/dziry-engine/src/layout.rs:201`, `native-src/dziry-engine/tests/bounds.rs:334`
 
 **Claim.** `relink`'s budget only detects cycles in the `nextSibling` chain; a cycle in the *parent/child* direction (`firstChild[root] = root`) passes relink untouched and then recurses forever inside `compute_layout`, overflowing the render thread's stack — which `catch_unwind` cannot contain.
 
@@ -1385,11 +1385,11 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `architecture` · `engine-layout/paint-only-patch-forces-relayout`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:542`, `native-src/dziri-engine/src/engine.rs:273`, `native-src/dziri-engine/src/engine.rs:314`, `native-src/dziri-engine/src/layout.rs:124`, `src/ir.ts:142`
+**Where:** `native-src/dziry-engine/src/tables.rs:542`, `native-src/dziry-engine/src/engine.rs:273`, `native-src/dziry-engine/src/engine.rs:314`, `native-src/dziry-engine/src/layout.rs:124`, `src/ir.ts:142`
 
 **Claim.** The compiler's `affectsLayout` classification is never transmitted to the engine, and the engine's commit diff throws away the field index — so a colour-only conditional class re-pushes the whole `Style` and unconditionally dirties the node and every ancestor up to the root. `LAYOUT_FIELDS` is a lie as far as the engine is concerned.
 
-**Evidence.** tables.rs:542-546 discards `span.field` for the styles table entirely: `if span.table as usize == styles { diff.styles = true; self.collect_changed_slots(span, &mut diff.changed_styles); return; }` — bg/fg/borderColor/borderWidth/radius are indistinguishable from width/padding/gap. engine.rs:314-329 then calls `self.tree.apply_style(...)` for every node wearing a changed slot, and layout.rs:126 calls `set_style`, which in taffy 0.9.2 (taffy_tree.rs:831-835) is `self.nodes[node].style = style; self.mark_dirty(node)?;` — dirty unconditionally — and `mark_dirty` (taffy_tree.rs:870-887) walks to the root. engine.rs:273 then runs `compute` for any `diff.any`. Nothing in native-src/dziri-engine/src/protocol.rs carries a layout/paint flag; the classification exists only at src/ir.ts:142 and dies at src/runtime/patches.ts:48 (`dirty = patch.affectsLayout ? Dirty.LAYOUT : ... Dirty.PAINT`), whose result the host cannot pass to the engine — there is no such FFI entry point in lib.rs.
+**Evidence.** tables.rs:542-546 discards `span.field` for the styles table entirely: `if span.table as usize == styles { diff.styles = true; self.collect_changed_slots(span, &mut diff.changed_styles); return; }` — bg/fg/borderColor/borderWidth/radius are indistinguishable from width/padding/gap. engine.rs:314-329 then calls `self.tree.apply_style(...)` for every node wearing a changed slot, and layout.rs:126 calls `set_style`, which in taffy 0.9.2 (taffy_tree.rs:831-835) is `self.nodes[node].style = style; self.mark_dirty(node)?;` — dirty unconditionally — and `mark_dirty` (taffy_tree.rs:870-887) walks to the root. engine.rs:273 then runs `compute` for any `diff.any`. Nothing in native-src/dziry-engine/src/protocol.rs carries a layout/paint flag; the classification exists only at src/ir.ts:142 and dies at src/runtime/patches.ts:48 (`dirty = patch.affectsLayout ? Dirty.LAYOUT : ... Dirty.PAINT`), whose result the host cannot pass to the engine — there is no such FFI entry point in lib.rs.
 
 **Impact.** A hover-driven `.primary` background toggle clears the measure cache on the whole ancestor chain, so Skia re-measures that node's text every time. A theme change touching one colour field across many slots dirties most of the tree. The staging/diff machinery earns its memory precisely on this claim ("a colour-only theme patch touches no geometry, so it reaches paint without Taffy hearing about it at all", engine.rs:300-302) and it does not hold.
 
@@ -1403,7 +1403,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `performance` · `engine-layout/structural-change-rebuilds-whole-tree`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:304`, `native-src/dziri-engine/src/layout.rs:62`, `native-src/dziri-engine/src/tables.rs:531`
+**Where:** `native-src/dziry-engine/src/engine.rs:304`, `native-src/dziry-engine/src/layout.rs:62`, `native-src/dziry-engine/src/tables.rs:531`
 
 **Claim.** The tree is kept incrementally across frames (there is a persistent index→NodeId map), but `diff.structure` — what a dynamic-list append or reorder produces — discards the whole `TaffyTree` and rebuilds it from zero, re-measuring every text node through Skia.
 
@@ -1421,7 +1421,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-layout/interaction-styles-bypass-layout`
 
-**Where:** `native-src/dziri-engine/src/layout.rs:368`, `native-src/dziri-engine/src/paint.rs:65`, `native-src/dziri-engine/src/paint.rs:221`, `native-src/dziri-engine/src/engine.rs:332`
+**Where:** `native-src/dziry-engine/src/layout.rs:368`, `native-src/dziry-engine/src/paint.rs:65`, `native-src/dziry-engine/src/paint.rs:221`, `native-src/dziry-engine/src/engine.rs:332`
 
 **Claim.** `style_of` always resolves a node's *base* `nodes.style` slot, while `Painter::node` resolves the state slot via `style_for`. Any interaction declaration touching a layout field is silently half-applied: the box keeps its base geometry while the label is positioned using the hover slot's padding and font size.
 
@@ -1439,7 +1439,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-layout/initial-style-defeats-unset`
 
-**Where:** `src/ir.ts:188`, `src/ir.ts:189`, `native-src/dziri-engine/src/layout.rs:322`, `native-src/dziri-engine/src/layout.rs:409`, `former windows/main/index.css line 56`
+**Where:** `src/ir.ts:188`, `src/ir.ts:189`, `native-src/dziry-engine/src/layout.rs:322`, `native-src/dziry-engine/src/layout.rs:409`, `former windows/main/index.css line 56`
 
 **Claim.** Every `u8` enum field in `style_of` handles `UNSET` correctly — including all four of `alignItems`/`alignSelf`/`justifyItems`/`justifySelf`, which all route through `align_of` — but the compiler never emits `UNSET` for `align` or `justify`, so grid items are still coerced to `flex-start` and never stretch. This is the exact regression the code comment claims was fixed.
 
@@ -1457,7 +1457,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `architecture` · `engine-layout/list-wrapper-breaks-grid`
 
-**Where:** `src/compiler/compile.ts:467`, `src/compiler/compile.ts:153`, `src/ir.ts:155`, `native-src/dziri-engine/src/layout.rs:88`
+**Where:** `src/compiler/compile.ts:467`, `src/compiler/compile.ts:153`, `src/ir.ts:155`, `native-src/dziry-engine/src/layout.rs:88`
 
 **Claim.** A LIST node is a real child node between the container and the rows, and it copies `display`/`gridCols`/`gridRows` from the container. Inside a grid container that makes the wrapper a single grid item occupying one cell, with a second nested grid inside it — grid placement of the rows is not approximate, it is wrong by a factor of the track count. `justify-content` on a list container is likewise a no-op.
 
@@ -1475,7 +1475,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `security` · `engine-layout/unclamped-grid-inputs-reach-taffy`
 
-**Where:** `native-src/dziri-engine/src/layout.rs:337`, `native-src/dziri-engine/src/layout.rs:467`, `native-src/dziri-engine/src/layout.rs:476`
+**Where:** `native-src/dziry-engine/src/layout.rs:337`, `native-src/dziry-engine/src/layout.rs:467`, `native-src/dziry-engine/src/layout.rs:476`
 
 **Claim.** `gridColumns`/`gridRows` (full u16) and `gridColumnStart`/`gridRowStart`/`*Span` (full i16) are passed to Taffy verbatim from host-writable memory. The 0-sentinel guard is correct and load-bearing, but nothing bounds the magnitudes: I measured 211 ms and 1.33 s single-frame layouts, and reproduced an `attempt to add with overflow` panic inside Taffy.
 
@@ -1497,13 +1497,13 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 **Claim.** The crate has no callers, is not in any workspace or build script, and duplicates `layout.rs`'s conversion rules — which have already diverged. It is also the only FFI surface in the repo with no `catch_unwind`, unchecked indexing, and an unchecked out-buffer.
 
-**Evidence.** The only references anywhere are its own Cargo.toml, a stale `target/` directory, and the historical note at NOTES.md:180 ("The A0 spike wrapped Taffy in a C ABI (`native-src/taffy-ffi`)"); package.json only builds `native-src/dziri-engine`, and there is no root workspace manifest. The rules have drifted: taffy-ffi's `opt()` (lib.rs:44-50) treats only NaN as auto, while layout.rs:296 also treats Infinity as auto — so `maxW: Infinity` from `INITIAL_STYLE` would become `Dimension::length(inf)` here; its `lp()` (lib.rs:60) does not guard Infinity; `align_self` (lib.rs:125-130) has no `BASELINE` and coerces differently from `align_of`. Soundness: `taffy_new_node` does `.unwrap()` (lib.rs:251), `taffy_add_child` does `ctx.nodes[parent as usize]` on an unvalidated i32 (lib.rs:260), `taffy_set_styles` reads `STYLE_FIELDS * count` f32s from a raw pointer (lib.rs:293), and `taffy_read_layout` writes `4 * count` f32s into the caller's buffer with no capacity check (lib.rs:372) — all in `extern "C"` fns with no unwind guard, so any panic aborts the process.
+**Evidence.** The only references anywhere are its own Cargo.toml, a stale `target/` directory, and the historical note at NOTES.md:180 ("The A0 spike wrapped Taffy in a C ABI (`native-src/taffy-ffi`)"); package.json only builds `native-src/dziry-engine`, and there is no root workspace manifest. The rules have drifted: taffy-ffi's `opt()` (lib.rs:44-50) treats only NaN as auto, while layout.rs:296 also treats Infinity as auto — so `maxW: Infinity` from `INITIAL_STYLE` would become `Dimension::length(inf)` here; its `lp()` (lib.rs:60) does not guard Infinity; `align_self` (lib.rs:125-130) has no `BASELINE` and coerces differently from `align_of`. Soundness: `taffy_new_node` does `.unwrap()` (lib.rs:251), `taffy_add_child` does `ctx.nodes[parent as usize]` on an unvalidated i32 (lib.rs:260), `taffy_set_styles` reads `STYLE_FIELDS * count` f32s from a raw pointer (lib.rs:293), and `taffy_read_layout` writes `4 * count` f32s into the caller's buffer with no capacity check (lib.rs:372) — all in `extern "C"` fns with no unwind guard, so any panic aborts the process.
 
 **Impact.** Two implementations of the same NaN/UNSET/grid-placement contract that must agree and no longer do. Anyone reading it to understand the conversion rules learns the wrong ones, and any future "just reuse the spike" reintroduces a cdylib with no panic guard into a codebase whose stated invariant is that every `extern "C"` fn has one.
 
-**Recommendation.** `rm -rf native-src/taffy-ffi`. Its conclusion is already recorded in prose at NOTES.md:180 and its measurements in ROADMAP's A0 section; the code adds nothing the note does not. If a reproducible benchmark is the reason to keep it, move the measurement into `native-src/dziri-engine/benches/` against the real `LayoutTree`, which is what would actually catch a regression.
+**Recommendation.** `rm -rf native-src/taffy-ffi`. Its conclusion is already recorded in prose at NOTES.md:180 and its measurements in ROADMAP's A0 section; the code adds nothing the note does not. If a reproducible benchmark is the reason to keep it, move the measurement into `native-src/dziry-engine/benches/` against the real `LayoutTree`, which is what would actually catch a regression.
 
-**Verifier — confirmed.** Verified end to end. The only reference to the crate anywhere outside its own directory is NOTES.md:180 ("The A0 spike wrapped Taffy in a C ABI (native-src/taffy-ffi)"); package.json:8-12 only builds and tests native-src/dziri-engine; there is no native-src/Cargo.toml and no Cargo.toml at the repo root, so no workspace includes it (each of dziri-engine, skia-probe, taffy-ffi has its own manifest and lockfile). The divergences are all present: taffy-ffi's opt() (lib.rs:44-50) tests only is_nan, so INITIAL_STYLE's `maxW: Infinity` (ir.ts:210) would become Dimension::length(inf) rather than auto as in layout.rs:296-302; its lp() (lib.rs:59-61) is `if v.is_nan() { 0.0 } else { v }` with no infinity guard, unlike layout.rs:311-313; its align_self mapping (lib.rs:125-130) has no BASELINE arm and folds 4 to None, where align_of (layout.rs:322-334) returns Baseline; its align_items arm coerces unrecognised values to FlexStart, i.e. exactly the UNSET bug the engine documents as fixed. The soundness claims hold too: taffy_new_node unwraps (lib.rs:251), taffy_add_child indexes ctx.nodes with an unvalidated i32 (lib.rs:260-262), taffy_set_styles reads STYLE_FIELDS * count f32s from a raw pointer (lib.rs:293-295), taffy_read_layout writes 4*count f32s into the caller's buffer with no capacity check (lib.rs:370-372) — none inside a catch_unwind, unlike lib.rs:44-72 in the engine. Medium for cleanliness is defensible in a repo whose thesis is one generated source of truth; the code is unreachable, so it carries no runtime risk, only the risk of being read or revived.
+**Verifier — confirmed.** Verified end to end. The only reference to the crate anywhere outside its own directory is NOTES.md:180 ("The A0 spike wrapped Taffy in a C ABI (native-src/taffy-ffi)"); package.json:8-12 only builds and tests native-src/dziry-engine; there is no native-src/Cargo.toml and no Cargo.toml at the repo root, so no workspace includes it (each of dziry-engine, skia-probe, taffy-ffi has its own manifest and lockfile). The divergences are all present: taffy-ffi's opt() (lib.rs:44-50) tests only is_nan, so INITIAL_STYLE's `maxW: Infinity` (ir.ts:210) would become Dimension::length(inf) rather than auto as in layout.rs:296-302; its lp() (lib.rs:59-61) is `if v.is_nan() { 0.0 } else { v }` with no infinity guard, unlike layout.rs:311-313; its align_self mapping (lib.rs:125-130) has no BASELINE arm and folds 4 to None, where align_of (layout.rs:322-334) returns Baseline; its align_items arm coerces unrecognised values to FlexStart, i.e. exactly the UNSET bug the engine documents as fixed. The soundness claims hold too: taffy_new_node unwraps (lib.rs:251), taffy_add_child indexes ctx.nodes with an unvalidated i32 (lib.rs:260-262), taffy_set_styles reads STYLE_FIELDS * count f32s from a raw pointer (lib.rs:293-295), taffy_read_layout writes 4*count f32s into the caller's buffer with no capacity check (lib.rs:370-372) — none inside a catch_unwind, unlike lib.rs:44-72 in the engine. Medium for cleanliness is defensible in a repo whose thesis is one generated source of truth; the code is unreachable, so it carries no runtime risk, only the risk of being read or revived.
 
 <a id="f-engine-layout-layout-test-coverage-gaps"></a>
 
@@ -1511,7 +1511,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `testing` · `engine-layout/layout-test-coverage-gaps`
 
-**Where:** `native-src/dziri-engine/tests/bounds.rs:111`, `native-src/dziri-engine/tests/bounds.rs:334`, `native-src/dziri-engine/tests/bounds.rs:270`
+**Where:** `native-src/dziry-engine/tests/bounds.rs:111`, `native-src/dziry-engine/tests/bounds.rs:334`, `native-src/dziry-engine/tests/bounds.rs:270`
 
 **Claim.** The nine integration tests cover flex column/row, absolute-bounds accumulation, text measurement, `hidden`, a style patch, a relink, one sibling cycle and hit-testing. Everything else in `style_of` — most of it — has zero coverage, including every behaviour named as load-bearing in the file's own comments.
 
@@ -1529,7 +1529,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-layout/text-repoint-misses-mark-dirty`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:537`, `native-src/dziri-engine/src/engine.rs:339`
+**Where:** `native-src/dziry-engine/src/tables.rs:537`, `native-src/dziry-engine/src/engine.rs:339`
 
 **Claim.** `classify` sets `diff.text` when the `nodes.text` span changes but records *which nodes* changed nowhere, and `resync` then filters by `changed_strings`. A node whose text pointer moved to a slot whose bytes did not change is therefore never re-measured.
 
@@ -1547,7 +1547,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `performance` · `engine-layout/hidden-toggle-restyles-every-node`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:535`, `native-src/dziri-engine/src/engine.rs:311`
+**Where:** `native-src/dziry-engine/src/tables.rs:535`, `native-src/dziry-engine/src/engine.rs:311`
 
 **Claim.** `nodes.hidden`, `nodes.style` and `nodes.flags` all collapse to a single `node_styles` flag, and `resync` answers it with `apply_all_styles` — N `set_style` calls, each marking its node and ancestors dirty, so the entire measure cache is cleared to show or hide one subtree.
 
@@ -1565,17 +1565,17 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-layout/grow-leaves-live-string-and-bounds-arenas-stale`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:716`, `native-src/dziri-engine/src/tables.rs:731`, `native-src/dziri-engine/src/tables.rs:663`
+**Where:** `native-src/dziry-engine/src/tables.rs:716`, `native-src/dziry-engine/src/tables.rs:731`, `native-src/dziry-engine/src/tables.rs:663`
 
 **Claim.** Growth preserves contents for every table span in both arenas, but the string byte region is copied into `staged` only, and the `Bounds` arena is skipped entirely — so after a grow the engine's live string arena is zeroed and the published bounds are zeroed until the next commit and layout.
 
 **Evidence.** tables.rs:716-717 skips the region span: `if span.home != Home::Shared || span.table < 0 { continue; }` — the string arena has `table == REGION` (-1) — and skips the layout table (`home == Bounds`). tables.rs:731-733 then copies the region one-directionally: `let string_bytes = self.string_bytes().to_vec();` (that reads *live*) into `grown.staged_string_bytes_mut()`, with nothing written to `grown.live`. Nothing restores the bounds arena, and `Engine::grow` (engine.rs:514-520) only sets `fresh = true`.
 
-**Impact.** Self-healing rather than broken: the next `commit` sees the region differ and copies staged→live before layout runs. But it is correct by accident, and the window is observable — `Tables::bounds_of`/`Engine::bounds_of` back the host's imperative `rect()` and hit-testing, and between `dziri_engine_grow` and the next `tick` they return all-zero rects rather than the previous frame's. Relatedly, `bounds_of` (tables.rs:671) and `write_bounds` (tables.rs:654) hardcode a 4-byte element (`span.offset + node * 4`, `bytes.len() / 4`) instead of `span.elem_size`, so a schema change to the layout table's width would silently misread rather than fail.
+**Impact.** Self-healing rather than broken: the next `commit` sees the region differ and copies staged→live before layout runs. But it is correct by accident, and the window is observable — `Tables::bounds_of`/`Engine::bounds_of` back the host's imperative `rect()` and hit-testing, and between `dziry_engine_grow` and the next `tick` they return all-zero rects rather than the previous frame's. Relatedly, `bounds_of` (tables.rs:671) and `write_bounds` (tables.rs:654) hardcode a 4-byte element (`span.offset + node * 4`, `bytes.len() / 4`) instead of `span.elem_size`, so a schema change to the layout table's width would silently misread rather than fail.
 
 **Recommendation.** Copy the region symmetrically in `grow` (write the live bytes into `grown.live` at the region's new offset, exactly as the table loop does) and memcpy the old bounds arena into the grown one — capacity only ever increases, so the prefix is valid. Replace the hardcoded `4`s with `span.elem_size as usize` plus a `debug_assert_eq!(span.elem_size, 4)` so the f32 cast states its assumption instead of burying it.
 
-**Verifier — weakened.** Growth does leave grown.live's string region and the whole bounds arena zeroed, and the region copy is asymmetric — but there is no observable window: the only bounds path the host has (dziri_engine_bounds → Engine::bounds_of → LayoutTree's own Vec) is unaffected by Tables::grow, Tables::bounds_of has zero callers, and commit always runs before any live-string read inside tick. What remains is latent fragility plus the hardcoded 4-byte element width in write_bounds/bounds_of. Severity low.
+**Verifier — weakened.** Growth does leave grown.live's string region and the whole bounds arena zeroed, and the region copy is asymmetric — but there is no observable window: the only bounds path the host has (dziry_engine_bounds → Engine::bounds_of → LayoutTree's own Vec) is unaffected by Tables::grow, Tables::bounds_of has zero callers, and commit always runs before any live-string read inside tick. What remains is latent fragility plus the hardcoded 4-byte element width in write_bounds/bounds_of. Severity low.
 
 ---
 
@@ -1602,7 +1602,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `performance` · `engine-paint-text/full-window-repaint-and-two-full-frame-copies`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:353-366`, `native-src/dziri-engine/src/engine.rs:285-292`, `native-src/dziri-engine/src/window.rs:122-133`, `native-src/dziri-engine/src/paint.rs:122-146`
+**Where:** `native-src/dziry-engine/src/engine.rs:353-366`, `native-src/dziry-engine/src/engine.rs:285-292`, `native-src/dziry-engine/src/window.rs:122-133`, `native-src/dziry-engine/src/paint.rs:122-146`
 
 **Claim.** `needs_paint` is a single bool, so any change repaints the entire window from the root and then re-uploads and re-blits the entire surface; three of the four full-frame costs per frame are independent of how much actually changed.
 
@@ -1620,7 +1620,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `performance` · `engine-paint-text/colour-only-patch-forces-a-taffy-relayout`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:299-330`, `native-src/dziri-engine/src/tables.rs:544-546`, `native-src/dziri-engine/src/layout.rs:124-129`
+**Where:** `native-src/dziry-engine/src/engine.rs:299-330`, `native-src/dziry-engine/src/tables.rs:544-546`, `native-src/dziry-engine/src/layout.rs:124-129`
 
 **Claim.** `Diff::changed_styles` records changed style *slots*, not changed *fields*, so a `bg`-only patch routes through `apply_style` -> Taffy `set_style` -> `mark_dirty`, which is exactly what the code says cannot happen.
 
@@ -1638,7 +1638,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-paint-text/border-outer-radius-does-not-match-css`
 
-**Where:** `native-src/dziri-engine/src/paint.rs:179-188`
+**Where:** `native-src/dziry-engine/src/paint.rs:179-188`
 
 **Claim.** The stroke inset is correct for the straight edges but not for the corners: stroking a radius-`r` path with width `t` produces an outer boundary of radius `r + t/2`, while the background fill underneath has radius `r`, so the fill pokes outside the border at each corner and the whole box's outer radius is wrong relative to CSS.
 
@@ -1656,7 +1656,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-paint-text/border-width-excluded-from-layout`
 
-**Where:** `native-src/dziri-engine/src/layout.rs:352-357`, `native-src/dziri-engine/src/paint.rs:179-188`, `native-src/dziri-engine/src/paint.rs:223-227`
+**Where:** `native-src/dziry-engine/src/layout.rs:352-357`, `native-src/dziry-engine/src/paint.rs:179-188`, `native-src/dziry-engine/src/paint.rs:223-227`
 
 **Claim.** The border paints inside the node's box but layout does not reserve room for it, so the border band overlaps the padding box; this matches neither CSS content-box nor Tailwind's border-box.
 
@@ -1674,7 +1674,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-paint-text/greyscale-aa-text-on-a-desktop-framework`
 
-**Where:** `native-src/dziri-engine/src/text.rs:126-150`, `native-src/dziri-engine/src/paint.rs:229-234`
+**Where:** `native-src/dziry-engine/src/text.rs:126-150`, `native-src/dziry-engine/src/paint.rs:229-234`
 
 **Claim.** Every `Font` is built with SkFont's defaults, which are greyscale AA and no subpixel positioning, so all text is noticeably lighter and blurrier than every other application on the same Windows desktop, where ClearType subpixel AA is the norm.
 
@@ -1692,7 +1692,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `architecture` · `engine-paint-text/paragraph-seam-returns-a-size-not-a-paragraph`
 
-**Where:** `native-src/dziri-engine/src/text.rs:184-186`, `native-src/dziri-engine/src/text.rs:15-18`, `native-src/dziri-engine/src/paint.rs:221-234`, `native-src/dziri-engine/src/layout.rs:229`
+**Where:** `native-src/dziry-engine/src/text.rs:184-186`, `native-src/dziry-engine/src/text.rs:15-18`, `native-src/dziry-engine/src/paint.rs:221-234`, `native-src/dziry-engine/src/layout.rs:229`
 
 **Claim.** The doc comment claims the current signature is the one SkParagraph needs, but only its *inputs* are right; the *output* is a size, and a paragraph's laid-out state is what paint must draw, so with this seam paint has no choice but to build and layout a second paragraph for every text node every frame.
 
@@ -1710,7 +1710,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-paint-text/advance-cache-key-is-a-bare-fnv-and-omits-width`
 
-**Where:** `native-src/dziri-engine/src/text.rs:157-173`, `native-src/dziri-engine/src/text.rs:184-186`, `native-src/dziri-engine/src/text.rs:196-203`
+**Where:** `native-src/dziry-engine/src/text.rs:157-173`, `native-src/dziry-engine/src/text.rs:184-186`, `native-src/dziry-engine/src/text.rs:196-203`
 
 **Claim.** Two defects in one key: the cached string is never stored so a hash collision silently returns another string's width, and the key does not include the available width, so the moment `measure` stops ignoring `_available_width` the cache starts returning measurements taken at a different width.
 
@@ -1728,7 +1728,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `security` · `engine-paint-text/unbounded-font-caches-keyed-on-host-memory`
 
-**Where:** `native-src/dziri-engine/src/text.rs:53-63`, `native-src/dziri-engine/src/text.rs:109-150`
+**Where:** `native-src/dziry-engine/src/text.rs:53-63`, `native-src/dziry-engine/src/text.rs:109-150`
 
 **Claim.** The advance cache is bounded with a documented rationale, but the two caches next to it are not, and both keys come straight out of the host-writable styles table — so a Bun-side bug or a font-size animation grows platform font objects without limit.
 
@@ -1746,13 +1746,13 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `architecture` · `engine-paint-text/hidpi-is-a-sweep-not-a-local-change`
 
-**Where:** `native-src/dziri-engine/src/window.rs:143-148`, `native-src/dziri-engine/src/window.rs:97-99`, `native-src/dziri-engine/src/lib.rs:366-378`, `native-src/dziri-engine/src/layout.rs:242-248`, `native-src/dziri-engine/src/engine.rs:522-548`
+**Where:** `native-src/dziry-engine/src/window.rs:143-148`, `native-src/dziry-engine/src/window.rs:97-99`, `native-src/dziry-engine/src/lib.rs:366-378`, `native-src/dziry-engine/src/layout.rs:242-248`, `native-src/dziry-engine/src/engine.rs:522-548`
 
 **Claim.** The painter itself would take a one-line `canvas.scale(dpr, dpr)`, but the surrounding code has already baked `scale = 1` into the event model, the surface descriptor and the layout rounding, so adding a device pixel ratio touches window.rs, engine.rs, layout.rs, lib.rs and paint's origin arithmetic.
 
 **Evidence.** window.rs:143-147 collapses two semantically different SDL events into one variant: `WindowEvent::PixelSizeChanged(w, h) | WindowEvent::Resized(w, h) => out.push(RawInput::Resized { width: ..., height: ... })` — `Resized` reports points and `PixelSizeChanged` reports pixels, and engine.rs:401 keeps only the last (`RawInput::Resized { width, height } => resize = Some((width, height))`). `size_in_pixels()` exists at window.rs:97-99 and is called from nowhere in engine.rs. lib.rs:374 synthesises `*out.add(2) = width * 4;` as rowBytes while `Engine::pixels` (engine.rs:256-258) returns the pixmap's real `row_bytes()`. layout.rs:242-286 `read_back` has no access to a scale factor, and ROADMAP.md:89-91 notes Taffy rounds to whole pixels by default.
 
-**Impact.** On a 150% Windows display SDL emits both events with different numbers on every resize, so the engine nondeterministically sizes its surface to points or to pixels depending on delivery order — a real bug the moment `scale = 1` stops being true, hidden today only because the two numbers are equal. `surface_info`'s `width * 4` and the pixmap's real stride also diverge as soon as the surface is device-sized while `self.width` stays logical: `readPixels()` in src/engine/host.ts:440-441 sizes its buffer from `surfaceInfo()`, so it would allocate 1/dpr^2 of what is needed and `dziri_engine_read_pixels` would fail with CAPACITY. And Taffy's whole-logical-pixel rounding stops helping: at dpr = 1.5 a whole logical pixel is 1.5 device pixels, so every box lands on a half-device-pixel edge and every edge goes soft — the roadmap's proposed remedy, `disable_rounding`, makes that worse by removing rounding entirely rather than moving it to the right grid.
+**Impact.** On a 150% Windows display SDL emits both events with different numbers on every resize, so the engine nondeterministically sizes its surface to points or to pixels depending on delivery order — a real bug the moment `scale = 1` stops being true, hidden today only because the two numbers are equal. `surface_info`'s `width * 4` and the pixmap's real stride also diverge as soon as the surface is device-sized while `self.width` stays logical: `readPixels()` in src/engine/host.ts:440-441 sizes its buffer from `surfaceInfo()`, so it would allocate 1/dpr^2 of what is needed and `dziry_engine_read_pixels` would fail with CAPACITY. And Taffy's whole-logical-pixel rounding stops helping: at dpr = 1.5 a whole logical pixel is 1.5 device pixels, so every box lands on a half-device-pixel edge and every edge goes soft — the roadmap's proposed remedy, `disable_rounding`, makes that worse by removing rounding entirely rather than moving it to the right grid.
 
 **Recommendation.** Do the four things that make it local, before the sweep gets bigger. (1) Split the event: `RawInput::Resized { points }` and `RawInput::PixelSizeChanged { pixels }`, and have `Engine::resize` take logical size and derive device size from `window.size_in_pixels()` — the accessor is already there. (2) Store `scale: f32` on `Engine`, size the surface at `(w * scale, h * scale)`, and put `canvas.scale(self.scale, self.scale)` in `draw()` immediately after `clear` so paint, `bounds`, `hit_test` and the mouse coordinates all stay in logical space and need no change at all. (3) Report the pixmap's real `row_bytes()` from `surface_info` instead of computing `width * 4`, plus the device width/height as two extra u32s — it is already an out-array. (4) Keep Taffy's rounding off (`TaffyTree::disable_rounding`) and round in `read_back` to the device grid instead: `let snap = |v: f32| (v * scale).round() / scale;`, which needs `read_back` to take the scale — that is the one genuinely non-local change, and doing it now is a two-line signature edit versus a correctness hunt later.
 
@@ -1764,7 +1764,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `architecture` · `engine-paint-text/gpu-migration-path-and-peek-pixels`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:240-259`, `native-src/dziri-engine/src/engine.rs:368-383`, `native-src/dziri-engine/src/window.rs:70-74`, `native-src/dziri-engine/Cargo.toml:19`
+**Where:** `native-src/dziry-engine/src/engine.rs:240-259`, `native-src/dziry-engine/src/engine.rs:368-383`, `native-src/dziry-engine/src/window.rs:70-74`, `native-src/dziry-engine/Cargo.toml:19`
 
 **Claim.** The painter survives a GPU move untouched because it takes `&Canvas`, but every path that reads pixels goes through `Surface::peek_pixels`, which returns `None` on any GPU surface, and `window.rs` commits the window to SDL's renderer API, which cannot coexist with a raw GL/Vulkan context on the same window.
 
@@ -1782,11 +1782,11 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-paint-text/png-and-pixel-readback-error-paths`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:443-456`, `native-src/dziri-engine/src/engine.rs:240-259`, `native-src/dziri-engine/src/lib.rs:380-406`
+**Where:** `native-src/dziry-engine/src/lib.rs:443-456`, `native-src/dziry-engine/src/engine.rs:240-259`, `native-src/dziry-engine/src/lib.rs:380-406`
 
 **Claim.** Three defects in the two-call PNG/pixel protocol: a too-small buffer loses the frame irrecoverably instead of being retryable, each export copies the full frame twice, and `read_pixels` hands out premultiplied bytes documented as plain BGRA_8888.
 
-**Evidence.** lib.rs:447-452: `let png = engine.take_png();` runs *before* `if (len as usize) < png.len() { return fail(status::CAPACITY, ...) }` — and `take_png` is `std::mem::take(&mut self.png)` (engine.rs:251), so on the failure path the `Vec` is dropped at the end of the closure and the encoded frame is gone. Contrast lib.rs:397-402, where `read_pixels` checks capacity before copying and is therefore retryable. `encode_png` does `self.png = data.as_bytes().to_vec()` (engine.rs:245) — SkData already owns those bytes, so that is one full copy, and `dziri_engine_take_png` then copies again into the host buffer. Same for pixels: `pixmap.bytes()?.to_vec()` (engine.rs:258) then `copy_nonoverlapping` (lib.rs:403). And the surface is `raster_n32_premul` (engine.rs:160) while lib.rs:380 and src/engine/host.ts:438 both say only 'BGRA_8888'.
+**Evidence.** lib.rs:447-452: `let png = engine.take_png();` runs *before* `if (len as usize) < png.len() { return fail(status::CAPACITY, ...) }` — and `take_png` is `std::mem::take(&mut self.png)` (engine.rs:251), so on the failure path the `Vec` is dropped at the end of the closure and the encoded frame is gone. Contrast lib.rs:397-402, where `read_pixels` checks capacity before copying and is therefore retryable. `encode_png` does `self.png = data.as_bytes().to_vec()` (engine.rs:245) — SkData already owns those bytes, so that is one full copy, and `dziry_engine_take_png` then copies again into the host buffer. Same for pixels: `pixmap.bytes()?.to_vec()` (engine.rs:258) then `copy_nonoverlapping` (lib.rs:403). And the surface is `raster_n32_premul` (engine.rs:160) while lib.rs:380 and src/engine/host.ts:438 both say only 'BGRA_8888'.
 
 **Impact.** The `take_png` ordering means a host that under-allocates gets `CAPACITY` and then, on retry, an empty buffer with `status::OK` — a zero-byte PNG written to disk with no error, which is the worst possible failure mode for a golden-image harness. The double copy is 2x33 MB per 4K screenshot for pixels (and the encoded PNG is retained on `Engine` for its entire remaining lifetime after the last `encode_png` if `take_png` is never called — bounded, since each encode overwrites, but several megabytes held indefinitely). The premultiplication label is the invisible one: every pixel is currently opaque because `draw` clears to opaque black, so it cannot be observed today, but the first golden-image comparison against an RGBA reference or the first translucent window will produce wrong colours on every semi-transparent pixel with nothing in the code to point at.
 
@@ -1800,15 +1800,15 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `engine-paint-text/hit-test-hardcodes-node-zero-as-root`
 
-**Where:** `native-src/dziri-engine/src/paint.rs:252`, `native-src/dziri-engine/src/engine.rs:574-576`, `native-src/dziri-engine/src/engine.rs:181`
+**Where:** `native-src/dziry-engine/src/paint.rs:252`, `native-src/dziry-engine/src/engine.rs:574-576`, `native-src/dziry-engine/src/engine.rs:181`
 
 **Claim.** The root node index is configurable and threaded through paint and layout read-back, but `hit_test` ignores it and starts its traversal at a literal 0.
 
-**Evidence.** paint.rs:252 `let mut stack = vec![0usize];` versus paint.rs:122 `let mut stack = vec![root];` in `paint`, which receives `self.root` from engine.rs:365. `Engine::hit_test` (engine.rs:574-576) calls `hit_test(&self.tables, self.tree.bounds(), x, y)` with no root argument at all, while `Engine::root` is set from `config.root as usize` (engine.rs:181) and `dziri_engine_create` accepts it from the host (src/engine/host.ts:188 `u32v[9] = options.root ?? 0`, and src/ir.ts:366 declares `root: number`).
+**Evidence.** paint.rs:252 `let mut stack = vec![0usize];` versus paint.rs:122 `let mut stack = vec![root];` in `paint`, which receives `self.root` from engine.rs:365. `Engine::hit_test` (engine.rs:574-576) calls `hit_test(&self.tables, self.tree.bounds(), x, y)` with no root argument at all, while `Engine::root` is set from `config.root as usize` (engine.rs:181) and `dziry_engine_create` accepts it from the host (src/engine/host.ts:188 `u32v[9] = options.root ?? 0`, and src/ir.ts:366 declares `root: number`).
 
 **Impact.** Latent rather than live — app/ui.gen.ts:173 currently emits `root = 0` — but the moment a compiler change or a second entry point makes the root non-zero, every mouse event resolves against a different subtree than the one on screen: hover and click land on whatever node 0 happens to be, and `hit_test`'s bounds check against `bounds[0]` (which is `[0,0,0,0]` for an unlaid-out node) rejects immediately, so hit testing returns -1 for the entire window and the UI becomes unclickable with no error anywhere.
 
-**Recommendation.** Give `hit_test` the same `root: usize` parameter `paint` already has and pass `self.root` from `Engine::hit_test`, then add a bounds test in native-src/dziri-engine/tests/bounds.rs that builds a tree with `root = 1` and asserts a click resolves — the divergence is only cheap to fix while it is still theoretical.
+**Recommendation.** Give `hit_test` the same `root: usize` parameter `paint` already has and pass `self.root` from `Engine::hit_test`, then add a bounds test in native-src/dziry-engine/tests/bounds.rs that builds a tree with `root = 1` and asserts a click resolves — the divergence is only cheap to fix while it is still theoretical.
 
 **Verifier — confirmed.** Exactly as described, and I could not find a compensating path. paint.rs:252 `let mut stack = vec![0usize];` in `hit_test` versus paint.rs:122 `let mut stack = vec![root];` in `paint`, which receives `self.root` from engine.rs:364. `Engine::hit_test` (engine.rs:574-576) and the three `pump_input` call sites (engine.rs:415, 432, 448) all call the free function with no root argument, while `Engine::root` comes from `config.root as usize` (engine.rs:181) and the host passes it through (`u32v[9] = options.root ?? 0`, host.ts:188; `root?: number`, host.ts:134). The failure mode is also right: layout.rs:242-256 zero-fills `bounds` and walks from `self.root`, so with root != 0 `bounds[0]` stays `[0,0,0,0]`, `px >= x + w` rejects at paint.rs:266, the stack empties, and every hit test returns -1 — an unclickable window with no error. Latent only because app/ui.gen.ts:173 `export const root = 0`. Low is the right severity and the one-parameter fix plus a `root = 1` bounds test is the right remedy.
 
@@ -1836,17 +1836,17 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `correctness` · `window-input-threading/text-input-never-started`
 
-**Where:** `native-src/dziri-engine/src/window.rs:183`, `native-src/dziri-engine/src/engine.rs:479`, `src/window-host.ts`, `native-src/dziri-engine/Cargo.toml:21`
+**Where:** `native-src/dziry-engine/src/window.rs:183`, `native-src/dziry-engine/src/engine.rs:479`, `src/window-host.ts`, `native-src/dziry-engine/Cargo.toml:21`
 
 **Claim.** SDL3 does not deliver text-input events until `SDL_StartTextInput(window)` is called, and the engine never calls it, so `SdlEvent::TextInput` never fires, `EventKind.TEXT_INPUT` is never queued, and the whole editable-text path in the host is dead code.
 
-**Evidence.** The pinned header is explicit (sdl3-sys-0.6.7+SDL-3.4.12 keyboard.rs:468): "Text input events are not received by default." for `SDL_StartTextInput`. A grep for `start_text_input|StartTextInput|text_input` across native-src/dziri-engine/src and examples finds only window.rs:183 `SdlEvent::TextInput { text, .. } => out.push(RawInput::Text { text })` — the consumer, never the enabler. The safe wrapper exists and is unused: sdl3-0.18.4 keyboard/mod.rs:224 `#[doc(alias = "SDL_StartTextInput")]`. Meanwhile Cargo.toml:21-23 justifies the whole dependency choice on this: "SDL3 rather than winit: winit's IME is documented as unstable for CJK, and an input abstraction cannot fix events that never arrive", and window.rs:8-12 repeats it.
+**Evidence.** The pinned header is explicit (sdl3-sys-0.6.7+SDL-3.4.12 keyboard.rs:468): "Text input events are not received by default." for `SDL_StartTextInput`. A grep for `start_text_input|StartTextInput|text_input` across native-src/dziry-engine/src and examples finds only window.rs:183 `SdlEvent::TextInput { text, .. } => out.push(RawInput::Text { text })` — the consumer, never the enabler. The safe wrapper exists and is unused: sdl3-0.18.4 keyboard/mod.rs:224 `#[doc(alias = "SDL_StartTextInput")]`. Meanwhile Cargo.toml:21-23 justifies the whole dependency choice on this: "SDL3 rather than winit: winit's IME is documented as unstable for CJK, and an input abstraction cannot fix events that never arrive", and window.rs:8-12 repeats it.
 
 **Impact.** `typeInto(editables, event.node, ...)` (src/window-host.ts) can never run, so every editable in the compiled app silently ignores typing; only BACKSPACE and ESCAPE work, because those arrive as KEY_DOWN. More seriously, the argument that decided SDL3 over winit — CJK users being able to type — is completely unexercised: `SDL_StartTextInput` is also what activates the platform IME, and `SDL_SetTextInputArea` (the call that positions the candidate window at the caret) is likewise absent, so even once text input is enabled a CJK composition popup will render in the wrong place. The dependency was chosen for a capability the code does not yet reach.
 
 **Recommendation.** Call `sdl3::keyboard::start_text_input(window)` in `Window::new` (or, better, on focus acquisition so the on-screen keyboard is not summoned on mobile-ish backends), and call `SDL_SetTextInputArea` with the focused node's bounds whenever `state.focused` changes — the engine already has the rect from `tree.bounds_of`. Then handle `SDL_EVENT_TEXT_EDITING` too: composition preedit is currently dropped by window.rs:185's `_ => {}`, which means a CJK user sees nothing until commit. While there: `Event.b` is unused for KEY_DOWN (engine.rs:472-477) while SDL's `keymod` is right there in the event, so Ctrl+A is indistinguishable from A — fill `b` with the modifier mask.
 
-**Verifier — confirmed.** I tried hard to break this and could not. window.rs:183 consumes SdlEvent::TextInput; nothing in the repo ever enables it — grep for text_input/StartTextInput across native-src/dziri-engine/src, examples, tests and src/ returns only the consumer, protocol constants and src/window-host.ts. The safe wrapper is present and unused (sdl3-0.18.4 keyboard/mod.rs:224 TextInputUtil::start, reached via VideoSubsystem::text_input(); note the recommendation's `sdl3::keyboard::start_text_input(window)` is not the real API name). The header is explicit: "Text input events are not received by default." (sdl3-sys keyboard.rs:468). SDL's own Windows backend proves the gate: WM_CHAR and WM_UNICHAR only call SDL_SendKeyboardText when SDL_TextInputActive(window) (SDL_windowsevents.c:1629, 1640), and raw-key delivery also branches on window->text_input_active (SDL_windowsevents.c:1615). So EventKind.TEXT_INPUT can never be queued, and src/window-host.ts's typeInto path over generated editables (app/ui.gen.ts:105-107, node 32 bound to `draft`) is dead — only BACKSPACE/ESCAPE work via KEY_DOWN. SDL_SetTextInputArea is likewise absent. This is not fully covered by the documented deferral: ROADMAP.md:66 defers the *IME proof* and NOTES.md:171 claims "Text input is decoded but no IME work has been done" — the latter is inaccurate, since plain Latin typing into a shipped editable is also broken.
+**Verifier — confirmed.** I tried hard to break this and could not. window.rs:183 consumes SdlEvent::TextInput; nothing in the repo ever enables it — grep for text_input/StartTextInput across native-src/dziry-engine/src, examples, tests and src/ returns only the consumer, protocol constants and src/window-host.ts. The safe wrapper is present and unused (sdl3-0.18.4 keyboard/mod.rs:224 TextInputUtil::start, reached via VideoSubsystem::text_input(); note the recommendation's `sdl3::keyboard::start_text_input(window)` is not the real API name). The header is explicit: "Text input events are not received by default." (sdl3-sys keyboard.rs:468). SDL's own Windows backend proves the gate: WM_CHAR and WM_UNICHAR only call SDL_SendKeyboardText when SDL_TextInputActive(window) (SDL_windowsevents.c:1629, 1640), and raw-key delivery also branches on window->text_input_active (SDL_windowsevents.c:1615). So EventKind.TEXT_INPUT can never be queued, and src/window-host.ts's typeInto path over generated editables (app/ui.gen.ts:105-107, node 32 bound to `draft`) is dead — only BACKSPACE/ESCAPE work via KEY_DOWN. SDL_SetTextInputArea is likewise absent. This is not fully covered by the documented deferral: ROADMAP.md:66 defers the *IME proof* and NOTES.md:171 claims "Text input is decoded but no IME work has been done" — the latter is inaccurate, since plain Latin typing into a shipped editable is also broken.
 
 <a id="f-window-input-threading-sdl3-main-thread-forecloses-render-thread"></a>
 
@@ -1854,7 +1854,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `architecture` · `window-input-threading/sdl3-main-thread-forecloses-render-thread`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:9`, `native-src/dziri-engine/src/window.rs:122`, `native-src/dziri-engine/src/window.rs:102`, `native-src/dziri-engine/src/window.rs:136`
+**Where:** `native-src/dziry-engine/src/engine.rs:9`, `native-src/dziry-engine/src/window.rs:122`, `native-src/dziry-engine/src/window.rs:102`, `native-src/dziry-engine/src/window.rs:136`
 
 **Claim.** The engine's stated next architectural step — moving the frame loop onto its own thread so "a resize or a caret blink repaints while Bun is busy" — is foreclosed by SDL3, because not just event pumping but every renderer and texture call in `Window` is documented main-thread-only.
 
@@ -1872,7 +1872,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `testing` · `window-input-threading/windowed-path-has-zero-coverage-two-drivers`
 
-**Where:** `native-src/dziri-engine/tests/bounds.rs:34`, `native-src/dziri-engine/tests/boundary.rs:25`, `src/engine/upload.test.ts:56`, `src/engine/smoke.test.ts:184`, `native-src/dziri-engine/examples/window.rs:255`
+**Where:** `native-src/dziry-engine/tests/bounds.rs:34`, `native-src/dziry-engine/tests/boundary.rs:25`, `src/engine/upload.test.ts:56`, `src/engine/smoke.test.ts:184`, `native-src/dziry-engine/examples/window.rs:255`
 
 **Claim.** All three test suites construct the engine with `windowed: 0`/`false`, and `pump_input` early-returns when there is no window, so `Window::new`, `poll`, `present`, `resize`, CLICK synthesis, focus acquisition and the texture destroy have no coverage of any kind — and the only two things that exercise them are two divergent hand-written loops.
 
@@ -1890,11 +1890,11 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `soundness` · `window-input-threading/no-thread-identity-assertion`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:44`, `native-src/dziri-engine/src/window.rs:53`, `native-src/dziri-engine/src/error.rs:25`, `src/engine/host.ts:84`
+**Where:** `native-src/dziry-engine/src/lib.rs:44`, `native-src/dziry-engine/src/window.rs:53`, `native-src/dziry-engine/src/error.rs:25`, `src/engine/host.ts:84`
 
-**Claim.** There is no thread assertion anywhere in the engine: `with()` validates a magic number and a poison flag but not thread identity, so any thread holding the `*mut Handle` can call `dziri_engine_tick` and drive SDL from the wrong thread with no diagnostic.
+**Claim.** There is no thread assertion anywhere in the engine: `with()` validates a magic number and a poison flag but not thread identity, so any thread holding the `*mut Handle` can call `dziry_engine_tick` and drive SDL from the wrong thread with no diagnostic.
 
-**Evidence.** `with()` (lib.rs:44-72) checks exactly three things — null, `handle.magic != MAGIC`, `handle.engine.poisoned` — and nothing else. A grep for `thread` across native-src/dziri-engine/src returns only doc-comment prose ("render thread's stack") plus `error.rs`'s `thread_local!`; there is no `ThreadId`, no `SDL_IsMainThread`, no `debug_assert`. `Engine` is *implicitly* `!Send` because it owns `Sdl`, `EventPump` and `WindowCanvas` (window.rs:41-50), but lib.rs:53 launders it through `&mut *handle` from a raw pointer, which discards that guarantee entirely — Rust's checker never sees the cross-thread call. Compounding it, error.rs:25-32 keeps `LAST_ERROR` in a `thread_local!`, and `dziri_last_error` (lib.rs:91) reads the *calling* thread's copy.
+**Evidence.** `with()` (lib.rs:44-72) checks exactly three things — null, `handle.magic != MAGIC`, `handle.engine.poisoned` — and nothing else. A grep for `thread` across native-src/dziry-engine/src returns only doc-comment prose ("render thread's stack") plus `error.rs`'s `thread_local!`; there is no `ThreadId`, no `SDL_IsMainThread`, no `debug_assert`. `Engine` is *implicitly* `!Send` because it owns `Sdl`, `EventPump` and `WindowCanvas` (window.rs:41-50), but lib.rs:53 launders it through `&mut *handle` from a raw pointer, which discards that guarantee entirely — Rust's checker never sees the cross-thread call. Compounding it, error.rs:25-32 keeps `LAST_ERROR` in a `thread_local!`, and `dziry_last_error` (lib.rs:91) reads the *calling* thread's copy.
 
 **Impact.** A Bun `Worker`, or any future refactor that moves `tick()` off the entry thread, compiles and runs and then dies inside AppKit on macOS with no message — and because `LAST_ERROR` is thread-local, even the failures that *are* caught report an empty string to the host, so the one diagnostic channel goes silent exactly when it is needed. There is no macOS or Linux CI in the repo (no `.github` directory; `native/` contains only `win32-x64`), so this path has never been executed on the platform where it is fatal.
 
@@ -1908,7 +1908,7 @@ with notify (line 71) `} else if (depth > 0) { pending.add(s); } else { s(); }`.
 
 `soundness` · `window-input-threading/failed-resize-desyncs-surface-and-texture`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:529`, `native-src/dziri-engine/src/window.rs:102`, `native-src/dziri-engine/src/window.rs:122`
+**Where:** `native-src/dziry-engine/src/engine.rs:529`, `native-src/dziry-engine/src/window.rs:102`, `native-src/dziry-engine/src/window.rs:122`
 
 **Claim.** `Engine::resize` replaces `self.surface` before resizing the window and updates `self.width/height` only after both succeed, so if `SDL_CreateTexture` fails the engine keeps a new-size Skia surface, an old-size SDL texture and old-size layout dimensions — and returns a recoverable status rather than poisoning.
 
@@ -1922,9 +1922,9 @@ if let Some(window) = self.window.as_mut() {
 self.width = width;
 self.height = height;
 ```
-`Window::resize` returns `Err` when `create_texture_streaming` fails (window.rs:106-109) leaving `self.texture`, `self.width`, `self.height` at the old values. `present` then does `self.texture.update(None, pixels, pitch)` (window.rs:123) where `pixels`/`pitch` come from the *new* surface (engine.rs:372-382). SDL_UpdateTexture reads `pitch * texture_height` bytes from the caller's pointer; `catch_unwind` in lib.rs cannot see a read past the end of a Skia pixmap. `dziri_engine_resize` maps the error to `status::SDL` (lib.rs:292-295), and only `status::PANIC` sets `poisoned` (lib.rs:68-70), so the engine remains willing to tick.
+`Window::resize` returns `Err` when `create_texture_streaming` fails (window.rs:106-109) leaving `self.texture`, `self.width`, `self.height` at the old values. `present` then does `self.texture.update(None, pixels, pitch)` (window.rs:123) where `pixels`/`pitch` come from the *new* surface (engine.rs:372-382). SDL_UpdateTexture reads `pitch * texture_height` bytes from the caller's pointer; `catch_unwind` in lib.rs cannot see a read past the end of a Skia pixmap. `dziry_engine_resize` maps the error to `status::SDL` (lib.rs:292-295), and only `status::PANIC` sets `poisoned` (lib.rs:68-70), so the engine remains willing to tick.
 
-**Impact.** Reachable via the public `dziri_engine_resize` entry point or an OS resize to a size exceeding the renderer's max texture dimension (dragging across a 4K monitor), plus OOM. If the new surface is *shorter* than the old texture, the next `present` reads out of bounds past the Skia pixmap — an out-of-bounds read that no guard catches. Both drivers currently abort on a non-OK tick (src/window-host.ts throws via `check`, examples/window.rs:256 breaks), so it is latent rather than live; but the FFI contract advertises errors as recoverable, and any host that logs-and-continues gets the OOB read.
+**Impact.** Reachable via the public `dziry_engine_resize` entry point or an OS resize to a size exceeding the renderer's max texture dimension (dragging across a 4K monitor), plus OOM. If the new surface is *shorter* than the old texture, the next `present` reads out of bounds past the Skia pixmap — an out-of-bounds read that no guard catches. Both drivers currently abort on a non-OK tick (src/window-host.ts throws via `check`, examples/window.rs:256 breaks), so it is latent rather than live; but the FFI contract advertises errors as recoverable, and any host that logs-and-continues gets the OOB read.
 
 **Recommendation.** Resize the window first and the Skia surface second, so a texture failure leaves everything at the old size and the operation is genuinely atomic; or keep the order and set `self.poisoned = true` on any partial failure. Better still, make `present` defensive: it already has both sizes in hand, so `debug_assert_eq!((self.width, self.height), texture_size)` plus an early `Err` when they disagree costs nothing per frame and makes the invariant explicit rather than assumed.
 
@@ -1936,7 +1936,7 @@ self.height = height;
 
 `better-alternative` · `window-input-threading/unsafe-textures-avoidable-via-window-surface`
 
-**Where:** `native-src/dziri-engine/Cargo.toml:25`, `native-src/dziri-engine/src/window.rs:41`, `native-src/dziri-engine/src/window.rs:106`
+**Where:** `native-src/dziry-engine/Cargo.toml:25`, `native-src/dziry-engine/src/window.rs:41`, `native-src/dziry-engine/src/window.rs:106`
 
 **Claim.** The self-referential borrow the feature works around only exists because the code chose SDL's *renderer* API to blit CPU pixels; SDL's window-surface API has no texture, no texture creator, and therefore no lifetime to erase — and it is the API intended for exactly this job.
 
@@ -1954,7 +1954,7 @@ self.height = height;
 
 `correctness` · `window-input-threading/stale-input-state-never-invalidated`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:431`, `native-src/dziri-engine/src/engine.rs:497`, `native-src/dziri-engine/src/engine.rs:514`, `native-src/dziri-engine/src/window.rs:154`, `src/engine/upload.ts:144`
+**Where:** `native-src/dziry-engine/src/engine.rs:431`, `native-src/dziry-engine/src/engine.rs:497`, `native-src/dziry-engine/src/engine.rs:514`, `native-src/dziry-engine/src/window.rs:154`, `src/engine/upload.ts:144`
 
 **Claim.** `InputState` holds three bare `i32` node ids that are set once and never re-validated: `grow()` does not reset them, hiding a node does not clear them, a list relink can point them at a different item, and window focus loss leaves `pressed` latched.
 
@@ -1972,7 +1972,7 @@ self.height = height;
 
 `correctness` · `window-input-threading/hit-test-ignores-configured-root`
 
-**Where:** `native-src/dziri-engine/src/paint.rs:244`, `native-src/dziri-engine/src/paint.rs:252`, `native-src/dziri-engine/src/engine.rs:181`
+**Where:** `native-src/dziry-engine/src/paint.rs:244`, `native-src/dziry-engine/src/paint.rs:252`, `native-src/dziry-engine/src/engine.rs:181`
 
 **Claim.** `EngineConfig.root` is honoured by paint and layout but not by hit-testing, which always walks from node 0.
 
@@ -1990,7 +1990,7 @@ self.height = height;
 
 `architecture` · `window-input-threading/mouse-move-coalesced-on-node-identity`
 
-**Where:** `native-src/dziri-engine/src/engine.rs:414`, `native-src/dziri-engine/src/engine.rs:112`, `native-src/dziri-engine/src/engine.rs:551`, `src/window-host.ts`, `src/window-host.ts`
+**Where:** `native-src/dziry-engine/src/engine.rs:414`, `native-src/dziry-engine/src/engine.rs:112`, `native-src/dziry-engine/src/engine.rs:551`, `src/window-host.ts`, `src/window-host.ts`
 
 **Claim.** The engine emits a MOUSE_MOVE only when the hit node changes, which discards every intra-node position; and the queue it emits into is an unbounded `Vec<Event>` drained 32-at-a-time by hosts that never call again.
 
@@ -2017,15 +2017,15 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `process` · `window-input-threading/static-sdl-build-reproducibility-and-notices`
 
-**Where:** `native-src/dziri-engine/Cargo.toml:29`, `native-src/dziri-engine/build.rs:4`
+**Where:** `native-src/dziry-engine/Cargo.toml:29`, `native-src/dziry-engine/build.rs:4`
 
 **Claim.** The "one artifact" distribution story rests on a build that is reproducible in its *sources* but not in its *capabilities*, requires network access, and ships statically-linked BSD-3 and zlib code with no accompanying notices.
 
-**Evidence.** Cargo.toml:29 `sdl3 = { version = "0.18", features = ["build-from-source-static", "unsafe_textures"] }`. The SDL source itself is pinned (`sdl3-src 3.4.12` appears in native-src/dziri-engine/Cargo.lock:421), which is good — but SDL's CMake build enables backends by probing the *build machine*: an SDL built on a box without `libwayland-dev`/`libdecor-dev` silently produces a binary with no Wayland support, and nothing in the artifact records which backends it got. Separately, skia-bindings 0.87 fetches prebuilt binaries over the network keyed by target+feature set — skia-bindings-0.87.0/build.rs:108 `let build_skia = build_support::binary_cache::try_prepare_download(&binaries_config);` — falling back to a full depot_tools/GN/ninja Skia build if no matching release exists. Neither the download nor its checksum is in Cargo.lock. And there is no LICENSE, NOTICE or THIRD-PARTY file anywhere in the repo (checked at root and one level down).
+**Evidence.** Cargo.toml:29 `sdl3 = { version = "0.18", features = ["build-from-source-static", "unsafe_textures"] }`. The SDL source itself is pinned (`sdl3-src 3.4.12` appears in native-src/dziry-engine/Cargo.lock:421), which is good — but SDL's CMake build enables backends by probing the *build machine*: an SDL built on a box without `libwayland-dev`/`libdecor-dev` silently produces a binary with no Wayland support, and nothing in the artifact records which backends it got. Separately, skia-bindings 0.87 fetches prebuilt binaries over the network keyed by target+feature set — skia-bindings-0.87.0/build.rs:108 `let build_skia = build_support::binary_cache::try_prepare_download(&binaries_config);` — falling back to a full depot_tools/GN/ninja Skia build if no matching release exists. Neither the download nor its checksum is in Cargo.lock. And there is no LICENSE, NOTICE or THIRD-PARTY file anywhere in the repo (checked at root and one level down).
 
 **Impact.** Three separate costs. (1) A Linux user's IME — the entire reason for choosing SDL3 (Cargo.toml:21) — depends on whether the CI runner happened to have fcitx/ibus headers, and there is no way to tell from the shipped `.so`. (2) `cargo build` is not hermetic: a GitHub release going away, or a feature-flag change that has no prebuilt Skia, turns a 3-minute build into a multi-hour Skia-from-source build on all three platforms — with `lto = true` and `codegen-units = 1` (Cargo.toml:33-34) on top. (3) Static linking is exactly the case where notice obligations bite: Skia is BSD-3-Clause, which requires reproducing the copyright notice and disclaimer in materials distributed with a binary; SDL's zlib licence is satisfied by not misrepresenting origin but the bundled Rust crates are MIT/Apache-2.0, and Apache-2.0 §4 requires the NOTICE file be carried. Shipping today would be a licence violation, and it is trivially fixable now versus awkwardly later.
 
-**Recommendation.** (1) Pin the SDL feature surface explicitly rather than letting CMake probe: pass the SDL CMake options you require (`SDL_WAYLAND=ON`, `SDL_X11=ON`, `SDL_IBUS=ON`, ...) so a build machine missing a header *fails* instead of silently degrading, and add a `dziri_engine_backends()` FFI call that reports `SDL_GetCurrentVideoDriver()` plus IME availability so a bug report can say which build it is. (2) Build the engine in a container per platform and record the toolchain versions alongside the artifact; check the resolved skia-binaries URL and SHA into the repo and set `SKIA_BINARIES_URL`/offline mode in CI so a build cannot silently become a source build. (3) Add `cargo-about` or `cargo-deny --license` to CI and generate a `THIRD-PARTY.md` from the lockfile; ROADMAP.md:567-569 already flags signing and notarization as prerequisites, and notices belong in the same batch.
+**Recommendation.** (1) Pin the SDL feature surface explicitly rather than letting CMake probe: pass the SDL CMake options you require (`SDL_WAYLAND=ON`, `SDL_X11=ON`, `SDL_IBUS=ON`, ...) so a build machine missing a header *fails* instead of silently degrading, and add a `dziry_engine_backends()` FFI call that reports `SDL_GetCurrentVideoDriver()` plus IME availability so a bug report can say which build it is. (2) Build the engine in a container per platform and record the toolchain versions alongside the artifact; check the resolved skia-binaries URL and SHA into the repo and set `SKIA_BINARIES_URL`/offline mode in CI so a build cannot silently become a source build. (3) Add `cargo-about` or `cargo-deny --license` to CI and generate a `THIRD-PARTY.md` from the lockfile; ROADMAP.md:567-569 already flags signing and notarization as prerequisites, and notices belong in the same batch.
 
 **Verifier — weakened.** Substantively right that SDL backends are auto-probed (sdl3-sys passes no explicit CMake backend options) and that skia-bindings downloads unpinned prebuilt binaries by default (binary-cache in default features), but build.rs:4 is mis-cited — the local build.rs only links Windows system libs. Notices/hermetic CI are D2 prerequisites already scheduled in ROADMAP.md and nothing ships yet, so this is a process to-do, not a live violation.
 
@@ -2039,9 +2039,9 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 **Claim.** `native/win32-x64/` holds `libSkiaSharp.dll` (12.3 MB), `SDL3.dll` (2.8 MB), `taffy_ffi.dll` (0.4 MB) and `probe.json`, none of which any code loads — and that same directory is the fallback search path for the real engine binary.
 
-**Evidence.** `libraryPath()` (host.ts:64-82) looks only for `dziri_engine.dll`/`libdziri_engine.dylib`/`libdziri_engine.so` in two candidates, the second being `native/${process.platform}-${process.arch}/` (host.ts:74). A grep across all .ts/.json/.md/.toml/.rs for `libSkiaSharp|taffy_ffi|probe.json|SDL3.dll` finds only prose in NOTES.md and ROADMAP.md plus doc comments in the retired probe crates — no loader. NOTES.md:481-482 confirms the intent: "`bun run natives`, `bun run probe` and `bun run m1` are gone: nothing fetches `libSkiaSharp` or `SDL3.dll` any more, because the engine links its own." The scripts that produced them are gone too — `scripts/` contains only `gen-protocol.ts`, and package.json has no `natives`/`probe`/`m1` entries. Also stale: `SDL3-3.4.12-win32-x64.zip` and `skiasharp.nativeassets.win32.4.150.1.nupkg` at the repo root, an empty `.natives-tmp/`, and the `native-src/taffy-ffi` and `native-src/skia-probe` crates (both with their own Cargo.lock).
+**Evidence.** `libraryPath()` (host.ts:64-82) looks only for `dziry_engine.dll`/`libdziry_engine.dylib`/`libdziry_engine.so` in two candidates, the second being `native/${process.platform}-${process.arch}/` (host.ts:74). A grep across all .ts/.json/.md/.toml/.rs for `libSkiaSharp|taffy_ffi|probe.json|SDL3.dll` finds only prose in NOTES.md and ROADMAP.md plus doc comments in the retired probe crates — no loader. NOTES.md:481-482 confirms the intent: "`bun run natives`, `bun run probe` and `bun run m1` are gone: nothing fetches `libSkiaSharp` or `SDL3.dll` any more, because the engine links its own." The scripts that produced them are gone too — `scripts/` contains only `gen-protocol.ts`, and package.json has no `natives`/`probe`/`m1` entries. Also stale: `SDL3-3.4.12-win32-x64.zip` and `skiasharp.nativeassets.win32.4.150.1.nupkg` at the repo root, an empty `.natives-tmp/`, and the `native-src/taffy-ffi` and `native-src/skia-probe` crates (both with their own Cargo.lock).
 
-**Impact.** Mostly weight — 15 MB of binaries plus a ~30 MB zip and nupkg in a repo whose thesis is smallness. But there is a real footgun: `native/win32-x64/` is where `dziri_engine.dll` gets copied for distribution, and Windows resolves a DLL's dependencies from its own directory first. Today the engine links SDL statically so the adjacent `SDL3.dll` is inert; the moment anything links SDL dynamically (a debug build, a future `--features build-from-source` variant), a months-old SDL3 3.4.12 binary is sitting there ready to be picked up in preference to the intended one, and the resulting version skew would be invisible.
+**Impact.** Mostly weight — 15 MB of binaries plus a ~30 MB zip and nupkg in a repo whose thesis is smallness. But there is a real footgun: `native/win32-x64/` is where `dziry_engine.dll` gets copied for distribution, and Windows resolves a DLL's dependencies from its own directory first. Today the engine links SDL statically so the adjacent `SDL3.dll` is inert; the moment anything links SDL dynamically (a debug build, a future `--features build-from-source` variant), a months-old SDL3 3.4.12 binary is sitting there ready to be picked up in preference to the intended one, and the resulting version skew would be invisible.
 
 **Recommendation.** Delete `native/win32-x64/{libSkiaSharp.dll,taffy_ffi.dll,SDL3.dll,probe.json}`, the root-level `SDL3-*.zip` and `skiasharp.nativeassets.*.nupkg`, and `.natives-tmp/`; keep the `native/<target>/` directory as the engine's distribution slot and add a `.gitignore` for `*.dll`/`*.so`/`*.dylib` under it so a stale binary cannot be committed again. Keep `native-src/skia-probe` — NOTES.md:216 and ROADMAP.md:45 both cite it as the evidence for the skia-safe pin, and text.rs:214-220 still asserts against its number — but retire `native-src/taffy-ffi`: its purpose was the A0 spike measuring Taffy over a C ABI, that measurement is recorded in ROADMAP.md:110-125, and Taffy is now linked directly into the engine.
 
@@ -2060,7 +2060,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 - **low** · [The `faces` font cache is unbounded and keyed on host-written f32 bit patterns](#f-security-supplychain-unbounded-font-face-cache)
 - **low** · [Cdylib is not one artifact: it imports VCRUNTIME140/MSVCP140, not KnownDLLs](#f-security-supplychain-cdylib-not-self-contained-msvc-runtime)
 - **low** · [`app/ui.gen.ts` is an executable artifact with no input stamp; `bun run app` never checks](#f-security-supplychain-generated-artifact-unstamped-and-unchecked)
-- **low** · [`dziri_last_error` truncates mid-codepoint; no message leaks memory](#f-security-supplychain-last-error-truncation-splits-utf8)
+- **low** · [`dziry_last_error` truncates mid-codepoint; no message leaks memory](#f-security-supplychain-last-error-truncation-splits-utf8)
 - **low** · [Untrusted text reaches Skia uncapped and unclipped; A2 and A5 widen the surface](#f-security-supplychain-untrusted-text-to-skia-no-cap)
 - **low** · [Capacity requests have no ceiling; allocation failure is an `assert!` that poisons](#f-security-supplychain-capacity-requests-unbounded-oom-poisons)
 - **low** · [`hit_test` hardcodes node 0 as root while layout and paint honour the configured root](#f-security-supplychain-hit-test-ignores-configured-root)
@@ -2071,7 +2071,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `security` · `security-supplychain/untrusted-text-drives-unbounded-native-realloc`
 
-**Where:** `src/engine/upload.ts:101`, `src/engine/upload.ts:144`, `src/window-host.ts`, `src/runtime/bindings.ts:95`, `native-src/dziri-engine/src/tables.rs:701`, `native-src/dziri-engine/src/engine.rs:514`
+**Where:** `src/engine/upload.ts:101`, `src/engine/upload.ts:144`, `src/window-host.ts`, `src/runtime/bindings.ts:95`, `native-src/dziry-engine/src/tables.rs:701`, `native-src/dziry-engine/src/engine.rs:514`
 
 **Claim.** The only genuinely attacker-influenced runtime input (typed text) feeds directly into the engine's capacity request, which is recomputed from live mutable state every frame, is monotonic, and whose satisfaction reallocates three arenas and rebuilds the entire Taffy tree.
 
@@ -2089,17 +2089,17 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `process` · `security-supplychain/supply-chain-no-vcs-no-audit-no-ci`
 
-**Where:** `package.json:20`, `package.json:23`, `bun.lock:1`, `native-src/dziri-engine/Cargo.toml:19`
+**Where:** `package.json:20`, `package.json:23`, `bun.lock:1`, `native-src/dziry-engine/Cargo.toml:19`
 
 **Claim.** The build's integrity story has no floor: there is no repository, no ignore file, no checksum for any vendored binary, no dependency audit for either ecosystem, and the one unpinned dependency re-resolves on every clean install.
 
-**Evidence.** `ls -d .git` → no such file; no `.gitignore`. At repo root: `skiasharp.nativeassets.win32.4.150.1.nupkg` (79,528,972 bytes) and `SDL3-3.4.12-win32-x64.zip` (1,161,314 bytes), with no `.sha256`/`CHECKSUMS` beside them. `native/win32-x64/` holds `libSkiaSharp.dll` (12.2 MB), `SDL3.dll` (2.8 MB), `taffy_ffi.dll` (416 KB) — prebuilt, unsigned-by-us, no provenance record. `native-src/dziri-engine/target/` is in the tree with ~30 build-script `.exe`s and a full SDL3 CMake tree; with no `.gitignore`, a first `git add .` commits all of it. package.json:20 `"@types/bun": "latest"` — bun.lock currently pins `1.3.14` with an integrity hash, but `latest` means a clean `bun install` re-resolves. package.json:23 pins `packageManager: pnpm@10.29.3+sha512...` while every one of the nine scripts invokes `bun` — the corepack guarantee is inert and there is no pnpm lockfile. Cargo.toml:19-29 pulls `skia-safe 0.87` (which builds Skia from source or downloads a prebuilt binary from a third-party release) and `sdl3 0.18` with `build-from-source-static`, i.e. C/C++ compilation of two large upstreams on every dev machine, with no `cargo-deny`, no `cargo audit`, and no CI to run either.
+**Evidence.** `ls -d .git` → no such file; no `.gitignore`. At repo root: `skiasharp.nativeassets.win32.4.150.1.nupkg` (79,528,972 bytes) and `SDL3-3.4.12-win32-x64.zip` (1,161,314 bytes), with no `.sha256`/`CHECKSUMS` beside them. `native/win32-x64/` holds `libSkiaSharp.dll` (12.2 MB), `SDL3.dll` (2.8 MB), `taffy_ffi.dll` (416 KB) — prebuilt, unsigned-by-us, no provenance record. `native-src/dziry-engine/target/` is in the tree with ~30 build-script `.exe`s and a full SDL3 CMake tree; with no `.gitignore`, a first `git add .` commits all of it. package.json:20 `"@types/bun": "latest"` — bun.lock currently pins `1.3.14` with an integrity hash, but `latest` means a clean `bun install` re-resolves. package.json:23 pins `packageManager: pnpm@10.29.3+sha512...` while every one of the nine scripts invokes `bun` — the corepack guarantee is inert and there is no pnpm lockfile. Cargo.toml:19-29 pulls `skia-safe 0.87` (which builds Skia from source or downloads a prebuilt binary from a third-party release) and `sdl3 0.18` with `build-from-source-static`, i.e. C/C++ compilation of two large upstreams on every dev machine, with no `cargo-deny`, no `cargo audit`, and no CI to run either.
 
-**Impact.** Nothing here is exploited today — the trust boundary is a single developer's machine — but there is currently no way to answer "did this DLL change?", "which Skia commit is in the binary I shipped?", or "does any dependency have a known advisory?". `skia-safe` + `build-from-source-static` means a compromised crates.io release or a compromised skia-binaries GitHub release executes `build.rs` and a C++ toolchain with full user privileges at `cargo build` time, with no record of the change. The 79 MB nupkg and the three DLLs are also *dead*: the built `dziri_engine.dll` imports neither `SDL3.dll` nor `libSkiaSharp.dll` (verified from its import table), and `grep -rn 'libSkiaSharp|SDL3.dll|taffy_ffi' src/ scripts/ app/` returns nothing — so they are 95 MB of unverified binary with no consumer.
+**Impact.** Nothing here is exploited today — the trust boundary is a single developer's machine — but there is currently no way to answer "did this DLL change?", "which Skia commit is in the binary I shipped?", or "does any dependency have a known advisory?". `skia-safe` + `build-from-source-static` means a compromised crates.io release or a compromised skia-binaries GitHub release executes `build.rs` and a C++ toolchain with full user privileges at `cargo build` time, with no record of the change. The 79 MB nupkg and the three DLLs are also *dead*: the built `dziry_engine.dll` imports neither `SDL3.dll` nor `libSkiaSharp.dll` (verified from its import table), and `grep -rn 'libSkiaSharp|SDL3.dll|taffy_ffi' src/ scripts/ app/` returns nothing — so they are 95 MB of unverified binary with no consumer.
 
 **Recommendation.** In order of value per minute: (1) `git init` plus a `.gitignore` covering `target/`, `node_modules/`, `.natives-tmp/`, `*.nupkg`, `*.zip` — everything else here depends on having a baseline; (2) delete the nupkg, the zip, and `native/win32-x64/*.dll` — they are dead, and deleting beats checksumming; (3) pin `@types/bun` to `1.3.14` exactly and either delete `packageManager` or change it to the `bun@x.y.z` actually in use; (4) add a `deny.toml` and one GitHub Action running `cargo deny check advisories bans sources`, `cargo test --release`, `bun test`, and `bun run gen:protocol && git diff --exit-code` (which also catches a hand-edited generated file — the thing gen-protocol.ts:8 asks nobody to do); (5) for A5/D2, pin `skia-safe` to an exact `=0.87.x` and record the `skia-binaries` release SHA-256 in the repo, verified by the build.
 
-**Verifier — confirmed.** I re-checked every factual claim and all of them hold. `ls -d .git` and `ls .gitignore` and `ls -d .github` all fail — no repository, no ignore file, no CI. `skiasharp.nativeassets.win32.4.150.1.nupkg` is 79,528,972 bytes and `SDL3-3.4.12-win32-x64.zip` is 1,161,314 bytes at the root; `native/win32-x64/` holds `SDL3.dll` (2,840,576), `libSkiaSharp.dll` (12,254,048), `taffy_ffi.dll` (416,256); `ls *.sha256 CHECKSUMS*` finds nothing, and there is no `deny.toml` anywhere. `native-src/dziri-engine/target` is 622 MB in-tree with 38 build-script directories, so a first `git add .` with no ignore file would indeed commit it. `package.json:20` is `"@types/bun": "latest"` while `bun.lock` pins `@types/bun@1.3.14` with a sha512 — so a clean install re-resolves. `package.json:23` pins `pnpm@10.29.3+sha512...` while all nine scripts invoke `bun` and there is no pnpm lockfile, making the corepack guarantee inert. `Cargo.toml:19-29` is `skia-safe = { version = "0.87" }` (caret, so 0.87.x floats) and `sdl3 = { version = "0.18", features = ["build-from-source-static", ...] }`, i.e. a C++ toolchain plus either a source build or a third-party prebuilt download running `build.rs` with full user privileges at every `cargo build`. I independently parsed the import table of the built `dziri_engine.dll` and confirmed the three DLLs are dead weight: it imports neither SDL3.dll nor libSkiaSharp.dll, and `grep -rn 'libSkiaSharp|SDL3.dll|taffy_ffi' src/ scripts/ app/` finds only comments. The severity is right for what it is: the trust boundary is one developer's machine and nothing is exploited, but there is genuinely no way to answer 'did this DLL change' or 'is any dependency advisory-affected', and every other item depends on `git init` first. One correction to the recommendation only, not the finding: `native/<platform>-<arch>/` is a live engine-load fallback (`host.ts:73-74`), so delete the three stale DLLs inside it, not the directory.
+**Verifier — confirmed.** I re-checked every factual claim and all of them hold. `ls -d .git` and `ls .gitignore` and `ls -d .github` all fail — no repository, no ignore file, no CI. `skiasharp.nativeassets.win32.4.150.1.nupkg` is 79,528,972 bytes and `SDL3-3.4.12-win32-x64.zip` is 1,161,314 bytes at the root; `native/win32-x64/` holds `SDL3.dll` (2,840,576), `libSkiaSharp.dll` (12,254,048), `taffy_ffi.dll` (416,256); `ls *.sha256 CHECKSUMS*` finds nothing, and there is no `deny.toml` anywhere. `native-src/dziry-engine/target` is 622 MB in-tree with 38 build-script directories, so a first `git add .` with no ignore file would indeed commit it. `package.json:20` is `"@types/bun": "latest"` while `bun.lock` pins `@types/bun@1.3.14` with a sha512 — so a clean install re-resolves. `package.json:23` pins `pnpm@10.29.3+sha512...` while all nine scripts invoke `bun` and there is no pnpm lockfile, making the corepack guarantee inert. `Cargo.toml:19-29` is `skia-safe = { version = "0.87" }` (caret, so 0.87.x floats) and `sdl3 = { version = "0.18", features = ["build-from-source-static", ...] }`, i.e. a C++ toolchain plus either a source build or a third-party prebuilt download running `build.rs` with full user privileges at every `cargo build`. I independently parsed the import table of the built `dziry_engine.dll` and confirmed the three DLLs are dead weight: it imports neither SDL3.dll nor libSkiaSharp.dll, and `grep -rn 'libSkiaSharp|SDL3.dll|taffy_ffi' src/ scripts/ app/` finds only comments. The severity is right for what it is: the trust boundary is one developer's machine and nothing is exploited, but there is genuinely no way to answer 'did this DLL change' or 'is any dependency advisory-affected', and every other item depends on `git init` first. One correction to the recommendation only, not the finding: `native/<platform>-<arch>/` is a live engine-load fallback (`host.ts:73-74`), so delete the three stale DLLs inside it, not the directory.
 
 <a id="f-security-supplychain-no-single-validation-pass-at-the-commit-boundary"></a>
 
@@ -2107,7 +2107,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `soundness` · `security-supplychain/no-single-validation-pass-at-the-commit-boundary`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:498`, `native-src/dziri-engine/src/layout.rs:368`, `native-src/dziri-engine/src/layout.rs:374`, `native-src/dziri-engine/src/paint.rs:161`, `native-src/dziri-engine/src/paint.rs:79`, `native-src/dziri-engine/src/layout.rs:102`
+**Where:** `native-src/dziry-engine/src/tables.rs:498`, `native-src/dziry-engine/src/layout.rs:368`, `native-src/dziry-engine/src/layout.rs:374`, `native-src/dziry-engine/src/paint.rs:161`, `native-src/dziry-engine/src/paint.rs:79`, `native-src/dziry-engine/src/layout.rs:102`
 
 **Claim.** `Tables::commit` validates nothing — it memcmps and copies. Memory safety against arbitrary host writes is real but is an emergent property of every read site independently remembering `.get(...).unwrap_or(default)`, and the chosen defaults are semantically wrong, so a host bug silently renders the wrong pixels instead of failing.
 
@@ -2125,7 +2125,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `security` · `security-supplychain/gridcolumns-u16-allocation-amplification`
 
-**Where:** `native-src/dziri-engine/src/layout.rs:467`, `src/protocol/schema.ts:115`
+**Where:** `native-src/dziry-engine/src/layout.rs:467`, `src/protocol/schema.ts:115`
 
 **Claim.** A single 2-byte write into shared memory turns into a 65535-element Vec per node, re-allocated on every style application.
 
@@ -2143,7 +2143,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `security` · `security-supplychain/unbounded-font-face-cache`
 
-**Where:** `native-src/dziri-engine/src/text.rs:57`, `native-src/dziri-engine/src/text.rs:126`, `native-src/dziri-engine/src/text.rs:51`
+**Where:** `native-src/dziry-engine/src/text.rs:57`, `native-src/dziry-engine/src/text.rs:126`, `native-src/dziry-engine/src/text.rs:51`
 
 **Claim.** `Measurer` bounds its advance cache at 4096 entries and explains why, then keeps a second cache — holding Skia `Font` objects — with no bound at all, keyed on a value the host controls.
 
@@ -2161,17 +2161,17 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `security` · `security-supplychain/cdylib-not-self-contained-msvc-runtime`
 
-**Where:** `native-src/dziri-engine/Cargo.toml:29`, `src/engine/host.ts:64`, `src/engine/host.ts:84`
+**Where:** `native-src/dziry-engine/Cargo.toml:29`, `src/engine/host.ts:64`, `src/engine/host.ts:84`
 
 **Claim.** Cargo.toml's distribution claim holds for SDL3 and Skia but not for the MSVC runtime, so D2 must either require the VC++ redistributable or ship two hijackable DLLs next to the app.
 
-**Evidence.** Cargo.toml:26-29: "Built from source and linked statically so distribution stays one artifact." Parsing the import table of the actual built `native-src/dziri-engine/target/release/dziri_engine.dll` (7.8 MB) confirms the static part — there is no `SDL3.dll` and no `libSkiaSharp.dll` import — but the full list is: ADVAPI32, GDI32, IMM32, KERNEL32, **MSVCP140.dll**, OLEAUT32, SETUPAPI, SHELL32, USER32, **VCRUNTIME140.dll**, VERSION, WINMM, ole32, ntdll, bcryptprimitives, and eight api-ms-win-crt-* api-sets. `MSVCP140.dll`, `VCRUNTIME140.dll` and `WINMM.dll` are not in the KnownDLLs registry key, so they resolve through the standard search order, which searches the *process's* directory before System32.
+**Evidence.** Cargo.toml:26-29: "Built from source and linked statically so distribution stays one artifact." Parsing the import table of the actual built `native-src/dziry-engine/target/release/dziry_engine.dll` (7.8 MB) confirms the static part — there is no `SDL3.dll` and no `libSkiaSharp.dll` import — but the full list is: ADVAPI32, GDI32, IMM32, KERNEL32, **MSVCP140.dll**, OLEAUT32, SETUPAPI, SHELL32, USER32, **VCRUNTIME140.dll**, VERSION, WINMM, ole32, ntdll, bcryptprimitives, and eight api-ms-win-crt-* api-sets. `MSVCP140.dll`, `VCRUNTIME140.dll` and `WINMM.dll` are not in the KnownDLLs registry key, so they resolve through the standard search order, which searches the *process's* directory before System32.
 
-**Impact.** Two consequences for roadmap D2. First, correctness of the claim: shipping `dziri_engine.dll` alone is not sufficient — a machine without the VC++ 2015-2022 redistributable fails to load it with a diagnostic Bun will report poorly. Second, the usual fix (copying `MSVCP140.dll`/`VCRUNTIME140.dll` into the app directory) makes that directory a DLL-planting target: anyone who can write to the install directory gets code execution inside the app process, the standard Windows local-privilege/persistence pattern. Neither is a vulnerability today — the engine is loaded from a dev build tree — but both are decided by how D2 packages.
+**Impact.** Two consequences for roadmap D2. First, correctness of the claim: shipping `dziry_engine.dll` alone is not sufficient — a machine without the VC++ 2015-2022 redistributable fails to load it with a diagnostic Bun will report poorly. Second, the usual fix (copying `MSVCP140.dll`/`VCRUNTIME140.dll` into the app directory) makes that directory a DLL-planting target: anyone who can write to the install directory gets code execution inside the app process, the standard Windows local-privilege/persistence pattern. Neither is a vulnerability today — the engine is loaded from a dev build tree — but both are decided by how D2 packages.
 
 **Recommendation.** Build with a static CRT so the claim becomes true: `RUSTFLAGS="-C target-feature=+crt-static"` for the Rust objects plus `/MT` for the Skia and SDL C++ objects (SDL's CMake takes `-DSDL_FORCE_STATIC_VCRT=ON`; skia-safe honours extra cflags) — verify by re-checking the import table for the absence of MSVCP140. If a shared CRT is unavoidable, call `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR)` before the first `dlopen`, install to a directory non-admins cannot write, and Authenticode-sign the cdylib. Worth stating what is already right: host.ts:72-84 builds two **absolute** candidate paths from `import.meta.dir`, `existsSync`-checks them, and `dlopen`s the absolute result — the primary library is never PATH- or CWD-resolved, so the obvious hijack is already closed.
 
-**Verifier — weakened.** The import table is exactly as reported (I re-parsed it: MSVCP140/VCRUNTIME140/WINMM present, no SDL3.dll or libSkiaSharp.dll) and the KnownDLLs absence is confirmed, so 'shipping dziri_engine.dll alone needs the VC++ redist' is a valid documentation correction. But the Cargo.toml claim is scoped to SDL3 and holds; the DLL-planting concern is entirely conditional on unmade D2 packaging decisions and is a generic Windows side-by-side-CRT topic; and dependency resolution for an absolute-path dlopen searches bun.exe's directory, not the cdylib's. Low/informational.
+**Verifier — weakened.** The import table is exactly as reported (I re-parsed it: MSVCP140/VCRUNTIME140/WINMM present, no SDL3.dll or libSkiaSharp.dll) and the KnownDLLs absence is confirmed, so 'shipping dziry_engine.dll alone needs the VC++ redist' is a valid documentation correction. But the Cargo.toml claim is scoped to SDL3 and holds; the DLL-planting concern is entirely conditional on unmade D2 packaging decisions and is a generic Windows side-by-side-CRT topic; and dependency resolution for an absolute-path dlopen searches bun.exe's directory, not the cdylib's. Low/informational.
 
 <a id="f-security-supplychain-generated-artifact-unstamped-and-unchecked"></a>
 
@@ -2193,21 +2193,21 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 <a id="f-security-supplychain-last-error-truncation-splits-utf8"></a>
 
-### LOW · `dziri_last_error` truncates mid-codepoint; no message leaks memory
+### LOW · `dziry_last_error` truncates mid-codepoint; no message leaks memory
 
 `correctness` · `security-supplychain/last-error-truncation-splits-utf8`
 
-**Where:** `native-src/dziri-engine/src/error.rs:88`, `native-src/dziri-engine/src/lib.rs:476`, `src/engine/host.ts:112`, `native-src/dziri-engine/src/error.rs:25`
+**Where:** `native-src/dziry-engine/src/error.rs:88`, `native-src/dziry-engine/src/lib.rs:476`, `src/engine/host.ts:112`, `native-src/dziry-engine/src/error.rs:25`
 
 **Claim.** The buffer-length protocol is correct (returns the needed length, copies min) but truncation can split a UTF-8 sequence — the one thing the event path explicitly gets right and this path does not; separately, no message leaks memory contents, and the thread-local becomes wrong at A0 step 3.
 
-**Evidence.** error.rs:92-95 `if !buf.is_null() && len > 0 { let n = bytes.len().min(len as usize); std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n); }` — no char-boundary walk-back. Compare engine.rs:486-491, which does exactly that and says why: "Truncated on a UTF-8 boundary rather than mid-codepoint: a split sequence would reach Bun as broken text" — `while n > 0 && !text.is_char_boundary(n) { n -= 1; }`. lib.rs:476-479 (`dziri_engine_font_family`) has the same gap. host.ts:108-115 uses a 1024-byte buffer and `decoder.decode(errorBuf.subarray(0, Math.min(len, errorBuf.length)))`, and `TextDecoder` is non-fatal by default, so the symptom is a U+FFFD, not a throw. On the disclosure question: every `fail()` site interpolates integers and static text only — lib.rs:355 `format!("no node {node}")`, lib.rs:400 `format!("frame is {} bytes, was given {len}", pixels.len())`, layout.rs:102 `format!("node {i} has child {c}, past the {count}-node table")` — never arena bytes, never a pointer, and `read_last_error` copies `min(len, actual)` so there is no read past the buffer either. error.rs:25-32 declares `LAST_ERROR` in `thread_local!`.
+**Evidence.** error.rs:92-95 `if !buf.is_null() && len > 0 { let n = bytes.len().min(len as usize); std::ptr::copy_nonoverlapping(bytes.as_ptr(), buf, n); }` — no char-boundary walk-back. Compare engine.rs:486-491, which does exactly that and says why: "Truncated on a UTF-8 boundary rather than mid-codepoint: a split sequence would reach Bun as broken text" — `while n > 0 && !text.is_char_boundary(n) { n -= 1; }`. lib.rs:476-479 (`dziry_engine_font_family`) has the same gap. host.ts:108-115 uses a 1024-byte buffer and `decoder.decode(errorBuf.subarray(0, Math.min(len, errorBuf.length)))`, and `TextDecoder` is non-fatal by default, so the symptom is a U+FFFD, not a throw. On the disclosure question: every `fail()` site interpolates integers and static text only — lib.rs:355 `format!("no node {node}")`, lib.rs:400 `format!("frame is {} bytes, was given {len}", pixels.len())`, layout.rs:102 `format!("node {i} has child {c}, past the {count}-node table")` — never arena bytes, never a pointer, and `read_last_error` copies `min(len, actual)` so there is no read past the buffer either. error.rs:25-32 declares `LAST_ERROR` in `thread_local!`.
 
-**Impact.** Today: a >1024-byte error message ends in a replacement character. Tomorrow: engine.rs:9-17 schedules the engine owning its own render thread (A0 step 3), at which point a panic recorded on the render thread is invisible to `dziri_last_error` called from Bun's thread — the host gets `""` alongside a `PANIC` status, precisely the silent-failure mode error.rs:1-8 exists to prevent.
+**Impact.** Today: a >1024-byte error message ends in a replacement character. Tomorrow: engine.rs:9-17 schedules the engine owning its own render thread (A0 step 3), at which point a panic recorded on the render thread is invisible to `dziry_last_error` called from Bun's thread — the host gets `""` alongside a `PANIC` status, precisely the silent-failure mode error.rs:1-8 exists to prevent.
 
-**Recommendation.** Extract the boundary walk-back from engine.rs:488-491 into `fn truncate_utf8(s: &str, len: usize) -> &[u8]` and use it in `read_last_error` and `dziri_engine_font_family`. For the threading change, move `LAST_ERROR` from `thread_local!` to a `Mutex<String>` on the `Handle` — the message becomes per-engine rather than per-thread, which is the identity the host actually has — and make the switch when step 3 lands rather than after the first invisible panic.
+**Recommendation.** Extract the boundary walk-back from engine.rs:488-491 into `fn truncate_utf8(s: &str, len: usize) -> &[u8]` and use it in `read_last_error` and `dziry_engine_font_family`. For the threading change, move `LAST_ERROR` from `thread_local!` to a `Mutex<String>` on the `Handle` — the message becomes per-engine rather than per-thread, which is the identity the host actually has — and make the switch when step 3 lands rather than after the first invisible panic.
 
-**Verifier — confirmed.** All four code claims check out. `error.rs:88-98 read_last_error` does `let n = bytes.len().min(len as usize); copy_nonoverlapping(...)` with no char-boundary walk-back, and `lib.rs:470-480 dziri_engine_font_family` has the identical gap, while `engine.rs:479-489` does exactly the walk-back for event text with the reasoning spelled out ('a split sequence would reach Bun as broken text'). So the inconsistency the finding names is genuinely there and the extract-a-helper fix is four lines. The disclosure analysis is also right: I checked the `fail()` sites and they interpolate integers and static text only (`lib.rs:355` 'no node {node}', `lib.rs:400` 'frame is {} bytes, was given {len}', `layout.rs:102` 'node {i} has child {c}, past the {count}-node table'), never arena bytes or pointers, and `host.ts:112-115` reads with a 1024-byte buffer and `Math.min(len, errorBuf.length)`, so there is no over-read. Reachability today is close to nil — every message is far under 1024 bytes and font family names are short — and TextDecoder is non-fatal so the worst symptom is one U+FFFD, which is precisely why the finding filed it as low. The thread-local half is explicitly forward-looking about A0 step 3 rather than a present defect, and it is framed that way. I tried to find a reason to downgrade below low and could not: it is a small, correct, cheap consistency defect at the same severity claimed.
+**Verifier — confirmed.** All four code claims check out. `error.rs:88-98 read_last_error` does `let n = bytes.len().min(len as usize); copy_nonoverlapping(...)` with no char-boundary walk-back, and `lib.rs:470-480 dziry_engine_font_family` has the identical gap, while `engine.rs:479-489` does exactly the walk-back for event text with the reasoning spelled out ('a split sequence would reach Bun as broken text'). So the inconsistency the finding names is genuinely there and the extract-a-helper fix is four lines. The disclosure analysis is also right: I checked the `fail()` sites and they interpolate integers and static text only (`lib.rs:355` 'no node {node}', `lib.rs:400` 'frame is {} bytes, was given {len}', `layout.rs:102` 'node {i} has child {c}, past the {count}-node table'), never arena bytes or pointers, and `host.ts:112-115` reads with a 1024-byte buffer and `Math.min(len, errorBuf.length)`, so there is no over-read. Reachability today is close to nil — every message is far under 1024 bytes and font family names are short — and TextDecoder is non-fatal so the worst symptom is one U+FFFD, which is precisely why the finding filed it as low. The thread-local half is explicitly forward-looking about A0 step 3 rather than a present defect, and it is framed that way. I tried to find a reason to downgrade below low and could not: it is a small, correct, cheap consistency defect at the same severity claimed.
 
 <a id="f-security-supplychain-untrusted-text-to-skia-no-cap"></a>
 
@@ -2215,7 +2215,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `security` · `security-supplychain/untrusted-text-to-skia-no-cap`
 
-**Where:** `src/runtime/bindings.ts:80`, `native-src/dziri-engine/src/text.rs:184`, `native-src/dziri-engine/src/paint.rs:229`, `src/engine/upload.ts:231`
+**Where:** `src/runtime/bindings.ts:80`, `native-src/dziry-engine/src/text.rs:184`, `native-src/dziry-engine/src/paint.rs:229`, `src/engine/upload.ts:231`
 
 **Claim.** The current text path is narrow enough that adversarial Unicode is a cost problem rather than a safety one, but there is no length cap anywhere and no clipping, and the two roadmap items that widen the surface are the two most historically CVE-dense parts of Skia.
 
@@ -2233,7 +2233,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `security` · `security-supplychain/capacity-requests-unbounded-oom-poisons`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:117`, `native-src/dziri-engine/src/tables.rs:113`, `native-src/dziri-engine/src/engine.rs:151`, `native-src/dziri-engine/src/lib.rs:69`
+**Where:** `native-src/dziry-engine/src/tables.rs:117`, `native-src/dziry-engine/src/tables.rs:113`, `native-src/dziry-engine/src/engine.rs:151`, `native-src/dziry-engine/src/lib.rs:69`
 
 **Claim.** Both `create` and `grow` take host u32 capacities with no ceiling and turn them straight into an allocation whose failure path is a panic, so an over-large request kills the engine irrecoverably instead of returning a status.
 
@@ -2241,7 +2241,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 **Impact.** `nodes: 0xFFFFFFFF` (reachable from a Bun-side arithmetic slip — `capacitiesFor` feeds `Math.ceil` results into a `Uint32Array`, so a NaN or a negative silently becomes a large u32) asks for ~100 GB across three arenas. Best case the allocator refuses and the engine is permanently poisoned mid-session — a recoverable capacity error turned into a dead window. Worst case on an overcommitting OS it succeeds and `alloc_zeroed` touches every page.
 
-**Recommendation.** Add `const MAX_NODES: u32`, `MAX_STYLES`, `MAX_STRING_BYTES` (generous — 1<<22 nodes, 1<<28 arena bytes) and reject anything larger from `dziri_engine_create`/`dziri_engine_grow` with `fail(status::CAPACITY, ...)` before any allocation. Then make `Arena::new` fallible — `fn try_new(size: usize) -> Result<Self, String>` returning `Err` on a null pointer or a bad layout, propagated through `Tables::new`/`grow` — so an honest OOM is a `CAPACITY` status the host can act on. `grow` already has the right shape: it builds the new `Tables` before swapping, so a failure can leave the old ones intact.
+**Recommendation.** Add `const MAX_NODES: u32`, `MAX_STYLES`, `MAX_STRING_BYTES` (generous — 1<<22 nodes, 1<<28 arena bytes) and reject anything larger from `dziry_engine_create`/`dziry_engine_grow` with `fail(status::CAPACITY, ...)` before any allocation. Then make `Arena::new` fallible — `fn try_new(size: usize) -> Result<Self, String>` returning `Err` on a null pointer or a bad layout, propagated through `Tables::new`/`grow` — so an honest OOM is a `CAPACITY` status the host can act on. `grow` already has the right shape: it builds the new `Tables` before swapping, so a failure can leave the old ones intact.
 
 **Verifier — weakened.** Accurate that create/grow apply only `.max()` and that allocation failure is an `expect`/`assert!` which poisons the engine via lib.rs:66-71. But the cited trigger is wrong: `Uint32Array[i] = NaN` is 0 in JS, not a large u32 (and 0 becomes 1 via `.max(1)`), and nothing in capacitiesFor can produce a negative, so there is no reachable path to an over-large request. On Windows the request simply fails and the engine reports POISONED with a message. Low-severity robustness nit, not a security issue.
 
@@ -2251,7 +2251,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `correctness` · `security-supplychain/hit-test-ignores-configured-root`
 
-**Where:** `native-src/dziri-engine/src/paint.rs:252`, `native-src/dziri-engine/src/paint.rs:122`, `native-src/dziri-engine/src/layout.rs:160`, `app/ui.gen.ts:173`
+**Where:** `native-src/dziry-engine/src/paint.rs:252`, `native-src/dziry-engine/src/paint.rs:122`, `native-src/dziry-engine/src/layout.rs:160`, `app/ui.gen.ts:173`
 
 **Claim.** The engine accepts a host-supplied root, threads it through layout and paint, then ignores it in the third walker — working today only by the accident that the root happens to be 0.
 
@@ -2261,7 +2261,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 **Recommendation.** Give `hit_test` a `root: usize` parameter and pass `self.root` from all four call sites, exactly as `paint` already does. Add the regression the current test cannot catch: a fixture with `root: 1` asserting that paint and hit-test agree and that node 0 is never returned.
 
-**Verifier — confirmed.** Verified line by line and I could not find a defence. `paint.rs:244-249`: `pub fn hit_test(tables: &Tables, bounds: &[[f32; 4]], px: f32, py: f32) -> i32 { let count = bounds.len(); ... let mut stack = vec![0usize];` — no `root` parameter exists, and `grep -n hit_test native-src/dziri-engine/src/*.rs` shows all four call sites (engine.rs:415, 432, 448 and `Engine::hit_test` at engine.rs:574-576) pass none, while `paint.rs:106-122 paint(...)` does take `root: usize` and seeds `vec![root]`, and `layout.rs:160-163` resolves `self.ids.get(self.root)`. So the engine threads a host-supplied root through two of three walkers and drops it in the third. It works only by coincidence: `app/ui.gen.ts:173` is `export const root = 0;` (src/window-host.ts passes it), and `compile.ts:589-592` derives `rootIndex` from the first node walked, so the compiler always emits 0 today — including in the synthetic `#root` wrapper case. The consequence is stated correctly: with a non-zero root, hit-testing would walk from node 0, a node that may not even be in the painted subtree, and the symptom is silently dead interaction rather than a crash. The note that `tests/bounds.rs:358 hit_testing_finds_the_deepest_interactive_node` cannot catch it is right — its fixture also roots at 0 (config() in bounds.rs sets no non-zero root). Latent, unreachable today, cheap to fix, and low is the correct severity.
+**Verifier — confirmed.** Verified line by line and I could not find a defence. `paint.rs:244-249`: `pub fn hit_test(tables: &Tables, bounds: &[[f32; 4]], px: f32, py: f32) -> i32 { let count = bounds.len(); ... let mut stack = vec![0usize];` — no `root` parameter exists, and `grep -n hit_test native-src/dziry-engine/src/*.rs` shows all four call sites (engine.rs:415, 432, 448 and `Engine::hit_test` at engine.rs:574-576) pass none, while `paint.rs:106-122 paint(...)` does take `root: usize` and seeds `vec![root]`, and `layout.rs:160-163` resolves `self.ids.get(self.root)`. So the engine threads a host-supplied root through two of three walkers and drops it in the third. It works only by coincidence: `app/ui.gen.ts:173` is `export const root = 0;` (src/window-host.ts passes it), and `compile.ts:589-592` derives `rootIndex` from the first node walked, so the compiler always emits 0 today — including in the synthetic `#root` wrapper case. The consequence is stated correctly: with a non-zero root, hit-testing would walk from node 0, a node that may not even be in the painted subtree, and the symptom is silently dead interaction rather than a crash. The note that `tests/bounds.rs:358 hit_testing_finds_the_deepest_interactive_node` cannot catch it is right — its fixture also roots at 0 (config() in bounds.rs sets no non-zero root). Latent, unreachable today, cheap to fix, and low is the correct severity.
 
 ---
 
@@ -2324,17 +2324,17 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `process` · `quality-tests-process/no-gitignore-not-a-repo`
 
-**Where:** `package.json:1`, `native-src/dziri-engine/target/.rustc_info.json:1`, `skiasharp.nativeassets.win32.4.150.1.nupkg:1`, `native/win32-x64/libSkiaSharp.dll:1`
+**Where:** `package.json:1`, `native-src/dziry-engine/target/.rustc_info.json:1`, `skiasharp.nativeassets.win32.4.150.1.nupkg:1`, `native/win32-x64/libSkiaSharp.dll:1`
 
 **Claim.** For a project that intends to be public, the single most urgent process gap is that the first `git init && git add .` will commit roughly a gigabyte of regenerable artifacts, and there is no `.gitignore` to stop it.
 
-**Evidence.** `git rev-parse --is-inside-work-tree` → `fatal: not a git repository (or any of the parent directories): .git`. `ls -la .gitignore` → `No such file or directory`. `du -sh`: `native-src/dziri-engine/target` 622M, `native-src/skia-probe` 350M, `node_modules` 30M, `native` 15M, `native-src/taffy-ffi` 13M — 1.1 GB total. Loose in the root: `skiasharp.nativeassets.win32.4.150.1.nupkg` (79,528,972 bytes), `SDL3-3.4.12-win32-x64.zip` (1,161,314 bytes), `engine-demo.png`, `engine-demo-light.png`. `app/ui.gen.ts` (18 KB of generated typed arrays) is also present and is a build product of `bun run compile`.
+**Evidence.** `git rev-parse --is-inside-work-tree` → `fatal: not a git repository (or any of the parent directories): .git`. `ls -la .gitignore` → `No such file or directory`. `du -sh`: `native-src/dziry-engine/target` 622M, `native-src/skia-probe` 350M, `node_modules` 30M, `native` 15M, `native-src/taffy-ffi` 13M — 1.1 GB total. Loose in the root: `skiasharp.nativeassets.win32.4.150.1.nupkg` (79,528,972 bytes), `SDL3-3.4.12-win32-x64.zip` (1,161,314 bytes), `engine-demo.png`, `engine-demo-light.png`. `app/ui.gen.ts` (18 KB of generated typed arrays) is also present and is a build product of `bun run compile`.
 
 **Impact.** A 1 GB initial commit is effectively permanent — git history cannot be shrunk after publication without a rewrite that invalidates every clone and fork. It also makes `git status` useless (622 MB of churning fingerprint JSON), makes CI checkout minutes-long, and means the 79 MB SkiaSharp nupkg — a dependency of the *retired* TypeScript runtime — becomes a permanent part of the project's identity.
 
 **Recommendation.** Before `git init`: write `.gitignore` with `node_modules/`, `target/`, `.natives-tmp/`, `*.nupkg`, `*.zip`, `native/**/*.dll`, `native/**/*.so`, `native/**/*.dylib`, `engine-frame.png`. Decide deliberately about `app/ui.gen.ts` — commit it (it is the artifact the README will show, and `upload.test.ts:22` imports it) but add a `bun run compile && git diff --exit-code app/ui.gen.ts` check so a stale generated file is a CI failure rather than a silent divergence. Delete the nupkg and the SDL zip; record their versions in NOTES.md instead, which already documents the toolchain floor.
 
-**Verifier — confirmed.** Every number checks out. `git rev-parse --is-inside-work-tree` -> `fatal: not a git repository`; no .gitignore (`ls: cannot access '.gitignore'`). `du -sh` gives 1.1G total, native-src/dziri-engine/target 622M, native-src/skia-probe 350M, native-src/taffy-ffi 13M, node_modules 30M, native 15M. Root listing confirms skiasharp.nativeassets.win32.4.150.1.nupkg at exactly 79,528,972 bytes, SDL3-3.4.12-win32-x64.zip at 1,161,314, engine-demo.png and engine-demo-light.png, plus app/ui.gen.ts at 18,234 bytes. The nupkg really is dead weight: NOTES.md:481 states "nothing fetches libSkiaSharp or SDL3.dll any more, because the engine links its own", and ROADMAP.md:183 lists both DLLs as retired. Public intent is explicit, so this is not a hypothetical repo — ROADMAP.md:7 "Open source, with `create-dziri` scaffolding and a `dziri` CLI" and ROADMAP.md:19 "P0 · Prerequisites — before any public work" (npm names, GitHub org). ui.gen.ts is a build product of `bun run compile` (src/compile.ts writes it) and is imported by src/window-host.ts and src/engine/upload.test.ts:22, so the commit-plus-drift-check recommendation is the right shape. Severity is carried by irreversibility, not by present breakage: the fix is a ten-line file, and it stops being possible the moment history is published.
+**Verifier — confirmed.** Every number checks out. `git rev-parse --is-inside-work-tree` -> `fatal: not a git repository`; no .gitignore (`ls: cannot access '.gitignore'`). `du -sh` gives 1.1G total, native-src/dziry-engine/target 622M, native-src/skia-probe 350M, native-src/taffy-ffi 13M, node_modules 30M, native 15M. Root listing confirms skiasharp.nativeassets.win32.4.150.1.nupkg at exactly 79,528,972 bytes, SDL3-3.4.12-win32-x64.zip at 1,161,314, engine-demo.png and engine-demo-light.png, plus app/ui.gen.ts at 18,234 bytes. The nupkg really is dead weight: NOTES.md:481 states "nothing fetches libSkiaSharp or SDL3.dll any more, because the engine links its own", and ROADMAP.md:183 lists both DLLs as retired. Public intent is explicit, so this is not a hypothetical repo — ROADMAP.md:7 "Open source, with `create-dziry` scaffolding and a `dziry` CLI" and ROADMAP.md:19 "P0 · Prerequisites — before any public work" (npm names, GitHub org). ui.gen.ts is a build product of `bun run compile` (src/compile.ts writes it) and is imported by src/window-host.ts and src/engine/upload.test.ts:22, so the commit-plus-drift-check recommendation is the right shape. Severity is carried by irreversibility, not by present breakage: the fix is a ten-line file, and it stops being possible the moment history is published.
 
 <a id="f-quality-tests-process-generated-module-untypechecked"></a>
 
@@ -2396,17 +2396,17 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `correctness` · `quality-tests-process/engine-tick-status-lies`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:239`, `native-src/dziri-engine/src/engine.rs:263`, `native-src/dziri-engine/src/engine.rs:368`, `native-src/dziri-engine/src/lib.rs:291`
+**Where:** `native-src/dziry-engine/src/lib.rs:239`, `native-src/dziry-engine/src/engine.rs:263`, `native-src/dziry-engine/src/engine.rs:368`, `native-src/dziry-engine/src/lib.rs:291`
 
 **Claim.** Every internal fallible operation returns `Result<_, String>`, which carries a message but not a category, so `lib.rs` must pick one status per entry point — and the picks are wrong for most of the paths that can actually fail.
 
-**Evidence.** lib.rs:239-244: `match engine.tick() { Ok(()) => status::OK, Err(message) => fail(status::LAYOUT, message) }`. But `tick()` (engine.rs:263-297) propagates from four sources: `pump_input()?` → `resize()?` → `"Skia could not allocate a {width}x{height} raster surface"` (engine.rs:530) and `window.resize()?` → `"SDL_CreateTexture on resize: {e}"` (window.rs:109); `resync()?` and `compute()?` → genuine Taffy errors; and `present()?` → `"Skia surface has no readable pixels"` (engine.rs:373, :377) and `"SDL_UpdateTexture: {e}"` (window.rs:125). All five reach the host as `status::LAYOUT`. Symmetrically `dziri_engine_resize` (lib.rs:291-296) maps everything to `status::SDL`, including the Skia surface-allocation failure. The `Status` enum the schema generates for exactly this purpose (schema.ts:306-319: `SDL: -6, SKIA: -7, LAYOUT: -8`) is therefore decorative on the frame path.
+**Evidence.** lib.rs:239-244: `match engine.tick() { Ok(()) => status::OK, Err(message) => fail(status::LAYOUT, message) }`. But `tick()` (engine.rs:263-297) propagates from four sources: `pump_input()?` → `resize()?` → `"Skia could not allocate a {width}x{height} raster surface"` (engine.rs:530) and `window.resize()?` → `"SDL_CreateTexture on resize: {e}"` (window.rs:109); `resync()?` and `compute()?` → genuine Taffy errors; and `present()?` → `"Skia surface has no readable pixels"` (engine.rs:373, :377) and `"SDL_UpdateTexture: {e}"` (window.rs:125). All five reach the host as `status::LAYOUT`. Symmetrically `dziry_engine_resize` (lib.rs:291-296) maps everything to `status::SDL`, including the Skia surface-allocation failure. The `Status` enum the schema generates for exactly this purpose (schema.ts:306-319: `SDL: -6, SKIA: -7, LAYOUT: -8`) is therefore decorative on the frame path.
 
-**Impact.** The host's only structured signal is the status code — host.ts:117-120 renders `${STATUS_NAMES[code]} — ${lastError()}`, so a user out of video memory is told "dziri_engine_tick failed: LAYOUT". Any host-side recovery keyed on the code (retry a resize on SDL, refuse to render on LAYOUT, surface a driver message on SKIA) is impossible, and this is the one place where the codebase's own rule — "returns a status, never a value" so failure is machine-distinguishable (lib.rs:8-10) — is satisfied in form but not substance. `String` errors also `format!`-allocate on every failure path, on the render thread.
+**Impact.** The host's only structured signal is the status code — host.ts:117-120 renders `${STATUS_NAMES[code]} — ${lastError()}`, so a user out of video memory is told "dziry_engine_tick failed: LAYOUT". Any host-side recovery keyed on the code (retry a resize on SDL, refuse to render on LAYOUT, surface a driver message on SKIA) is impossible, and this is the one place where the codebase's own rule — "returns a status, never a value" so failure is machine-distinguishable (lib.rs:8-10) — is satisfied in form but not substance. `String` errors also `format!`-allocate on every failure path, on the render thread.
 
-**Recommendation.** `String` is defensible for the *detail* — it is only ever read by a human through `dziri_last_error`, and a `thiserror` hierarchy would buy little across an i32 boundary. But the *category* must travel with the error. Define `pub struct EngineError { pub status: i32, pub detail: String }` with `::skia(...)`, `::sdl(...)`, `::layout(...)`, `::capacity(...)` constructors, change the internal signatures to `Result<T, EngineError>`, and reduce every `lib.rs` arm to `Err(e) => fail(e.status, e.detail)`. That is ~20 call sites, it deletes the guessing, and `boundary.rs` gains a test worth writing: force a surface-allocation failure and assert the code is SKIA, not LAYOUT.
+**Recommendation.** `String` is defensible for the *detail* — it is only ever read by a human through `dziry_last_error`, and a `thiserror` hierarchy would buy little across an i32 boundary. But the *category* must travel with the error. Define `pub struct EngineError { pub status: i32, pub detail: String }` with `::skia(...)`, `::sdl(...)`, `::layout(...)`, `::capacity(...)` constructors, change the internal signatures to `Result<T, EngineError>`, and reduce every `lib.rs` arm to `Err(e) => fail(e.status, e.detail)`. That is ~20 call sites, it deletes the guessing, and `boundary.rs` gains a test worth writing: force a surface-allocation failure and assert the code is SKIA, not LAYOUT.
 
-**Verifier — confirmed.** One impact detail is overstated: the human is not left with a bare "LAYOUT". host.ts:117-120 appends the detail string, so an out-of-VRAM user sees `dziri_engine_tick failed: LAYOUT — Skia could not allocate a 1920x1080 raster surface`. What is actually lost is machine classification (any code-keyed recovery), not the diagnosis.
+**Verifier — confirmed.** One impact detail is overstated: the human is not left with a bare "LAYOUT". host.ts:117-120 appends the detail string, so an out-of-VRAM user sees `dziry_engine_tick failed: LAYOUT — Skia could not allocate a 1920x1080 raster surface`. What is actually lost is machine classification (any code-keyed recovery), not the diagnosis.
 
 <a id="f-quality-tests-process-max-fields-flat-index-unguarded"></a>
 
@@ -2414,7 +2414,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `soundness` · `quality-tests-process/max-fields-flat-index-unguarded`
 
-**Where:** `native-src/dziri-engine/src/tables.rs:582`, `native-src/dziri-engine/src/tables.rs:291`, `native-src/dziri-engine/src/tables.rs:334`, `src/protocol/schema.ts:85`
+**Where:** `native-src/dziry-engine/src/tables.rs:582`, `native-src/dziry-engine/src/tables.rs:291`, `native-src/dziry-engine/src/tables.rs:334`, `src/protocol/schema.ts:85`
 
 **Claim.** The (table, field) → span lookup is a flat array strided by a hardcoded 64, so a schema that grows any table past 64 fields silently aliases into the next table's row rather than failing to build — the precise failure class the generated-schema design exists to prevent.
 
@@ -2450,7 +2450,7 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `process` · `quality-tests-process/no-ci-no-lint-second-test-framework`
 
-**Where:** `package.json:6`, `src/engine-smoke.ts` (since deleted), `src/compiler/jsx-runtime.ts:103`, `native-src/dziri-engine/Cargo.toml:1`
+**Where:** `package.json:6`, `src/engine-smoke.ts` (since deleted), `src/compiler/jsx-runtime.ts:103`, `native-src/dziry-engine/Cargo.toml:1`
 
 **Claim.** Everything that runs the tests requires knowing what to type: `bun test` is in no script, `engine-smoke.ts` reimplements assertions instead of being a test file, and there is no `.github/`, `rustfmt.toml`, `clippy.toml`, or eslint/biome config — while the source already carries an eslint directive for a linter that was never configured.
 
@@ -2470,13 +2470,13 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 `soundness` · `quality-tests-process/unsafe-op-in-unsafe-fn`
 
-**Where:** `native-src/dziri-engine/src/lib.rs:1`, `native-src/dziri-engine/src/lib.rs:209`, `native-src/dziri-engine/src/lib.rs:262`, `native-src/dziri-engine/src/lib.rs:366`, `native-src/dziri-engine/Cargo.toml:4`
+**Where:** `native-src/dziry-engine/src/lib.rs:1`, `native-src/dziry-engine/src/lib.rs:209`, `native-src/dziry-engine/src/lib.rs:262`, `native-src/dziry-engine/src/lib.rs:366`, `native-src/dziry-engine/Cargo.toml:4`
 
 **Claim.** The crate is edition 2021 with no lint attributes, so every raw-pointer dereference and `from_raw_parts_mut` inside the FFI entry points is unmarked — there is no syntactic distinction between the one line that is genuinely unsafe and the fifty around it that are not.
 
-**Evidence.** `edition = "2021"` (Cargo.toml:4) and lib.rs has no `#![deny(...)]` or `#![warn(...)]` at all. The pattern repeats 19 times: lib.rs:188-213 `pub unsafe extern "C" fn dziri_engine_describe(...)` contains `let slice = std::slice::from_raw_parts_mut(out, capacity as usize);` (:209) with no `unsafe {}` and no `// SAFETY:`; lib.rs:262 the same in `drain_events`; lib.rs:372-375 four raw `*out.add(n) = …` writes in `surface_info`; lib.rs:352, :403, :454, :478 `copy_nonoverlapping`. By contrast the code that *does* mark its unsafety documents it well — `with()` (lib.rs:49-53), `Arena` (tables.rs:113-140), `read_title` (engine.rs:583-585), `old.destroy()` (window.rs:112-115) all carry real SAFETY comments. The FFI layer is the exception, and it is the layer where it matters most.
+**Evidence.** `edition = "2021"` (Cargo.toml:4) and lib.rs has no `#![deny(...)]` or `#![warn(...)]` at all. The pattern repeats 19 times: lib.rs:188-213 `pub unsafe extern "C" fn dziry_engine_describe(...)` contains `let slice = std::slice::from_raw_parts_mut(out, capacity as usize);` (:209) with no `unsafe {}` and no `// SAFETY:`; lib.rs:262 the same in `drain_events`; lib.rs:372-375 four raw `*out.add(n) = …` writes in `surface_info`; lib.rs:352, :403, :454, :478 `copy_nonoverlapping`. By contrast the code that *does* mark its unsafety documents it well — `with()` (lib.rs:49-53), `Arena` (tables.rs:113-140), `read_title` (engine.rs:583-585), `old.destroy()` (window.rs:112-115) all carry real SAFETY comments. The FFI layer is the exception, and it is the layer where it matters most.
 
-**Impact.** Two costs. Reviewability: in `dziri_engine_describe` the reader cannot see that `from_raw_parts_mut(out, capacity)` trusts a host-supplied length — note it uses `capacity`, not the already-validated `engine.span_count()`, so a host passing a large `capacity` with a small buffer gets a slice over memory it does not own; the `# Safety` doc states the contract but the body does not mark where it is relied upon. Migration: `unsafe_op_in_unsafe_fn` is deny-by-default in edition 2024, as is bare `#[no_mangle]` (all 19 need `#[unsafe(no_mangle)]`), so this is required work deferred rather than avoided.
+**Impact.** Two costs. Reviewability: in `dziry_engine_describe` the reader cannot see that `from_raw_parts_mut(out, capacity)` trusts a host-supplied length — note it uses `capacity`, not the already-validated `engine.span_count()`, so a host passing a large `capacity` with a small buffer gets a slice over memory it does not own; the `# Safety` doc states the contract but the body does not mark where it is relied upon. Migration: `unsafe_op_in_unsafe_fn` is deny-by-default in edition 2024, as is bare `#[no_mangle]` (all 19 need `#[unsafe(no_mangle)]`), so this is required work deferred rather than avoided.
 
 **Recommendation.** Add `#![deny(unsafe_op_in_unsafe_fn)]` to lib.rs now and fix the ~25 resulting errors by wrapping each pointer operation in `unsafe { }` with a one-line `// SAFETY:` naming the documented precondition it relies on. While doing it, clamp `describe` and `drain_events` to `min(capacity, span_count())` / `min(capacity, events.len())` so an over-large `capacity` cannot produce an out-of-bounds slice even if the host lies. Then add `#![deny(clippy::undocumented_unsafe_blocks, clippy::cast_possible_truncation)]`; the second will fire on some of tables.rs's 63 `as` casts (`elem_size as u32`, `capacity as usize`, `slot as u32`) and each hit is a u32/usize boundary that deserves an explicit `try_into().expect()` inside the panic guard.
 
@@ -2492,11 +2492,11 @@ So `x`/`y` are only ever the coordinates of a boundary crossing. The queue is `e
 
 **Claim.** `taffy-ffi` and `skia-probe` are finished spikes referenced only in prose, each with its own `Cargo.lock` and target directory, and `native/win32-x64/` still holds the three DLLs the retired TypeScript runtime needed — none of which any current code path loads.
 
-**Evidence.** `grep -rn "taffy-ffi|taffy_ffi|skia-probe"` over `src app scripts native-src/dziri-engine package.json` finds only prose: Cargo.toml:17 ("Pinned to what `native-src/skia-probe` verified"), build.rs:3, text.rs:16, plus NOTES.md:180/216 and ROADMAP.md:45. No `[workspace]` in any manifest, so they are three independent crates. `du -sh`: skia-probe 350M, taffy-ffi 13M. `native/win32-x64/` holds `libSkiaSharp.dll` (12.2 MB), `SDL3.dll` (2.8 MB), `taffy_ffi.dll` (416 KB) and `probe.json`; host.ts:64-82 only ever looks for `dziri_engine.{dll,dylib,so}`, and SDL3 is `build-from-source-static` (Cargo.toml:29) so the loose `SDL3.dll` cannot be needed either. Smaller vestige in the same class: src/runtime/list-runtime.ts:357 ends with a bare `void findRow;` although `findRow` is genuinely used at :97 and :106.
+**Evidence.** `grep -rn "taffy-ffi|taffy_ffi|skia-probe"` over `src app scripts native-src/dziry-engine package.json` finds only prose: Cargo.toml:17 ("Pinned to what `native-src/skia-probe` verified"), build.rs:3, text.rs:16, plus NOTES.md:180/216 and ROADMAP.md:45. No `[workspace]` in any manifest, so they are three independent crates. `du -sh`: skia-probe 350M, taffy-ffi 13M. `native/win32-x64/` holds `libSkiaSharp.dll` (12.2 MB), `SDL3.dll` (2.8 MB), `taffy_ffi.dll` (416 KB) and `probe.json`; host.ts:64-82 only ever looks for `dziry_engine.{dll,dylib,so}`, and SDL3 is `build-from-source-static` (Cargo.toml:29) so the loose `SDL3.dll` cannot be needed either. Smaller vestige in the same class: src/runtime/list-runtime.ts:357 ends with a bare `void findRow;` although `findRow` is genuinely used at :97 and :106.
 
 **Impact.** Compounds the repository-size finding — 378 MB of the 1.1 GB is spike build output. A newcomer reading `native-src/` sees three crates and cannot tell which is the product, and ROADMAP.md's "What survives, what retires" section (line 176) does not name these. `probe.json` in the same directory implies the probe is still part of the build.
 
-**Recommendation.** Move both spikes to `docs/spikes/` with their `src/` and manifests but no lockfile or target, or delete them and keep only their measured conclusions — which NOTES.md:180-216 already records in more useful form than the code does. Delete `native/win32-x64/{libSkiaSharp,SDL3,taffy_ffi}.dll` and `probe.json`; keep the directory as a documented drop location for a prebuilt `dziri_engine`, since host.ts:74 searches it. Delete the `void findRow;` line.
+**Recommendation.** Move both spikes to `docs/spikes/` with their `src/` and manifests but no lockfile or target, or delete them and keep only their measured conclusions — which NOTES.md:180-216 already records in more useful form than the code does. Delete `native/win32-x64/{libSkiaSharp,SDL3,taffy_ffi}.dll` and `probe.json`; keep the directory as a documented drop location for a prebuilt `dziry_engine`, since host.ts:74 searches it. Delete the `void findRow;` line.
 
 **Verifier — confirmed.** Small nuance: the DLLs *are* named as retired in ROADMAP.md:183 ("Retires: ... plus `libSkiaSharp.dll` and `SDL3.dll` as shipped artifacts") and NOTES.md:481 — they are documented-retired-but-undeleted rather than undocumented. It is the two spike *crates* that the "What survives, what retires" section never names.
 
@@ -2508,21 +2508,21 @@ Collected from the reviewers independently, before synthesis. These are the deci
 
 **Protocol & code generation**
 
-- Sentinel decoding on the engine side is genuinely complete and correctly reasoned: `opt()` folds NaN *and* ±Infinity to `None` so both the compiler's `AUTO` and `INITIAL_STYLE`'s `maxW: Infinity` decode as auto (native-src/dziri-engine/src/layout.rs:295), `placement()` treats 0 as `GridPlacement::Auto` keeping CSS lines 1-based (layout.rs:387), and `align_of` leaves Taffy's default rather than coercing to variant 0 (layout.rs:322) — every sentinel in the schema survives the typed-array round trip.
-- Reporting absolute per-span pointers instead of (base, byteOffset) is the right call and the doc argues it correctly: three arenas would make "which base" one more thing to agree about, and `toArrayBuffer(ptr, 0, elemSize * capacity)` leaves no arithmetic on either side to get wrong (native-src/dziri-engine/src/tables.rs:18).
-- The staged/live/bounds three-arena split earns its memory through `commit`'s span-wise memcmp: `classify` turns "this span differs" into structure-vs-style-vs-text, and `collect_changed_slots` narrows a theme patch to the slots that moved (native-src/dziri-engine/src/tables.rs:525) — this is the real justification for struct-of-arrays, stronger than the monomorphism claim the comments lead with.
-- `prefill_links` filling 0xff into text/parent/firstChild/nextSibling/list in *both* arenas, with the explicit reasoning that node 0 is a valid id so a zeroed `firstChild` makes every node its own child (native-src/dziri-engine/src/tables.rs:221) — correct, and it keeps the first commit a genuine no-op.
+- Sentinel decoding on the engine side is genuinely complete and correctly reasoned: `opt()` folds NaN *and* ±Infinity to `None` so both the compiler's `AUTO` and `INITIAL_STYLE`'s `maxW: Infinity` decode as auto (native-src/dziry-engine/src/layout.rs:295), `placement()` treats 0 as `GridPlacement::Auto` keeping CSS lines 1-based (layout.rs:387), and `align_of` leaves Taffy's default rather than coercing to variant 0 (layout.rs:322) — every sentinel in the schema survives the typed-array round trip.
+- Reporting absolute per-span pointers instead of (base, byteOffset) is the right call and the doc argues it correctly: three arenas would make "which base" one more thing to agree about, and `toArrayBuffer(ptr, 0, elemSize * capacity)` leaves no arithmetic on either side to get wrong (native-src/dziry-engine/src/tables.rs:18).
+- The staged/live/bounds three-arena split earns its memory through `commit`'s span-wise memcmp: `classify` turns "this span differs" into structure-vs-style-vs-text, and `collect_changed_slots` narrows a theme patch to the slots that moved (native-src/dziry-engine/src/tables.rs:525) — this is the real justification for struct-of-arrays, stronger than the monomorphism claim the comments lead with.
+- `prefill_links` filling 0xff into text/parent/firstChild/nextSibling/list in *both* arenas, with the explicit reasoning that node 0 is a valid id so a zeroed `firstChild` makes every node its own child (native-src/dziry-engine/src/tables.rs:221) — correct, and it keeps the first commit a genuine no-op.
 - `FIELD_ORDER` in the host is derived from the generated `F` map by sorting on index rather than restated as a name list (src/engine/host.ts:512) — exactly the discipline the rest of the protocol should follow, and it does eliminate that particular drift.
 - Deriving the IR's encodings from the generated protocol instead of restating them — `export const Justify = { START: SchemaJustify.FLEX_START, ... }` renames without re-encoding (src/ir.ts:34) — so the compiler and engine cannot disagree that `justify-content: center` is 1.
 
 **FFI boundary soundness & memory safety**
 
-- `Arena` stores a bare `*mut u8` and materialises `&[u8]`/`&mut [u8]` only inside function bodies (native-src/dziri-engine/src/tables.rs:101-133) — the single detail that keeps today's model sound: no Rust reference into shared memory is live across a return to Bun, and `&mut Engine` from `with()` does not cover the arena bytes.
-- `#[repr(C)]` on `Handle` is used correctly for what it can do: it guarantees field order and `magic` at offset 0 even though `Engine`'s own layout is unspecified, so the sentinel check reads the bytes it intends to (native-src/dziri-engine/src/lib.rs:36-40).
-- `describe` refuses a short buffer before writing anything and zeroes `written` first, so a partial descriptor is impossible (native-src/dziri-engine/src/lib.rs:198-207), and the behaviour is pinned by a test (native-src/dziri-engine/tests/boundary.rs:119-144).
-- Host-written *table contents* are consistently distrusted: `relink` range-checks every child id and budgets the walk against cycles (native-src/dziri-engine/src/layout.rs:88-113), and `string()` returns "" rather than panicking on a bad (offset, length) (native-src/dziri-engine/src/tables.rs:473-491).
-- Both length-taking copy-outs clamp with `min(bytes.len(), len)` and accept a null buffer as a pure size query, which is the correct C idiom (native-src/dziri-engine/src/error.rs:88-98, native-src/dziri-engine/src/lib.rs:474-479).
-- `panic = "unwind"` is pinned in both profiles with a comment explaining that `catch_unwind` depends on it (native-src/dziri-engine/Cargo.toml:32-40), so the boundary's failure story cannot be defeated by a profile edit.
+- `Arena` stores a bare `*mut u8` and materialises `&[u8]`/`&mut [u8]` only inside function bodies (native-src/dziry-engine/src/tables.rs:101-133) — the single detail that keeps today's model sound: no Rust reference into shared memory is live across a return to Bun, and `&mut Engine` from `with()` does not cover the arena bytes.
+- `#[repr(C)]` on `Handle` is used correctly for what it can do: it guarantees field order and `magic` at offset 0 even though `Engine`'s own layout is unspecified, so the sentinel check reads the bytes it intends to (native-src/dziry-engine/src/lib.rs:36-40).
+- `describe` refuses a short buffer before writing anything and zeroes `written` first, so a partial descriptor is impossible (native-src/dziry-engine/src/lib.rs:198-207), and the behaviour is pinned by a test (native-src/dziry-engine/tests/boundary.rs:119-144).
+- Host-written *table contents* are consistently distrusted: `relink` range-checks every child id and budgets the walk against cycles (native-src/dziry-engine/src/layout.rs:88-113), and `string()` returns "" rather than panicking on a bad (offset, length) (native-src/dziry-engine/src/tables.rs:473-491).
+- Both length-taking copy-outs clamp with `min(bytes.len(), len)` and accept a null buffer as a pure size query, which is the correct C idiom (native-src/dziry-engine/src/error.rs:88-98, native-src/dziry-engine/src/lib.rs:474-479).
+- `panic = "unwind"` is pinned in both profiles with a comment explaining that `catch_unwind` depends on it (native-src/dziry-engine/Cargo.toml:32-40), so the boundary's failure story cannot be defeated by a profile edit.
 
 **Compiler: CSS cascade, parsing, variants**
 
@@ -2545,38 +2545,38 @@ Collected from the reviewers independently, before synthesis. These are the deci
 **Runtime: signals, patches, dynamic lists**
 
 - Interning a style slot over the *vector* of its values across every variant (src/compiler/variant-compile.ts:200-214) makes patching a shared style entry safe by construction — two nodes share a slot only if they agree in the baseline and in every toggle — so the feared interaction is genuinely a non-issue: app/ui.gen.ts:122 and :131 show both patches writing slot 16 with no interference.
-- The engine does not trust the host's `(offset, length)`: `Tables::string` (native-src/dziri-engine/src/tables.rs:473-491) checks the slot index, uses `saturating_add`, rejects `end > arena.len()` and falls back on invalid UTF-8, returning `""` rather than panicking — with a regression test asserting exactly that (tables.rs:830-840).
-- Both tree walks are explicitly stacked and budgeted against a hostile `firstChild`/`nextSibling` written from JS (native-src/dziri-engine/src/layout.rs:94-113 and :256-262), so a cycle or out-of-range child is a returned error, not a hung or blown render thread.
+- The engine does not trust the host's `(offset, length)`: `Tables::string` (native-src/dziry-engine/src/tables.rs:473-491) checks the slot index, uses `saturating_add`, rejects `end > arena.len()` and falls back on invalid UTF-8, returning `""` rather than panicking — with a regression test asserting exactly that (tables.rs:830-840).
+- Both tree walks are explicitly stacked and budgeted against a hostile `firstChild`/`nextSibling` written from JS (native-src/dziry-engine/src/layout.rs:94-113 and :256-262), so a cycle or out-of-range child is a returned error, not a hung or blown render thread.
 - Growing a list arena by appending a fresh larger one and abandoning the old region (src/runtime/list-runtime.ts:75-85) is the right call given focus is a node id: no existing id is invalidated, which growing in place would have made impossible, and doubling bounds the waste at 2×.
 - The "~20 KB runtime" claim measures out: host + upload + the four runtime modules + ir.ts + the generated protocol bundles to 22.5 KB minified / 8.0 KB gzipped (`bun build --minify --target=bun`, 10 modules), and tree-shaking correctly drops the compiler-only `recorder`/`ItemSpreadError` that list-runtime.ts drags in via item-path.ts; app/ui.gen.ts (18 KB) is data, not runtime.
 - Patch application is idempotent and cheap to re-run: the `applied` WeakMap (src/runtime/patches.ts:30-39) skips a patch already in the requested state and the `Object.is` guard on writes (src/runtime/signal.ts:90) means a re-toggled boolean costs zero writes and zero notifications.
 
 **Engine: layout (Taffy) & table management**
 
-- `Arena` refuses `Vec<u8>` and allocates with an explicit 16-byte alignment plus `assert!(!ptr.is_null())`, so every span's 8-aligned offset guarantees the u16/u32/f32 casts by construction and an OOM is a catchable panic rather than Vec's abort — native-src/dziri-engine/src/tables.rs:101.
-- The `start == 0 → GridPlacement::Auto` guard is genuinely load-bearing, not defensive noise: taffy 0.9.2 does `panic!("Grid line of zero is invalid")` at coordinates.rs:38, so this one branch is what keeps a zeroed style slot from poisoning the engine — native-src/dziri-engine/src/layout.rs:337.
-- NaN-as-auto and Infinity-as-none are applied consistently and no non-finite value reaches Taffy arithmetic: `dim`/`lpa` map both to `auto`, `lp` coerces to 0 where `auto` is meaningless, and `flex_grow`/`flex_shrink`/`aspect_ratio` each carry their own `is_finite` fallback to the CSS initial value — native-src/dziri-engine/src/layout.rs:296.
-- `hidden → Display::None` with an early return really does exclude the subtree: taffy's `compute_hidden_layout` zeroes the node and recurses into all children (compute/mod.rs:266), and paint and hit_test both `continue` before pushing children, so the subtree is neither drawn nor hittable — native-src/dziri-engine/src/layout.rs:362.
-- The root's window-size write is guarded by an equality check on `s.size` before `set_style`, precisely because `set_style` marks the node dirty — the one place in the engine that already understands the dirty-propagation cost this review found missing everywhere else — native-src/dziri-engine/src/layout.rs:183.
-- `Home::Shared` vs `Home::Bounds` forces every access through `read_arena`/`write_arena` rather than a raw offset, and the doc comment names the exact bug it prevents and admits it shipped once — a design that encodes the failure mode instead of warning about it — native-src/dziri-engine/src/tables.rs:350.
+- `Arena` refuses `Vec<u8>` and allocates with an explicit 16-byte alignment plus `assert!(!ptr.is_null())`, so every span's 8-aligned offset guarantees the u16/u32/f32 casts by construction and an OOM is a catchable panic rather than Vec's abort — native-src/dziry-engine/src/tables.rs:101.
+- The `start == 0 → GridPlacement::Auto` guard is genuinely load-bearing, not defensive noise: taffy 0.9.2 does `panic!("Grid line of zero is invalid")` at coordinates.rs:38, so this one branch is what keeps a zeroed style slot from poisoning the engine — native-src/dziry-engine/src/layout.rs:337.
+- NaN-as-auto and Infinity-as-none are applied consistently and no non-finite value reaches Taffy arithmetic: `dim`/`lpa` map both to `auto`, `lp` coerces to 0 where `auto` is meaningless, and `flex_grow`/`flex_shrink`/`aspect_ratio` each carry their own `is_finite` fallback to the CSS initial value — native-src/dziry-engine/src/layout.rs:296.
+- `hidden → Display::None` with an early return really does exclude the subtree: taffy's `compute_hidden_layout` zeroes the node and recurses into all children (compute/mod.rs:266), and paint and hit_test both `continue` before pushing children, so the subtree is neither drawn nor hittable — native-src/dziry-engine/src/layout.rs:362.
+- The root's window-size write is guarded by an equality check on `s.size` before `set_style`, precisely because `set_style` marks the node dirty — the one place in the engine that already understands the dirty-propagation cost this review found missing everywhere else — native-src/dziry-engine/src/layout.rs:183.
+- `Home::Shared` vs `Home::Bounds` forces every access through `read_arena`/`write_arena` rather than a raw offset, and the doc comment names the exact bug it prevents and admits it shipped once — a design that encodes the failure mode instead of warning about it — native-src/dziry-engine/src/tables.rs:350.
 
 **Engine: paint, text & Skia**
 
-- Colour is correct end to end and I could not break it: `parseColor` emits `(a<<24)|(r<<16)|(g<<8)|b` (src/compiler/css.ts:196) which is exactly SkColor's unpremultiplied 0xAARRGGBB, `Color::from(u32)` is a `#[repr(transparent)]` no-op wrapper (skia-safe-0.87.0/src/core/color.rs:19), and the `bg >> 24 != 0` alpha test reads the right byte (native-src/dziri-engine/src/paint.rs:169).
-- SkPaint is hoisted out of the hot loop rather than constructed per node: `Painter { fill, stroke }` is built once (native-src/dziri-engine/src/paint.rs:43-59) and the loop only calls `set_color`/`set_stroke_width`; `draw_round_rect` builds its SkRRect on the stack and `draw_str` takes `&str` bytes directly, so there is no Path, RRect, Vec, String or CString allocation per node anywhere in `Painter::node`.
-- Both tree walks are iterative with an explicit budget, so a host-written `firstChild`/`nextSibling` cycle cannot blow or hang the render thread (native-src/dziri-engine/src/paint.rs:122-130 and 251-259).
-- The advance cache is deliberately bounded FIFO at 4096 with the reason stated and a test that proves it stays bounded under minted-per-frame strings (native-src/dziri-engine/src/text.rs:51 and 226-232).
-- Presenting is genuinely swizzle-free and copy-free on the Skia side: n32 is byte-identical to SDL's ARGB8888 on little-endian (native-src/dziri-engine/src/window.rs:14-18) and `peek_pixels()` borrows the surface rather than snapshotting it (native-src/dziri-engine/src/engine.rs:372).
-- `Painter::paint` takes `&Canvas`, not `&mut Surface`, so the painter itself is backend-agnostic and would survive a Ganesh/Graphite move unchanged (native-src/dziri-engine/src/paint.rs:106-114).
+- Colour is correct end to end and I could not break it: `parseColor` emits `(a<<24)|(r<<16)|(g<<8)|b` (src/compiler/css.ts:196) which is exactly SkColor's unpremultiplied 0xAARRGGBB, `Color::from(u32)` is a `#[repr(transparent)]` no-op wrapper (skia-safe-0.87.0/src/core/color.rs:19), and the `bg >> 24 != 0` alpha test reads the right byte (native-src/dziry-engine/src/paint.rs:169).
+- SkPaint is hoisted out of the hot loop rather than constructed per node: `Painter { fill, stroke }` is built once (native-src/dziry-engine/src/paint.rs:43-59) and the loop only calls `set_color`/`set_stroke_width`; `draw_round_rect` builds its SkRRect on the stack and `draw_str` takes `&str` bytes directly, so there is no Path, RRect, Vec, String or CString allocation per node anywhere in `Painter::node`.
+- Both tree walks are iterative with an explicit budget, so a host-written `firstChild`/`nextSibling` cycle cannot blow or hang the render thread (native-src/dziry-engine/src/paint.rs:122-130 and 251-259).
+- The advance cache is deliberately bounded FIFO at 4096 with the reason stated and a test that proves it stays bounded under minted-per-frame strings (native-src/dziry-engine/src/text.rs:51 and 226-232).
+- Presenting is genuinely swizzle-free and copy-free on the Skia side: n32 is byte-identical to SDL's ARGB8888 on little-endian (native-src/dziry-engine/src/window.rs:14-18) and `peek_pixels()` borrows the surface rather than snapshotting it (native-src/dziry-engine/src/engine.rs:372).
+- `Painter::paint` takes `&Canvas`, not `&mut Surface`, so the painter itself is backend-agnostic and would survive a Ganesh/Graphite move unchanged (native-src/dziry-engine/src/paint.rs:106-114).
 
 **Windowing, input & threading**
 
-- The reasoning for having no `Drop` on the texture is correct and hard-won: SDL destroys a renderer's textures with the renderer, and `destroy` after the canvas is gone is UB — so dropping the canvas is the right teardown and `resize` is the only place a texture is orphaned early enough to destroy by hand (native-src/dziri-engine/src/window.rs:192).
-- Both tree walks over host-written link fields are iterative and budgeted, so a hostile or half-written `firstChild`/`nextSibling` chain from Bun cannot hang or blow the stack — a real threat model for shared-memory input, taken seriously (native-src/dziri-engine/src/paint.rs:120, paint.rs:253).
-- Pumping input *before* commit, so a click staged by Bun last frame and a click arriving this frame are never resolved against different layouts, is the right ordering and the comment explains why (native-src/dziri-engine/src/engine.rs:266).
-- IME text is truncated on a UTF-8 char boundary rather than mid-codepoint before being copied into the fixed 32-byte inline field, which is exactly the bug most fixed-buffer event structs ship with (native-src/dziri-engine/src/engine.rs:486).
-- `needs_paint` gating means an idle tick is an event-queue drain and no pixels at all, and the comment correctly notes that not presenting is not the same as presenting nothing — the window keeps its last frame (native-src/dziri-engine/src/engine.rs:285).
-- The `n32` / packed `ARGB8888` byte-identity is verified rather than assumed, which removes a per-pixel swizzle from the present path and is the kind of ABI fact this project consistently measures instead of guessing (native-src/dziri-engine/src/window.rs:14).
+- The reasoning for having no `Drop` on the texture is correct and hard-won: SDL destroys a renderer's textures with the renderer, and `destroy` after the canvas is gone is UB — so dropping the canvas is the right teardown and `resize` is the only place a texture is orphaned early enough to destroy by hand (native-src/dziry-engine/src/window.rs:192).
+- Both tree walks over host-written link fields are iterative and budgeted, so a hostile or half-written `firstChild`/`nextSibling` chain from Bun cannot hang or blow the stack — a real threat model for shared-memory input, taken seriously (native-src/dziry-engine/src/paint.rs:120, paint.rs:253).
+- Pumping input *before* commit, so a click staged by Bun last frame and a click arriving this frame are never resolved against different layouts, is the right ordering and the comment explains why (native-src/dziry-engine/src/engine.rs:266).
+- IME text is truncated on a UTF-8 char boundary rather than mid-codepoint before being copied into the fixed 32-byte inline field, which is exactly the bug most fixed-buffer event structs ship with (native-src/dziry-engine/src/engine.rs:486).
+- `needs_paint` gating means an idle tick is an event-queue drain and no pixels at all, and the comment correctly notes that not presenting is not the same as presenting nothing — the window keeps its last frame (native-src/dziry-engine/src/engine.rs:285).
+- The `n32` / packed `ARGB8888` byte-identity is verified rather than assumed, which removes a per-pixel swizzle from the present path and is the kind of ABI fact this project consistently measures instead of guessing (native-src/dziry-engine/src/window.rs:14).
 
 **Security & supply chain**
 
@@ -2589,11 +2589,11 @@ Collected from the reviewers independently, before synthesis. These are the deci
 
 **Code quality, tests & process**
 
-- The Rust engine is the better-tested half and its tests are chosen for consequence, not coverage: a panic becomes a status code and poisons the engine, a destroyed handle is refused rather than double-freed, and a short descriptor buffer writes nothing — the three failures a scripting host actually causes (native-src/dziri-engine/tests/boundary.rs:73).
-- `tests/bounds.rs` runs a whole headless engine against hand-computed bounds and includes the adversarial case, not just the happy path: a cycle in `firstChild`/`nextSibling` written by a hostile host must be an error and not a hang (native-src/dziri-engine/tests/bounds.rs:334).
-- `tables.rs`'s inline tests assert invariants rather than outputs: spans never overlap and are aligned, a colour-only patch reports exactly one changed slot and no structural change, growth preserves contents and bumps the generation, and a corrupt string slot returns `""` instead of panicking the render thread (native-src/dziri-engine/src/tables.rs:759).
+- The Rust engine is the better-tested half and its tests are chosen for consequence, not coverage: a panic becomes a status code and poisons the engine, a destroyed handle is refused rather than double-freed, and a short descriptor buffer writes nothing — the three failures a scripting host actually causes (native-src/dziry-engine/tests/boundary.rs:73).
+- `tests/bounds.rs` runs a whole headless engine against hand-computed bounds and includes the adversarial case, not just the happy path: a cycle in `firstChild`/`nextSibling` written by a hostile host must be an error and not a hang (native-src/dziry-engine/tests/bounds.rs:334).
+- `tables.rs`'s inline tests assert invariants rather than outputs: spans never overlap and are aligned, a colour-only patch reports exactly one changed slot and no structural change, growth preserves contents and bumps the generation, and a corrupt string slot returns `""` instead of panicking the render thread (native-src/dziry-engine/src/tables.rs:759).
 - TypeScript strictness is real and currently clean: `strict` plus `noUncheckedIndexedAccess` and `verbatimModuleSyntax`, one `any` in 8,000 lines, `tsc --noEmit` exits 0 — and the 200+ non-null assertions are almost all the mechanical `arr[i]!` that `noUncheckedIndexedAccess` demands after an explicit bounds check, which is the right trade (tsconfig.json:9).
-- Doc comments consistently record the rejected alternative and why, which is what makes the code reviewable at all: `Vec<u8>` rejected for the arena because its alignment is only 1 byte (native-src/dziri-engine/src/tables.rs:95), `@preact/signals-core` rejected because the compiler must recognise signals by identity (src/runtime/signal.ts:1), a JS finalizer on `toArrayBuffer` rejected because the memory belongs to Rust (src/engine/host.ts:206).
+- Doc comments consistently record the rejected alternative and why, which is what makes the code reviewable at all: `Vec<u8>` rejected for the arena because its alignment is only 1 byte (native-src/dziry-engine/src/tables.rs:95), `@preact/signals-core` rejected because the compiler must recognise signals by identity (src/runtime/signal.ts:1), a JS finalizer on `toArrayBuffer` rejected because the memory belongs to Rust (src/engine/host.ts:206).
 - The one TS test file makes the right structural choice for a moving target — nodes are located by what their computed style *is* (the node with four grid tracks, the ones with `position: absolute`), so editing `app.tsx` renumbers every node without breaking an assertion (src/engine/upload.test.ts:66).
 
 ---

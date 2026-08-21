@@ -11,7 +11,7 @@ import { usePluginData } from "@docusaurus/useGlobalData";
 import type { ArchData } from "../plugins/arch-data";
 
 export function useArchData(): ArchData {
-  return usePluginData("dziri-arch-data") as ArchData;
+  return usePluginData("dziry-arch-data") as ArchData;
 }
 
 export default function Guards(): React.JSX.Element {

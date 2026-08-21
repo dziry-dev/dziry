@@ -11,7 +11,7 @@
     // the setting from its tsconfig instead of having to repeat a relative path
     // whose depth changes with the folder. Bun's transpiler reads this too, so
     // `bun run` and `tsc` agree without a second place to keep in sync.
-    "jsxImportSource": "dziri",
+    "jsxImportSource": "dziry",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "noEmit": true,

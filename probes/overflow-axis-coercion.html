@@ -12,7 +12,7 @@
   // ---------------------------------------------------------------------------
   // 1. The computed value of the axis nobody set.
   //
-  // dziri carries overflowX and overflowY as independent fields and takes
+  // dziry carries overflowX and overflowY as independent fields and takes
   // `visible` literally on the axis the author left alone. If Chromium coerces
   // instead, `body { overflow-y: auto }` means something different there than
   // here, and the difference is whether sideways overflow is reachable at all.
@@ -39,7 +39,7 @@
   }
 
   // ---------------------------------------------------------------------------
-  // 2. What that means for a real narrow layout: dziri's own sample shape.
+  // 2. What that means for a real narrow layout: dziry's own sample shape.
   //
   // A two-track `1fr` grid whose items cannot shrink below their content, which
   // is the case a too-narrow window hits. Measured with an UNBREAKABLE word:

@@ -200,7 +200,7 @@ land in an existing layer root.
   migration" there.
 - **`doc-lint` green does not mean a document is true.** It proves a cited line is in
   range, not that the line still says what the prose claims. `.claude/commands/tw-loop.md`
-  described `dziriSupported()` as scanning for `case "name":` three commits after that
+  described `dzirySupported()` as scanning for `case "name":` three commits after that
   became `Object.keys(PROPERTIES)`; only the out-of-range line number was flagged.
 - **The architecture review's correctness claim about the harnesses was wrong.** It said
   they "measure a pipeline that does not ship" because the HTML branch skips

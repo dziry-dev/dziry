@@ -13,7 +13,7 @@
   import { log, report } from "./_harness.js";
 
   /**
-   * The question dziri needs answered.
+   * The question dziry needs answered.
    *
    * ROADMAP A3 claims "Enter/Space is wiring, not new behaviour" — that activation
    * is already kind-dispatched in `Controls::activate` and merely unreachable from
@@ -24,7 +24,7 @@
    *      takes only one, and a link takes the other — and getting it backwards is
    *      the kind of bug nobody files, they just stop using the keyboard.
    *
-   *   2. **keydown or keyup.** dziri has exactly one hook, `Engine::key_down`. If any
+   *   2. **keydown or keyup.** dziry has exactly one hook, `Engine::key_down`. If any
    *      of these activates on release, that hook is the wrong one and `key_up` has
    *      to exist before the wiring can be faithful. This is the finding most likely
    *      to change code, and it is invisible from the outside: both keys arrive in
@@ -32,7 +32,7 @@
    *
    *   3. **Whether a synthetic `click` really fires.** "Through the same dispatch as
    *      a click" is only free if the platform agrees that a keyboard activation *is*
-   *      a click. If it is, dziri's Enter handler ends at "call the click path" and
+   *      a click. If it is, dziry's Enter handler ends at "call the click path" and
    *      every future control inherits keyboard support the day it gets pointer
    *      support. If it is not, the two paths diverge forever.
    *
@@ -80,7 +80,7 @@
         if (n === "submit") e.preventDefault();          // or the page navigates and the probe dies
         if (n === "click" && node.id === "link") e.preventDefault();
         // `detail` is how libraries tell a keyboard activation from a real click:
-        // a synthesised one carries 0. Recorded so dziri knows whether the two are
+        // a synthesised one carries 0. Recorded so dziry knows whether the two are
         // distinguishable downstream, since its own CLICK event has no such field.
         fired.push(`${node.id}:${n}` + (n === "click" ? `(detail=${e.detail})` : ""));
       });
@@ -108,7 +108,7 @@
 
   const plan = [
     // Every control is focused by *clicking* it, which is deliberate: a click is the
-    // only focus source dziri has today, and it also means each section starts from
+    // only focus source dziry has today, and it also means each section starts from
     // the state a user would really be in. The click's own events are drained by the
     // row it prints, so the key press that follows reports only its own.
     ["click the button", { ...centre(el("btn")), down: 1, up: 1 }],
@@ -142,10 +142,10 @@
     ["Enter on link", { key: "Enter" }],
     ["Space on link", { key: " " }],
 
-    // A div with tabindex is the control dziri does *not* have a ControlKind for, and
+    // A div with tabindex is the control dziry does *not* have a ControlKind for, and
     // the answer decides whether keyboard activation is a property of the kind or of
     // focusability. If a div gets no click from Enter, then activation is per-kind and
-    // dziri's dispatch table is the right shape.
+    // dziry's dispatch table is the right shape.
     ["click div[tabindex=0]", { ...centre(el("div0")), down: 1, up: 1 }],
     ["Enter on div", { key: "Enter" }],
     ["Space on div", { key: " " }],
@@ -168,7 +168,7 @@
     log("");
     log("Reading the order column: a `click` printed *before* the `keyup` means the");
     log("control activates on press; one printed after it means the control activates");
-    log("on release, and dziri's key_down-only hook cannot reproduce it.");
+    log("on release, and dziry's key_down-only hook cannot reproduce it.");
     report();
   };
 

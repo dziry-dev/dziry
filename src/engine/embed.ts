@@ -2,7 +2,7 @@
  * The engine, carried inside a standalone binary and unpacked on first run.
  *
  * `bun build --compile` can embed a file, but what it hands back at run time is a
- * path into Bun's virtual filesystem — `B:/~BUN/root/dziri_engine-*.dll` on
+ * path into Bun's virtual filesystem — `B:/~BUN/root/dziry_engine-*.dll` on
  * Windows. That is not a file any loader can open: measured, `dlopen` on it fails,
  * and on macOS code signing needs a real path too. So the bytes are written out
  * once, to a cache directory, and the loader is pointed at the copy.
@@ -32,14 +32,14 @@ import { libraryName, useEngineLibrary } from "./host.ts";
  */
 function cacheRoot(): string {
   if (process.platform === "win32") {
-    return join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "dziri", "engine");
+    return join(process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local"), "dziry", "engine");
   }
   if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Caches", "dziri", "engine");
+    return join(homedir(), "Library", "Caches", "dziry", "engine");
   }
   return join(
     process.env.XDG_CACHE_HOME ?? join(homedir(), ".cache"),
-    "dziri",
+    "dziry",
     "engine",
   );
 }
@@ -71,7 +71,7 @@ export async function useEmbeddedEngine(embedded: string, hash: string): Promise
     try {
       renameSync(partial, dest);
     } catch {
-      if (!existsSync(dest)) throw new Error(`could not unpack the dziri engine to ${dest}`);
+      if (!existsSync(dest)) throw new Error(`could not unpack the dziry engine to ${dest}`);
     } finally {
       try {
         rmSync(partial, { force: true });

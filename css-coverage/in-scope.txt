@@ -1,6 +1,6 @@
 # The denominator for `bun run css-coverage`.
 #
-# ROADMAP A1 says Tailwind defines dziri's CSS subset. This is that subset
+# ROADMAP A1 says Tailwind defines dziry's CSS subset. This is that subset
 # expressed as CSS *properties* — the properties Tailwind's utilities generate —
 # because a percentage needs a property list, not a utility list. `p-4`, `p-6`
 # and `p-8` are three utilities and one property.

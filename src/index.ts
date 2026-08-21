@@ -1,8 +1,8 @@
 /**
- * `dziri` — the authoring surface, and the only import an app should need.
+ * `dziry` — the authoring surface, and the only import an app should need.
  *
  * Everything here is what a window, a page or a state module reaches for. The
- * deep paths still exist and still resolve (`dziri/runtime/signal.ts` and the
+ * deep paths still exist and still resolve (`dziry/runtime/signal.ts` and the
  * rest are in the package's `exports`), but they are there because the *emitter*
  * writes those specifiers into `ui.gen.ts` — not as an invitation.
  *
@@ -53,7 +53,7 @@ export type {
 export { $, batch, computed, createScope, effect, isSignal, signal, untrack } from "./runtime/signal.ts";
 export type { DisposalScope, MapOptions, ReadonlySignal, Signal } from "./runtime/signal.ts";
 
-/** A stream-backed signal — Effect's `Stream` feeding a dziri signal. */
+/** A stream-backed signal — Effect's `Stream` feeding a dziry signal. */
 export { source } from "./runtime/source.ts";
 
 /**

@@ -1,5 +1,5 @@
 /**
- * `dziri/livestore` — the binding's dziri half, measured against a fake store.
+ * `dziry/livestore` — the binding's dziry half, measured against a fake store.
  *
  * The LiveStore side is type-checked by `tsc` against the real `@livestore/livestore`
  * types (a devDependency); the runtime behaviour worth owning here is the plumbing:

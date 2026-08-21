@@ -21,7 +21,7 @@ identifier read into `$(x)`, which unwraps a signal at run time and passes every
 through — so it needs no type information, no module graph, and no scope analysis.
 `Signal<T>` is `T & Ops<T>`, so the same expressions type-check. Installed via a
 `bunfig.toml` preload, because three processes import authored modules: the compiler, the
-window host, and `bun test`. `DZIRI_REACTIVE=0` turns it off.
+window host, and `bun test`. `DZIRY_REACTIVE=0` turns it off.
 
 The `reactivity` route in the demo renders every form, and the golden holds it.
 
@@ -388,7 +388,7 @@ Each fails loudly rather than silently, because `.value` no longer exists (§5.2
 | TanStack Store 0.11 | `count.get()` | auto, by running |
 | Preact signals | `count.value` | auto, by running |
 | Svelte 5 | `count` | auto — compiler rewrites every read in the file |
-| **dziri (this)** | **`count`** | **auto — plugin rewrites reads, runtime decides** |
+| **dziry (this)** | **`count`** | **auto — plugin rewrites reads, runtime decides** |
 
 Verified against `@tanstack/store@0.11.0`: `createAtom(7)` for state,
 `createAtom(() => count.get() * 2)` for derived, read via `.get()`; the explicit-deps
@@ -397,7 +397,7 @@ Verified against `@tanstack/store@0.11.0`: `createAtom(7)` for state,
 Svelte is the closest, and the difference is where the knowledge lives. Svelte's compiler must
 *know* an identifier is reactive, which is why `export let count = $state(0)` cannot work across
 modules. Here the plugin knows nothing and `$()` decides at run time — so cross-module signals,
-which dziri has by design, cost nothing.
+which dziry has by design, cost nothing.
 
 ---
 
