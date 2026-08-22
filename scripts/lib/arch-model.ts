@@ -637,11 +637,15 @@ export const FLOWS: Flow[] = [
 // Where the long-form reasoning lives
 // ---------------------------------------------------------------------------
 
-export const DOCS: { path: string; what: string }[] = [
+export const DOCS: { path: string; what: string; local?: boolean }[] = [
   { path: "API.md", what: "The authoring surface, planned and tracked." },
-  { path: "ARCHITECTURE-REVIEW.md", what: "The fix-order authority. Read §4 before refactoring." },
-  { path: "ROADMAP.md", what: "Milestones and their state." },
-  { path: "REACTIVITY.md", what: "Signals: the model, and what was rejected." },
-  { path: "NOTES.md", what: "Measurements. Check provenance — some predate the Rust engine." },
-  { path: "BROWSER-FACTS.md", what: "Browser behaviour, measured rather than recalled." },
+  // The maintainers' notebook, present on a dev machine and deliberately absent
+  // from the public repo (gitignored 2026-08-22). `local: true` means the check
+  // verifies each one only where it exists — a fresh clone not having them is
+  // the intended state, not model rot.
+  { path: "ARCHITECTURE-REVIEW.md", what: "The fix-order authority. Read §4 before refactoring.", local: true },
+  { path: "ROADMAP.md", what: "Milestones and their state.", local: true },
+  { path: "REACTIVITY.md", what: "Signals: the model, and what was rejected.", local: true },
+  { path: "NOTES.md", what: "Measurements. Check provenance — some predate the Rust engine.", local: true },
+  { path: "BROWSER-FACTS.md", what: "Browser behaviour, measured rather than recalled.", local: true },
 ];

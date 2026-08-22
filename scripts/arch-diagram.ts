@@ -478,7 +478,7 @@ function validate(g: Graph): string[] {
     }
   }
   for (const d of DOCS) {
-    if (!existsSync(join(ROOT, d.path))) problems.push(`DOCS lists ${d.path}, which does not exist`);
+    if (!d.local && !existsSync(join(ROOT, d.path))) problems.push(`DOCS lists ${d.path}, which does not exist`);
   }
 
   const ids = new Set([...PEOPLE, ...EXTERNALS, ...CONTAINERS].map((x) => x.id));
