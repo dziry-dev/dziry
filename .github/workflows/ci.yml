@@ -1,11 +1,17 @@
-# The verification battery, on the one platform the engine is proven on.
+# The verification battery, on the one platform the engine is proven on —
+# plus experimental engine builds for the two it is not, yet.
 #
-# Windows because the engine has only ever been built and measured there (the
-# MSVC 14.4x floor is recorded in ROADMAP P0); mac/linux join when their
-# binaries become real targets. Pixel goldens are deliberately NOT here: they
-# render text through the platform font stack, and a runner's font/AA config
-# drifting from the blessing machine would fail honest code. Everything else
-# in the battery is deterministic.
+# Windows is the gate: the engine has only ever been built and measured there
+# (the MSVC 14.4x floor is recorded in ROADMAP P0). Pixel goldens are
+# deliberately NOT here: they render text through the platform font stack, and
+# a runner's font/AA config drifting from the blessing machine would fail
+# honest code. Everything else in the battery is deterministic.
+#
+# The mac and linux jobs build the engine and run its headless cargo suite.
+# `continue-on-error` while they are experimental: a red mac build must not
+# gate a Windows push until someone has actually watched a window open there.
+# Each uploads its library as an artifact — the future per-platform release
+# binaries, inspectable today.
 name: ci
 
 on:
@@ -28,7 +34,12 @@ jobs:
           workspaces: native-src/dziry-engine
       - run: bun install --frozen-lockfile
 
-      # The engine first: the TS suite dlopens the release DLL.
+      # ui.gen.ts and its siblings are generated, not tracked — a fresh clone
+      # has no compiled demo, and both tsc and the test suite import it.
+      - name: compile the demo window
+        run: bun run window
+
+      # The engine before the TS suite: the tests dlopen the release DLL.
       - name: engine build
         run: cargo build --release
         working-directory: native-src/dziry-engine
@@ -52,3 +63,55 @@ jobs:
         run: bun run docs-check
       - name: architecture model
         run: bun run arch:check
+
+  engine-portability:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            library: libdziry_engine.dylib
+          - os: ubuntu-latest
+            library: libdziry_engine.so
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native-src/dziry-engine
+
+      # SDL3 is built from source (static), so linux needs the windowing and
+      # audio dev headers SDL's cmake probes for; skia-safe's prebuilt Skia
+      # links fontconfig/freetype. macOS runners carry everything already.
+      - name: linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxrender-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev libegl1-mesa-dev libgl1-mesa-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libfontconfig1-dev libfreetype-dev
+
+      - name: engine build
+        run: cargo build --release
+        working-directory: native-src/dziry-engine
+
+      # The cargo suite is headless by construction — goldens and screenshots
+      # render to a surface, not a window — so it is the honest first signal
+      # of whether the engine *works* here, not merely compiles.
+      - name: engine tests
+        run: cargo test --release
+        working-directory: native-src/dziry-engine
+        env:
+          SDL_VIDEODRIVER: dummy
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ matrix.os }}
+          path: native-src/dziry-engine/target/release/${{ matrix.library }}
+          if-no-files-found: error

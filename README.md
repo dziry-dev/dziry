@@ -7,6 +7,12 @@ no webview.
 > **Beta.** The authoring API is usable and tested, and it is still moving.
 > Expect breaking changes between beta releases; each one is called out in the
 > release notes.
+>
+> **Windows x64 only, today.** The engine is written on cross-platform stock
+> (SDL3, Skia, Taffy) and carries no Windows assumptions, but it has only ever
+> been built and measured on Windows — and this project does not claim what it
+> has not measured. The compiler runs anywhere Bun does; it is the native window
+> that needs a platform binary. macOS and Linux are in progress.
 
 ```tsx
 import { signal, computed, Show, Window } from "dziry";

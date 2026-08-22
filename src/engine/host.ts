@@ -145,8 +145,21 @@ function libraryPath(): string {
   ];
 
   for (const path of candidates) if (existsSync(path)) return path;
+
+  // Which advice is honest depends on who is asking. Inside the framework
+  // checkout (native-src/ exists) the fix is to build the engine; in an app that
+  // installed dziry from npm there is nothing to build — the package simply does
+  // not carry an engine for this platform, and saying `bun run engine` would
+  // send the user chasing a script their project does not have.
+  const checkout = existsSync(join(import.meta.dir, "..", "..", "native-src"));
+  const advice = checkout
+    ? `Run \`bun run engine\` to build it.`
+    : `This dziry release ships a prebuilt engine for Windows x64 only — ` +
+      `${process.platform}-${process.arch} is not supported yet.\n` +
+      `  The compiler ran fine; it is the native window that cannot open here.\n` +
+      `  Platform progress: https://github.com/dziry-dev/dziry/issues`;
   throw new Error(
-    `no engine binary found. Run \`bun run engine\` to build it.\n  looked in:\n` +
+    `no engine binary found. ${advice}\n  looked in:\n` +
       candidates.map((c) => `    ${c}`).join("\n"),
   );
 }
