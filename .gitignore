@@ -71,3 +71,25 @@ docs/.docusaurus/
 
 # `dziry build` output — a 117 MB executable and the wrapper entry it generates.
 dist/
+
+# The working design docs are the maintainers' lab notebook — measurements,
+# decision history, fix-order authority. They stay local: the public repo's
+# documentation is docs/ (the site) and API.md, which the site's status badges
+# parse at build time and which therefore MUST stay tracked.
+ROADMAP.md
+NOTES.md
+BROWSER-FACTS.md
+ARCHITECTURE-REVIEW.md
+HANDOFF.md
+REACTIVITY.md
+HTML-ELEMENT-COVERAGE-RESEARCH.md
+data-layer-design.md
+test_output.txt
+
+# Generated guard outputs — every one is recreated by the script beside it
+# (arch-diagram, mdn:sync). The guard *inputs* stay tracked: CI runs the
+# characterize goldens and the runtime-surface ratchet, and the docs render
+# guards/architecture/data.ts.
+guards/diagrams/
+guards/vendor/
+guards/arch/report.html
