@@ -121,7 +121,16 @@ if (!existsSync(TEMPLATE)) {
  * only a symlink into the checkout preserves.
  */
 function dependency(): string {
-  if (local === undefined) return "^0.0.0";
+  // The published path: dziry and create-dziry version in lockstep, so this
+  // package's own version is the range to scaffold. `^` with a prerelease still
+  // admits later prereleases of the same patch (0.1.0-beta.2), which is the
+  // upgrade a beta user wants without opting into 0.2.x.
+  if (local === undefined) {
+    const own = JSON.parse(
+      readFileSync(join(import.meta.dir, "package.json"), "utf8"),
+    ) as { version?: string };
+    return `^${own.version ?? "0.0.0"}`;
+  }
 
   const from = resolve(local);
   const pkgPath = join(from, "package.json");

@@ -28,14 +28,21 @@ export type ApiStatus = {
   rows: { label: string; status: StatusKind; milestone: string; note: string }[];
 };
 
-/** `| a | b | c |` -> ["a", "b", "c"] */
+/**
+ * `| a | b | c |` -> ["a", "b", "c"].
+ *
+ * `\|` is an escaped pipe *inside* a cell, per GFM — `validateOn="submit\|change\|blur"`
+ * is one label, not three cells. Splitting on every pipe silently dropped that row
+ * (its second "cell" classified as no status), and `<Status of="validateOn" />` then
+ * failed the whole docs build.
+ */
 function cells(line: string): string[] {
   const t = line.trim();
   if (!t.startsWith("|")) return [];
   return t
     .slice(1, t.endsWith("|") ? -1 : undefined)
-    .split("|")
-    .map((c) => c.trim());
+    .split(/(?<!\\)\|/)
+    .map((c) => c.replace(/\\\|/g, "|").trim());
 }
 
 const isDivider = (row: string[]): boolean => row.every((c) => /^:?-{2,}:?$/.test(c));
@@ -59,6 +66,10 @@ function keysIn(label: string): string[] {
     // The callable/leading-dot forms people actually type in `of="…"`.
     const bare = raw.replace(/^[.<]/, "").replace(/[>(].*$/, "").replace(/=$/, "").trim();
     if (bare) out.add(bare);
+    // An attribute-with-values label — `validateOn="submit|change|blur"` — is looked
+    // up by the attribute's own name, so the part before `=` is a key too.
+    const attr = bare.replace(/=.*$/, "").trim();
+    if (attr && attr !== bare && /^[A-Za-z][\w:-]*$/.test(attr)) out.add(attr);
   }
   return [...out];
 }

@@ -1,0 +1,54 @@
+# The verification battery, on the one platform the engine is proven on.
+#
+# Windows because the engine has only ever been built and measured there (the
+# MSVC 14.4x floor is recorded in ROADMAP P0); mac/linux join when their
+# binaries become real targets. Pixel goldens are deliberately NOT here: they
+# render text through the platform font stack, and a runner's font/AA config
+# drifting from the blessing machine would fail honest code. Everything else
+# in the battery is deterministic.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  battery:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native-src/dziry-engine
+      - run: bun install --frozen-lockfile
+
+      # The engine first: the TS suite dlopens the release DLL.
+      - name: engine build
+        run: cargo build --release
+        working-directory: native-src/dziry-engine
+
+      - name: typecheck
+        run: bun run check
+      - name: bun tests
+        run: bun test
+      - name: engine tests
+        run: cargo test --release
+        working-directory: native-src/dziry-engine
+      - name: protocol guard
+        run: bun run protocol-guard
+      - name: compiler characterization
+        run: bun run characterize
+      - name: runtime-surface ratchet
+        run: bun run runtime-surface
+      - name: doc citations
+        run: bun run doc-lint
+      - name: docs examples
+        run: bun run docs-check
+      - name: architecture model
+        run: bun run arch:check

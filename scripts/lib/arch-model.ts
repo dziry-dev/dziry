@@ -69,6 +69,7 @@ export const LAYERS: Layer[] = [
       "src/routes.ts",
       "src/route-chain.test.ts",
       "src/index.ts",
+      "src/css.d.ts",
     ],
     blurb:
       "Selector matching, specificity, cascade, inheritance, shorthand expansion, unit " +
@@ -77,7 +78,10 @@ export const LAYERS: Layer[] = [
   {
     id: "ir",
     label: "IR",
-    roots: ["src/ir.ts"],
+    // `hot.ts` and `find-row.ts` sit here for the same reason `ir.ts` does: both
+    // sides of the build/run boundary import them (ir.ts itself imports find-row),
+    // so they are contract, not compiler and not runtime.
+    roots: ["src/ir.ts", "src/hot.ts", "src/find-row.ts", "src/find-row.test.ts"],
     blurb:
       "The build/run contract: the shape the compiler emits and the runtime and host read. " +
       "One file, and the highest fan-in in the repo — which is why it gets its own layer " +
@@ -86,7 +90,9 @@ export const LAYERS: Layer[] = [
   {
     id: "runtime",
     label: "Runtime",
-    roots: ["src/runtime/"],
+    // The Effect and LiveStore seams live with the runtime: both are `source()`
+    // wrappers a consumer's app runs, importing the store engines as types only.
+    roots: ["src/runtime/", "src/effect.ts", "src/livestore.ts", "src/livestore.test.ts"],
     blurb:
       "The only code that survives to run time: signals, and the three things they drive — " +
       "text bindings, style patches, list arenas. No parser, no cascade, no tree diff.",
@@ -200,6 +206,10 @@ export const RULES: Rule[] = [
   {
     from: "ir",
     to: "compiler",
+    // valueOnly: the stated hazard is *loading* the compiler at run time, which an
+    // `import type` cannot do — ir.ts typing a field as the compiler's `ItemPath`
+    // is the contract naming a shape, erased before anything runs.
+    valueOnly: true,
     why:
       "`ir.ts` is the contract both sides read. If it depended on the compiler, importing " +
       "the contract at run time would pull the compiler in with it.",

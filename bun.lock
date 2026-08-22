@@ -5,25 +5,31 @@
     "": {
       "name": "skia-proto",
       "dependencies": {
+        "@tailwindcss/node": "4.3.3",
+        "@tailwindcss/oxide": "4.3.3",
         "effect": "^3.22.1",
+        "magic-string": "^1.1.0",
+        "oxc-parser": "^0.142.0",
       },
       "devDependencies": {
         "@livestore/livestore": "^0.4.0",
         "@tailwindcss/cli": "^4.3.3",
-        "@tailwindcss/node": "4.3.3",
-        "@tailwindcss/oxide": "4.3.3",
         "@types/bun": "latest",
         "@types/react": "^19.2.18",
         "@types/react-dom": "^19.2.4",
-        "magic-string": "^1.1.0",
         "mdn-data": "^2.29.0",
-        "oxc-parser": "^0.142.0",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
         "tailwindcss": "^4.3.3",
         "typescript": "^5",
         "zod": "^4.4.3",
       },
+      "peerDependencies": {
+        "@livestore/livestore": "^0.4.0",
+      },
+      "optionalPeers": [
+        "@livestore/livestore",
+      ],
     },
     "docs": {
       "name": "dziry-docs",
@@ -49,7 +55,7 @@
     },
     "packages/create-dziry": {
       "name": "create-dziry",
-      "version": "0.0.0",
+      "version": "0.1.0-beta.1",
       "bin": {
         "create-dziry": "./index.ts",
       },

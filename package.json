@@ -1,8 +1,9 @@
 {
   "name": "dziry",
   "version": "0.1.0-beta.1",
-  "private": true,
   "type": "module",
+  "license": "MIT",
+  "keywords": ["desktop", "ui", "framework", "bun", "skia", "compiled", "native"],
   "description": "A UI framework for real desktop apps in TypeScript, HTML and CSS — compiled ahead of time, rendered by a native engine. No browser, no DOM, no webview.",
   "homepage": "https://dziry.dev",
   "repository": {
@@ -47,9 +48,30 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "effect": "^3.22.1"
+    "@tailwindcss/node": "4.3.3",
+    "@tailwindcss/oxide": "4.3.3",
+    "effect": "^3.22.1",
+    "magic-string": "^1.1.0",
+    "oxc-parser": "^0.142.0"
   },
+  "peerDependencies": {
+    "@livestore/livestore": "^0.4.0"
+  },
+  "peerDependenciesMeta": {
+    "@livestore/livestore": {
+      "optional": true
+    }
+  },
+  "files": [
+    "src",
+    "native",
+    "LICENSE",
+    "README.md",
+    "!**/*.test.ts",
+    "!**/*.test.tsx"
+  ],
   "scripts": {
+    "prepack": "bun run scripts/prepack.ts",
     "test": "bun test && bun run engine:test",
     "check": "tsc --noEmit",
     "lint": "cd native-src/dziry-engine && cargo fmt --check && cargo clippy --release --all-targets",
@@ -101,14 +123,10 @@
   "devDependencies": {
     "@livestore/livestore": "^0.4.0",
     "@tailwindcss/cli": "^4.3.3",
-    "@tailwindcss/node": "4.3.3",
-    "@tailwindcss/oxide": "4.3.3",
     "@types/bun": "latest",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "magic-string": "^1.1.0",
     "mdn-data": "^2.29.0",
-    "oxc-parser": "^0.142.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "tailwindcss": "^4.3.3",

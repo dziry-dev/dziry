@@ -1,0 +1,16 @@
+{
+  // Its own project because this is the only code in the repo that runs in a
+  // browser. Adding "DOM" to the root tsconfig would let `document` typecheck
+  // inside `src/`, where reaching for it is always a mistake.
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    // The root sets `jsxImportSource: "dziry"` so authored windows need no pragma.
+    // This directory is the one place that is *not* a dziry app — it is a React
+    // site — so it has to opt back out, or every `<div>` here is checked against
+    // dziry's IntrinsicElements and `<StrictMode>` stops being a valid component.
+    "jsxImportSource": "react",
+    "types": ["bun", "react", "react-dom"]
+  },
+  "include": ["."]
+}
