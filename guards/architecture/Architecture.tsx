@@ -122,7 +122,7 @@ export function Architecture({ metrics }: { metrics: Metrics | null }) {
           ? `measured ${new Date(metrics.measuredAt).toLocaleString()} · ${metrics.files.length} source files scanned`
           : "metrics unavailable — is the dev server running?"}
         {" · "}
-        edit <code>architecture/data.ts</code>, then run <code>bun run arch:check</code>
+        edit <code>guards/architecture/data.ts</code>, then run <code>bun run arch:check</code>
       </p>
     </div>
   );

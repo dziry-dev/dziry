@@ -328,8 +328,8 @@ and anchor-positioning the picker relies on — the overlay layer, ROADMAP B1.
 
 ## How a transform composes, and how a transition samples it
 
-**Measured 2026-08-02 · Chromium 151 (via Edge 151) · `probes/transform-composition.html` and
-`probes/transition-sampling.html`, each run twice with identical output.** Transitions were sampled
+**Measured 2026-08-02 · Chromium 151 (via Edge 151) · `guards/probes/transform-composition.html` and
+`guards/probes/transition-sampling.html`, each run twice with identical output.** Transitions were sampled
 from a *paused* `element.animate()` with an explicit `currentTime` rather than from a live
 transition, because sampling a running transition races the compositor and is not reproducible.
 
@@ -416,7 +416,7 @@ midpoint, which is the cheap check that an implementation's curve is the right o
 
 ## How a transition is interrupted, and how a keyframe's easing is scoped
 
-**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/animation-semantics.html`, run twice
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `guards/probes/animation-semantics.html`, run twice
 with identical output.** Values are read from a *paused* animation at an explicit `currentTime`,
 except the two interruption cases, which ask the live `CSSTransition` object about its own timing —
 a sampled pixel mid-interruption is not reproducible, and `getComputedTiming()` is exact.
@@ -522,7 +522,7 @@ layout-affecting in dziry and transitions there are refused by name — see API.
 
 ## `:hover` and `:active` match the ancestors too; `:focus` does not
 
-**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/hover-propagation.html`, run
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `guards/probes/hover-propagation.html`, run
 twice with identical output.** With a *real* pointer, dispatched over CDP — this is the first
 probe that needed one, and it is why `scripts/probe.ts` grew the mouse handshake. A
 synthesised `MouseEvent` does not set `:hover`, and DevTools' `CSS.forcePseudoState` forces
@@ -577,7 +577,7 @@ specification.
 
 ## What activates a form control, and when in the press the bit actually flips
 
-**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/control-activation.html`, driven by a
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `guards/probes/control-activation.html`, driven by a
 real pointer through `Input.dispatchMouseEvent`.** Asked before writing any of it, because "a click
 toggles a checkbox" hides at least five decisions, and four of them are guessable in the wrong
 direction.
@@ -680,7 +680,7 @@ form owner form their own group per name in tree scope.
 
 ## What box each form control gets from the UA sheet
 
-**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/control-metrics.html`,** every
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `guards/probes/control-metrics.html`,** every
 `type` HTML defines, read from `getComputedStyle` with nothing authored but the attribute. A 16px
 root and the platform default fonts.
 
@@ -743,7 +743,7 @@ its content is not what a browser does; the box is set by `size` and stays.
 
 ### The tick and the dot have no DOM, so they were read off pixels
 
-`probes/control-metrics.html` renders unchecked and checked checkbox and radio at `zoom: 8` for
+`guards/probes/control-metrics.html` renders unchecked and checked checkbox and radio at `zoom: 8` for
 exactly this reason: a UA-drawn tick is not an element and `getComputedStyle` has nothing to say
 about it. At 13px, from the screenshot:
 
@@ -757,7 +757,7 @@ recorded as approximate on purpose.
 
 ## What counts as a child for `:first-child` / `:last-child`, and whether the root does
 
-**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `probes/structural-pseudo-root.html`,
+**Measured 2026-08-03 · Chromium 151 (via Edge 151) · `guards/probes/structural-pseudo-root.html`,
 run twice with identical output.** Asked because `space-y-*` and `divide-*` are emitted as
 `:where(.space-y-4 > :not(:last-child))`, so implementing them meant deciding three edge cases
 the compiler cannot avoid: what the root element answers, and whether the two kinds of
@@ -797,7 +797,7 @@ container:
 
 ## Opening, dismissing and committing a `<select>`
 
-**Measured 2026-08-04 · Chromium 151 (via Edge 151) · `probes/select-picker.html`, driven by a real
+**Measured 2026-08-04 · Chromium 151 (via Edge 151) · `guards/probes/select-picker.html`, driven by a real
 pointer *and real keys* through `Input.dispatchMouseEvent` / `Input.dispatchKeyEvent`.** Asked
 before writing any of B1, because "clicking a select opens a list" hides at least six decisions and
 half of them are guessable backwards.
@@ -930,7 +930,7 @@ question is re-asked headed if it ever matters.
 
 ## How tall a text field is, and whether its content has any say
 
-**Measured 2026-08-04 · Chromium 151 (via Edge 151) · `probes/text-field-box.html`.** Asked because
+**Measured 2026-08-04 · Chromium 151 (via Edge 151) · `guards/probes/text-field-box.html`.** Asked because
 dziry rendered an empty field as a bare line: its height came from the text inside it, and an empty
 string measures zero. A browser plainly does not do that — but "one line high" is not a number, and a
 number is what a layout pass needs.
@@ -989,7 +989,7 @@ treatment on the inline axis.
 
 ## Where a click puts the caret, and what keys do to a selection
 
-**Measured 2026-08-05 · Chromium 151 (via Edge 151) · `probes/caret-and-selection.html`,
+**Measured 2026-08-05 · Chromium 151 (via Edge 151) · `guards/probes/caret-and-selection.html`,
 driven by a real pointer and real keys.** Asked before writing a caret, because every rule
 below is a coin flip from memory and each one is visible the first time a user clicks.
 
@@ -1134,7 +1134,7 @@ right-hand column of the table above rather than hand-written approximations of 
 
 ## What selects a word, and what editing does to a live selection
 
-**Measured 2026-08-05 · Chromium 151 (via Edge 151) · `probes/selection-editing.html`, driven by
+**Measured 2026-08-05 · Chromium 151 (via Edge 151) · `guards/probes/selection-editing.html`, driven by
 real pointer and key events. Run twice, identical.**
 
 This closes the row the previous section left open: its fixture was the single word `abcdefghij`,
@@ -1251,7 +1251,7 @@ by character.
 
 ## Enter opens a closed select after all — and what a textless key event cost
 
-**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/select-picker.html`, after a fix to
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `guards/probes/select-picker.html`, after a fix to
 `scripts/probe.ts`. Two identical consecutive runs.** This **corrects** "Which keys open a closed
 select: Space, F4 and Alt+ArrowDown — *not Enter*", recorded earlier the same day.
 
@@ -1338,7 +1338,7 @@ neither in a picker, and both work here.
 
 ## What is a tab stop, and in what order
 
-**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/tab-order.html`, real Tab and
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `guards/probes/tab-order.html`, real Tab and
 Shift+Tab through `Input.dispatchKeyEvent`. Two identical consecutive runs.** Asked before writing
 any of A3, because the ROADMAP's claim that the focusable **set** is compile-time while only the
 **order** is a live walk is only worth building if the set really is a function of the markup.
@@ -1417,7 +1417,7 @@ start -> a[href] -> button -> input -> input[readonly] -> textarea -> checkbox
 
 ## When `:focus-visible` matches
 
-**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/focus-visible.html`. Two identical
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `guards/probes/focus-visible.html`. Two identical
 consecutive runs.** ROADMAP A3 wants `:focus-visible` as a bit distinct from `:focus` and never
 said what the rule is.
 
@@ -1465,7 +1465,7 @@ divergence in *appearance*; the trigger is what this measures.
 
 ## What Enter and Space do to a focused control
 
-**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/keyboard-activation.html`, with the
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `guards/probes/keyboard-activation.html`, with the
 fixed runner. Two identical consecutive runs.** ROADMAP A3 claims Enter/Space is "wiring, not new
 behaviour" because `Controls::activate` already dispatches on kind. Two of the three assumptions
 under that claim turn out to hold and one does not.
@@ -1538,7 +1538,7 @@ this kind, and the wrap differs from a `<select>` picker, which clamps (measured
 
 ## Tab with a picker open is Escape
 
-**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `probes/select-picker.html`. Two identical
+**Measured 2026-08-06 · Chromium 151 (via Edge 151) · `guards/probes/select-picker.html`. Two identical
 consecutive runs.** Asked because the engine has to do *something* and all three armchair answers
 are defensible, which is the signature of a question that should not be answered from the armchair.
 
@@ -1565,7 +1565,7 @@ before the tab walk sees it, so an open picker claims Tab and a closed one does 
 
 ## When focus moves: what fires, in what order, and what is focused during each
 
-**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/focus-event-order.html`. Two
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `guards/probes/focus-event-order.html`. Two
 identical consecutive runs.** The one item on ROADMAP A3's "probe before writing Rust" list that
 had been skipped — Tab order, `:focus-visible` and activation were all measured and this was not.
 
@@ -1618,7 +1618,7 @@ click focusing a `tabindex="-1"` element, and that is a behaviour worth keeping.
 
 ## Focus the user did not ask for: `autofocus` and script `focus()`
 
-**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/focus-without-interaction.html`.
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `guards/probes/focus-without-interaction.html`.
 Two byte-identical consecutive runs.** ROADMAP A3 held `autofocus` back for exactly one
 unmeasured question: focus arriving without an interaction has no modality, so does it match
 `:focus-visible` or not? The answer turned out to be a property of the *bit*, not of `autofocus`.
@@ -1681,7 +1681,7 @@ rule, not a behaviour, and finding 3 does not touch it.
 
 ## `autofocus` on something that cannot be focused
 
-**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/autofocus-hidden.html`.
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `guards/probes/autofocus-hidden.html`.
 Two runs, agreeing on the answer and disagreeing on the timing — see the correction below.**
 
 Asked because the section above left it open and dziry's router makes it the common case, not
@@ -1734,7 +1734,7 @@ browser has no equivalent situation.
 
 ## Implicit submission: the conditions, not just the headline
 
-**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/implicit-submission.html`.
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `guards/probes/implicit-submission.html`.
 Two byte-identical consecutive runs.** The headline was measured on 2026-08-05 — Enter in a
 text field inside a `<form>` clicks the submit button, then `submit` fires. That is the easy
 half. These are the conditions, and each one changes how much dziry has to build. Every form
@@ -1798,7 +1798,7 @@ needs the attribute read before any of this can be faithful.
 
 ## `<select multiple>` is a different element wearing the same tag
 
-**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `probes/select-multiple.html`.
+**Measured 2026-08-07 · Chromium 151 (via Edge 151) · `guards/probes/select-multiple.html`.
 Two runs, identical. One section is deliberately left unresolved — see the end.**
 
 Asked because dziry's `<select>` is a closed button plus a `::picker(select)` overlay, and
@@ -1895,7 +1895,7 @@ what a single per-gesture event can carry when the answer is a *set*.
 
 ## A listbox is made by `size`, not by `multiple` — and it starts with nothing selected
 
-**Measured 2026-08-08 · Chromium 151 (via Edge 151) · `probes/select-listbox.html`.
+**Measured 2026-08-08 · Chromium 151 (via Edge 151) · `guards/probes/select-listbox.html`.
 Three runs, identical.**
 
 Asked because `select-multiple.html` measured how a listbox *behaves* and never asked what
@@ -1997,7 +1997,7 @@ attribute. Two of the three answers below contradict what the fork assumed.
 
 ## The viewport scrolls with nobody's permission — `visible` on it means `auto`
 
-**Measured 2026-08-09 · Chromium 152 (via Edge 152) · `probes/viewport-default-scroll.html`.
+**Measured 2026-08-09 · Chromium 152 (via Edge 152) · `guards/probes/viewport-default-scroll.html`.
 Two runs, identical.**
 
 Asked because dziry decides user-scrollability purely from the `OVERFLOW_X/Y` style fields,
@@ -2046,7 +2046,7 @@ page scroll", exactly like an author's `hidden` on the root.
 
 ## What `:disabled` actually changes, per control — greys, alphas, and one opacity
 
-**Measured 2026-08-10 · Chromium 152 (via Edge 152) · `probes/disabled-control-styles.html`.
+**Measured 2026-08-10 · Chromium 152 (via Edge 152) · `guards/probes/disabled-control-styles.html`.
 Three runs, identical.**
 
 Asked because dziry's UA sheet gained default control appearance and a disabled button
@@ -2085,7 +2085,7 @@ the DOM: the system colours (`GrayText` and friends) resolve to `rgb()` in
 
 ## What a form actually submits, and as what
 
-**Measured 2026-08-11 · Chromium 152 (via Edge 152) · `probes/form-data.html`.** Forty-odd
+**Measured 2026-08-11 · Chromium 152 (via Edge 152) · `guards/probes/form-data.html`.** Forty-odd
 forms, each built from its own fragment, each printed as `new FormData(form).entries()`. Asked
 because dziry was about to collect a payload from `name` attributes, and every rule below is one
 that gets stated from memory — including two the author never wrote and the parser invents.
@@ -2180,7 +2180,7 @@ string is the point of writing one.
 
 ## Which form owns a control, and where the submitter's entry goes
 
-**Measured 2026-08-11 · Chromium 152 (via Edge 152) · `probes/form-owner.html`.** Two questions
+**Measured 2026-08-11 · Chromium 152 (via Edge 152) · `guards/probes/form-owner.html`.** Two questions
 the payload probe left open, both of which dziry had to answer to finish `<form>`.
 
 ### `form="id"` is not a hint — it re-parents the control for every purpose
@@ -2248,7 +2248,7 @@ form that is not a control at all.
 
 ## A nested-looking `name` is just a string — no browser does anything with it
 
-**Measured 2026-08-11 · Chromium 152 (via Edge 152) · `probes/form-nested-names.html`.** Asked
+**Measured 2026-08-11 · Chromium 152 (via Edge 152) · `guards/probes/form-nested-names.html`.** Asked
 because dziry is considering `name="user[email]"` collapsing into a nested object, and the
 convention is old enough to feel like part of the platform. It is not part of it at all.
 
@@ -2313,7 +2313,7 @@ Two things follow, and they cut in dziry's favour rather than against:
 
 ## Newlines in a single-line input — the editing path spaces them, assignment strips them
 
-**Measured 2026-08-21 · Chromium 152 (via Edge 152) · `probes/input-newline-sanitization.html`.
+**Measured 2026-08-21 · Chromium 152 (via Edge 152) · `guards/probes/input-newline-sanitization.html`.
 Two runs, identical.**
 
 Asked because clipboard paste is landing in dziry's text fields, and a pasted string is the

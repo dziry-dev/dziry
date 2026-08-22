@@ -109,7 +109,7 @@ export function optionsOf(nodes: Node[]): Element[] {
  * Whether a `<select>` is drawn as a list rather than a dropdown, and how tall.
  *
  * `null` for a dropdown. The condition is `multiple || size > 1` and **not** `multiple`
- * alone — measured, `probes/select-listbox.html`: `<select size="4">` with no `multiple`
+ * alone — measured, `guards/probes/select-listbox.html`: `<select size="4">` with no `multiple`
  * is a six-option list box with in-flow options and an empty initial selection, exactly
  * like a `multiple`. Forking on the attribute would have compiled a shape authors really
  * write into a dropdown.
@@ -161,7 +161,7 @@ export type UaParts = {
    * there is at most one and a dropdown always has one. This is *what is selected*, which
    * for a `multiple` is a set and for a list box may be empty.
    *
-   * The rules, both measured in `probes/select-listbox.html`:
+   * The rules, both measured in `guards/probes/select-listbox.html`:
    *
    * - A **dropdown** falls back to its first option when none says `selected`. A **list
    *   box** does not — it starts with nothing selected, `selectedIndex` of -1. Inheriting
@@ -240,7 +240,7 @@ export function uaParts(el: Element): UaParts {
 
   const options = optionsOf(picker);
   // The **last** option marked `selected`, else the first option at all. `findLast` and
-  // not `find`: measured, `probes/select-listbox.html`, a dropdown with its 2nd and 4th
+  // not `find`: measured, `guards/probes/select-listbox.html`, a dropdown with its 2nd and 4th
   // options marked shows the 4th. This read `find` until that row was added, and nothing
   // had caught it because every case measured before marked at most one option — the two
   // rules cannot disagree until markup does something slightly odd, and this is legal

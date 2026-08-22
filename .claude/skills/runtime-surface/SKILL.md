@@ -20,7 +20,7 @@ bun run runtime-surface --bless   # record current numbers as the new limit
 
 ## The ratchet
 
-Two numbers are committed to `runtime-surface/baseline.json`. They may **fall freely**. They may
+Two numbers are committed to `guards/runtime-surface/baseline.json`. They may **fall freely**. They may
 **not rise** without re-blessing in the same commit — which forces the growth into a diff someone
 can argue with. That is the entire mechanism, and it is the point: a principle you cannot regress
 against is an aspiration, not a rule.

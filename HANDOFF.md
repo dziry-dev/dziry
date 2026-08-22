@@ -149,7 +149,7 @@ Also fixed while verifying: `--route products/1` was rejected at startup —
 `requireRouteMatch` binds params at startup now, and the `route-param` golden
 scenario drives a concrete id (its golden was stale since `8a8252f`; re-blessed).
 
-### 3c. `bench/baseline.json` lies about its own date
+### 3c. `guards/bench/baseline.json` lies about its own date
 
 `--bless` stamps `new Date()` (`scripts/bench.ts:355`), yet `recorded` reads
 `2026-08-01` while the 10/100/1000 rows were changed and three rows added. Those numbers

@@ -623,7 +623,7 @@ pub struct InputState {
     /// The `<select>` whose picker is showing, or -1 — the `:open` predicate.
     ///
     /// One integer rather than a set, because only one popover can be open at a time.
-    /// Measured, `probes/select-picker.html`: opening a second closes the first.
+    /// Measured, `guards/probes/select-picker.html`: opening a second closes the first.
     pub open: i32,
     /// The scrollbar under the pointer, if the pointer is on one at all.
     pub bar: Option<BarHover>,
@@ -632,14 +632,14 @@ pub struct InputState {
     /// A bool rather than a node id, because only one node can be focused: this qualifies
     /// `focused` and never names anyone else.
     ///
-    /// Measured, `probes/focus-visible.html`, and it is a **modality** flag rather than a
+    /// Measured, `guards/probes/focus-visible.html`, and it is a **modality** flag rather than a
     /// property of the focus event. It goes true on any keystroke — which covers both
     /// arriving by Tab and typing while something is already focused, since both are keys
     /// — and goes false on a pointer press *unless* the press put a caret somewhere, which
     /// is the engine's way of asking the measured question: does typing go here.
     ///
     /// **Starts true**, which is not an arbitrary default. Measured
-    /// (`probes/focus-without-interaction.html`, 2026-08-07): before any interaction at
+    /// (`guards/probes/focus-without-interaction.html`, 2026-08-07): before any interaction at
     /// all, Chromium matches `:focus-visible` on everything script focuses, including a
     /// `<div tabindex=0>`. So the rule is one bit with three edges and no special cases —
     /// a keystroke sets it, a pointer press clears it, and a focus change *carries it
@@ -734,7 +734,7 @@ pub struct FrameState {
     /// The hovered node **and every ancestor of it**, deepest first.
     ///
     /// A chain rather than the single id it used to be, because that is what CSS
-    /// matches — measured, `probes/hover-propagation.html`: pointing at a button three
+    /// matches — measured, `guards/probes/hover-propagation.html`: pointing at a button three
     /// levels deep matches `html body card mid btn`, every one of them. The exact
     /// comparison it replaced could only ever light one node, so a hoverable card
     /// containing a button went dark the moment the pointer reached the button. Worse,
@@ -769,7 +769,7 @@ impl FrameState {
     /// # The two chains differ, and only over labels
     ///
     /// A `<label>` drags its control into both chains, and *from where* is not the same
-    /// for the two. Measured, `probes/control-activation.html`:
+    /// for the two. Measured, `guards/probes/control-activation.html`:
     ///
     /// - `:hover` reaches the control when the label **is the hovered node**, and not
     ///   when the hovered node is a descendant of the label. Pointing at the label's
@@ -3678,7 +3678,7 @@ mod tests {
 
     /// The composed matrix must equal the one Chromium computes.
     ///
-    /// The expected values are readings from `probes/transform-composition.html`
+    /// The expected values are readings from `guards/probes/transform-composition.html`
     /// on Chromium 151, and the same numbers `css.test.ts` asserts on the compiler
     /// side. Both ends of the boundary are pinned to one measurement, so a
     /// composition order that drifts on either side shows up here rather than as a

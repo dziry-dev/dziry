@@ -25,7 +25,7 @@ import { compileSnippet } from "../src/compiler/single.ts";
 import { toCompiledUi } from "../src/compiler/compile.ts";
 
 const ROOT = join(import.meta.dir, "..");
-const MDN = join(ROOT, "vendor/mdn/files/en-us/web/html/reference/elements");
+const MDN = join(ROOT, "guards/vendor/mdn/files/en-us/web/html/reference/elements");
 const argv = process.argv.slice(2);
 const SHOW_SAME = argv.includes("--same");
 const SHOW_KNOWN = argv.includes("--known");
@@ -277,7 +277,7 @@ const inlineElements: string[] = [];
 
 try {
   const list = await elements();
-  console.log(`html-coverage  ${list.length} elements from vendor/mdn\n`);
+  console.log(`html-coverage  ${list.length} elements from guards/vendor/mdn\n`);
 
   for (const el of list) {
     if (SKIP.has(el)) {

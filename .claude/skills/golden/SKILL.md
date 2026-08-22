@@ -34,7 +34,7 @@ tree not changing.
 
 ## Reading a failure
 
-On a diff it writes `golden/<name>.actual.png` beside the expected one — **look at them**. The
+On a diff it writes `guards/golden/<name>.actual.png` beside the expected one — **look at them**. The
 report tells you which kind of change it is:
 
 - **DIMENSIONS CHANGED** — a layout or window-size change, not a paint change. Usually the more
@@ -52,7 +52,7 @@ cheaply via the `browser-oracle` Chrome harness.
 Only after looking at the `.actual.png`. `--accept` on an unreviewed diff converts a regression
 into a baseline, silently and permanently — which is worse than not having the tool.
 
-`golden/*.png` belongs in git; `*.actual.png` does not (it is deleted automatically once a
+`guards/golden/*.png` belongs in git; `*.actual.png` does not (it is deleted automatically once a
 scenario passes again).
 
 ## Related

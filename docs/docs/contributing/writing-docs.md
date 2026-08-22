@@ -16,9 +16,9 @@ flattering direction, still claiming a feature works months after it stopped.
 | Fact | Read from | Written as |
 | --- | --- | --- |
 | Is this done, partial or planned? | the status table in `API.md` | `<Status of="signal" />` |
-| The guard scripts | `architecture/data.ts` | `<Guards />` |
-| The pipeline stages | `architecture/data.ts` | `<Pipeline />` |
-| Shared-table writers and readers | `architecture/data.ts` | `<TableRoles />` |
+| The guard scripts | `guards/architecture/data.ts` | `<Guards />` |
+| The pipeline stages | `guards/architecture/data.ts` | `<Pipeline />` |
+| Shared-table writers and readers | `guards/architecture/data.ts` | `<TableRoles />` |
 
 Do not hand-write any of those. A `<Status of="…" />` naming a row that is not in
 `API.md` is a **build error**, and that is the feature: you cannot document a surface

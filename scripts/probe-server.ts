@@ -1,5 +1,5 @@
 /**
- * Static server for `probes/` — the browser oracle's page host.
+ * Static server for `guards/probes/` — the browser oracle's page host.
  *
  * `file://` is blocked for the Chrome extension and top-level `data:` navigation
  * is blocked by Chrome itself, so a probe needs a real http origin. This is that
@@ -9,7 +9,7 @@
  * into a cascade or layout measurement, which is the whole reason this exists
  * rather than injecting into a live page.
  *
- *   bun run scripts/probe-server.ts          # serves probes/ on :7391
+ *   bun run scripts/probe-server.ts          # serves guards/probes/ on :7391
  *   bun run scripts/probe-server.ts --port 0 # ephemeral port, printed
  *
  * `scripts/probe.ts` imports `startProbeServer` rather than spawning this, so a
@@ -20,7 +20,7 @@ import { file } from "bun";
 import { readdir } from "node:fs/promises";
 import { join, extname, normalize } from "node:path";
 
-export const PROBE_ROOT = join(import.meta.dir, "..", "probes");
+export const PROBE_ROOT = join(import.meta.dir, "..", "guards", "probes");
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -48,14 +48,14 @@ export function startProbeServer(port = 7391) {
         const body =
           `<!doctype html><meta charset=utf-8><title>probes</title>` +
           `<style>body{font:13px ui-monospace,monospace;padding:24px}a{display:block;padding:2px 0}</style>` +
-          `<h3>probes/</h3>` +
+          `<h3>guards/probes/</h3>` +
           names.map((n) => `<a href="/${n}">${n}</a>`).join("");
         return new Response(body, {
           headers: { ...NO_CACHE, "content-type": TYPES[".html"]! },
         });
       }
 
-      // normalize() collapses `..` so a probe cannot read outside probes/.
+      // normalize() collapses `..` so a probe cannot read outside guards/probes/.
       const rel = normalize(path).replace(/^([/\\])+/, "");
       const target = join(PROBE_ROOT, rel);
       if (!target.startsWith(PROBE_ROOT)) return new Response("no", { status: 403 });

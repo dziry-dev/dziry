@@ -143,7 +143,7 @@ function describeEl(el: Element): string {
  * An element's position among its parent's element children.
  *
  * All three of the awkward cases here were measured rather than reasoned about —
- * Chromium 151, `probes/structural-pseudo-root.html`, recorded in
+ * Chromium 151, `guards/probes/structural-pseudo-root.html`, recorded in
  * BROWSER-FACTS.md — because dziry's IR gives a node to two things CSS does not
  * count as children, and getting either wrong is silent:
  *
@@ -213,7 +213,7 @@ function positionOf(path: Element[], subject: number): SiblingPos {
 /**
  * The one attribute nobody writes: it is computed, and only the UA sheet asks for it.
  *
- * A list box is `multiple || size > 1` — measured, `probes/select-listbox.html`, where
+ * A list box is `multiple || size > 1` — measured, `guards/probes/select-listbox.html`, where
  * `<select size="4">` with no `multiple` turned out to be a list box too. **CSS cannot say
  * that.** `select[size]` also matches `size="1"`, which is a dropdown, and a selector has
  * no numeric comparison. So the compiler resolves the condition and the matcher answers as

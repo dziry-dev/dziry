@@ -15,7 +15,7 @@ mislinked. This says which node.
 
 ```bash
 bun run boundary-diff                              # validate app/ui.gen.ts
-bun run boundary-diff characterize/golden/x.gen.ts # any emitted module
+bun run boundary-diff guards/characterize/golden/x.gen.ts # any emitted module
 bun run boundary-diff --live                       # also start the engine and compare
 ```
 

@@ -3,7 +3,7 @@
  * Architecture diagrams for dziry — C4 levels 1-3 from the model, level 4 read
  * out of the source, and the refactor queries that use the same graph.
  *
- *   bun run arch-diagram                 # validate the model, emit diagrams/
+ *   bun run arch-diagram                 # validate the model, emit guards/diagrams/
  *   bun run arch-diagram --check         # validate only, exit 1 on drift
  *   bun run arch-diagram context         # a single diagram, to stdout
  *   bun run arch-diagram blast src/ir.ts # what breaks if I change this?
@@ -15,7 +15,7 @@
  * module graph maintained by hand is wrong within a week and is read with the
  * same confidence as one that is right.
  *
- * Nothing here imports `architecture/`. The one thing it does import from `src/`
+ * Nothing here imports `guards/architecture/`. The one thing it does import from `src/`
  * is the protocol schema, and that is deliberate: the boundary diagram *is* the
  * schema, so it cannot disagree with it.
  */
@@ -38,13 +38,13 @@ import {
 import { ELEM_SIZE, PROTOCOL_VERSION, TABLES } from "../src/protocol/schema.ts";
 
 const ROOT = join(import.meta.dir, "..");
-const OUT_DIR = join(ROOT, "diagrams");
+const OUT_DIR = join(ROOT, "guards", "diagrams");
 
 // ---------------------------------------------------------------------------
 // Walking the tree
 // ---------------------------------------------------------------------------
 
-/** Never source, whatever they contain. `architecture/` is a separate viewer, not the framework. */
+/** Never source, whatever they contain. `guards/architecture/` is a separate viewer, not the framework. */
 const SKIP_DIRS = new Set([
   "node_modules",
   "target",
@@ -955,7 +955,7 @@ function emitAll(g: Graph): void {
     ),
   );
 
-  console.log(`wrote ${written.length} files to diagrams/`);
+  console.log(`wrote ${written.length} files to guards/diagrams/`);
 }
 
 // ---------------------------------------------------------------------------
@@ -1136,7 +1136,7 @@ switch (command) {
   default:
     console.error(
       `unknown command "${command}"\n\n` +
-        `  (none)        validate and emit diagrams/\n` +
+        `  (none)        validate and emit guards/diagrams/\n` +
         `  --check       validate only, exit 1 on drift, cycles or violations\n` +
         `  context | containers | components [id]\n` +
         `  layers | modules <layer> | boundary | flow <id>\n` +

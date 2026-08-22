@@ -96,7 +96,7 @@ pub fn group_members(
 /// Every node claiming `autofocus` that is actually showing, in document order.
 ///
 /// The first one wins and the rest are fallbacks, which is measured rather than assumed:
-/// `probes/autofocus-hidden.html` put three claims in one document, the first two
+/// `guards/probes/autofocus-hidden.html` put three claims in one document, the first two
 /// unfocusable, and Chromium focused the third. So an unfocusable claim does not abort
 /// autofocus and does not win it — the list is walked.
 ///
@@ -270,7 +270,7 @@ fn showing_nodes(
 
 /// Reduces every radio group in `stops` to the single stop it is.
 ///
-/// Measured, `probes/tab-order.html`: a group with nothing checked stops on its **first**
+/// Measured, `guards/probes/tab-order.html`: a group with nothing checked stops on its **first**
 /// member, and a group with a checked member stops on **that** one, skipping earlier
 /// siblings. This is ARIA's roving tabindex, arrived at from the platform rather than
 /// from the pattern, and it is the first of the five controls ROADMAP A3 wants it for.

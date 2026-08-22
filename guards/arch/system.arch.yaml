@@ -12,8 +12,8 @@ description: "Compile-time UI framework: a Bun-side compiler turns JSX+CSS into 
 # Allowlist: the application is src/ plus the windows authored against it.
 # Excluded by omission: scripts/ (measurement/build tooling — user's call,
 # 2026-08-06), docs/ (Docusaurus site), packages/create-dziry/ (scaffolding;
-# its template/ is a {{name}}-placeholder copy of windows/), characterize/
-# (generated golden fixtures), probes/ (browser-oracle probes), .claude/.
+# its template/ is a {{name}}-placeholder copy of windows/), guards/characterize/
+# (generated golden fixtures), guards/probes/ (browser-oracle probes), .claude/.
 include:
   - "src/**"
   - "windows/**"

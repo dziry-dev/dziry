@@ -9,7 +9,7 @@
  *
  * That last one is `nodes.activates`, and it is what stands in for the second,
  * synthetic click a browser dispatches at a control when a label was clicked. The
- * behaviour it reproduces is measured in `probes/control-activation.html`; these
+ * behaviour it reproduces is measured in `guards/probes/control-activation.html`; these
  * tests are about the table, not about the rule.
  */
 import { expect, test } from "bun:test";
@@ -99,7 +99,7 @@ test("a radio group is keyed on the form, not on the name alone", () => {
 
 test("a label's press reaches its control, through `for` and through containment", () => {
   // `activates` is what replaces the second, synthetic click a browser dispatches
-  // at the control — measured, `probes/control-activation.html`.
+  // at the control — measured, `guards/probes/control-activation.html`.
   const html = `<body>
     <label id="wrap"><input type="checkbox" id="cb"><span id="text">tick me</span></label>
     <input type="checkbox" id="far">
@@ -186,7 +186,7 @@ test("a page with no controls emits no rows and no activation", () => {
 /**
  * The structural fork, and it is **`multiple || size > 1`** rather than `multiple`.
  *
- * Measured, `probes/select-listbox.html`: `<select size="4">` with no `multiple` is a
+ * Measured, `guards/probes/select-listbox.html`: `<select size="4">` with no `multiple` is a
  * list box — in-flow options, no picker, and an empty initial selection — so keying this
  * on the attribute would have compiled a shape authors really write into a dropdown.
  * `size="1"` is the row that keeps the condition honest: it is a dropdown.
@@ -267,7 +267,7 @@ test("a list box has its options in flow, with no overlay and no selectedcontent
 /**
  * What is selected at rest, which is a different rule for each shape.
  *
- * All three rows measured in `probes/select-listbox.html`, and dziry had the dropdown's
+ * All three rows measured in `guards/probes/select-listbox.html`, and dziry had the dropdown's
  * rule in every position until then — so a list box came up with a row highlighted that
  * the user never chose.
  */

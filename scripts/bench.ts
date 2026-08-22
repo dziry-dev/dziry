@@ -2,7 +2,7 @@
  * What a frame costs, and whether the cost tracks the change or the document.
  *
  *   bun run bench                 # the table and the shape gates
- *   bun run bench --bless         # rewrite bench/baseline.json from this run
+ *   bun run bench --bless         # rewrite guards/bench/baseline.json from this run
  *   bun run bench --sizes 10,200  # override the tree sizes
  *   bun run bench --reps 400      # samples per measurement (default 200)
  *
@@ -61,7 +61,7 @@ const flag = (name: string): string | null => {
  */
 const SIZES = (flag("--sizes") ?? "10,100,1000,2000,4000,8000").split(",").map((s) => Number(s.trim()));
 const REPS = Number(flag("--reps") ?? 200);
-const BASELINE = join(ROOT, "bench", "baseline.json");
+const BASELINE = join(ROOT, "guards", "bench", "baseline.json");
 
 /**
  * A tree with real paint work in it: every box has a background and a border, so
@@ -373,7 +373,7 @@ const current = {
 
 if (BLESS) {
   await Bun.write(BASELINE, `${JSON.stringify(current, null, 2)}\n`);
-  console.log(`baseline written to bench/baseline.json (${current.recorded})`);
+  console.log(`baseline written to guards/bench/baseline.json (${current.recorded})`);
 } else {
   try {
     const prev = JSON.parse(await readFile(BASELINE, "utf8"));

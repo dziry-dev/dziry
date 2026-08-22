@@ -22,7 +22,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 const ROOT = join(import.meta.dir, "..");
-const GOLDEN = join(ROOT, "golden");
+const GOLDEN = join(ROOT, "guards", "golden");
 
 const argv = process.argv.slice(2);
 const ACCEPT = argv.includes("--accept");
@@ -122,7 +122,7 @@ for (const s of list) {
         ? "       DIMENSIONS CHANGED — a layout or window-size change, not a paint change"
         : `       same dimensions; first byte differs at ${firstDifferingByte(golden, actual)}`,
     );
-    console.log(`       wrote ${join("golden", `${s.name}.actual.png`)} — compare by eye`);
+    console.log(`       wrote ${join("guards", "golden", `${s.name}.actual.png`)} — compare by eye`);
   }
 }
 

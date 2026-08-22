@@ -23,11 +23,11 @@ properties, including `anchor-name`, `view-transition-name` and `scroll-timeline
 framework will never want. A percentage against that is not merely useless; it makes deliberate
 non-goals read as unfinished work, which is the opposite of what ROADMAP says to communicate.
 
-So until `css-coverage/in-scope.txt` exists, the tool prints counts and **no percentage**. A made-up
+So until `guards/css-coverage/in-scope.txt` exists, the tool prints counts and **no percentage**. A made-up
 denominator is worse than no number.
 
 ROADMAP A1 defines the real denominator: Tailwind's utility surface, curated to ~200 cases. When
-that corpus is written, put its properties in `css-coverage/in-scope.txt` (one per line, `#` comments)
+that corpus is written, put its properties in `guards/css-coverage/in-scope.txt` (one per line, `#` comments)
 and the percentage appears — the same denominator `conformance` uses, so the two cannot disagree.
 
 ## Buckets

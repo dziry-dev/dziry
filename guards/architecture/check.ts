@@ -2,7 +2,7 @@
  * Keeps `data.ts` honest, and regenerates the Markdown rendering of it.
  *
  *   bun run arch:check          # validate
- *   bun run arch:check --emit   # validate, then rewrite architecture/ARCHITECTURE.md
+ *   bun run arch:check --emit   # validate, then rewrite guards/architecture/ARCHITECTURE.md
  *
  * A diagram that is not checked becomes a diagram that is wrong, and a wrong one
  * is worse than none — it is read with the same confidence. So every claim in
@@ -106,7 +106,7 @@ if (orphans.length > 0) {
 // ---------------------------------------------------------------------------
 
 if (problems.length > 0) {
-  console.error(`architecture/data.ts is out of date with the repo:\n`);
+  console.error(`guards/architecture/data.ts is out of date with the repo:\n`);
   for (const p of problems) console.error(`  · ${p}`);
   console.error(
     `\n${problems.length} problem(s). The view is only worth keeping while this passes.`,
@@ -137,7 +137,7 @@ function markdown(): string {
 
   p(`# dziry — architecture`);
   p();
-  p(`> Generated from \`architecture/data.ts\` by \`bun run arch:check --emit\`. Do not edit.`);
+  p(`> Generated from \`guards/architecture/data.ts\` by \`bun run arch:check --emit\`. Do not edit.`);
   p(`> Run \`bun run arch\` for the interactive version.`);
   p();
   p(
@@ -249,4 +249,4 @@ function markdown(): string {
 
 const target = join(import.meta.dir, "ARCHITECTURE.md");
 await Bun.write(target, markdown());
-console.log(`wrote architecture/ARCHITECTURE.md`);
+console.log(`wrote guards/architecture/ARCHITECTURE.md`);

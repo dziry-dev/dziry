@@ -30,7 +30,7 @@ whole point.
 - `app` — the real application. Highest value: grid with spans, flex with grow/shrink/basis, a
   keyed list with per-row handlers, conditional classes compiled to patches, derived values,
   inline styles.
-- `characterize/cases/<name>.{tsx,html}` + `<name>.css` — focused cases. `cascade.html` covers
+- `guards/characterize/cases/<name>.{tsx,html}` + `<name>.css` — focused cases. `cascade.html` covers
   specificity, inheritance, shorthand expansion and a deliberate specificity tie that source order
   has to break.
 
@@ -39,7 +39,7 @@ stops it coming back, and it costs two files.
 
 ## Goldens are committed
 
-`characterize/golden/*.gen.ts` belongs in git. The diff in a pull request *is* the review artifact
+`guards/characterize/golden/*.gen.ts` belongs in git. The diff in a pull request *is* the review artifact
 — it shows exactly which style slots, node links or bindings a change moved. Verified deterministic
 2026-07-31: compiling the same input twice is byte-identical.
 

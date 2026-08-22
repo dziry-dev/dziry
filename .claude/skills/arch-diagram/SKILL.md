@@ -10,7 +10,7 @@ and are hand-written; the bottom one is parsed out of the source on every run an
 written down.
 
 ```bash
-bun run arch-diagram              # validate the model, regenerate diagrams/
+bun run arch-diagram              # validate the model, regenerate guards/diagrams/
 bun run arch-diagram --check      # validate only; exit 1 on drift, cycles or violations
 bun run arch-diagram context      # one diagram to stdout
 bun run arch-diagram blast src/ir.ts   # what breaks if I change this
@@ -20,14 +20,14 @@ bun run arch-diagram blast src/ir.ts   # what breaks if I change this
 
 | You want to know | Command | File |
 | --- | --- | --- |
-| Who uses this and what it touches | `context` | `diagrams/01-context.md` |
-| What processes/threads exist, what is shared | `containers` | `diagrams/02-containers.md` |
-| What is inside the compiler / app thread / engine | `components [id]` | `diagrams/03-components.md` |
-| Which layers depend on which, how heavily | `layers` | `diagrams/04-layers.md` |
-| Every file and every import edge | `modules <layer>` | `diagrams/05-modules.md` |
-| What crosses into shared memory | `boundary` | `diagrams/06-boundary.md` |
-| What happens over time | `flow build\|frame\|contended` | `diagrams/07-flows.md` |
-| Cycles, layering violations, hotspots | — | `diagrams/08-health.md` |
+| Who uses this and what it touches | `context` | `guards/diagrams/01-context.md` |
+| What processes/threads exist, what is shared | `containers` | `guards/diagrams/02-containers.md` |
+| What is inside the compiler / app thread / engine | `components [id]` | `guards/diagrams/03-components.md` |
+| Which layers depend on which, how heavily | `layers` | `guards/diagrams/04-layers.md` |
+| Every file and every import edge | `modules <layer>` | `guards/diagrams/05-modules.md` |
+| What crosses into shared memory | `boundary` | `guards/diagrams/06-boundary.md` |
+| What happens over time | `flow build\|frame\|contended` | `guards/diagrams/07-flows.md` |
+| Cycles, layering violations, hotspots | — | `guards/diagrams/08-health.md` |
 
 Refactor queries, which print prose plus a Mermaid graph:
 
@@ -92,7 +92,7 @@ Then regenerate: `bun run arch-diagram`.
 
 ## Using this with an agent
 
-`diagrams/04-layers.md` and `diagrams/08-health.md` are the two cheapest files to put in
+`guards/diagrams/04-layers.md` and `guards/diagrams/08-health.md` are the two cheapest files to put in
 context — they are small, derived, and current. For a task scoped to one subsystem, prefer
 `bun run arch-diagram modules <layer>` over pasting source.
 
@@ -120,9 +120,9 @@ wants to compute over the graph rather than read it.
   forbidden edge exists. Whether a container's description still describes it is a question
   for a person.
 
-## Relationship to `architecture/`
+## Relationship to `guards/architecture/`
 
-`architecture/` is a separate interactive web app with its own hand-written `data.ts`. This
+`guards/architecture/` is a separate interactive web app with its own hand-written `data.ts`. This
 skill deliberately shares nothing with it — no imports either way — so deleting
-`architecture/` costs nothing here. The one thing both read is `src/protocol/schema.ts`,
+`guards/architecture/` costs nothing here. The one thing both read is `src/protocol/schema.ts`,
 which is source rather than documentation.

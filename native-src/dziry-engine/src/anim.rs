@@ -1066,7 +1066,7 @@ mod tests {
     }
 
     /// Colours mix per channel in sRGB, **premultiplied** — the row a naive
-    /// implementation fails. Chromium's numbers, from `probes/animation-semantics.html`.
+    /// implementation fails. Chromium's numbers, from `guards/probes/animation-semantics.html`.
     #[test]
     fn colours_mix_premultiplied_in_srgb() {
         let black = 0xff00_0000u32;

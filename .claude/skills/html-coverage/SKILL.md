@@ -96,6 +96,6 @@ If an element reports "already match" and you doubt it, check the markup first.
 
 ## Related
 
-Enumeration comes from `vendor/mdn` (`mdn:sync`). Measurement shares `cdp.ts` with `conformance`
+Enumeration comes from `guards/vendor/mdn` (`mdn:sync`). Measurement shares `cdp.ts` with `conformance`
 and `browser-oracle` — installed Chrome or Edge, headless. `conformance` asks whether a *property*
 is right; this asks whether an *element* looks right.

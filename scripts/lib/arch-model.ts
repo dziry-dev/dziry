@@ -13,7 +13,7 @@
  *   2. Every source file must fall inside some layer, so a new subsystem that
  *      nobody put on the map is a failure rather than a silent omission.
  *
- * Deliberately self-contained: it imports nothing from `architecture/`, which is
+ * Deliberately self-contained: it imports nothing from `guards/architecture/`, which is
  * a separate viewer that may be deleted, and nothing from `src/` except the
  * protocol schema — that one *is* the boundary, so importing it is what stops
  * the boundary diagram from disagreeing with the protocol.

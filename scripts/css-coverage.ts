@@ -144,7 +144,7 @@ const unknown = notAProperty;
  * Until that file exists, this prints counts and refuses to print a percentage.
  * A made-up denominator is worse than no number.
  */
-const DENOM_FILE = join(ROOT, "css-coverage", "in-scope.txt");
+const DENOM_FILE = join(ROOT, "guards", "css-coverage", "in-scope.txt");
 let denomList: Set<string> | null = null;
 try {
   const text = await readFile(DENOM_FILE, "utf8");
@@ -173,7 +173,7 @@ if (denomList) {
   if (bogus.length) {
     console.log(`  BAD DENOMINATOR — not real CSS properties per mdn-data:`);
     for (const b of bogus) console.log(`    ${b}`);
-    console.log(`  fix css-coverage/in-scope.txt`);
+    console.log(`  fix guards/css-coverage/in-scope.txt`);
     process.exit(1);
   }
 
@@ -193,7 +193,7 @@ if (denomList) {
   if (outside.length) console.log(`  ${outside.length} supported but outside the corpus: ${outside.join(", ")}`);
 } else {
   console.log(`  NO PERCENTAGE — no denominator defined.`);
-  console.log(`  Create ${"css-coverage/in-scope.txt"} (one property per line) to get one.`);
+  console.log(`  Create ${"guards/css-coverage/in-scope.txt"} (one property per line) to get one.`);
   console.log(`  "all standard CSS minus non-goals" still leaves ${inScope.length} properties including`);
   console.log(`  anchor-name and view-transition-name, so a % against it would mislead.`);
   console.log(`  ROADMAP A1: the denominator is Tailwind's utility surface, ~200 curated cases.`);

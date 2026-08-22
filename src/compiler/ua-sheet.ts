@@ -21,7 +21,7 @@
  *
  * Only add what a measurement justifies, and name the measurement. Most rules
  * come from `html-coverage` — re-run it afterwards, the count is the review. The
- * control-appearance block instead cites `probes/control-metrics.html` via
+ * control-appearance block instead cites `guards/probes/control-metrics.html` via
  * BROWSER-FACTS.md, because what a UA-drawn tick looks like is not a computed
  * style any tool can diff. Either way a reader can trace any line back to a
  * measurement rather than to taste; nothing here comes from memory or from
@@ -188,7 +188,7 @@ select button::after { content: "\\25BE"; padding-left: 4px }
    control that draws nothing reads as broken, not as unthemed. What belongs in a
    theme is a *different* look, not the existence of one.
 
-   Values are Chromium 151's, measured in probes/control-metrics.html and recorded
+   Values are Chromium 151's, measured in guards/probes/control-metrics.html and recorded
    in BROWSER-FACTS.md ("What box each form control gets from the UA sheet"),
    with three approximations, each forced by a missing field and stated here:
 
@@ -223,7 +223,7 @@ input {
 }
 
 /* The slider: 129px is Chrome's default width (measured in
-   probes/control-metrics.html's run), and 14px is enough height for the thumb
+   guards/probes/control-metrics.html's run), and 14px is enough height for the thumb
    the engine draws. No border, no background, no padding — the box is the
    track's runway, and the chrome is painted from the fraction. */
 input[type="range"] {
@@ -367,7 +367,7 @@ option:focus {
   color: #ffffff;
 }
 
-/* :disabled, exactly as measured — probes/disabled-control-styles.html, recorded
+/* :disabled, exactly as measured — guards/probes/disabled-control-styles.html, recorded
    in BROWSER-FACTS.md. Two shapes worth noticing, both verbatim from Chromium:
    button and the text fields grey out with *alpha* colours, so a disabled field
    over a dark card darkens with the card instead of going pastel; a select keeps
@@ -422,7 +422,7 @@ select[data-dziry-listbox] option:checked {
 
 /* A list box: a select with multiple, or with a size above one.
 
-   Not a dropdown with a flag on it. Measured (probes/select-listbox.html and
+   Not a dropdown with a flag on it. Measured (guards/probes/select-listbox.html and
    select-multiple.html): its options are ordinary in-flow boxes with a box, a computed
    style and an offsetParent, where a dropdown's are browser chrome with no box at all.
    So none of the picker rules above apply to it — and they do not have to be undone
@@ -484,7 +484,7 @@ input::placeholder, textarea::placeholder {
 /* A focus ring, on keyboard focus only.
 
    :focus-visible rather than :focus, and that distinction is the entire feature —
-   measured, probes/focus-visible.html. A ring on every click is what the pseudo-class
+   measured, guards/probes/focus-visible.html. A ring on every click is what the pseudo-class
    was invented to stop, and no ring while somebody is tabbing is a keyboard user with
    no idea where they are. Chromium hangs its own ring on exactly this pseudo-class:
    a focused-but-not-visible element computes outline-style:none, a visible one

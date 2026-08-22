@@ -13,7 +13,7 @@ claiming a feature works months after it stopped:
 | Fact | Read from | Rendered by |
 | --- | --- | --- |
 | Is this surface done, partial or planned? | `API.md` status table | `<Status of="signal" />` |
-| The guard scripts, the pipeline, the shared tables | `architecture/data.ts` | `<Guards/>`, `<Pipeline/>`, `<TableRoles/>` |
+| The guard scripts, the pipeline, the shared tables | `guards/architecture/data.ts` | `<Guards/>`, `<Pipeline/>`, `<TableRoles/>` |
 | Does `signal.ts:140` still point at anything? | the tree, via `scripts/lib/citations.ts` | the remark plugin, at build time |
 
 Do not hand-write any of those into a page. `<Status of="…" />` with a name that is
@@ -21,7 +21,7 @@ not in `API.md` is a build error, and that is the feature: you cannot document a
 surface the tracking table has never heard of.
 
 **The Internals pages inherit `arch:check`.** `<Pipeline/>` and `<TableRoles/>` render
-`architecture/data.ts`, so a red `bun run arch:check` means those pages are rendering
+`guards/architecture/data.ts`, so a red `bun run arch:check` means those pages are rendering
 stale claims — and nothing in `docs-check` will notice, because the citations live in a
 `.ts` file rather than in Markdown. On 2026-08-02 that file still cited `app/app.tsx`
 months after the directory became `windows/`. Run `arch:check` before trusting an

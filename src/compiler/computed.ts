@@ -231,7 +231,7 @@ function resolveValue(
 /**
  * `visible` on one axis becomes `auto` when the other axis scrolls.
  *
- * Measured, not assumed — Chromium 151, `probes/overflow-axis-coercion.html`, recorded
+ * Measured, not assumed — Chromium 151, `guards/probes/overflow-axis-coercion.html`, recorded
  * in BROWSER-FACTS.md. Declaring `overflow-y: auto` and nothing else gives a computed
  * `overflow-x: auto`, and it happens *even when the author writes `visible` explicitly*:
  * a box cannot be a scroll container in one axis and let content spill out of the other,
@@ -266,7 +266,7 @@ function coerceOverflow(style: ComputedStyle): ComputedStyle {
 /**
  * The viewport rule: `visible` on the window root means `auto`.
  *
- * Measured, not assumed — Chromium 152, `probes/viewport-default-scroll.html`, recorded
+ * Measured, not assumed — Chromium 152, `guards/probes/viewport-default-scroll.html`, recorded
  * in BROWSER-FACTS.md. An unstyled page taller than its window scrolls while both `html`
  * and `body` compute `overflow: visible`; page scrolling is a *viewport* behaviour, not a
  * UA stylesheet rule. That is why this is not `body { overflow: auto }` in `ua-sheet.ts`:

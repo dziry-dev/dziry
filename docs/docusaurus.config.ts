@@ -91,7 +91,7 @@ const config: Config = {
 
   plugins: [
     // Both read facts that already exist elsewhere in the repo, rather than letting
-    // the docs keep a second copy: `API.md` for what works, `architecture/data.ts`
+    // the docs keep a second copy: `API.md` for what works, `guards/architecture/data.ts`
     // for the pipeline and the guards.
     "./src/plugins/api-status.ts",
     "./src/plugins/arch-data.ts",

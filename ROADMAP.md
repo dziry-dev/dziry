@@ -472,7 +472,7 @@ winit-versus-SDL3 choice reversible.
 - ~~`onSubmit` on `bind:value`~~ — **built**, and wider than this line asked for: `onSubmit`
   receives the whole form's **payload**, collected by `name` from the form's subtree the way a
   browser collects one and typed by each control's kind. The bullet assumed a bound field, and
-  the measurement (`probes/form-data.html`) is what changed the design — a browser reads live
+  the measurement (`guards/probes/form-data.html`) is what changed the design — a browser reads live
   state from every named control, bound or not, so the compiler declares a cell for each field
   that has none. `validate={schema}` takes any Standard Schema or an Effect schema without dziry
   depending on either. Still `onChange` vs `onInput` to distinguish.
@@ -758,7 +758,7 @@ Also unimplemented and now named: a keyboard activation has no press/release pai
 Space and tabbing away activates whatever is focused at release — a browser cancels.
 
 **Probe before writing Rust.** This was followed for activation and it paid for itself immediately —
-`probes/control-activation.html` found four things that would have been implemented backwards, the
+`guards/probes/control-activation.html` found four things that would have been implemented backwards, the
 sharpest being that `:active` follows a label to its control from anywhere in the chain while
 `:hover` only does so from the label itself. Focus and blur ordering, and what `:focus-visible`
 actually resolves to, are the same kind of question and nobody should assert them from memory.
@@ -766,7 +766,7 @@ Run the probes, record the answers in BROWSER-FACTS.md, then implement against t
 
 #### Done, 2026-08-06 — and it changed the plan in four places
 
-`probes/tab-order.html`, `probes/focus-visible.html` and `probes/keyboard-activation.html`, all in
+`guards/probes/tab-order.html`, `guards/probes/focus-visible.html` and `guards/probes/keyboard-activation.html`, all in
 BROWSER-FACTS.md. What they settled, in the order it bears on the work:
 
 1. **Space activates on `keyup`; Enter and the arrows on `keydown`.** A button, a checkbox and a
@@ -920,7 +920,7 @@ What is left of A5 is images and icons, plus IME below.
     `SDL_StartTextInput` looked like the fix and changed nothing on its own; two dead links in one
     chain hid each other.
   - **A field is one line high when empty — done**, protocol v14's `NodeFlags.EDITABLE`. Measured
-    first (`probes/text-field-box.html`): a field's height comes from its *font*, not its content, so
+    first (`guards/probes/text-field-box.html`): a field's height comes from its *font*, not its content, so
     empty, one character and forty are all 15.0px at 13.3333px Arial. It had been rendering as a bare
     line and jumping to full height on the first keystroke. The flag is what scopes it — an empty
     `<div>` is 0 high, so a floor on every empty run would have been wrong for every binding that
@@ -1009,7 +1009,7 @@ wrong, and what is left.
   specific to cancelling. A *trap* and a *focus stack* are unbuilt and currently unmotivated:
   there is nowhere else for focus to go while a picker is open, and one integer restores it.
 
-**Measured before writing any of it** (`probes/select-picker.html`, and the probe runner gained key
+**Measured before writing any of it** (`guards/probes/select-picker.html`, and the probe runner gained key
 injection to make it possible — a synthetic `KeyboardEvent` is untrusted and performs no default
 action, so nothing about what a key *does* was measurable before). Three findings changed the
 design, and all three are now built:
@@ -1063,7 +1063,7 @@ before this, which was the wrong *shape* rather than a missing feature: a closed
 `::picker(select)` overlay, for an element whose options are ordinary in-flow boxes.
 
 Two probes, and the second moved two things the first had left to assumption.
-`probes/select-multiple.html` measured how one behaves; `probes/select-listbox.html`
+`guards/probes/select-multiple.html` measured how one behaves; `guards/probes/select-listbox.html`
 asked what *makes* one, and answered:
 
 - **The fork is `multiple || size > 1`, not `multiple`.** A `<select size="4">` with no

@@ -7,7 +7,7 @@
  * two fields share a name — so all of it is decided here, at build time, and the runtime is
  * left reading cells.
  *
- * The rules are measured rather than recalled. `probes/form-data.html` builds forty-odd
+ * The rules are measured rather than recalled. `guards/probes/form-data.html` builds forty-odd
  * forms and prints `new FormData(form).entries()` for each; every "measured" below cites a
  * row of that table, and BROWSER-FACTS.md holds the table itself.
  *
@@ -213,7 +213,7 @@ const ASSOCIATED = new Set(["input", "select", "textarea", "button"]);
 /**
  * Whether Enter anywhere in a form would click this element.
  *
- * Measured, `probes/implicit-submission.html`: a bare `<button>` is a submit button because
+ * Measured, `guards/probes/implicit-submission.html`: a bare `<button>` is a submit button because
  * `type` defaults to `submit`; `type="button"` is not one and does not rescue a form that
  * would otherwise not submit; and `<input type=submit>` counts too.
  */
@@ -229,7 +229,7 @@ export function isSubmitButton(el: Element): boolean {
  * Which form owns each control, and what each form owns.
  *
  * **Ownership is not ancestry**, and that is measured rather than inferred from the spec:
- * `probes/form-owner.html` puts a `form="F"` field outside F, inside a *different* form, and
+ * `guards/probes/form-owner.html` puts a `form="F"` field outside F, inside a *different* form, and
  * pointing at an id that does not exist, and then asks all three of the questions a form
  * asks. Every one of them follows ownership:
  *
@@ -620,7 +620,7 @@ export function collectFields(
         warn(
           `<${el.tag}> inside a submitting <form> has no name, so it is not in the payload.\n` +
             `    Give it a name, or wrap it in <div field="…">. A browser leaves a nameless\n` +
-            `    control out too (measured, probes/form-data.html), so this is faithful rather\n` +
+            `    control out too (measured, guards/probes/form-data.html), so this is faithful rather\n` +
             `    than a limitation — but it is also the commonest reason a field an author can\n` +
             `    see is missing from what onSubmit receives.`,
         );

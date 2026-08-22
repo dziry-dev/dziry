@@ -1,7 +1,7 @@
 //! `<select multiple>` — the selection rules, driven through real presses and keys.
 //!
-//! Every rule asserted here was measured first, in `probes/select-multiple.html` and
-//! `probes/select-listbox.html`, and this file exists because most of them are the
+//! Every rule asserted here was measured first, in `guards/probes/select-multiple.html` and
+//! `guards/probes/select-listbox.html`, and this file exists because most of them are the
 //! *opposite* of the single `<select>` sitting beside them in the same tag:
 //!
 //! | | `<select>` | `<select multiple>` |
@@ -123,7 +123,7 @@ fn control(t: &mut Tables, row: usize, target: i32, kind: u8, group: i32, flags:
 ///
 /// `multiple` chooses between `<select multiple>` and `<select size="4">` — two shapes
 /// that lay out identically and select differently, which is the pair
-/// `probes/select-listbox.html` was written to separate.
+/// `guards/probes/select-listbox.html` was written to separate.
 ///
 /// `selected` seeds `ControlFlags::CHECKED` on those option indices, standing in for the
 /// `selected` attribute the compiler resolves.

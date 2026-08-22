@@ -294,7 +294,7 @@ impl Controls {
             }),
             // A `SELECT` deliberately does nothing here, and it is the one kind that
             // reaches this arm rather than being absent from the table. Its behaviour is
-            // on the **press**: measured, `probes/select-picker.html` — the press alone
+            // on the **press**: measured, `guards/probes/select-picker.html` — the press alone
             // opened the picker before any release, which is the opposite of a checkbox,
             // whose bit flips during the click. So `Engine::mouse_down` opens it and this
             // function, which runs on the release, has nothing left to do.
@@ -562,7 +562,7 @@ impl Controls {
 
 /// Whether **Enter** activates a control of this kind, and whether it does so on the press.
 ///
-/// Measured, `probes/keyboard-activation.html`, and the table is not symmetric with
+/// Measured, `guards/probes/keyboard-activation.html`, and the table is not symmetric with
 /// [`space_activates`] in either direction — which is the whole reason both exist:
 ///
 /// | kind | Enter | Space |

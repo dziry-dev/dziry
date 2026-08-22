@@ -311,7 +311,7 @@ impl Measurer {
 
     /// How tall one line of this font is, with no text in it — CSS's *strut*.
     ///
-    /// What an empty editable field is worth. Measured, `probes/text-field-box.html`:
+    /// What an empty editable field is worth. Measured, `guards/probes/text-field-box.html`:
     /// an `<input>`'s content box is 15.0px at 13.3333px Arial whether it holds nothing,
     /// one character or forty, so the height is a property of the **font** and content
     /// has no say. A `contenteditable` div agrees; a plain block box does not, which is

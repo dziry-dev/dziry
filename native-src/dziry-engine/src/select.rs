@@ -10,7 +10,7 @@
 //!
 //! It is answered as narrowly as the fact allows, which turns out to be narrower than
 //! checkedness: **one integer for the whole document**, not one bit per select. Only one
-//! picker can be open at a time — measured, `probes/select-picker.html` — so a second
+//! picker can be open at a time — measured, `guards/probes/select-picker.html` — so a second
 //! opening closes the first, and there is nothing per-select to store.
 //!
 //! # Why the pending highlight is not here
@@ -67,7 +67,7 @@ pub struct Selects {
 
 /// What a gesture on a list box option means for the selection.
 ///
-/// Measured, `probes/select-multiple.html`, and every row of it would be guessed wrong by
+/// Measured, `guards/probes/select-multiple.html`, and every row of it would be guessed wrong by
 /// somebody — the platforms genuinely differ, and the three modifiers do three things:
 ///
 /// | gesture | result |
@@ -382,7 +382,7 @@ pub fn listbox_of(tables: &Tables, controls: &Controls, option: i32, node_count:
 /// having each key path compute its own set is how two of them end up disagreeing.
 ///
 /// **A single-selection list box replaces on every gesture.** `<select size="4">` with no
-/// `multiple` is a real shape (measured, `probes/select-listbox.html`) whose modifier
+/// `multiple` is a real shape (measured, `guards/probes/select-listbox.html`) whose modifier
 /// behaviour is *not* measured — the probe only ever held modifiers over a `multiple`. So
 /// the modifiers are ignored rather than guessed, which is the conservative direction: a
 /// plain click is what they collapse to, and a plain click is measured.

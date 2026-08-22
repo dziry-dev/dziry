@@ -221,7 +221,7 @@ const CONTROLS: Table = {
       doc:
         "A RANGE's thumb position, per-mille of the track: 0..1000, or 65535 for " +
         "'the author said nothing', which is 500 — a browser's slider with no value " +
-        "starts mid-track (measured, probes/range-default.html). Re-read on rescan like " +
+        "starts mid-track (measured, guards/probes/range-default.html). Re-read on rescan like " +
         "DISABLED, because the binding is the authority when there is one; the engine " +
         "tracks what it last applied so a drag is not undone by an unrelated republish.",
     },
@@ -1120,7 +1120,7 @@ export const ENUMS: EnumDef[] = [
        * and no ring while someone is tabbing is a keyboard user with no idea where
        * they are.
        *
-       * Measured, `probes/focus-visible.html`, and the rule is **modality**, not
+       * Measured, `guards/probes/focus-visible.html`, and the rule is **modality**, not
        * focus. Three parts, none of which is "keyboard focus is visible and mouse
        * focus is not":
        *
@@ -1268,7 +1268,7 @@ export const ENUMS: EnumDef[] = [
        *   position in the list they wrote.
        *
        * **The select's `CHANGE` names the select, not the option.** Measured —
-       * `probes/select-picker.html` listens on the `<select>` and that is where
+       * `guards/probes/select-picker.html` listens on the `<select>` and that is where
        * `input` and `change` arrive. It named the option until an `onChange`
        * handler existed to receive it, which is how a queue nobody drains stays
        * wrong quietly.
@@ -1352,7 +1352,7 @@ export const ENUMS: EnumDef[] = [
        * A `<select>`. A press **opens** it, on `mouse_down` and not on the click.
        *
        * That is the opposite of every other kind here and it is measured, not
-       * assumed: `probes/select-picker.html` shows the press alone opening the
+       * assumed: `guards/probes/select-picker.html` shows the press alone opening the
        * picker before any release, while a checkbox's bit flips during the click.
        * So the two cannot share a trigger point, and `Controls::activate` — which
        * runs on the release — deliberately declines this kind.
@@ -1374,7 +1374,7 @@ export const ENUMS: EnumDef[] = [
        * A `<button>`. Activating one changes no state — the `CLICK` event *is* the
        * activation — so it is here for the keyboard and for nothing else.
        *
-       * Measured, `probes/keyboard-activation.html`: Enter activates a button on
+       * Measured, `guards/probes/keyboard-activation.html`: Enter activates a button on
        * **keydown** and Space on **keyup**, and both dispatch a real `click`. The
        * pointer path never needed this row, because a click is emitted on whatever
        * was hit whether or not it is a control. The keyboard has nothing equivalent
@@ -1404,12 +1404,12 @@ export const ENUMS: EnumDef[] = [
        * nothing they do is shared. A `SELECT` opens an overlay on the press and
        * commits on a release *inside that overlay*; a `LISTBOX` has no overlay at
        * all, its options are hit by the ordinary tree walk, and — measured,
-       * `probes/select-multiple.html` — its selection changes on the **release**.
+       * `guards/probes/select-multiple.html` — its selection changes on the **release**.
        * Two elements wearing one tag, and the one thing they share is that
        * `<option>` means the same in both.
        *
        * Which of the two an author gets is `multiple || size > 1`, measured in
-       * `probes/select-listbox.html`: `<select size="4">` with no `multiple` is a
+       * `guards/probes/select-listbox.html`: `<select size="4">` with no `multiple` is a
        * list box, and keying this on `multiple` alone compiled a shape authors
        * really write into a dropdown.
        *
@@ -1594,7 +1594,7 @@ export const ENUMS: EnumDef[] = [
  * of nodes Tab can reach is a function of the markup: a `<button>`, an `<a>` with an `href`,
  * a form control, and nothing else. The *order* is not — it is document order in the live
  * tree, which a reorder changes — so the engine walks for it. Measured before it was
- * written, `probes/tab-order.html`, and the measurement is what forced the split: node ids
+ * written, `guards/probes/tab-order.html`, and the measurement is what forced the split: node ids
  * are strictly document order today, so a sorted table of tab stops would look right and
  * would be wrong for exactly the case A3's own bullet warns about.
  *
@@ -1652,7 +1652,7 @@ export const ENUMS: EnumDef[] = [
  *
  * It ships with a change to something the hash cannot see either, and this one is not a
  * flag: `InputState::focus_visible` now starts **true** rather than false. Measured
- * (`probes/focus-without-interaction.html`) — before any interaction Chromium treats focus
+ * (`guards/probes/focus-without-interaction.html`) — before any interaction Chromium treats focus
  * as visible, which is why an autofocused field opens wearing a ring. The two belong in one
  * version because separating them ships a feature whose whole visible behaviour is wrong:
  * `autofocus` with the old start value focuses silently and draws nothing.
@@ -1667,8 +1667,8 @@ export const ENUMS: EnumDef[] = [
  *
  * A `<select multiple>` compiled to a dropdown before this, which was the wrong *shape*
  * rather than a missing feature: a closed button and an overlay, for an element whose
- * options are ordinary in-flow boxes. Measured in `probes/select-multiple.html` and
- * `probes/select-listbox.html`, and the second of those moved two things the first had
+ * options are ordinary in-flow boxes. Measured in `guards/probes/select-multiple.html` and
+ * `guards/probes/select-listbox.html`, and the second of those moved two things the first had
  * left to assumption — `size > 1` makes a list box with no `multiple` anywhere, and a list
  * box starts with **nothing** selected where a dropdown falls back to its first option.
  *
@@ -1759,7 +1759,7 @@ export const NodeFlags = {
    * A text run inside a field the user can edit, which is one line high **whether
    * or not it has any text**.
    *
-   * Measured, 2026-08-04, `probes/text-field-box.html`: an `<input>`'s content box
+   * Measured, 2026-08-04, `guards/probes/text-field-box.html`: an `<input>`'s content box
    * is 15.0px at 13.3333px Arial when empty, with one character, and with forty —
    * content has no say at all, and a `contenteditable` div behaves the same way. A
    * plain block box does the opposite: `<div></div>` is 0 high.
@@ -1835,7 +1835,7 @@ export const NodeFlags = {
    * tree, which a reorder changes constantly, so the engine walks `firstChild`/
    * `nextSibling` for it rather than reading an index from here.
    *
-   * Measured, `probes/tab-order.html`, and the measurement is why the set is not simply
+   * Measured, `guards/probes/tab-order.html`, and the measurement is why the set is not simply
    * "is it interactive":
    *
    * - **An `<a>` with no `href` is not focusable.** `INTERACTIVE` does not care, because
@@ -1871,7 +1871,7 @@ export const NodeFlags = {
    *
    * A flag rather than a scalar, and the reason it could not have been a scalar is the
    * interesting half. The compiler cannot resolve `autofocus` to one id: measured
-   * (`probes/autofocus-hidden.html`), an unfocusable claim is walked past rather than
+   * (`guards/probes/autofocus-hidden.html`), an unfocusable claim is walked past rather than
    * honoured, and in dziry thirteen of a page's fourteen routes are hidden on the first
    * frame — so several claims are the normal case and which one is showing is runtime
    * state. The engine walks the flagged nodes and takes the first that is visible.
@@ -1883,7 +1883,7 @@ export const NodeFlags = {
    * once. On the node table it arrives the same way for both, because neither is involved.
    *
    * Applied **once per document**, latched in the engine. Measured
-   * (`probes/focus-without-interaction.html`, 2026-08-07): inserting an element carrying
+   * (`guards/probes/focus-without-interaction.html`, 2026-08-07): inserting an element carrying
    * `autofocus` after load moves nothing in Chromium. So this is a startup event, not a
    * property re-checked whenever a node appears — which matters here more than in a
    * browser, because Bun republishes these tables on every signal change and an unlatched
@@ -1927,7 +1927,7 @@ export const ControlFlags = {
    *
    * It is deliberately *not* what decides whether a select is drawn as a list; that
    * is `ControlKind.LISTBOX`, and it is also true for `<select size="4">` with no
-   * `multiple`. Measured, `probes/select-listbox.html`: the two questions have
+   * `multiple`. Measured, `guards/probes/select-listbox.html`: the two questions have
    * different answers for a shape authors really write, and one bit answering both
    * would have compiled that shape to a dropdown.
    *

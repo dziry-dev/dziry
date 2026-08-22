@@ -395,7 +395,7 @@ export type NodeTable = {
    *
    * A control points at itself. A `<label>` points at the control it labels, and so
    * does every descendant of that label — which is what makes clicking the text
-   * beside a checkbox tick it. Measured, `probes/control-activation.html`: a browser
+   * beside a checkbox tick it. Measured, `guards/probes/control-activation.html`: a browser
    * does this by dispatching a *second* click at the control, and the forwarding is
    * skipped exactly when the target already is the control, so a wrapping label
    * cannot toggle twice.
@@ -458,7 +458,7 @@ export type ControlTable = {
    * The one column here the compiler cannot turn into pixels. A list box's content
    * height is `rows` times an option's row, and that row is the font's ascent + descent
    * + line gap at the resolved size — Skia's answer, known only once layout runs.
-   * Measured as a ratio rather than assumed: `probes/select-listbox.html` holds it
+   * Measured as a ratio rather than assumed: `guards/probes/select-listbox.html` holds it
    * across a 4x font-size range, which is what rules out baking the 17px it looks like
    * at the default font.
    */
@@ -772,7 +772,7 @@ export type DisabledBinding = {
  * presence of a `value` attribute. What is not compile-time is the value itself, and the
  * probe is unambiguous about that: writing `input.value`, `input.checked` and
  * `select.selectedIndex` changed the payload while the attributes still said what the
- * author wrote (`probes/form-data.html`, "after value/checked/index writes"). So a field
+ * author wrote (`guards/probes/form-data.html`, "after value/checked/index writes"). So a field
  * is a kind plus a live cell, and never a constant.
  *
  * Strings rather than an enum, and for a reason this repo has already paid for once:
@@ -797,7 +797,7 @@ export type FieldKind =
   /**
    * A named submit button. Contributes its `value` **only when it is the button that
    * submitted**, which is the one entry no cell can hold — it is a property of the gesture
-   * rather than of the form. Measured, `probes/form-owner.html`, including its position:
+   * rather than of the form. Measured, `guards/probes/form-owner.html`, including its position:
    * the entry sits where the button is written, not at the end.
    */
   | "submitter";
@@ -818,7 +818,7 @@ export type FormField = {
    * The `value` attribute as authored.
    *
    * A checked checkbox or radio with no `value` submits the string `"on"` — measured,
-   * `probes/form-data.html` — and that default is applied here at build time rather than
+   * `guards/probes/form-data.html` — and that default is applied here at build time rather than
    * being invented at submit.
    */
   value: string;
@@ -881,7 +881,7 @@ export type FormKey = {
    *
    * A path rather than a name because a `field` wrapper is a namespace, and nesting is
    * structural: the wrapper chain *is* the path. No browser does this (measured,
-   * `probes/form-nested-names.html`: `name="user[email]"` is the literal key
+   * `guards/probes/form-nested-names.html`: `name="user[email]"` is the literal key
    * `"user[email]"`), so it is dziry's, and it is resolved here rather than parsed at run
    * time the way every server-side bracket parser does it.
    */
@@ -1037,7 +1037,7 @@ export type FormBinding = {
    * payload entry.
    *
    * It exists because ownership is not ancestry. A `form="F"` control is F's for every
-   * purpose (measured, `probes/form-owner.html`), so Enter pressed in one written *outside*
+   * purpose (measured, `guards/probes/form-owner.html`), so Enter pressed in one written *outside*
    * F has to submit F — and the parent walk that answers this for ordinary markup cannot,
    * since the field is not a descendant. Sorted for `findRow`, like `textAreas`.
    */
@@ -1099,7 +1099,7 @@ export type CompiledUi = {
    * Sorted node ids that are one line high **when they hold nothing**.
    *
    * Which an `<input>` is and a plain block box is not — measured,
-   * `probes/text-field-box.html`: a field is 15.0px high empty, with one character and
+   * `guards/probes/text-field-box.html`: a field is 15.0px high empty, with one character and
    * with forty, while `<div></div>` is 0.
    *
    * Two kinds of node, deliberately, because a field has two shapes. A **bound** field

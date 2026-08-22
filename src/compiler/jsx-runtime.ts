@@ -163,7 +163,7 @@ export type Props = {
    * all. A field that *does* carry `bind:value` uses the author's signal, so the payload and
    * the rendered text cannot disagree.
    *
-   * The inclusion rules are the browser's, measured in `probes/form-data.html`: a control
+   * The inclusion rules are the browser's, measured in `guards/probes/form-data.html`: a control
    * with no `name` is not in the payload, nor is a disabled one — including one disabled by
    * an enclosing `<fieldset disabled>` — nor is an unticked checkbox's value. Two controls
    * sharing a name give an array, in document order.
@@ -175,7 +175,7 @@ export type Props = {
    * submission is only ever a call into app code.
    *
    * **Enter does not always submit**, and the conditions are measured rather than
-   * intuited (`probes/implicit-submission.html`). A form with no submit button submits
+   * intuited (`guards/probes/implicit-submission.html`). A form with no submit button submits
    * only if exactly one `<input>` blocks implicit submission; a *disabled* submit button
    * blocks it outright; and Enter in a `<textarea>` never submits. The compiler resolves
    * all of it, so what an author has to know is just this: give the form a submit button
@@ -295,7 +295,7 @@ export type Props = {
    *
    * It fires exactly once. An element carrying `autofocus` that appears later, from a
    * list growing or a route showing, does not steal the caret: measured in Chromium
-   * (`probes/focus-without-interaction.html`), and a stronger requirement here than
+   * (`guards/probes/focus-without-interaction.html`), and a stronger requirement here than
    * there, since dziry republishes its tables whenever any signal changes.
    */
   autofocus?: boolean;
@@ -306,7 +306,7 @@ export type Props = {
    * `<select size=…>` — its height in rows, and the other half of what makes a list box.
    *
    * A `<select size="4">` with no `multiple` is a list box, not a dropdown: measured,
-   * `probes/select-listbox.html`, same box and same in-flow options as a `multiple`. So
+   * `guards/probes/select-listbox.html`, same box and same in-flow options as a `multiple`. So
    * this is not a cosmetic hint — it decides which of two elements the tag compiles to.
    *
    * Also `<input size=…>`, which dziry does not implement. Typed as a string or a number
@@ -1020,7 +1020,7 @@ type ElementProps = Props & {
    * **Ownership, not a hint.** The control is that form's for every purpose: it is in that
    * form's payload, it can be that form's default submit button, and it counts towards that
    * form's implicit-submission rules — even when it is written outside the form, or inside a
-   * different one. All three are measured (`probes/form-owner.html`).
+   * different one. All three are measured (`guards/probes/form-owner.html`).
    *
    * An id that names no form leaves the control owned by **nothing**, rather than falling
    * back to its ancestor. That is also measured, and it is the behaviour a typo produces.
@@ -1050,7 +1050,7 @@ type ElementProps = Props & {
    *
    * **Not a browser attribute.** HTML has no nesting at all: `name="user[email]"` is the
    * literal key `"user[email]"` in `FormData`, and the bracket convention is invented by
-   * server-side parsers, each with its own dialect (measured, `probes/form-nested-names.html`).
+   * server-side parsers, each with its own dialect (measured, `guards/probes/form-nested-names.html`).
    * dziry nests by *structure* instead, because a compiler can see the structure — so there is
    * no path syntax to parse, and a conflict is a build error rather than the silent
    * last-write-wins every one of those parsers has.

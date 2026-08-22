@@ -41,7 +41,7 @@ import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
 const RUNTIME = join(ROOT, "src", "runtime");
-const BASELINE = join(ROOT, "runtime-surface", "baseline.json");
+const BASELINE = join(ROOT, "guards", "runtime-surface", "baseline.json");
 const argv = process.argv.slice(2);
 const BLESS = argv.includes("--bless");
 const LIST = argv.includes("--list");

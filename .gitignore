@@ -41,7 +41,7 @@ engine-demo-light.png
 # The generated IR is a build artifact of `bun run window`. Tracked would mean
 # every style change shows up as a 22 KB diff of integer arrays.
 #
-# The characterization goldens under `characterize/golden/` are the deliberate
+# The characterization goldens under `guards/characterize/golden/` are the deliberate
 # exception: freezing the compiler's output is the whole point of those, and a diff
 # there is the question they exist to ask.
 windows/*/ui.gen.ts
@@ -57,7 +57,7 @@ Thumbs.db
 
 # MDN prose, vendored for offline grep by `bun run mdn:sync`.
 # CC-BY-SA, so it is a local tool rather than part of this repo.
-vendor/mdn/
+guards/vendor/mdn/
 
 # Code examples extracted from the docs by `bun run docs-check`, typechecked, and
 # deleted again. At the repo root rather than under docs/ because a package

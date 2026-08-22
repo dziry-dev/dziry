@@ -1,7 +1,7 @@
 /**
  * The architecture of dziry, as data.
  *
- * This file is the single source of truth for `architecture/` — the React view
+ * This file is the single source of truth for `guards/architecture/` — the React view
  * renders it, `check.ts` validates it, and `ARCHITECTURE.md` is generated from
  * it. Prose about the architecture goes *here*, not into the component.
  *
@@ -657,37 +657,37 @@ export const FIGURE_ORDER: { id: string; title: string; answers: string; files: 
     id: "fig-pipeline",
     title: "One div, end to end",
     answers: "Where is the boundary, and what has already happened by the time you reach it?",
-    files: ["architecture/figures/PipelineFigure.tsx", "src/compile.ts"],
+    files: ["guards/architecture/figures/PipelineFigure.tsx", "src/compile.ts"],
   },
   {
     id: "fig-cascade",
     title: "The cascade, resolved once",
     answers: "Does resolving CSS early lose anything?",
-    files: ["architecture/figures/CascadeFigure.tsx", "src/compiler/compile.ts"],
+    files: ["guards/architecture/figures/CascadeFigure.tsx", "src/compiler/compile.ts"],
   },
   {
     id: "fig-memory",
     title: "Why struct-of-arrays",
     answers: "Why is the boundary memory instead of a call surface?",
-    files: ["architecture/figures/MemoryFigure.tsx", "native-src/dziry-engine/src/tables.rs"],
+    files: ["guards/architecture/figures/MemoryFigure.tsx", "native-src/dziry-engine/src/tables.rs"],
   },
   {
     id: "fig-loop",
     title: "The frame loop",
     answers: "What does a frame actually cost, and what does an idle one cost?",
-    files: ["architecture/figures/FrameLoopFigure.tsx", "native-src/dziry-engine/src/engine.rs"],
+    files: ["guards/architecture/figures/FrameLoopFigure.tsx", "native-src/dziry-engine/src/engine.rs"],
   },
   {
     id: "fig-variants",
     title: "Hover costs one u16",
     answers: "How can interaction state work with no selector matching at run time?",
-    files: ["architecture/figures/VariantsFigure.tsx", "src/compiler/variant-compile.ts"],
+    files: ["guards/architecture/figures/VariantsFigure.tsx", "src/compiler/variant-compile.ts"],
   },
   {
     id: "fig-lists",
     title: "Lists that never renumber",
     answers: "How does anything dynamic work when the tree was decided at build time?",
-    files: ["architecture/figures/ListArenaFigure.tsx", "src/runtime/list-runtime.ts"],
+    files: ["guards/architecture/figures/ListArenaFigure.tsx", "src/runtime/list-runtime.ts"],
   },
 ];
 

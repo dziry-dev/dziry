@@ -507,7 +507,7 @@ test("a select's option still matches `select > option`", () => {
 });
 
 test("the tab-stop set is the measured one, not the interactive one", () => {
-  // ROADMAP A3's compile-time half. Written against `probes/tab-order.html` and, more to
+  // ROADMAP A3's compile-time half. Written against `guards/probes/tab-order.html` and, more to
   // the point, written against the three places the tab-stop set and the *interactive*
   // set disagree — because deriving one from the other is the obvious shortcut and each
   // of these is a case where it silently gives the wrong answer.
@@ -1104,9 +1104,9 @@ test("the IR for one small document is exactly this", () => {
       // The disabled rows keep the author's own backgrounds — `.btn`'s blues beat
       // the UA grey on origin, per property — while `fg=#101010@0.30` is Chromium's
       // measured disabled text, an *alpha* over whatever is behind
-      // (probes/disabled-control-styles.html).
+      // (guards/probes/disabled-control-styles.html).
       // `overflowX/Y=3` on the root and only the root: the viewport rule. `visible`
-      // on the window root means `auto` (probes/viewport-default-scroll.html), so an
+      // on the window root means `auto` (guards/probes/viewport-default-scroll.html), so an
       // unstyled window scrolls like an unstyled browser page — coerced at the end of
       // the cascade, never declared, which is why no other slot carries it.
       "styles (13 unique)",

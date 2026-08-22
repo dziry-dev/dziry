@@ -14,7 +14,7 @@
  * correct — a blessed golden can encode a bug. That is the deliberate trade: an
  * unexpected diff is a question ("did you mean to change this?"), not a verdict.
  *
- * Cases live in `characterize/cases/<name>.{tsx,html}` with a sibling
+ * Cases live in `guards/characterize/cases/<name>.{tsx,html}` with a sibling
  * `<name>.css`; `app` is the real application, which exercises the most paths.
  */
 import { readdir, readFile, writeFile, mkdir, rm } from "node:fs/promises";
@@ -23,8 +23,8 @@ import { join, extname, basename } from "node:path";
 import { tmpdir } from "node:os";
 
 const ROOT = join(import.meta.dir, "..");
-const CASES = join(ROOT, "characterize", "cases");
-const GOLDEN = join(ROOT, "characterize", "golden");
+const CASES = join(ROOT, "guards", "characterize", "cases");
+const GOLDEN = join(ROOT, "guards", "characterize", "golden");
 
 const argv = process.argv.slice(2);
 const ACCEPT = argv.includes("--accept");

@@ -1,5 +1,5 @@
 /**
- * Re-exports `architecture/data.ts` to the docs site as global data.
+ * Re-exports `guards/architecture/data.ts` to the docs site as global data.
  *
  * That file is already the single source of truth for the architecture map, and
  * `bun run arch:check` validates it: every claim that names a file carries a
@@ -21,7 +21,7 @@ import {
   MILESTONES,
   STAGES,
   TABLE_ROLES,
-} from "../../../architecture/data.ts";
+} from "../../../guards/architecture/data.ts";
 
 export type ArchData = {
   layers: typeof LAYERS;
@@ -56,7 +56,7 @@ export default function archDataPlugin(context: LoadContext): Plugin<ArchData> {
     },
 
     getPathsToWatch() {
-      return [join(context.siteDir, "..", "architecture", "data.ts")];
+      return [join(context.siteDir, "..", "guards", "architecture", "data.ts")];
     },
   };
 }

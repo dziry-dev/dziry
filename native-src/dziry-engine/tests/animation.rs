@@ -464,7 +464,7 @@ fn a_page_with_no_tween_never_animates() {
 ///
 /// The two features meet here, and the meeting is what made the older bug worth fixing
 /// rather than documenting. `:hover` matches the pointed element and every ancestor of
-/// it — measured, `probes/hover-propagation.html` — and a transition starts only when a
+/// it — measured, `guards/probes/hover-propagation.html` — and a transition starts only when a
 /// node's resolved slot *changes*. So an exact-equality hover test did not merely leave
 /// the card unhighlighted: it left the card's slot unchanged, which meant the transition
 /// never started either. One wrong comparison, two features silently doing nothing.

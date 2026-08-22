@@ -829,7 +829,7 @@ mod keyboard {
 
     /// **A commit reports the select, not the option, and says which one.**
     ///
-    /// Measured: `probes/select-picker.html` listens on the `<select>` and that is where
+    /// Measured: `guards/probes/select-picker.html` listens on the `<select>` and that is where
     /// `input` and `change` arrive. The engine named the option and carried a constant 1
     /// until an `onChange` handler existed to receive it — a queue nobody drains can be
     /// wrong indefinitely without anything failing, which is why this assertion is worth
@@ -1088,7 +1088,7 @@ mod tab_order {
 
     /// Every event a focus move produces, in order, with what each one names.
     ///
-    /// Measured, `probes/focus-event-order.html`, and all three parts are load-bearing:
+    /// Measured, `guards/probes/focus-event-order.html`, and all three parts are load-bearing:
     /// the leaving element is told first, each event names the *other* node, and nothing
     /// fires when focus does not move. The middle one is the finding — during a real blur
     /// the browser reports nothing as focused, so neither event could name its counterpart
@@ -1393,7 +1393,7 @@ mod tab_order {
 
     /// **A radio group is one tab stop, and it is the checked member.**
     ///
-    /// Measured, `probes/tab-order.html`: a group with nothing checked stops on its first
+    /// Measured, `guards/probes/tab-order.html`: a group with nothing checked stops on its first
     /// member; a group with a checked member stops on that one, skipping earlier siblings.
     /// This is ARIA's roving tabindex reached from the platform rather than from the
     /// pattern, and it is the first of the five controls A3 wants the mechanism for.
@@ -1461,7 +1461,7 @@ mod tab_order {
 
 /// Enter and Space on a focused control — ROADMAP A3's activation, measured per kind.
 ///
-/// Every assertion here has a row in `probes/keyboard-activation.html`, and the two that
+/// Every assertion here has a row in `guards/probes/keyboard-activation.html`, and the two that
 /// would most easily have been implemented backwards are the ones about *when*: Enter
 /// fires on the press and Space on the release. The engine had no release to fire on
 /// until this landed, so a plausible implementation would have put both on `key_down`,
@@ -1946,7 +1946,7 @@ mod autofocus {
     /// demo is the state of thirteen routes out of fourteen. Honouring the first claim
     /// would put the keyboard on an invisible node and draw the ring nowhere, which is
     /// worse than not focusing at all. Measured in Chromium first
-    /// (`probes/autofocus-hidden.html`): unfocusable claims are skipped, not obeyed and
+    /// (`guards/probes/autofocus-hidden.html`): unfocusable claims are skipped, not obeyed and
     /// not fatal.
     #[test]
     fn a_claim_that_is_not_showing_loses_to_one_that_is() {

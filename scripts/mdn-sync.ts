@@ -1,7 +1,7 @@
 /**
  * Vendors MDN's CSS and HTML prose for offline grep.
  *
- *   bun run mdn:sync            # clone or update vendor/mdn
+ *   bun run mdn:sync            # clone or update guards/vendor/mdn
  *   bun run mdn:sync --status   # what is checked out
  *
  * MDN's content is a public git repo of Markdown with YAML front matter, so a
@@ -14,7 +14,7 @@
  * (initial value, inherited, syntax) come from the `mdn-data` package, which is
  * what MDN itself renders those tables from — see `spec-audit`.
  *
- * `vendor/mdn` is gitignored. MDN prose is CC-BY-SA; vendoring it into the repo
+ * `guards/vendor/mdn` is gitignored. MDN prose is CC-BY-SA; vendoring it into the repo
  * would put a share-alike obligation on a project that does not otherwise carry
  * one, so it stays a local tool.
  */
@@ -23,8 +23,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
-const DIR = join(ROOT, "vendor", "mdn");
-const STAMP = join(ROOT, "vendor", "mdn.json");
+const DIR = join(ROOT, "guards", "vendor", "mdn");
+const STAMP = join(ROOT, "guards", "vendor", "mdn.json");
 const REPO = "https://github.com/mdn/content.git";
 const PATHS = ["files/en-us/web/css", "files/en-us/web/html", "LICENSE.md"];
 
@@ -73,5 +73,5 @@ const count = async (sub: string) => {
 
 console.log(`  css   ${await count("files/en-us/web/css")} pages`);
 console.log(`  html  ${await count("files/en-us/web/html")} pages`);
-console.log(`  at    ${sha.slice(0, 9)}  (${when.slice(0, 10)})  -> vendor/mdn.json`);
-console.log(`\ngrep it: rg "min-width: auto" vendor/mdn/files/en-us/web/css`);
+console.log(`  at    ${sha.slice(0, 9)}  (${when.slice(0, 10)})  -> guards/vendor/mdn.json`);
+console.log(`\ngrep it: rg "min-width: auto" guards/vendor/mdn/files/en-us/web/css`);

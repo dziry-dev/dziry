@@ -25,7 +25,7 @@
 //! promise. That is the same reasoning that put transition interpolation in Rust.
 //!
 //! **The rate is not measured, and cannot be.** A caret is browser chrome: it has no
-//! element, no computed style and nothing script can read, so `probes/caret-and-selection.html`
+//! element, no computed style and nothing script can read, so `guards/probes/caret-and-selection.html`
 //! measures every rule *around* it — where a click puts it, what arrows do — and is silent
 //! on how fast it flashes. 500 ms per phase is the conventional figure and it is a guess;
 //! if it ever matters, it wants a screen recording rather than a probe.
@@ -45,7 +45,7 @@ pub struct Carets {
     /// Per node, the **anchor** — the end a Shift or a drag leaves where it was.
     ///
     /// `(anchor, focus)` rather than `(start, end)`, and that is measured rather than
-    /// preferred. From a caret at 5, `probes/caret-and-selection.html` shows Shift+ArrowLeft
+    /// preferred. From a caret at 5, `guards/probes/caret-and-selection.html` shows Shift+ArrowLeft
     /// walking `5..6`, `5..5`, then **`4..5 backward`** — the anchor stays at 5 *through* the
     /// reversal. With an ordered pair, "extend" has no way to know which end to move once
     /// the two have crossed. Shift+click reverses the same way, from the pointer side.
@@ -220,7 +220,7 @@ impl Carets {
     ///
     /// `false` means the frame needs no repaint *and* the key was still consumed — an
     /// arrow at the end of the text is handled and does nothing, which is the measured
-    /// behaviour: `probes/caret-and-selection.html` shows ArrowRight at the length and
+    /// behaviour: `guards/probes/caret-and-selection.html` shows ArrowRight at the length and
     /// ArrowLeft at 0 both leaving the caret exactly where it was.
     ///
     /// `extend` is Shift held. It moves the focus and leaves the anchor, which is the whole
@@ -340,7 +340,7 @@ impl Carets {
 
 /// What a double click treats as one unit.
 ///
-/// Three classes, and the measurement is what says three: `probes/selection-editing.html`
+/// Three classes, and the measurement is what says three: `guards/probes/selection-editing.html`
 /// shows `bb  ` selected as a word plus its whole run of trailing spaces, `  ` selected alone
 /// when the pointer is in it, and the *second* comma of `,,` selected by itself — so a run of
 /// punctuation is not a unit while a run of letters and a run of spaces both are.
@@ -433,7 +433,7 @@ pub enum Motion {
 
 /// The character boundary a click at `dx` past the run's origin lands on.
 ///
-/// Measured, `probes/caret-and-selection.html`: a click resolves to the **nearest**
+/// Measured, `guards/probes/caret-and-selection.html`: a click resolves to the **nearest**
 /// boundary rather than to the character under the pointer — 0.4 of a character lands at
 /// 0 and 0.6 lands at 1 — and a point past the end clamps to the text's length rather
 /// than to the box.
@@ -583,7 +583,7 @@ mod tests {
         );
     }
 
-    /// The measured movement rules, from `probes/caret-and-selection.html`.
+    /// The measured movement rules, from `guards/probes/caret-and-selection.html`.
     #[test]
     fn arrows_move_one_boundary_and_stop_dead_at_the_ends() {
         let mut carets = Carets::new();
@@ -714,7 +714,7 @@ mod tests {
     // Selection
     // -----------------------------------------------------------------------------------
 
-    /// The Shift+Arrow table from `probes/caret-and-selection.html`, row for row.
+    /// The Shift+Arrow table from `guards/probes/caret-and-selection.html`, row for row.
     ///
     /// The measured sequence from a collapsed caret at 5 is `5..6`, `5..7`, `5..6`, `5..5`,
     /// then **`4..5 backward`** — the anchor stays at 5 through the reversal. That last row is
@@ -884,7 +884,7 @@ mod tests {
         assert_eq!(carets.index_of(1), Some(3));
     }
 
-    /// The word-boundary table, every row from `probes/selection-editing.html`.
+    /// The word-boundary table, every row from `guards/probes/selection-editing.html`.
     ///
     /// Four fixtures, thirteen rows, one rule. The rows are grouped by fixture rather than by
     /// what they prove, so a reader can check them against the probe's own output.

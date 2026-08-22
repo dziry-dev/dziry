@@ -172,7 +172,7 @@ async function emitArtifacts(): Promise<string[]> {
   // The fixture cases compile in this process. `.html` only, which is what they all
   // are — the JSX front-end has to `import()` its input and is a driver rather than a
   // function, so `compileSnippet` deliberately does not cover it.
-  const cases = join(ROOT, "characterize", "cases");
+  const cases = join(ROOT, "guards", "characterize", "cases");
   if (existsSync(cases)) {
     for (const f of (await readdir(cases)).sort()) {
       if (!f.endsWith(".html")) continue;
@@ -183,11 +183,11 @@ async function emitArtifacts(): Promise<string[]> {
       const { result } = compileSnippet({
         html: await readFile(join(cases, f), "utf8"),
         css: existsSync(cssPath) ? await readFile(cssPath, "utf8") : "",
-        label: `characterize/cases/${f}`,
+        label: `guards/characterize/cases/${f}`,
       });
       await writeFile(
         join(into, `${name}.gen.ts`),
-        emit(result, { html: `characterize/cases/${f}`, css: `characterize/cases/${name}.css` }).source,
+        emit(result, { html: `guards/characterize/cases/${f}`, css: `guards/characterize/cases/${name}.css` }).source,
       );
       names.push(name);
     }

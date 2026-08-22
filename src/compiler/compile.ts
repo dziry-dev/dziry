@@ -134,7 +134,7 @@ type BuiltNode = {
    *
    * Deliberately *not* derived from `ownsPress` or from `activates`, even though the
    * three overlap heavily. Each of the three exclusions measured in
-   * `probes/tab-order.html` is a case where they disagree: an `<a>` with no `href` owns
+   * `guards/probes/tab-order.html` is a case where they disagree: an `<a>` with no `href` owns
    * its press and is not focusable, a `<select>`'s button is what the pointer hits and
    * is not a stop, and an `<option>` is a control with a row of its own that Tab never
    * visits. Deriving one from another would encode "interactive" and "reachable" as the
@@ -798,7 +798,7 @@ const TEXT_ENTRY_TYPES = new Set([
    * reads them — see `numericOf`.
    *
    * This set is **not** the implicit-submission blocking set, which is what it used to be as
-   * well. That one is measured (`probes/implicit-submission.html`) and was measured over the
+   * well. That one is measured (`guards/probes/implicit-submission.html`) and was measured over the
    * six above, so widening it here would have silently changed a rule nobody re-measured.
    * See `blocksImplicitSubmission`.
    */
@@ -815,7 +815,7 @@ const TEXT_ENTRY_TYPES = new Set([
  * `number` had to be typeable, and the blocking membership is a *measurement* over the six
  * text keywords. Whether a `number` blocks implicit submission has not been measured, so it is
  * left out rather than assumed — the probe to settle it is a two-line addition to
- * `probes/implicit-submission.html`.
+ * `guards/probes/implicit-submission.html`.
  */
 const BLOCKING_TYPES = new Set(["", "text", "search", "tel", "url", "email", "password"]);
 
@@ -870,7 +870,7 @@ const TAB_STOP_TAGS = new Set(["input", "textarea", "select"]);
 /**
  * Whether Tab can reach this element — the compile-time half of ROADMAP A3's focus model.
  *
- * Measured, `probes/tab-order.html`, and written against that table rather than against
+ * Measured, `guards/probes/tab-order.html`, and written against that table rather than against
  * the neighbouring [`ownsItsPress`], which it resembles closely enough to be tempting.
  * The two disagree in three places and every one of them is a real difference:
  *
@@ -912,7 +912,7 @@ function isTabStop(el: Element, path: Element[]): boolean {
  * The `tabindex` attribute as a number, or null when absent or unparseable.
  *
  * Only the sign is read, and that is deliberate rather than lazy. Measured,
- * `probes/tab-order.html`: a **positive** `tabindex` does not sit where it is written —
+ * `guards/probes/tab-order.html`: a **positive** `tabindex` does not sit where it is written —
  * the whole positive group sorts ahead of everything else, and `div[tabindex="3"]` was
  * reached *after* the document wrapped, as the first stop of the next cycle.
  *
@@ -2089,7 +2089,7 @@ export function compileTree(
       warnings.push(
         `tabindex="${explicitTabIndex}" on <${el.tag}> is treated as tabindex="0".\n` +
           `    A positive tabindex does not sit where it is written: browsers sort the whole\n` +
-          `    positive group ahead of every other stop (measured, probes/tab-order.html), which\n` +
+          `    positive group ahead of every other stop (measured, guards/probes/tab-order.html), which\n` +
           `    makes tab order a sort rather than a walk of the tree. dziry walks.\n` +
           `    The element is still reachable by Tab, in document order.\n` +
           `    ${where}`,
@@ -2254,7 +2254,7 @@ export function compileTree(
         // Only a list box has one, and only the engine can use it: the height is
         // `rows` times an option's row height, and that row height is Skia's ascent +
         // descent + line gap at the resolved font size. Measured as a *ratio* across a
-        // 4x font-size range (`probes/select-listbox.html`), which is what rules out
+        // 4x font-size range (`guards/probes/select-listbox.html`), which is what rules out
         // compiling a pixel height here — the 17px it looks like at the default font is
         // an instance, not a constant.
         rows: listbox?.rows ?? 0,
@@ -3146,7 +3146,7 @@ function buildTabStops(nodes: BuiltNode[]): Int32Array {
  * Marks every element that can hold focus and asked for it, and warns about the rest.
  *
  * **Every** one, not the winner. Choosing is the engine's job, and the reason is a
- * measurement plus a fact about dziry. Measured (`probes/autofocus-hidden.html`): an
+ * measurement plus a fact about dziry. Measured (`guards/probes/autofocus-hidden.html`): an
  * unfocusable claim neither wins nor aborts — Chromium walks past it to the next. And in
  * dziry a page is fourteen routes with thirteen hidden on the first frame, so several
  * claims are normal and which of them is *showing* is the only thing that decides, which

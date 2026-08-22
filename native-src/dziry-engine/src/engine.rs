@@ -1719,7 +1719,7 @@ impl Engine {
     ///
     /// **A keyboard activation really is a click** — measured, and it is what lets this be
     /// the same three events the pointer emits rather than a parallel vocabulary. Every
-    /// activation in `probes/keyboard-activation.html` dispatched a real `click`, which is
+    /// activation in `guards/probes/keyboard-activation.html` dispatched a real `click`, which is
     /// the claim ROADMAP A3 made and had not checked.
     ///
     /// Coordinates are zero, as they are for a keyboard commit in `choose_option`, and for
@@ -1854,7 +1854,7 @@ impl Engine {
     ///
     /// **Closed and focused**: ArrowDown or ArrowUp **opens the picker** rather than walking
     /// the value. That refutes the belief carried over from legacy selects, and it was
-    /// measured before any of this was written — `probes/select-picker.html`, both arrows
+    /// measured before any of this was written — `guards/probes/select-picker.html`, both arrows
     /// opened it with no `input` and no `change`. Convenient as well as correct: keyboard
     /// opening is then the same path as the click rather than a second mechanism.
     ///
@@ -1990,7 +1990,7 @@ impl Engine {
     /// is unreachable: Space on an already-checked radio fires nothing at all (measured), so
     /// a keyboard user could see the group and never change the answer.
     ///
-    /// Measured, `probes/keyboard-activation.html`, and three things about it are not
+    /// Measured, `guards/probes/keyboard-activation.html`, and three things about it are not
     /// guessable:
     ///
     /// - **ArrowRight and ArrowDown both go forward**, Left and Up back. A radio group has
@@ -2082,7 +2082,7 @@ impl Engine {
     /// Handles an arrow, Home or End if there is a caret. Returns whether it was consumed.
     ///
     /// Consumed is not the same as moved: an arrow at the end of the text is *handled* and
-    /// changes nothing, which is measured — `probes/caret-and-selection.html` shows
+    /// changes nothing, which is measured — `guards/probes/caret-and-selection.html` shows
     /// ArrowRight at the length and ArrowLeft at 0 both leaving the caret put. Forwarding
     /// those to the host instead would let it act on a key the engine had already claimed.
     ///
@@ -2115,7 +2115,7 @@ impl Engine {
     /// seventh. Centralising is what makes "the event and the state cannot disagree" a
     /// property of the code rather than a thing to remember.
     ///
-    /// The order and the payload are both measured, `probes/focus-event-order.html`:
+    /// The order and the payload are both measured, `guards/probes/focus-event-order.html`:
     ///
     /// - **`FOCUS_OUT` before `FOCUS_IN`**, always. Every event of the leaving element
     ///   precedes every event of the arriving one, so one ordered queue tells a host a
@@ -2650,7 +2650,7 @@ impl Engine {
         let dismissed = self.close_open_picker();
 
         // A disabled control receives no button events at all — not a click that gets
-        // ignored, no events. Measured, `probes/control-activation.html`: pressing one
+        // ignored, no events. Measured, `guards/probes/control-activation.html`: pressing one
         // produced no `mousedown`, no `mouseup` and no `click`, and it never took focus.
         // So the press is dropped here, before anything is recorded.
         //
@@ -2683,7 +2683,7 @@ impl Engine {
         self.needs_paint = true;
 
         // A `<select>` opens on the **press**, and this is the one control that does.
-        // Measured, `probes/select-picker.html`: the press alone opened the picker before
+        // Measured, `guards/probes/select-picker.html`: the press alone opened the picker before
         // any release, which is the opposite of a checkbox — whose bit flips during the
         // click, after `mouseup`. So the two cannot share a trigger point, and
         // `activate_control` stays where it is on the release.
@@ -2727,7 +2727,7 @@ impl Engine {
         }
 
         // The caret goes where the press landed, not where the release does — measured
-        // for the *selection* case in `probes/caret-and-selection.html`, where a press at
+        // for the *selection* case in `guards/probes/caret-and-selection.html`, where a press at
         // 2 collapsed the caret to 2 before any drag began. So this belongs beside the
         // press, and a drag will later extend from it rather than replace it.
         //
@@ -2787,7 +2787,7 @@ impl Engine {
 
         // **A pointer press hides focus, unless typing goes where it landed.**
         //
-        // Measured, `probes/focus-visible.html`: a clicked text field matches
+        // Measured, `guards/probes/focus-visible.html`: a clicked text field matches
         // `:focus-visible` and a clicked button, checkbox, radio, link and `tabindex` div
         // do not. The distinguishing question is not "is it a form control" — three of
         // those four are — it is *does typing go here*, and the engine has just answered
@@ -2816,7 +2816,7 @@ impl Engine {
     ///
     /// The mask matters here and nowhere else on the pointer path, because a list box is
     /// the one control whose selection changes on the **release** — measured,
-    /// `probes/select-multiple.html`, where every gesture showed the old selection at
+    /// `guards/probes/select-multiple.html`, where every gesture showed the old selection at
     /// `mousedown` and the new one at `mouseup`. A single `<select>` is the opposite and
     /// opens on the press, which is why the two cannot share a trigger point.
     pub fn mouse_up_with(&mut self, x: f32, y: f32, mods: u16) {
@@ -2986,7 +2986,7 @@ impl Engine {
 
     /// The keys a list box owns. Returns whether it consumed one.
     ///
-    /// Every row is measured, `probes/select-multiple.html`, and three of them would be
+    /// Every row is measured, `guards/probes/select-multiple.html`, and three of them would be
     /// guessed wrong:
     ///
     /// | key | result |
@@ -3292,7 +3292,7 @@ impl Engine {
         });
         if act.changed {
             // **`CHANGE` is on the select, not on the option**, and `a` is the chosen
-            // index. Measured: `probes/select-picker.html` listens on the `<select>` and
+            // index. Measured: `guards/probes/select-picker.html` listens on the `<select>` and
             // that is where `input` and `change` arrive; the option is not the element a
             // browser reports the change of.
             //

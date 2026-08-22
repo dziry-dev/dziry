@@ -51,11 +51,11 @@ with `CHROME=/path/to/binary`. There is no install step and no downloaded browse
 ## Where things live
 
 ```
-probes/
+guards/probes/
   _harness.js          shared helpers — import from every probe
   focus-removal.html   one probe per question
 scripts/probe.ts       the CDP runner
-scripts/probe-server.ts  static host for probes/
+scripts/probe-server.ts  static host for guards/probes/
 BROWSER-FACTS.md       dated findings. THE OUTPUT. A probe run that isn't recorded is wasted.
 ```
 

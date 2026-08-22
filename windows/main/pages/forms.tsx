@@ -13,7 +13,7 @@
  *   properties. So `address` + `city`/`street` inside it produces a nested object, and no
  *   bracket syntax was parsed to get there. No browser nests anything —
  *   `name="user[email]"` is the literal key `"user[email]"` in `FormData`, measured in
- *   `probes/form-nested-names.html` — so this is dziry's, and a compiler can do it because it
+ *   `guards/probes/form-nested-names.html` — so this is dziry's, and a compiler can do it because it
  *   can see the structure.
  *
  * - **A wrapper holding a `map()` is an array field**, which is the one field whose value the

@@ -84,7 +84,7 @@ pub enum RawInput {
         ///
         /// A release carries them because a list box's selection changes on the **release**
         /// and its modifiers decide what the change is — measured,
-        /// `probes/select-multiple.html`. Every other control reads its modifiers on the
+        /// `guards/probes/select-multiple.html`. Every other control reads its modifiers on the
         /// press, which is why this arm had none until there was a control that could not.
         mods: u16,
     },
@@ -97,7 +97,7 @@ pub enum RawInput {
     /// The release.
     ///
     /// Here because **Space activates a control on the release, not on the press** —
-    /// measured, `probes/keyboard-activation.html`: a button, a checkbox and a radio all
+    /// measured, `guards/probes/keyboard-activation.html`: a button, a checkbox and a radio all
     /// wait for `keyup`, while Enter and the arrows fire on `keydown`. Until this existed
     /// the engine could only see presses, so implementing Space would have meant
     /// implementing a different control from the one browsers ship.

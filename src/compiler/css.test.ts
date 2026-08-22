@@ -749,7 +749,7 @@ test("a compound with two pseudo-classes requires both states", () => {
  * The `visible`-to-`auto` coercion, against what Chromium 151 was measured doing.
  *
  * Every row here corresponds to a row of the table in BROWSER-FACTS.md
- * (`probes/overflow-axis-coercion.html`). This is the test that keeps the compiler and
+ * (`guards/probes/overflow-axis-coercion.html`). This is the test that keeps the compiler and
  * the measurement from drifting: if someone re-runs the probe and the engine has
  * changed, this fails and points at the recorded fact rather than at a guess.
  */
@@ -795,7 +795,7 @@ test("a visible axis becomes scrollable when the other axis scrolls", () => {
  * The viewport rule: `visible` on the window root means `auto`.
  *
  * Every case corresponds to a row of the table in BROWSER-FACTS.md
- * (`probes/viewport-default-scroll.html`, Chromium 152): an unstyled page scrolls while
+ * (`guards/probes/viewport-default-scroll.html`, Chromium 152): an unstyled page scrolls while
  * `html` and `body` both compute `overflow: visible`, an *explicit* `visible` changes
  * nothing, and `hidden` or `clip` on the root is how page scrolling is turned off.
  * This is why the rule is a root coercion and not a `body { overflow: auto }` UA rule —
@@ -1191,7 +1191,7 @@ test("a nested block inside a rule body is skipped, not misread", () => {
 // transform
 //
 // The interesting assertions here are against *measured* matrices rather than
-// against whatever the code happens to do. `probes/transform-composition.html`
+// against whatever the code happens to do. `guards/probes/transform-composition.html`
 // read the exact matrix Chromium 151 computes for each of these lists; the
 // numbers below are those readings, and `composed` rebuilds them from the
 // decomposed fields the compiler stores. A wrong composition order still
@@ -1672,7 +1672,7 @@ test("transition-property becomes a mask, and refuses layout by name", () => {
 });
 
 test("the animation shorthand fills the longhands CSS says it does", () => {
-  // Every row measured against Chromium in probes/animation-semantics.html.
+  // Every row measured against Chromium in guards/probes/animation-semantics.html.
   expect(animationFrom([["animation", "spin 1s linear infinite"]])).toMatchObject({
     name: "spin",
     duration: 1,

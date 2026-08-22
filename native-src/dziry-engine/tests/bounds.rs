@@ -1645,7 +1645,7 @@ fn an_absolute_child_insets_from_its_parents_padding_box() {
 ///
 /// The rule `NodeFlags::EDITABLE` exists for, asserted from both sides in one test
 /// because it is the *contrast* that is the rule — either half alone is satisfied by
-/// a wrong implementation. Measured, `probes/text-field-box.html`: an `<input>` is
+/// a wrong implementation. Measured, `guards/probes/text-field-box.html`: an `<input>` is
 /// 15.0px high with no text, one character and forty, while `<div></div>` is 0.
 ///
 /// Two flagged shapes, both leaves, because a field has two forms. A **bound** field

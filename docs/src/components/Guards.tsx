@@ -1,5 +1,5 @@
 /**
- * The guard scripts, listed from `architecture/data.ts`.
+ * The guard scripts, listed from `guards/architecture/data.ts`.
  *
  * Not hand-written here, because `bun run arch:check` validates that list against
  * `package.json` — a renamed script fails that run. A prose table in a Markdown file

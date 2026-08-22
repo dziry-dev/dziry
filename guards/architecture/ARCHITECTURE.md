@@ -1,6 +1,6 @@
 # dziry — architecture
 
-> Generated from `architecture/data.ts` by `bun run arch:check --emit`. Do not edit.
+> Generated from `guards/architecture/data.ts` by `bun run arch:check --emit`. Do not edit.
 > Run `bun run arch` for the interactive version.
 
 A UI framework that resolves CSS, the cascade and every interaction state before the app runs, then hands a native Rust engine a block of shared memory instead of a call surface.

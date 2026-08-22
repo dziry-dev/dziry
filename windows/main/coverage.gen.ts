@@ -12,7 +12,7 @@ export const COVERAGE = {
   tailwind: { pct: "97.7%", have: 22744, total: 23286 },
 
   /**
-   * `bun run css-coverage` — against the curated corpus in css-coverage/in-scope.txt,
+   * `bun run css-coverage` — against the curated corpus in guards/css-coverage/in-scope.txt,
    * *not* against all of CSS. The denominator is the point: "everything standard
    * minus the non-goals" is ~376 properties including ones a UI framework will
    * never want, and a percentage against that would mislead.

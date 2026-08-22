@@ -344,7 +344,7 @@ impl LayoutTree {
     /// # Why this is here and not in the style table
     ///
     /// It is the one box dziry cannot compile. Measured across a 4x font-size range
-    /// (`probes/select-listbox.html`), a list box's content height is `size` times the
+    /// (`guards/probes/select-listbox.html`), a list box's content height is `size` times the
     /// option's own row height — a *ratio*, so the 17px it looks like at the default font
     /// is an instance and not a constant. And a row height is [`Measurer::line_height`]:
     /// ascent + descent + line gap, from Skia, at the resolved size. The compiler has no
@@ -734,7 +734,7 @@ impl LayoutTree {
 
                 // A text field is one line high with nothing in it, and an empty
                 // anything else is nothing at all. Measured both ways,
-                // `probes/text-field-box.html`: an `<input>` and a `contenteditable` div
+                // `guards/probes/text-field-box.html`: an `<input>` and a `contenteditable` div
                 // are 15.0px high empty, with one character and with forty, while
                 // `<div></div>` is 0. Without this an empty field rendered as a bare
                 // line and jumped to full height on the first keystroke.

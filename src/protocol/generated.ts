@@ -351,7 +351,7 @@ export const F = {
     flags: 3, // ControlFlags: the authored initial state
     label: 4, // The text-run node this control's label lives on, or -1. On a SELECT it is the run inside <selectedcontent>, whose string the engine repoints at the committed option's; on an OPTION it is that option's own run. Nothing else fills it.
     rows: 5, // A LISTBOX's height in rows — its `size`, defaulting to 4. 0 on every other kind. The engine multiplies it by the option row height, which only the engine knows.
-    value: 6, // A RANGE's thumb position, per-mille of the track: 0..1000, or 65535 for 'the author said nothing', which is 500 — a browser's slider with no value starts mid-track (measured, probes/range-default.html). Re-read on rescan like DISABLED, because the binding is the authority when there is one; the engine tracks what it last applied so a drag is not undone by an unrelated republish.
+    value: 6, // A RANGE's thumb position, per-mille of the track: 0..1000, or 65535 for 'the author said nothing', which is 500 — a browser's slider with no value starts mid-track (measured, guards/probes/range-default.html). Re-read on rescan like DISABLED, because the binding is the authority when there is one; the engine tracks what it last applied so a drag is not undone by an unrelated republish.
   },
   /** Final bounds per node, written by the engine. */
   layout: {

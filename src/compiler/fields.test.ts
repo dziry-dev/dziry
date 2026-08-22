@@ -7,7 +7,7 @@
  * author's schema is written against, and they are decided here, once, rather than by
  * whatever happened to be ticked at submit.
  *
- * Every expectation traceable to a browser is cited to the row of `probes/form-data.html`
+ * Every expectation traceable to a browser is cited to the row of `guards/probes/form-data.html`
  * it came from. Where dziry deliberately parts company — a lone checkbox is a boolean
  * rather than present-or-absent — the test says so rather than reading as a browser claim.
  */
@@ -363,7 +363,7 @@ function find(node: Element, tag: string): Element | null {
 // ---------------------------------------------------------------------------
 
 test("a form= field outside the form is in its payload, at its document position", () => {
-  // Measured, `probes/form-owner.html`: written *after* the form it gives `inner outer`, and
+  // Measured, `guards/probes/form-owner.html`: written *after* the form it gives `inner outer`, and
   // written *before* it gives `outer inner`. So the order is document order over the whole
   // document — which a subtree scan could not produce, since the field is not in the subtree.
   expect(

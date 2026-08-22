@@ -509,7 +509,7 @@ rather than flipping above its select, which is ROADMAP B2's job — no scroll-o
 | `accent-color` `caret-color` `appearance` | **done** — `STYLE_FIELDS`, checked in `conformance` and `spec-audit` | A1 |
 | `resize`, `field-sizing: content` | **non-goal** — see ROADMAP C2; in `css-coverage`'s `OUT_OF_SCOPE_NAMES` | — |
 | `<Input>` | planned | C2 · Tier 1b (needs A5) |
-| `onSubmit` receives the form's payload | **done** — collected by `name` from the form's subtree, typed by control kind, with the browser's inclusion rules (measured, `probes/form-data.html`). `src/compiler/fields.ts` decides the shape, `src/runtime/forms.ts` reads the cells | A3 |
+| `onSubmit` receives the form's payload | **done** — collected by `name` from the form's subtree, typed by control kind, with the browser's inclusion rules (measured, `guards/probes/form-data.html`). `src/compiler/fields.ts` decides the shape, `src/runtime/forms.ts` reads the cells | A3 |
 | a named field with no `bind:value` | **done** — the compiler declares its cell in the artifact, so a browser-shaped form needs no state module. Typing reaches it through the same `editables` table a bound field uses | A3 |
 | `validate={schema}` — Zod, Valibot, ArkType, Effect | **done** — through Standard Schema's `~standard`, plus one lazy-import branch for a raw Effect schema, which carries no `~standard` of its own (measured, effect 3.22). dziry depends on none of them | A3 |
 | `onInvalid` | **done** — issues normalised to `{ path, message }[]` from all three validator shapes | A3 |
@@ -519,7 +519,7 @@ rather than flipping above its select, which is ROADMAP B2's job — no scroll-o
 | `validateOn="submit\|change\|blur"` | **done** — plus two rules that are behaviour rather than knobs: re-validate on change after a failed submit, and no error before a field has moved off its compiled value | A3 |
 | per-field `touched` / `dirty` as styling hooks | **refused by name** — `touched` exists in other libraries to gate error display, which `validateOn` does; per-field `dirty` styling is a need nobody has demonstrated. Reversible: each would be one more class toggle | — |
 | the submitter's own `name`/`value` entry | **not done** — measured (a named `<button type=submit>` contributes only when it is the button that submitted) and deliberately left out: it is the one entry that is not a property of the markup, and a two-button form in dziry would use two `onClick`s | — |
-| `form="id"` association | **done** — ownership rather than ancestry, resolved once and read by all three questions a form asks: its payload, its default button, and its blocking-field count. Measured (`probes/form-owner.html`), including that a `form=` naming no form **orphans** the control rather than falling back to its ancestor | A3 |
+| `form="id"` association | **done** — ownership rather than ancestry, resolved once and read by all three questions a form asks: its payload, its default button, and its blocking-field count. Measured (`guards/probes/form-owner.html`), including that a `form=` naming no form **orphans** the control rather than falling back to its ancestor | A3 |
 | a `field` wrapper holding a `map()` — repeating rows | **done** — the wrapper's value is the list's array, so the payload gains `Job[]` with one entry per live row. The only field whose state the compiler does not declare: an arena of interchangeable replicas has nothing stable to hang a per-row cell on, and the array has a keyed entry per row already. `bind:value={job.title}` writes back into it | A3 |
 | a *named* control inside a `map()` row | **refused by name** — a `name` in a template is the same string in every row, so two rows' entries would be indistinguishable. The array field above is the way rows reach a payload | — |
 | a row's own error message — `<span error />` in the template | **done** — matched by *data position*, so a reorder cannot carry a message to the wrong row. The section's own message then shows only issues at its own path, while its `errorClassName` still goes on for anything under it: the class and the message part company exactly here | A3 |
@@ -563,7 +563,7 @@ here would be worse than naming the gap.*
 `scaleX/Y`, `skewX/Y`, plus a `transform-origin` pair — and never as a matrix. That is a
 measurement, not a preference: `rotate(0deg)` and `rotate(360deg)` have identical matrices, so
 interpolating six floats between them cannot move, where Chromium is at 180° halfway. Decomposed
-scalars keep the winding; a matrix throws it away. `probes/transition-sampling.html`, recorded in
+scalars keep the winding; a matrix throws it away. `guards/probes/transition-sampling.html`, recorded in
 BROWSER-FACTS.md.
 
 The cost is that decomposed storage holds exactly one order — translate, rotate, skew, scale — so a

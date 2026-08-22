@@ -1,4 +1,4 @@
-# architecture/
+# guards/architecture/
 
 An interactive map of dziry, and a Markdown rendering of the same map for
 whoever — or whatever — is reading rather than clicking.

@@ -676,7 +676,7 @@ function overlayCentre(engine: Engine, select: number, picker: number, node: num
 /**
  * A press opens the picker — on the press, not the click.
  *
- * The trigger point is the whole assertion. Measured, `probes/select-picker.html`: the press
+ * The trigger point is the whole assertion. Measured, `guards/probes/select-picker.html`: the press
  * alone opened it before any release, which is the opposite of a checkbox whose bit flips
  * during the click. So this presses and asserts *before* releasing, which is the only way to
  * tell the two apart from out here — a full click would pass either way.
