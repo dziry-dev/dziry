@@ -382,9 +382,18 @@ async function compileWindow(window: WindowDef, options: CompileOptions): Promis
     loaderFromObject: boolean;
   }[] = [];
 
-  /** Where the generated module will sit, so import specifiers are relative to it. */
+  /** Where the generated module will sit. */
   const outPath = options.outOverride ?? join(dir, "ui.gen.ts");
-  const specifierFor = (p: string) => "./" + relative(dirname(outPath), p).replaceAll("\\", "/");
+  /**
+   * Import specifiers are relative to the artifact's *canonical* home, even when
+   * the write is diverted. An overridden artifact (characterize's golden) is never
+   * executed, and computing specifiers from the divert target baked the machine
+   * into the output: the golden held paths relative to one machine's temp dir, and
+   * on a runner whose temp sits on another drive, `relative()` fell back to an
+   * absolute path. CI caught it the first time a second machine ran the diff.
+   */
+  const specifierFor = (p: string) =>
+    "./" + relative(dirname(join(dir, "ui.gen.ts")), p).replaceAll("\\", "/");
 
   try {
     const entryPath = join(projectDir, window.entry);

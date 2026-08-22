@@ -6,18 +6,18 @@
 // 62 text bindings, 45 handlers.
 
 import { $, computed, signal } from "dziry/runtime/signal.ts";
-import { bufferInfo, bufferPath, bufferPreview, fileName, filePath, fileSize, fileType, onBufferPick, onFilePick, onImagePick, onTextPick, previewBytes, previewName, previewSrc, saveToUploads, savedTo } from "./../../../workspace/skia-proto/windows/main/pages/controls.tsx";
-import { addTodo, clearDraft, deleteTodo, draft, isCompact, isLight, remaining, toggleDensity, toggleDone, toggleTheme, total, view } from "./../../../workspace/skia-proto/windows/main/state.ts";
-import { accepted, addJob, cannotSubmit, checkSignUp, jobs, lastPayload, onSignUp, onSignUpRejected, onTermsChange, removeJob } from "./../../../workspace/skia-proto/windows/main/pages/forms.tsx";
-import { onNewProduct, onProductDetail, route } from "./../../../workspace/skia-proto/windows/main/router.ts";
-import { addLang, bump, doubled, drop, dropLang, isBig, isThree, langCount, langRows, note, parity, reset, shout, tick } from "./../../../workspace/skia-proto/windows/main/reactivity.ts";
-import { default as route_14 } from "./../../../workspace/skia-proto/windows/main/pages/products/$id.tsx";
-import * as __state_0 from "./../../../workspace/skia-proto/windows/main/pages/controls.tsx";
-import * as __state_1 from "./../../../workspace/skia-proto/windows/main/state.ts";
-import * as __state_2 from "./../../../workspace/skia-proto/windows/main/pages/forms.tsx";
-import * as __state_3 from "./../../../workspace/skia-proto/windows/main/router.ts";
-import * as __state_4 from "./../../../workspace/skia-proto/windows/main/reactivity.ts";
-import * as __state_5 from "./../../../workspace/skia-proto/windows/main/pages/products/$id.tsx";
+import { bufferInfo, bufferPath, bufferPreview, fileName, filePath, fileSize, fileType, onBufferPick, onFilePick, onImagePick, onTextPick, previewBytes, previewName, previewSrc, saveToUploads, savedTo } from "./pages/controls.tsx";
+import { addTodo, clearDraft, deleteTodo, draft, isCompact, isLight, remaining, toggleDensity, toggleDone, toggleTheme, total, view } from "./state.ts";
+import { accepted, addJob, cannotSubmit, checkSignUp, jobs, lastPayload, onSignUp, onSignUpRejected, onTermsChange, removeJob } from "./pages/forms.tsx";
+import { onNewProduct, onProductDetail, route } from "./router.ts";
+import { addLang, bump, doubled, drop, dropLang, isBig, isThree, langCount, langRows, note, parity, reset, shout, tick } from "./reactivity.ts";
+import { default as route_14 } from "./pages/products/$id.tsx";
+import * as __state_0 from "./pages/controls.tsx";
+import * as __state_1 from "./state.ts";
+import * as __state_2 from "./pages/forms.tsx";
+import * as __state_3 from "./router.ts";
+import * as __state_4 from "./reactivity.ts";
+import * as __state_5 from "./pages/products/$id.tsx";
 
 // Types, so this artifact is checked rather than asserted at the far end.
 import type { ControlTable, DataBinding, DisabledBinding, ErrorBinding, FormBinding, HandlerBinding, ImageTable, KeyframeTable, ListTable, MediaTable, NodeTable, NumericTable, ParamBinding, StyleTable, TextBinding, TweenTable, VariantTable, BoundaryNodes, RedboxNodes, RouteNodes, ShowNodes, WindowConfig } from "dziry/ir.ts";
