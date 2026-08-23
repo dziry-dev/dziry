@@ -33,7 +33,7 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            target: win32-x64
+            target: windows-x64
           - os: macos-latest
             target: darwin-arm64
           - os: macos-15-intel

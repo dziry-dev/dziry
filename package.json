@@ -78,7 +78,7 @@
     "other release is not merely stale, it is a protocol mismatch."
   ],
   "optionalDependencies": {
-    "dziry-engine-win32-x64": "0.1.0-beta.2",
+    "dziry-engine-windows-x64": "0.1.0-beta.2",
     "dziry-engine-darwin-arm64": "0.1.0-beta.2",
     "dziry-engine-darwin-x64": "0.1.0-beta.2",
     "dziry-engine-linux-x64": "0.1.0-beta.2",

@@ -139,16 +139,21 @@ export function useEngineLibrary(path: string): void {
  * The engine binary inside this platform's `dziry-engine-*` package, if it is
  * installed.
  *
- * Each release publishes one tiny package per platform — `dziry-engine-win32-x64`,
+ * Each release publishes one tiny package per platform — `dziry-engine-windows-x64`,
  * `dziry-engine-darwin-arm64`, … — and `dziry` lists all of them as
  * `optionalDependencies`, so the installer keeps only the one whose `os`/`cpu`
  * match. The packages carry no JavaScript at all; the resolvable file is their
  * manifest, and the binary sits next to it.
+ *
+ * The platform tag is "windows" where Node says "win32": npm's spam heuristic
+ * permanently rejected the name dziry-engine-win32-x64 at first publish, and
+ * since nobody types these names, the tag bent rather than npm support.
  */
 function enginePackagePath(name: string): string | null {
+  const platformTag = process.platform === "win32" ? "windows" : process.platform;
   try {
     const manifest = Bun.resolveSync(
-      `dziry-engine-${process.platform}-${process.arch}/package.json`,
+      `dziry-engine-${platformTag}-${process.arch}/package.json`,
       import.meta.dir,
     );
     return join(dirname(manifest), name);

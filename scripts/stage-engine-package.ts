@@ -19,7 +19,11 @@ import { libraryName } from "../src/engine/host.ts";
 
 const repo = join(import.meta.dir, "..");
 const root = await Bun.file(join(repo, "package.json")).json();
-const name = `dziry-engine-${process.platform}-${process.arch}`;
+// "windows", not Node's "win32": npm's spam heuristic permanently rejected the
+// name dziry-engine-win32-x64 (the other four landed), and the name is
+// internal plumbing anyway. host.ts::enginePackagePath maps the same way.
+const platformTag = process.platform === "win32" ? "windows" : process.platform;
+const name = `dziry-engine-${platformTag}-${process.arch}`;
 const binary = libraryName();
 const built = join(repo, "native-src", "dziry-engine", "target", "release", binary);
 const dest = join(repo, "dist", "engine-packages", name);
