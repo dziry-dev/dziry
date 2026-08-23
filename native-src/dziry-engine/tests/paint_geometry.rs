@@ -360,6 +360,18 @@ fn glyph_edges_are_subpixel_antialiased() {
     }
 
     assert!(lit > 0, "the glyphs were drawn at all");
+    // macOS cannot produce a coloured edge: Apple removed subpixel AA from
+    // CoreText in Mojave, so Skia's mac font host rasterises greyscale no
+    // matter what the surface's pixel geometry requests — the same trade every
+    // browser makes there. Greyscale is that platform's correct answer, so the
+    // assertion inverts rather than being skipped: a coloured edge appearing on
+    // a Mac would mean the rasteriser changed, which is worth hearing about.
+    #[cfg(target_os = "macos")]
+    assert_eq!(
+        coloured, 0,
+        "CoreText produced coloured edges — macOS grew subpixel AA back?"
+    );
+    #[cfg(not(target_os = "macos"))]
     assert!(
         coloured > 0,
         "no glyph edge carried colour, so this is greyscale AA: {lit} lit pixels, {coloured} coloured"
