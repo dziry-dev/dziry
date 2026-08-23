@@ -13,9 +13,11 @@
 //!
 //! # Pixel format
 //!
-//! Skia's `n32` is BGRA_8888 on little-endian, which is byte-identical to SDL's
-//! packed `ARGB8888`. So presenting is a straight upload with no swizzle — the
-//! same property the TypeScript runtime relied on.
+//! The engine's raster surface is pinned to `BGRA_8888` (see `raster_surface` in
+//! `engine.rs`), which is byte-identical to SDL's packed `ARGB8888` on
+//! little-endian. So presenting is a straight upload with no swizzle — the same
+//! property the TypeScript runtime relied on. Pinned rather than Skia's `n32`,
+//! because `n32` is RGBA on macOS and this upload would swap red and blue.
 
 use sdl3::event::{Event as SdlEvent, EventWatch, EventWatchCallback, WindowEvent};
 use sdl3::keyboard::Mod;

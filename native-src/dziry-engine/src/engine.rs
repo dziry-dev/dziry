@@ -25,7 +25,8 @@
 use std::sync::{Arc, Mutex};
 
 use skia_safe::{
-    surfaces, Color, ImageInfo, PixelGeometry, Surface, SurfaceProps, SurfacePropsFlags,
+    surfaces, AlphaType, Color, ColorType, ImageInfo, PixelGeometry, Surface, SurfaceProps,
+    SurfacePropsFlags,
 };
 
 use crate::caret::Motion;
@@ -3719,13 +3720,23 @@ const LIVE_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_mil
 
 /// The CPU raster surface every frame is painted into.
 ///
-/// Not `surfaces::raster_n32_premul`, which is the same thing with default surface
-/// properties — and the default pixel geometry is `Unknown`, which silently turns
-/// subpixel text off. `Font::set_edging(SubpixelAntiAlias)` is a *request*: the
-/// device decides, and a device that does not know its subpixel layout correctly
-/// refuses to guess and falls back to greyscale. So the two-line font change on its
-/// own changed nothing, which a test caught by looking for coloured glyph edges and
-/// finding 485 lit pixels and none.
+/// Not `surfaces::raster_n32_premul`, for two reasons that each cost a real bug.
+///
+/// `BGRA8888`, explicitly, not `n32`: `n32` is whatever byte order the platform's
+/// Skia build was compiled with — BGRA on Windows and Linux, **RGBA on macOS** —
+/// while `window.rs` uploads the bytes to SDL as packed `ARGB8888` (little-endian
+/// BGRA) unconditionally, and `Engine::pixels` promises BGRA to every reader. On a
+/// Mac, `n32` therefore swapped red and blue on screen. Skia's CPU raster backend
+/// draws BGRA on every platform, so pinning it turns the upload-without-swizzle
+/// assumption from a per-platform accident into a guarantee.
+///
+/// Explicit surface properties, not the defaults: the default pixel geometry is
+/// `Unknown`, which silently turns subpixel text off.
+/// `Font::set_edging(SubpixelAntiAlias)` is a *request*: the device decides, and a
+/// device that does not know its subpixel layout correctly refuses to guess and
+/// falls back to greyscale. So the two-line font change on its own changed nothing,
+/// which a test caught by looking for coloured glyph edges and finding 485 lit
+/// pixels and none.
 ///
 /// `RGBH` is the near-universal desktop LCD layout and what Windows assumes by
 /// default. It is a claim about the *display*, so it is wrong on a BGR or vertical
@@ -3733,7 +3744,12 @@ const LIVE_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_mil
 /// rotated-display path has to fall back to `Edging::AntiAlias` rather than change
 /// this.
 fn raster_surface(width: u32, height: u32) -> Result<Surface, EngineError> {
-    let info = ImageInfo::new_n32_premul((width as i32, height as i32), None);
+    let info = ImageInfo::new(
+        (width as i32, height as i32),
+        ColorType::BGRA8888,
+        AlphaType::Premul,
+        None,
+    );
     let props = SurfaceProps::new(SurfacePropsFlags::default(), PixelGeometry::RGBH);
     surfaces::raster(&info, None, Some(&props)).ok_or_else(|| {
         EngineError::skia(format!(

@@ -1076,7 +1076,14 @@ fn a_one_sided_border_paints_one_edge() {
 
     let at = |engine: &mut Engine, x: usize, y: usize| {
         let got = pixel(engine, x, y);
-        nearest(got, &[(BG, "background"), (RED, "red border"), (SURFACE, "surface")])
+        nearest(
+            got,
+            &[
+                (BG, "background"),
+                (RED, "red border"),
+                (SURFACE, "surface"),
+            ],
+        )
     };
 
     assert_eq!(at(&mut engine, 60, 3), "red border", "the top edge");
@@ -1086,7 +1093,11 @@ fn a_one_sided_border_paints_one_edge() {
     assert_eq!(at(&mut engine, 60, 116), "background", "no bottom edge");
     // The diagonal corner join: 4px along the top edge and 2px down is above the
     // diagonal (y < x), so it belongs to the top side.
-    assert_eq!(at(&mut engine, 6, 2), "red border", "the corner is shared, not lost");
+    assert_eq!(
+        at(&mut engine, 6, 2),
+        "red border",
+        "the corner is shared, not lost"
+    );
 }
 
 /// Two adjacent sides in different colours meet on the corner diagonal.
@@ -1115,7 +1126,15 @@ fn adjacent_border_colours_split_the_corner_on_the_diagonal() {
 
     let at = |engine: &mut Engine, x: usize, y: usize| {
         let got = pixel(engine, x, y);
-        nearest(got, &[(BG, "background"), (RED, "red top"), (BORDER, "blue left"), (SURFACE, "surface")])
+        nearest(
+            got,
+            &[
+                (BG, "background"),
+                (RED, "red top"),
+                (BORDER, "blue left"),
+                (SURFACE, "surface"),
+            ],
+        )
     };
 
     // Above the diagonal (y < x): the top side's. Below (y > x): the left's.
@@ -1163,108 +1182,129 @@ fn an_outline_rings_outside_the_border_box() {
 
     let at = |engine: &mut Engine, x: usize, y: usize| {
         let got = pixel(engine, x, y);
-        nearest(got, &[(GREEN, "outline"), (BG, "box"), (SURFACE, "surface")])
+        nearest(
+            got,
+            &[(GREEN, "outline"), (BG, "box"), (SURFACE, "surface")],
+        )
     };
 
     // The box spans 30..70; the band is 24..28 above it (30 - 2 - 4).
     assert_eq!(at(&mut engine, 50, 26), "outline", "in the band above");
-    assert_eq!(at(&mut engine, 50, 29), "surface", "the offset gap is empty");
-    assert_eq!(at(&mut engine, 50, 50), "box", "the box itself is untouched");
+    assert_eq!(
+        at(&mut engine, 50, 29),
+        "surface",
+        "the offset gap is empty"
+    );
+    assert_eq!(
+        at(&mut engine, 50, 50),
+        "box",
+        "the box itself is untouched"
+    );
     assert_eq!(at(&mut engine, 50, 20), "surface", "past the band");
+}
+
+/// Renders "iiii" white at 40px with the given `text-decoration` line and
+/// returns every solidly lit pixel as (x, y).
+///
+/// The decoration tests diff two of these renders rather than scanning a fixed
+/// pixel band, because where a decoration lands is a *font metric*: the band
+/// that holds Segoe UI's underline missed DejaVu's entirely on the Linux CI
+/// runner. The glyphs are identical across the pair, so any pixel the decorated
+/// render lights that the plain one does not is the decoration itself —
+/// wherever this platform's font put it.
+fn decorated_ink(decoration: u8) -> Vec<(usize, usize)> {
+    let mut engine = Engine::new(&config_of(2)).expect("engine");
+    {
+        let t = engine.tables_mut();
+        init_style(t, 0);
+        init_style(t, 1);
+        // White text, white decoration, on the black surface the engine clears to.
+        t.set_u32(STYLES, styles::FG, 1, 0xffff_ffff);
+        t.set_f32(STYLES, styles::FONT_SIZE, 1, 40.0);
+        t.set_u8(STYLES, styles::DECORATION_LINE, 1, decoration);
+
+        let mut cursor = 0;
+        t.push_string(0, "iiii", &mut cursor).expect("string arena");
+
+        for node in 0..2 {
+            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
+            t.set_u16(NODES, nodes::STYLE, node, node as u16);
+            t.set_i32(NODES, nodes::TEXT, node, -1);
+            t.set_i32(NODES, nodes::PARENT, node, -1);
+            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
+            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
+            t.set_i16(NODES, nodes::LIST, node, -1);
+        }
+        t.set_u8(NODES, nodes::KIND, 1, protocol::node_kind::TEXT);
+        t.set_i32(NODES, nodes::TEXT, 1, 0);
+        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::MEASURABLE);
+        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
+        t.set_i32(NODES, nodes::PARENT, 1, 0);
+    }
+    engine.tick().expect("tick");
+
+    let mut lit = Vec::new();
+    for y in 0..120usize {
+        for x in 0..120usize {
+            let p = pixel(&mut engine, x, y);
+            if p >> 24 != 0 && (p >> 16) & 0xff > 200 {
+                lit.push((x, y));
+            }
+        }
+    }
+    lit
 }
 
 /// An underline is a horizontal band below the text's baseline, in the run's
 /// own colour when `decorationColor` says nothing.
 #[test]
 fn an_underline_sits_below_the_baseline() {
-    let mut engine = Engine::new(&config_of(2)).expect("engine");
-    {
-        let t = engine.tables_mut();
-        init_style(t, 0);
-        init_style(t, 1);
-        // White text, white underline, on the black surface the engine clears to.
-        t.set_u32(STYLES, styles::FG, 1, 0xffff_ffff);
-        t.set_f32(STYLES, styles::FONT_SIZE, 1, 40.0);
-        t.set_u8(STYLES, styles::DECORATION_LINE, 1, 1); // underline
+    let plain: std::collections::HashSet<_> = decorated_ink(0).into_iter().collect();
+    assert!(!plain.is_empty(), "the text itself did not draw");
+    let extra: Vec<_> = decorated_ink(1)
+        .into_iter()
+        .filter(|p| !plain.contains(p))
+        .collect();
+    assert!(
+        !extra.is_empty(),
+        "no new pixels — the underline did not draw"
+    );
 
-        let mut cursor = 0;
-        t.push_string(0, "iiii", &mut cursor).expect("string arena");
-
-        for node in 0..2 {
-            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
-            t.set_u16(NODES, nodes::STYLE, node, node as u16);
-            t.set_i32(NODES, nodes::TEXT, node, -1);
-            t.set_i32(NODES, nodes::PARENT, node, -1);
-            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
-            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
-            t.set_i16(NODES, nodes::LIST, node, -1);
-        }
-        t.set_u8(NODES, nodes::KIND, 1, protocol::node_kind::TEXT);
-        t.set_i32(NODES, nodes::TEXT, 1, 0);
-        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::MEASURABLE);
-        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
-        t.set_i32(NODES, nodes::PARENT, 1, 0);
-    }
-    engine.tick().expect("tick");
-
-    // The text box is at the top of the window; a 40px line sits inside ~50px.
-    // "iiii" is four narrow glyphs: the underline is wider than the glyphs' ink
-    // at its y, so a lit pixel directly below the descent is the decoration.
-    let mut underlined = false;
-    for y in 44..56usize {
-        for x in 0..40usize {
-            let p = pixel(&mut engine, x, y);
-            if p >> 24 != 0 && (p >> 16) & 0xff > 200 {
-                underlined = true;
-            }
-        }
-    }
-    assert!(underlined, "no pixels below the text — the underline did not draw");
+    // "iiii" has no descenders, so the glyph ink ends at the baseline and the
+    // underline's body sits strictly below it. Its antialiased top edge may
+    // touch the glyphs' own antialiased bottom row, hence the one-row slack.
+    let ink_bottom = plain.iter().map(|&(_, y)| y).max().unwrap();
+    let above = extra.iter().filter(|&&(_, y)| y + 1 < ink_bottom).count();
+    assert_eq!(above, 0, "underline pixels appeared inside the glyph band");
+    let below = extra.iter().filter(|&&(_, y)| y > ink_bottom).count();
+    assert!(below > 0, "the underline never got below the glyph ink");
 }
 
 /// `line-through` crosses the glyphs, mid-x-height.
 #[test]
 fn a_strikethrough_crosses_the_glyphs() {
-    let mut engine = Engine::new(&config_of(2)).expect("engine");
-    {
-        let t = engine.tables_mut();
-        init_style(t, 0);
-        init_style(t, 1);
-        t.set_u32(STYLES, styles::FG, 1, 0xffff_ffff);
-        t.set_f32(STYLES, styles::FONT_SIZE, 1, 40.0);
-        t.set_u8(STYLES, styles::DECORATION_LINE, 1, 4); // line-through
+    let plain: std::collections::HashSet<_> = decorated_ink(0).into_iter().collect();
+    assert!(!plain.is_empty(), "the text itself did not draw");
+    let extra: Vec<_> = decorated_ink(4)
+        .into_iter()
+        .filter(|p| !plain.contains(p))
+        .collect();
+    assert!(
+        !extra.is_empty(),
+        "no new pixels — the strikeout did not draw"
+    );
 
-        let mut cursor = 0;
-        t.push_string(0, "iiii", &mut cursor).expect("string arena");
-
-        for node in 0..2 {
-            t.set_u8(NODES, nodes::KIND, node, protocol::node_kind::BOX);
-            t.set_u16(NODES, nodes::STYLE, node, node as u16);
-            t.set_i32(NODES, nodes::TEXT, node, -1);
-            t.set_i32(NODES, nodes::PARENT, node, -1);
-            t.set_i32(NODES, nodes::FIRST_CHILD, node, -1);
-            t.set_i32(NODES, nodes::NEXT_SIBLING, node, -1);
-            t.set_i16(NODES, nodes::LIST, node, -1);
-        }
-        t.set_u8(NODES, nodes::KIND, 1, protocol::node_kind::TEXT);
-        t.set_i32(NODES, nodes::TEXT, 1, 0);
-        t.set_u8(NODES, nodes::FLAGS, 1, protocol::flags::MEASURABLE);
-        t.set_i32(NODES, nodes::FIRST_CHILD, 0, 1);
-        t.set_i32(NODES, nodes::PARENT, 1, 0);
-    }
-    engine.tick().expect("tick");
-
-    // A strikeout sits around the x-height — inside the glyph band, not below it.
-    // "i" has no ink at its sides at that height, so a lit pixel *between* the
-    // glyphs is the line.
-    let mut crossed = false;
-    for y in 12..30usize {
-        for x in 3..8usize {
-            let p = pixel(&mut engine, x, y);
-            if p >> 24 != 0 && (p >> 16) & 0xff > 200 {
-                crossed = true;
-            }
-        }
-    }
-    assert!(crossed, "nothing crossed the glyphs — the strikeout did not draw");
+    // A strikeout sits inside the glyph band, not below it — and "i" has no ink
+    // between the stems at that height, so a new pixel in a column the plain
+    // render never touched is the line bridging the gaps.
+    let ink_bottom = plain.iter().map(|&(_, y)| y).max().unwrap();
+    assert!(
+        extra.iter().all(|&(_, y)| y < ink_bottom),
+        "the strikeout leaked below the glyphs"
+    );
+    let ink_columns: std::collections::HashSet<_> = plain.iter().map(|&(x, _)| x).collect();
+    assert!(
+        extra.iter().any(|&(x, _)| !ink_columns.contains(&x)),
+        "nothing bridged the gaps between the glyphs"
+    );
 }

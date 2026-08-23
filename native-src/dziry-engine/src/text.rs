@@ -160,10 +160,10 @@ impl FontSpec {
 }
 
 pub struct Measurer {
-      /// Kept for `decoration_metrics`, which needs a raw typeface where the
-      /// paragraph path goes through the collection.
-      mgr: FontMgr,
-      family: String,
+    /// Kept for `decoration_metrics`, which needs a raw typeface where the
+    /// paragraph path goes through the collection.
+    mgr: FontMgr,
+    family: String,
     /// What `font-family: monospace` resolves to. Falls back to `family` when the
     /// platform knows none of [`MONO_FAMILIES`], so index 1 always names a face.
     mono_family: String,
@@ -543,7 +543,11 @@ pub fn paint_decorations(paragraph: &Paragraph, canvas: &Canvas, at: Point, deco
         if deco.line & 1 != 0 {
             let y = baseline
                 + deco.metrics.underline_pos
-                + if deco.offset.is_finite() { deco.offset } else { 0.0 };
+                + if deco.offset.is_finite() {
+                    deco.offset
+                } else {
+                    0.0
+                };
             strokes.push((y, deco.thickness));
         }
         if deco.line & 2 != 0 {
@@ -562,7 +566,15 @@ pub fn paint_decorations(paragraph: &Paragraph, canvas: &Canvas, at: Point, deco
 /// One decoration stroke in the style asked for. `double` splits the thickness
 /// into two lines a thickness apart; `dashed` and `dotted` are dash effects;
 /// `wavy` is a sine path, the only one that is not a straight line at all.
-fn draw_deco_line(canvas: &Canvas, paint: &Paint, x0: f32, y: f32, w: f32, thickness: f32, style: u8) {
+fn draw_deco_line(
+    canvas: &Canvas,
+    paint: &Paint,
+    x0: f32,
+    y: f32,
+    w: f32,
+    thickness: f32,
+    style: u8,
+) {
     use protocol::decoration_style as ds;
     match style {
         ds::DOUBLE => {
@@ -598,10 +610,7 @@ fn draw_deco_line(canvas: &Canvas, paint: &Paint, x0: f32, y: f32, w: f32, thick
             while x < w {
                 let nx = (x + wavelength / 2.0).min(w);
                 let mid = (x + nx) / 2.0;
-                path.quad_to(
-                    (x0 + mid, if up { y - amp } else { y + amp }),
-                    (x0 + nx, y),
-                );
+                path.quad_to((x0 + mid, if up { y - amp } else { y + amp }), (x0 + nx, y));
                 x = nx;
                 up = !up;
             }

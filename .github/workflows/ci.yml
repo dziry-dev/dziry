@@ -101,6 +101,15 @@ jobs:
         run: cargo build --release
         working-directory: native-src/dziry-engine
 
+      # Upload before the tests, so a red suite still leaves the binary
+      # inspectable — diagnosing a platform failure needs the artifact most
+      # precisely when the tests fail.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ matrix.os }}
+          path: native-src/dziry-engine/target/release/${{ matrix.library }}
+          if-no-files-found: error
+
       # The cargo suite is headless by construction — goldens and screenshots
       # render to a surface, not a window — so it is the honest first signal
       # of whether the engine *works* here, not merely compiles.
@@ -109,9 +118,3 @@ jobs:
         working-directory: native-src/dziry-engine
         env:
           SDL_VIDEODRIVER: dummy
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: engine-${{ matrix.os }}
-          path: native-src/dziry-engine/target/release/${{ matrix.library }}
-          if-no-files-found: error
