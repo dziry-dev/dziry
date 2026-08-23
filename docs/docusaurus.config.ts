@@ -115,11 +115,35 @@ const config: Config = {
         { type: "docSidebar", sidebarId: "reference", position: "left", label: "Reference" },
         { type: "docSidebar", sidebarId: "architecture", position: "left", label: "Architecture" },
         { type: "docSidebar", sidebarId: "contributing", position: "left", label: "Contributing" },
+        {
+          href: "https://github.com/dziry-dev/dziry",
+          position: "right",
+          className: "header-github-link",
+          "aria-label": "GitHub repository",
+        },
       ],
     },
     footer: {
       style: "dark",
-      copyright: "dziry — compiled UI. Docs built from a tree that is checked, not remembered.",
+      links: [
+        {
+          title: "Docs",
+          items: [
+            { label: "Quick start", to: "/learn/getting-started/quick-start" },
+            { label: "Core concepts", to: "/learn/concepts/reactivity" },
+            { label: "Reference", to: "/reference" },
+          ],
+        },
+        {
+          title: "Project",
+          items: [
+            { label: "GitHub", href: "https://github.com/dziry-dev/dziry" },
+            { label: "npm", href: "https://www.npmjs.com/package/dziry" },
+            { label: "Contributing", to: "/contributing" },
+          ],
+        },
+      ],
+      copyright: `Copyright © ${new Date().getFullYear()} dziry-dev and contributors. MIT licensed.`,
     },
     prism: {
       theme: prismThemes.github,

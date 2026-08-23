@@ -23,30 +23,14 @@ bun run dev
 `bun create dziry` scaffolds the project, installs dependencies, and compiles
 it once. `bun run dev` opens the window with hot reload.
 
-### Options
-
-| Flag | Description |
-| --- | --- |
-| `--local <path>` | Depend on a local dziry checkout instead of the published package. |
-| `--no-install` | Write the files without installing dependencies. |
-
-Use `--local` when working on the framework itself:
-
-```bash
-bun create dziry my-app --local ../dziry
-```
-
 ## What the template contains
 
 The starter is a working application, not a minimal hello-world: eleven routes
 demonstrating the Tailwind utility families, conditional classes, a keyed
 list, component-local state, forms, and nested routing. Each page shows one
 feature working, so you can open the corresponding source file and copy the
-pattern.
-
-The template is generated from the framework's own demo application — the same
-one its visual regression tests render — so it always compiles against the
-version of dziry it ships with.
+pattern. The template always compiles against the version of dziry it ships
+with.
 
 ```
 my-app/

@@ -119,19 +119,14 @@ true for row 3 and false for row 4, and `cn("x", { on: sig })` cannot.
 
 ## CSS coverage
 
-dziry supports a subset of CSS, scoped to what Tailwind emits. The coverage is
-measured, not estimated:
-
-```bash
-bun run tailwind-coverage   # what fraction works, ranked by what blocks the rest
-bun run css-coverage        # supported / unsupported / committed non-goal
-bun run conformance         # compare emitted values against a browser
-```
+dziry supports a subset of CSS, scoped to what Tailwind emits. A utility
+outside the subset produces a build warning naming the property, so an
+unsupported class is never a silent no-op. (The exact coverage is measured by
+scripts in the repository — see [Contributing](../../contributing/index.mdx).)
 
 ### Known gaps
 
-The gaps you are most likely to notice — check the coverage runners for the
-current list:
+The gaps you are most likely to notice:
 
 - `line-height` is unsupported, so `text-sm` and `text-lg` set the font size
   and warn about the line height they carry.

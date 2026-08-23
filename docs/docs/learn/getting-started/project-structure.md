@@ -128,8 +128,7 @@ dziry dev --screenshot shot.png             # render one frame headlessly, then 
 ```
 
 `dev` compiles each window into its generated module (`ui.gen.ts`) and opens
-the app. In a framework checkout, use `bun run cli <command>` instead, and
-build the engine once with `bun run engine`.
+the app.
 
 Your application code runs in a worker thread, separate from the thread that
 owns the window, so a slow handler cannot freeze the UI. See

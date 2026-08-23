@@ -21,6 +21,16 @@ bun run window      # compile the demo window
 bun run dev         # open it
 ```
 
+In a checkout, CLI commands are `bun run cli <command>` — the `dziry` bin
+belongs to installed apps.
+
+To test a change against a real app, scaffold one that depends on your
+checkout instead of the published package:
+
+```bash
+bun create dziry test-app --local ../dziry     # add --no-install to skip installing
+```
+
 ## The test suite
 
 ```bash

@@ -53,13 +53,12 @@ Both `class` and `className` are accepted. `className` is the JSX convention.
 const draft = signal("");
 const onSave = () => {};
 
-<div
-  id="save-row"
-  className="flex gap-2"
-  style={{ padding: 8, fontWeight: 600 }}
-  onClick={onSave}
-  bind:value={draft}
-/>;
+<div id="save-row" className="flex gap-2" style={{ padding: 8 }}>
+  <input type="text" className="rounded bg-zinc-800 px-3 py-2" bind:value={draft} />
+  <button className="rounded bg-sky-600 px-3 py-2" onClick={onSave}>
+    Save
+  </button>
+</div>;
 ```
 
 ### onClick

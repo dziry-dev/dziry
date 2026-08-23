@@ -96,8 +96,7 @@ something behaves differently under `--single`, the difference is in the threadi
 rather than in your app.
 
 ```bash
-bun run cli dev --single
-bun run boundary-diff     # validates the tables before they are handed over
+dziry dev --single
 ```
 
 ## Two Bun behaviors worth knowing

@@ -28,10 +28,6 @@ both is reported as a duplicate rather than silently resolved.
 A `$` prefix makes a segment a parameter. Static segments match before
 parameters at the same depth, so `products/new` matches before `products/$id`.
 
-```bash
-bun run routes    # print the route table
-```
-
 ## The route signal
 
 Each window owns its route and hands it to `<Window>`:

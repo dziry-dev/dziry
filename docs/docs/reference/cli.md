@@ -11,9 +11,6 @@ dziry dev [-- app flags]      # compile, then run the app
 dziry build [options]         # package the app as one executable
 ```
 
-In a scaffolded app the `dziry` bin is on the path; in a framework checkout,
-use `bun run cli <command>`.
-
 The CLI operates on the current working directory.
 
 ## `dziry compile`
