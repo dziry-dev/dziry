@@ -6,12 +6,9 @@ slug: /
 
 # dziry
 
-A UI framework that does its work before the app runs.
-
-You write TSX and Tailwind. At build time the components are evaluated once, the
-cascade is resolved, and the answer is written out as typed arrays. At run time a
-Rust engine reads those arrays and draws — with no DOM, no virtual DOM, no CSS
-parser and no selector matching.
+dziry is a framework for building desktop applications in TypeScript, HTML and
+CSS. Your components and stylesheets are compiled ahead of time, and a native
+engine renders the result — there is no browser, no DOM, and no webview.
 
 ```tsx
 const count = signal(0);
@@ -21,9 +18,9 @@ const count = signal(0);
 </button>
 ```
 
-That `count` is a bare read. There is no `.value`, and no dependency array.
+Signals are read as plain identifiers — no `.value`, no dependency arrays.
 
-## Start
+## Installation
 
 ```bash
 bun create dziry my-app
@@ -31,18 +28,21 @@ cd my-app
 bun run dev
 ```
 
-## Where to go
+## Documentation
 
-- **[Guide](./guide/index.md)** — install, write a window, make it react.
-- **[API](./api/index.mdx)** — every surface, each marked with what actually works today.
-- **[Internals](./internals/index.mdx)** — the compile pipeline and the shared-memory boundary.
-- **[Contributing](./contributing/index.mdx)** — the guard scripts, and how to keep docs true.
+- **[What is dziry?](./learn/getting-started/what-is-dziry.md)** — the compilation model and what it means for your code.
+- **[Quick start](./learn/getting-started/quick-start.md)** — create a project and open your first window.
+- **[Core Concepts](./learn/concepts/reactivity.md)** — reactivity, routing, lists, styling, forms.
+- **[Reference](./reference/index.mdx)** — every exported API, with its current status.
+- **[Architecture](./architecture/index.mdx)** — how the compiler and the native engine fit together.
+- **[Contributing](./contributing/index.mdx)** — building the project and running its checks.
 
-## This is pre-1.0
+## Project status
 
-The API pages mark each surface **done**, **partial** or **planned**, and those badges
-are read from `API.md` at build time rather than typed by hand — so a page cannot claim
-a feature works while the tracking table says it does not.
+dziry is in beta. Each API in the [Reference](./reference/index.mdx) is marked
+**done**, **partial** or **planned**, and the badges are generated from the
+project's tracking table at build time — a page cannot claim a feature works
+when the tracking table says otherwise.
 
-`dziry build` produces a single executable with the engine embedded, but
-cross-compilation, signing and notarization are not done yet.
+`dziry build` produces a single executable with the engine embedded.
+Cross-compilation, code signing and notarization are not available yet.

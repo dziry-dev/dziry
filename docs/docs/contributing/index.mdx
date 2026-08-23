@@ -5,23 +5,47 @@ sidebar_position: 1
 
 # Contributing
 
-This repo replaces opinions with measurements wherever it can. The result is a set of
-guard scripts, and knowing which one to reach for is most of knowing how to work here.
+The repository is [dziry-dev/dziry](https://github.com/dziry-dev/dziry). It
+contains the compiler and runtime (TypeScript, under `src/`), the native
+engine (Rust, under `native-src/dziry-engine/`), the docs site (`docs/`), and
+the verification tooling (`guards/` and `scripts/`).
 
-## The governing principle
+## Setup
+
+```bash
+git clone https://github.com/dziry-dev/dziry
+cd dziry
+bun install
+bun run engine      # build the Rust engine (requires a Rust toolchain)
+bun run window      # compile the demo window
+bun run dev         # open it
+```
+
+## The test suite
+
+```bash
+bun run test              # bun test + cargo test
+bun run check             # tsc over src, scripts, windows, and architecture
+bun run lint              # cargo fmt --check && clippy
+```
+
+Run these before any commit that touches more than one area.
+
+## The design rule
 
 > Nothing stays dynamic unless it is proven it must.
 
-Before adding anything to the runtime — a per-frame cost, runtime state, a new entry in
-the shared-memory schema — the question is whether the work can happen at build time
-instead. `bun run runtime-surface` holds the runtime to a ratchet: exported symbols and
-bundled bytes may fall freely and may not rise without editing the baseline in the same
-commit.
+Before adding anything to the runtime — a per-frame cost, runtime state, a new
+entry in the shared-memory schema — ask whether the work can happen at build
+time instead. `bun run runtime-surface` enforces this as a ratchet: the
+runtime's exported symbols and bundled bytes may fall freely, but may not rise
+without editing the baseline in the same commit.
 
-## The guards
+## The guard scripts
 
-Each of these proves one thing. Several use a browser or `mdn-data` as an **oracle** —
-they compare dziry against an external authority rather than against itself.
+Each guard proves one thing. Several use a browser or `mdn-data` as an
+**oracle**, comparing dziry against an external authority rather than against
+itself:
 
 <Guards />
 
@@ -30,35 +54,32 @@ Two more that are not in that table:
 | Run | Proves |
 | --- | --- |
 | `bun run docs-check` | Doc examples compile against the real types; the public API is covered; frontmatter is present. |
-| `bun run arch:check` | The architecture map still matches the repo. `--emit` regenerates `ARCHITECTURE.md`. |
+| `bun run arch:check` | The architecture map still matches the repository. `--emit` regenerates the diagram data. |
 
-## Which one to run
+## Which guard to run
 
 | You changed | Run |
 | --- | --- |
 | A CSS property, or `STYLE_FIELDS` | `conformance`, `spec-audit`, `css-coverage` |
 | `src/protocol/schema.ts` | `protocol-guard` |
-| Anything in `src/compiler/` | `characterize` first, to freeze the before |
+| Anything in `src/compiler/` | `characterize` first, to freeze the current output |
 | `paint.rs`, `layout.rs`, `text.rs` | `golden` |
 | Taffy style construction, sizing, wrapping | `layout-diff` |
 | The emitter, list splicing, relinking, `hidden` | `boundary-diff` |
 | The authoring API in `src/index.ts` | `docs-check` |
 | Any doc, or any file a doc cites | `doc-lint` |
 
-Before a commit that touches more than one of those: `bun run test && bun run check`.
+## Claims and measurements
 
-## The whole suite
-
-```bash
-bun run test              # bun test + cargo test
-bun run check             # tsc over src, scripts, windows, and architecture
-bun run lint              # cargo fmt --check && clippy
-```
+Prefer running the relevant script to quoting a number found in prose. For
+coverage in particular, `bun run tailwind-coverage` is the measurement; a
+percentage written in a document is only a record of one.
 
 ## Working on docs
 
-The docs site is `docs/`, and it is built rather than merely written — a rotted
-citation fails `bun run docs:build`, and so does an example that no longer compiles.
+The docs site is `docs/`, and it is built rather than merely written: a
+citation that no longer resolves fails `bun run docs:build`, and so does an
+example that no longer compiles.
 
 ```bash
 bun run docs              # dev server; citations warn instead of failing
@@ -66,14 +87,4 @@ bun run docs-check        # examples, API coverage, frontmatter
 bun run docs:build        # the gate: doc-lint + docs-check + build
 ```
 
-See [Writing docs](./writing-docs.md) for the rules that keep them true, and the one failure
-no checker can catch.
-
-## A note on measurements
-
-`NOTES.md` contains numbers from before the Rust engine landed, sitting unlabelled next
-to current ones. Check provenance before quoting any figure from it, and prefer running
-the relevant script to citing a number you found written down.
-
-The same applies to coverage claims. `bun run tailwind-coverage` is the measurement; a
-percentage in prose is a memory of one.
+See [Writing docs](./writing-docs.md) for the conventions.

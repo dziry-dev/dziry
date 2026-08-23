@@ -1,8 +1,8 @@
 # dziry
 
-A UI framework for building **real desktop apps** with TypeScript, HTML and CSS —
-compiled ahead of time, rendered by a native engine. No browser engine, no DOM,
-no webview.
+dziry is a framework for building desktop applications in TypeScript, HTML and
+CSS — compiled ahead of time, rendered by a native engine. No browser engine,
+no DOM, no webview.
 
 > **Beta.** The authoring API is usable and tested, and it is still moving.
 > Expect breaking changes between beta releases; each one is called out in the
@@ -53,17 +53,18 @@ relayout. Reactivity is bare signal reads (`count * 2`, no `.value`, no
 dependency arrays) rewritten at build time. What remains at runtime is current
 state — and the runtime is held to a byte-count ratchet in CI.
 
-- **Windows and routing** — `<Window>`, file-path routes with typed `href`
+- **Windows and routing** — `<Window>`, file-based routes with typed `href`
   checking, loaders (sync, async, or [Effect](https://effect.website)),
   `navigate()`/`back()`
 - **State** — signals, computeds, effects, `resource()` with `<Suspense>`,
   `<Show>`, keyed lists with arena-backed reordering
-- **Forms** — payload by `name`, nested `field` groups, validation with any
-  Standard Schema, `:invalid` styling
-- **Native-feeling controls** — text input with caret/selection/clipboard,
-  checkbox, radio, `<select>` with its picker; keyboard traversal, `:focus-visible`
-- **Discipline** — behaviour is measured against Chrome (headless probes,
-  layout diff, pixel goldens), never recalled
+- **Forms** — payload collected by `name`, nested `field` groups, validation
+  with any Standard Schema or Effect schema, `:invalid` styling
+- **Native-feeling controls** — text input with caret, selection and
+  clipboard; checkbox, radio, `<select>` with its picker; keyboard traversal
+  and `:focus-visible`
+- **Verified against a browser** — CSS behavior is tested against Chrome with
+  headless probes, layout diffs and pixel goldens, not implemented from memory
 
 ## Getting started
 
@@ -81,17 +82,18 @@ executable.
 
 ## Documentation
 
-The docs live at **[dziry.dev](https://dziry.dev)** — a getting-started guide,
-the full authoring API, and the design notes behind the decisions.
+The documentation lives at **[dziry.dev](https://dziry.dev)**: a quick start,
+the core concepts, the full API reference with per-feature status, and the
+architecture behind it.
 
-## What it is not
+## What dziry is not
 
-dziry is a UI framework, not a browser. Floats, tables, writing modes,
-fragmentation and print are committed non-goals; the CSS surface is scoped to
-what Tailwind emits, measured and reported as a percentage rather than claimed.
-Accessibility today means real keyboard operability — an assistive-technology
-surface (UIAutomation/NSAccessibility/AT-SPI) is on the roadmap and not yet
-built.
+dziry renders applications, not documents. Floats, tables, writing modes,
+fragmentation and print are committed non-goals, and the CSS surface is scoped
+to what Tailwind emits — coverage is measured by a script in the repository
+rather than claimed. Accessibility today means real keyboard operability; an
+assistive-technology surface (UIAutomation/NSAccessibility/AT-SPI) is planned
+and not yet built.
 
 ## License
 

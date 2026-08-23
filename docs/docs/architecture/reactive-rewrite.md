@@ -97,14 +97,15 @@ that told you to write something `tsc` rejects is the worst of both.
 So `Signal<T>` is declared as `T & Ops<T>` — the value's type, intersected with the
 signal's methods.
 
-That intersection was rejected once, for a real reason: an intersection containing
-`number` is comparable to a number literal, so `count === 7` would type-check and be
-`false` for ever. The transform is what changes the answer — `$(count) === 7` is simply
-correct — so the type is no longer promising something the runtime fails to deliver.
+This intersection is only sound *because* the rewrite exists. An intersection
+containing `number` is comparable to a number literal, so `count === 7`
+type-checks — and without the rewrite it would be `false` forever. With it,
+`$(count) === 7` is simply correct, so the type promises nothing the runtime
+fails to deliver.
 
-That dependency runs one way and is worth stating plainly: **the type is only honest
-where the rewrite runs.** Under `windows/`, it does. In framework code it does not,
-which is why `Ops` still carries `.value` and why `src/` reads through it.
+The dependency runs one way: **the type is only honest where the rewrite
+runs.** Under `windows/`, it does. In framework code it does not, which is why
+`Ops` still carries `.value` and the framework's own source reads through it.
 
 ## Collecting reads
 

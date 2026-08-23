@@ -5,8 +5,9 @@ sidebar_position: 3
 
 # Two threads
 
-The window cannot be frozen by the app. That is the whole reason this exists, and
-everything below follows from it.
+dziry runs application code and window servicing on separate threads so the
+app can never freeze the window. Everything on this page follows from that
+requirement.
 
 ## The split
 
@@ -22,32 +23,28 @@ What it *can* do is write the tables, which is the part that matters.
 
 ## Zero-copy survives the split
 
-This is the part that could easily have been lost. The Worker writes **the same engine
-memory**, not a copy of it: the engine thread sends addresses across, and the Worker
-wraps them with `toArrayBuffer`.
+The worker writes **the same engine memory**, not a copy of it: the engine
+thread sends addresses across, and the worker wraps them with `toArrayBuffer`.
+A style patch or a list relink therefore costs exactly what it costs
+single-threaded — moving app code off the main thread did not turn the memory
+boundary into a message protocol.
 
-So a style patch and a list relink cost exactly what they cost single-threaded. The
-boundary is still memory, and moving app code off the main thread did not turn it into
-a message protocol.
+## What the split is worth
 
-## What it buys, measured
+Without it, a slow handler means no `tick()`, which means no
+`SDL_PumpEvents`, which means the OS marks the window unresponsive — the grey
+overlay on Windows, the beach ball on macOS.
 
-A handler that takes 400 ms no longer freezes the window. Before, a slow handler meant
-no `tick()`, which meant no `SDL_PumpEvents`, which meant the OS marked the window
-unresponsive — the grey overlay on Windows, the beachball on macOS.
-
-With the app thread deliberately wedged for 2 seconds of a 3-second run:
+Measured with the app thread deliberately wedged for 2 seconds of a 3-second
+run:
 
 | | Frames rendered |
 | --- | --- |
 | Single-threaded | 62 |
 | Worker | 190 |
 
-All 14 visual goldens render pixel-identically through the Worker path.
-
-This had been filed in `ROADMAP.md` as "only worth doing if the event watcher turns out
-to be insufficient". It was: the watcher saves a live-resize drag and does nothing at
-all for a slow handler, which is the common case.
+All visual regression goldens render pixel-identically through the worker
+path.
 
 ## The lock, and the one asymmetry
 
@@ -103,12 +100,9 @@ bun run cli dev --single
 bun run boundary-diff     # validates the tables before they are handed over
 ```
 
-## Two Bun behaviours worth knowing
+## Two Bun behaviors worth knowing
 
-Both were wrong in the optimistic direction, and both had to be measured rather than
-assumed:
-
-- A Worker inherits **neither** the parent's loader plugins **nor** its `process.argv`.
-
-The first is why the reactive rewrite has to be installed on the Worker side
-explicitly; the second is why app flags are passed across rather than read.
+A worker inherits **neither** the parent's loader plugins **nor** its
+`process.argv`. The first is why the reactive rewrite is installed on the
+worker side explicitly; the second is why app flags are passed across rather
+than read.

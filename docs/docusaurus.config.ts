@@ -111,9 +111,9 @@ const config: Config = {
     navbar: {
       title: "dziry",
       items: [
-        { type: "docSidebar", sidebarId: "guide", position: "left", label: "Guide" },
-        { type: "docSidebar", sidebarId: "api", position: "left", label: "API" },
-        { type: "docSidebar", sidebarId: "internals", position: "left", label: "Internals" },
+        { type: "docSidebar", sidebarId: "learn", position: "left", label: "Docs" },
+        { type: "docSidebar", sidebarId: "reference", position: "left", label: "Reference" },
+        { type: "docSidebar", sidebarId: "architecture", position: "left", label: "Architecture" },
         { type: "docSidebar", sidebarId: "contributing", position: "left", label: "Contributing" },
       ],
     },

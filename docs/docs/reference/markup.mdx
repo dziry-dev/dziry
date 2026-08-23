@@ -32,7 +32,7 @@ nothing at all per frame.
 Accepts strings, `false`, `null`, `undefined`, and objects. A literal boolean is
 resolved immediately — `cn({ big: true })` is just `"big"`, with no runtime mechanism.
 
-:::danger This is the one to get right
+:::danger Use `cn`, not string concatenation
 
 ```tsx no-check
 // Wrong — evaluates a signal object at build time and freezes.
@@ -87,8 +87,7 @@ Either CSS text or an object of camelCased properties:
 
 A number means pixels, except for the genuinely unitless properties — `fontWeight`,
 `flexGrow`, `flexShrink`, `flex`, `aspectRatio`, `gridColumn`, `gridRow`, `zIndex`,
-`opacity`, `lineClamp`. Same rule React uses, chosen because it is the one people
-already have.
+`opacity`, `lineClamp` — the same convention React uses.
 
 Inline styles are applied after the cascade and beat every selector, matching browser
 precedence. Both forms resolve at build time and cost the runtime nothing.
@@ -173,7 +172,7 @@ drift apart.
 | `<select name="x">` | `string` |
 | `<select name="x" multiple>`, or two controls sharing a name | `string[]` |
 
-Which controls are *in* the payload is the browser's rule, measured rather than recalled: a control
+Which controls are *in* the payload follows the browser's rules: a control
 with no `name` is left out, so is a disabled one — including one disabled by an enclosing
 `<fieldset disabled>` — an unticked checkbox contributes nothing, and an `<option>` with no `value`
 submits its trimmed text.
@@ -238,7 +237,7 @@ stable to hang a per-row cell on, while the array has an entry and a key per row
 the array is the state — `bind:value={job.title}` writes back into it, and adding a row is an
 ordinary `signal.set`. The entry is the item as authored, `key` property included.
 
-See the [Forms guide](../guide/forms.md) for the whole feature end to end.
+See [Forms](../learn/concepts/forms.md) for the whole feature end to end.
 
 ### errorClassName
 
@@ -276,7 +275,7 @@ message narrows to issues at its own path so the two do not say the same thing t
 
 The *control* is styled with **`:invalid`** rather than with this class — a predicate, resolved
 per node, which is what lets one list row be red and the next one not: replicas share a style
-row but not a control row. See the [Forms guide](../guide/forms.md#styling-the-field-itself-invalid).
+row but not a control row. See [Forms](../learn/concepts/forms.md#styling-an-invalid-control).
 
 ### validateOn
 

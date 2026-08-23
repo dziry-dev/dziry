@@ -1,0 +1,160 @@
+---
+title: Routing
+sidebar_position: 5
+---
+
+# Routing
+
+Routes come from files. Everything about them except the current path is
+resolved at compile time.
+
+## The route table
+
+<Status of="route-table-from-windows-pages" />
+Files under `windows/<name>/pages/**` become routes:
+
+| File | Route |
+| --- | --- |
+| `pages/index.tsx` | `/` |
+| `pages/layout.tsx` | `layout` |
+| `pages/products.tsx` | `products` |
+| `pages/products/new.tsx` | `products/new` |
+| `pages/products/$id.tsx` | `products/$id` |
+
+`index` names the directory it sits in, so `pages/products/index.tsx` also
+produces `products` — that collision is reported as a duplicate rather than
+resolved by a rule.
+
+A `$` prefix makes a segment a parameter. Static segments match before
+parameters at the same depth, so `products/new` matches before `products/$id`.
+
+```bash
+bun run routes    # print the table
+```
+
+## useRouter
+
+<Status of="useRouter" />
+Read access to the window's current route.
+
+```tsx no-check
+const router = useRouter();
+
+<div>You are at {router.path}</div>;
+```
+
+### router.path
+
+<Status of="useRouter().path" />
+The active route, as an ordinary signal — the window's own, by identity.
+Interpolating it creates a text binding that follows navigation, and anything
+derived from it is a `computed` like any other.
+
+### router.matches
+
+<Status of="useRouter().matches(path)" />
+```tsx no-check
+<button className={cn("link", { active: router.matches("layout") })}>Layout</button>
+```
+
+True while the active route is `path` or nested under it. Prefix-aware:
+`matches("products")` is true on `products/new` too, which is what a
+navigation entry naming a section wants.
+
+:::danger Do not compare `router.path` with `===`
+
+```tsx no-check
+// Wrong: always false.
+router.path === "layout";
+```
+
+`router.path` is a signal, so comparing it to a string compares an object to a
+string. The build succeeds and the link never highlights. Use `matches`, or —
+for exact equality — declare a `computed` in the window's own module, where
+the route signal lives:
+
+```ts no-check
+export const onNewProduct = computed(() => route === "products/new");
+```
+
+That works because the reactive rewrite applies to your modules.
+:::
+
+`useRouter()` is read-only. Anything derived from the route belongs in the
+window's module as a `computed`, because a `computed()` created inside a
+component has no export name for the generated module to import.
+
+Calling `useRouter()` in a window that did not pass `route` to `<Window>` is
+an error naming the fix.
+
+## useRoute
+
+<Status of="useRoute" />
+```tsx no-check
+export default function ProductDetail() {
+  const route = useRoute("products/$id");
+  // ...
+}
+```
+
+The string must match the file's own path under `pages/` — it is what types
+the parameters, and nothing else verifies it, so a mismatch is an error naming
+both paths.
+
+<Status of="useroute-params-as-bindings" />
+Parameters are live bindings: `{id}` in the component is a signal the router
+writes on navigation, so going from `products/1` to `products/2` updates the
+rendered text without rebuilding anything.
+
+## navigate and back
+
+<Status of="navigate" />
+```ts no-check
+import { navigate, back } from "dziry";
+
+export const goLayout = () => navigate("layout");
+```
+
+`navigate(path)` writes the window's route signal (with a same-path early-out);
+`back()` returns to the previous route. History is one entry deep by design —
+a second `back()` returns to where you just were, not anywhere older.
+
+String literals passed to `navigate` in captured handlers are checked against
+the route table at build time, the same way `href` is; a computed path is
+yours to get right. Calling `navigate()` at module scope — where no window
+exists yet — warns and does nothing, because modules are also imported by the
+compiler.
+
+Links navigate on their own: `<a href="products/new">` is checked against the
+route table at build time, and a path the table cannot match fails the compile.
+An authored `onClick` on a link takes precedence over the synthesized
+navigation.
+
+## Href
+
+<Status of="Href" />
+Each window generates an `Href` union from its route table, so a typo in a
+static segment is a type error.
+
+A static route contributes a string literal; a parameter contributes
+`${string}`, so both `"products/1"` and a template literal type-check.
+
+:::note Limits of the type
+
+`${string}` spans slashes, so the type also accepts `products/a/b/c` —
+TypeScript catches typos, the compiler catches shape.
+
+A parameter in the *first* segment — `pages/$slug.tsx` — contributes a bare
+`${string}`, which absorbs every other member and widens that window's `Href`
+to `string`. The type then checks nothing; the build-time link audit still
+does.
+:::
+
+## Types
+
+```ts
+import type { Args, Route, Router } from "dziry";
+```
+
+`Args<P>` maps a path's parameter names to strings — `Args<"products/$id">` is
+`{ id: string }`.

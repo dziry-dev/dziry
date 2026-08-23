@@ -60,15 +60,14 @@ error for the same reason.
 export const route = signal("/");
 ```
 
-Passed **in** rather than imported from the framework, and this is the whole of
-navigation's plumbing: the host subscribes, looks the path up in the route table, and
-writes `hidden` over the routes that left the chain.
+The route signal is passed in rather than imported from the framework: the
+host subscribes to it, looks the path up in the route table, and updates
+visibility for the routes that entered or left the active chain.
 
-A module-level `currentRoute` inside dziry would make every window share one route,
-and two windows on different routes is the normal case. Passing it in makes the
-ownership explicit.
-
-Everything else about a route is decided at compile time.
+A global `currentRoute` inside dziry would force every window to share one
+route, and two windows on different routes is the normal case. Passing the
+signal in makes the ownership explicit. Everything else about a route is
+resolved at compile time — see [Routing](./routing.mdx).
 
 ## Outlet
 
@@ -77,20 +76,18 @@ Everything else about a route is decided at compile time.
 <Outlet />
 ```
 
-Where the matched route renders. Takes nothing.
+Where the matched route renders. Takes no props.
 
-Boundaries — `fallback`, `error`, `notFound` — are carried in `API.md` as proposals
-that have not been decided, and adding them here would settle by accident what has
-not been settled on purpose.
+Boundary props — `fallback`, `error`, `notFound` — are tracked in the API
+table as undecided proposals and are not documented here until they are.
 
 ## One table set per window
 
 <Status of="hidden" />
-Every route in a window compiles into **one** set of tables, with an emitted `hidden`
-column. Navigating does not build anything: it flips `hidden` over the routes that
-left the chain and clears it on the ones that joined.
-
-That is why route changes cost integer writes rather than a render.
+Every route in a window compiles into **one** set of tables with a `hidden`
+column. Navigation builds nothing: it sets `hidden` on the routes that left
+the active chain and clears it on the ones that joined — integer writes, then
+a repaint.
 
 ## Types
 

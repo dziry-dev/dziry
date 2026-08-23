@@ -1,0 +1,85 @@
+---
+title: Overview
+sidebar_position: 1
+---
+
+# Architecture
+
+How a `<div>` becomes pixels, and where the boundary between TypeScript and
+the native engine sits.
+
+dziry's design follows one rule: **work is done at compile time unless it
+provably cannot be.** Every feature is asked, in order: can the compiler
+resolve it? precompute it? enumerate its variants? If the answer is yes, no
+runtime code ships for it. What remains dynamic — current state values, list
+contents, text measurement, hit-testing, the window size — is a short,
+deliberate list, and the runtime is held to a byte-count ratchet in CI to keep
+it that way.
+
+:::info Generated from checked data
+
+The pipeline stages, shared-memory table roles and guard lists on these pages
+are rendered from `guards/architecture/data.ts`, which `bun run arch:check`
+validates against the repository — a cited file that moves or a table with no
+documented writer fails that check.
+:::
+
+## The pipeline
+
+Six stages, five of which happen before the app runs.
+
+1. **You write** TSX and a stylesheet.
+2. **Evaluate** — importing the module runs your components, once. There is no
+   renderer and no virtual DOM; the tree they return is the tree that gets
+   compiled.
+3. **Resolve** — selectors match, specificity sorts, inheritance applies,
+   shorthands expand, units convert. This is the step a browser redoes every
+   frame; dziry does it once, and the result is a set of numbers.
+4. **Emit** — the numbers are written out as a TypeScript module of typed
+   arrays: the in-memory representation itself, not a format that needs
+   parsing.
+5. **Write** — across the boundary. Bun holds typed-array views over memory
+   the *engine* allocated, so an upload is a store instruction, not a call.
+6. **Draw** — Rust, with Skia for paint and Taffy for layout.
+
+## Build time
+
+<Pipeline phase="build" />
+
+## The boundary
+
+<Pipeline phase="boundary" />
+
+## Every frame
+
+<Pipeline phase="frame" />
+
+The frame phase runs on two threads: the engine thread owns the engine handle
+and services the OS, while the application runs in a worker that writes the
+same engine memory. See [Two threads](./threads.md) — in particular why the
+engine thread may only *try* the lock, and why a missed commit is skipped
+rather than delayed.
+
+## The shared-memory tables
+
+The boundary is memory, not a call surface. The layout is struct-of-arrays,
+because the engine reads one field across every node at a time, and a
+struct-of-structs layout would drag unused fields into cache on every read.
+
+Table definitions live in `src/protocol/schema.ts` and are imported by the
+architecture map directly, so the two cannot disagree. What the schema does
+not record is each table's *direction* — who writes and who reads — which is
+the first thing to know when debugging a wrong frame:
+
+<TableRoles />
+
+`bun run protocol-guard` verifies the two sides agree on offsets, field
+identity, enums and FFI symbols. `bun run boundary-diff` validates the tables
+before they are handed over — link consistency, index ranges, sibling-chain
+cycles, arena bounds.
+
+## Further reading
+
+- **[The reactive rewrite](./reactive-rewrite.md)** — how `count * 2` compiles when `count` is a signal.
+- **[Two threads](./threads.md)** — the engine thread, the app worker, and the lock between them.
+- `bun run arch` — the interactive architecture map, in the repository.

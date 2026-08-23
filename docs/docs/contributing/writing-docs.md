@@ -5,13 +5,13 @@ sidebar_position: 2
 
 # Writing docs
 
-The docs are built, not merely written. Three kinds of drift fail the build; one kind
-cannot, and that is the one to watch.
+The docs are built, not merely written: three kinds of drift fail the build.
+A fourth kind cannot, and it is covered at the end of this page.
 
-## Facts are read, never restated
+## Read facts from the source, never restate them
 
 A second copy of a fact is the copy that goes stale — and it goes stale in the
-flattering direction, still claiming a feature works months after it stopped.
+flattering direction, still claiming a feature works after it stopped.
 
 | Fact | Read from | Written as |
 | --- | --- | --- |
@@ -61,12 +61,13 @@ its filename.
 Every check above is mechanical: the citation resolves, the example compiles, the name
 is exported. None of them read the sentence.
 
-That is not hypothetical. On 2026-07-31 a cited comment in this repo turned out to state
-the *opposite* of what the doc claimed, and an API design was built on it before anyone
-opened the file. `doc-lint` was green throughout, because the line number was fine.
+This has happened in this repository: a cited comment turned out to state the
+*opposite* of what the doc claimed, and a design was built on the claim before
+anyone opened the file. `doc-lint` was green throughout, because the line
+number still resolved.
 
-So a clean run means "nothing dangling, nothing that fails to compile". It does not mean
-the docs are right. **When you change behaviour, read the page.**
+A clean run means "nothing dangling, nothing that fails to compile" — not
+"the docs are right". **When you change behavior, read the page.**
 
 ## House style
 
@@ -79,8 +80,8 @@ the docs are right. **When you change behaviour, read the page.**
 - **Name the failure.** "This compiles cleanly and never updates" is more useful than
   "this is incorrect", because it says what the reader will actually see.
 - **Prefer an example that compiles** over one that reads well.
-- **Do not quote measurements.** Point at the script. A percentage in prose is a memory
-  of a measurement.
+- **Do not quote measurements.** Point at the script that produces them — a
+  number written in prose is only a record of one run.
 - Pages using components must be `.mdx`. Plain `.md` is CommonMark and renders
   `<Status/>` as literal text.
 

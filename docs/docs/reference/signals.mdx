@@ -36,8 +36,8 @@ const isThree = computed(() => count === 3);
 const label = computed(() => `count is ${count}`);
 ```
 
-All four work, including `===`, which is the one people expect to be broken. A
-build-time rewrite turns `count === 3` into `$(count) === 3`.
+All of these work, including `===`. A build-time rewrite turns `count === 3`
+into `$(count) === 3` — see [Reactivity](../learn/concepts/reactivity.md).
 
 ### Writing
 
@@ -91,7 +91,7 @@ erased: the generated module imports every cell by name, and an anonymous one ha
 name. Declare derived state in a module beside the signal it derives from.
 
 Component-local *state* is different, and does work — see
-[component-local state](../guide/reactivity.md#component-local-state).
+[component-local state](../learn/concepts/reactivity.md#component-local-state).
 :::
 
 ## batch
@@ -146,7 +146,7 @@ the module), and the unsubscribe runs on window close.
 What the subscribe **returns** decides the shape. Return an unsubscribe and it is a
 callback source that needs nothing. Return an Effect `Stream` and dziry runs it
 with `Stream.runForEach`, importing `effect` lazily — see
-[Effect](../guide/effect.md#source--a-signal-from-a-stream).
+[Using Effect](../learn/guides/effect.md#feeding-a-signal-from-a-stream).
 
 ```ts no-check
 export const todos = source<Todo[]>(() => liveTodos(), []);
@@ -170,12 +170,10 @@ drawn by the framework would be the one part of your app that does not look like
 `level` is an `AlertLevel` — `"info"` (the default), `"warning"` or `"error"` — and `title` defaults to your
 window's own title. The window stops repainting while the box is up, which is what a modal is.
 
-**The box shows the frame that caused it.** The call is queued until the app thread's next
-commit and the engine paints once more before it blocks, so an alert raised from a handler that
-also changed the page shows the *changed* page behind it. Without that it did the opposite, in
-the case that matters most: a form listing every complaint inside the dialog with none of them
-visible behind it, because the alert is raised inside the same `batch()` that wrote them and a
-batch defers its subscribers to the end.
+**The dialog shows the frame that caused it.** The call is queued until the app
+thread's next commit, and the engine paints once more before it blocks — so an
+alert raised from a handler that also changed the page shows the changed page
+behind it, even when both happen inside one `batch()`.
 
 **Import it.** Bun defines a *global* `alert()` that writes to stdout and waits for Enter on
 stdin, so forgetting the import hangs your app thread on a terminal nobody is watching.

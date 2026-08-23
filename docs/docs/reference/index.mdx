@@ -1,0 +1,47 @@
+---
+title: Overview
+sidebar_position: 1
+---
+
+# API Reference
+
+Everything an application needs is exported from the `dziry` package:
+
+```ts no-check
+import { signal, computed, cn, Window, Outlet, useRouter } from "dziry";
+```
+
+Deep import paths (`dziry/runtime/signal.ts` and similar) resolve because the
+compiler writes them into generated modules, but they are not public API. The
+supported surface is what the package's root export provides.
+
+## Build-time and run-time APIs
+
+The exports split into two groups that run at different times, and the split
+explains most errors you can hit:
+
+- **Build time.** `Window`, `Outlet`, `cn`, `bind`, `useRoute` and `useRouter`
+  run inside the compiler and do not exist in the shipped app.
+- **Run time.** `signal`, `computed`, `batch`, `isSignal` and `$` are the
+  runtime.
+
+They are exported together because they are written together — a page imports
+`cn` and the signal it conditions on from the same place. But the split is why
+a signal created inside a component has nowhere to live, and why an inline
+style with a non-static value is a build error rather than a silent drop.
+
+## Pages
+
+- **[Signals](./signals.mdx)** — `signal`, `computed`, `effect`, `batch`, `source`, `resource`, and the rest of the runtime.
+- **[Markup](./markup.mdx)** — `cn`, `bind`, `Fragment`, props, inline styles, lists.
+- **[Window](./window.mdx)** — `Window`, `Outlet`, and window configuration.
+- **[Routing](./routing.mdx)** — `useRoute`, `useRouter`, `Href`.
+- **[CLI](./cli.md)** — `dziry compile`, `dziry dev`, `dziry build`.
+
+## API status
+
+Each API below is marked **done**, **partial** or **planned**. The badges are
+generated at build time from the project's tracking table (`API.md`), so this
+page cannot disagree with it.
+
+<StatusTable />
