@@ -113,21 +113,45 @@ jobs:
 
       # Engine packages first: dziry's exact-version optionalDependencies
       # point at them, so an install of the main package 404s until they land.
+      #
+      # Each publish is skipped when that exact version is already on the
+      # registry, so a partially-failed release can simply be re-run — npm's
+      # spam heuristic 403'd the fifth of five rapid-fire publishes once, and
+      # without the skip the re-run died on the first already-published
+      # package instead of reaching the missing one.
       - name: publish engine packages
         run: |
           for dir in dist/engine-packages/*/; do
+            name=$(node -p "require('./${dir}package.json').name")
+            version=$(node -p "require('./${dir}package.json').version")
+            if npm view "$name@$version" version >/dev/null 2>&1; then
+              echo "$name@$version is already on the registry — skipping"
+              continue
+            fi
             npm publish "$dir" --access public --provenance
           done
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: publish dziry
-        run: npm publish --access public --provenance
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "dziry@$version" version >/dev/null 2>&1; then
+            echo "dziry@$version is already on the registry — skipping"
+          else
+            npm publish --access public --provenance
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: publish create-dziry
-        run: npm publish --access public --provenance
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if npm view "create-dziry@$version" version >/dev/null 2>&1; then
+            echo "create-dziry@$version is already on the registry — skipping"
+          else
+            npm publish --access public --provenance
+          fi
         working-directory: packages/create-dziry
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
