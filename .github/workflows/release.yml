@@ -53,6 +53,19 @@ jobs:
         with:
           workspaces: native-src/dziry-engine
 
+      # Intel mac only breaks here, but the env is right for both mac targets.
+      # rustc's default deployment target for x86_64-apple-darwin is 10.12 —
+      # older than every prebuilt Skia object (10.13), and old enough that
+      # SDL's Cocoa code emits __isPlatformVersionAtLeast for its @available
+      # checks, a symbol that lives in clang's builtins library, which rustc
+      # never links. Target Big Sur the way the arm64 toolchain already does,
+      # and hand the linker clang_rt for whatever availability checks remain.
+      - name: macos link environment
+        if: runner.os == 'macOS'
+        run: |
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+          echo "RUSTFLAGS=-C link-arg=$(clang --print-libgcc-file-name)" >> "$GITHUB_ENV"
+
       - name: linux build dependencies
         if: runner.os == 'Linux'
         run: |
