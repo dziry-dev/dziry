@@ -1,17 +1,19 @@
-# The verification battery, on the one platform the engine is proven on —
-# plus experimental engine builds for the two it is not, yet.
+# The verification battery on Windows, plus the engine's cargo suite on mac
+# and linux.
 #
-# Windows is the gate: the engine has only ever been built and measured there
-# (the MSVC 14.4x floor is recorded in ROADMAP P0). Pixel goldens are
-# deliberately NOT here: they render text through the platform font stack, and
-# a runner's font/AA config drifting from the blessing machine would fail
-# honest code. Everything else in the battery is deterministic.
+# The full battery runs once, on windows-latest: the TS suite, the compiler
+# guards and the docs checks are platform-independent, so re-running them per
+# OS would triple the cost to learn nothing. Pixel goldens are deliberately
+# NOT here: they render text through the platform font stack, and a runner's
+# font/AA config drifting from the blessing machine would fail honest code.
+# Everything else in the battery is deterministic.
 #
-# The mac and linux jobs build the engine and run its headless cargo suite.
-# `continue-on-error` while they are experimental: a red mac build must not
-# gate a Windows push until someone has actually watched a window open there.
-# Each uploads its library as an artifact — the future per-platform release
-# binaries, inspectable today.
+# The mac and linux jobs build the engine and run its headless cargo suite —
+# and they gate. All three platforms went green on 2026-08-23 (the surface is
+# pinned BGRA everywhere; the decoration tests measure against each platform's
+# own font metrics), so a red one is a regression, not an experiment.
+# The release workflow builds these same engines into per-platform npm
+# packages; a broken platform must fail here, not at publish time.
 name: ci
 
 on:
@@ -74,7 +76,6 @@ jobs:
           - os: ubuntu-latest
             library: libdziry_engine.so
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

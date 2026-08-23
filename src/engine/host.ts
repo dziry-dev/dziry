@@ -11,7 +11,7 @@
  * regrow. Neither side hardcodes the other's layout.
  */
 import { dlopen, FFIType, ptr, type Pointer } from "bun:ffi";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { existsSync } from "node:fs";
 import {
   EventKind,
@@ -135,27 +135,55 @@ export function useEngineLibrary(path: string): void {
   override = path;
 }
 
+/**
+ * The engine binary inside this platform's `dziry-engine-*` package, if it is
+ * installed.
+ *
+ * Each release publishes one tiny package per platform — `dziry-engine-win32-x64`,
+ * `dziry-engine-darwin-arm64`, … — and `dziry` lists all of them as
+ * `optionalDependencies`, so the installer keeps only the one whose `os`/`cpu`
+ * match. The packages carry no JavaScript at all; the resolvable file is their
+ * manifest, and the binary sits next to it.
+ */
+function enginePackagePath(name: string): string | null {
+  try {
+    const manifest = Bun.resolveSync(
+      `dziry-engine-${process.platform}-${process.arch}/package.json`,
+      import.meta.dir,
+    );
+    return join(dirname(manifest), name);
+  } catch {
+    return null;
+  }
+}
+
 function libraryPath(): string {
   if (override !== null) return override;
   const name = libraryName();
 
   const candidates = [
     join(import.meta.dir, "..", "..", "native-src", "dziry-engine", "target", "release", name),
+    enginePackagePath(name),
+    // Where 0.1.0-beta.1 bundled its Windows engine, inside the dziry package
+    // itself. Nothing stages this any more, but an app installed against that
+    // release still resolves.
     join(import.meta.dir, "..", "..", "native", `${process.platform}-${process.arch}`, name),
-  ];
+  ].filter((c): c is string => c !== null);
 
   for (const path of candidates) if (existsSync(path)) return path;
 
   // Which advice is honest depends on who is asking. Inside the framework
   // checkout (native-src/ exists) the fix is to build the engine; in an app that
-  // installed dziry from npm there is nothing to build — the package simply does
-  // not carry an engine for this platform, and saying `bun run engine` would
-  // send the user chasing a script their project does not have.
+  // installed dziry from npm there is nothing to build — either the platform has
+  // no prebuilt engine, or the install skipped optional dependencies, which is
+  // where the engine package lives.
   const checkout = existsSync(join(import.meta.dir, "..", "..", "native-src"));
   const advice = checkout
     ? `Run \`bun run engine\` to build it.`
-    : `This dziry release ships a prebuilt engine for Windows x64 only — ` +
-      `${process.platform}-${process.arch} is not supported yet.\n` +
+    : `dziry ships prebuilt engines for Windows x64, macOS (x64/arm64) and Linux (x64/arm64)\n` +
+      `  as optional dependencies. None is installed for ${process.platform}-${process.arch}:\n` +
+      `  either this platform is not supported yet, or the install skipped optional\n` +
+      `  dependencies (--no-optional / --omit=optional) — reinstall without that flag.\n` +
       `  The compiler ran fine; it is the native window that cannot open here.\n` +
       `  Platform progress: https://github.com/dziry-dev/dziry/issues`;
   throw new Error(

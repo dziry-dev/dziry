@@ -24,6 +24,13 @@
         "typescript": "^5",
         "zod": "^4.4.3",
       },
+      "optionalDependencies": {
+        "dziry-engine-darwin-arm64": "0.1.0-beta.2",
+        "dziry-engine-darwin-x64": "0.1.0-beta.2",
+        "dziry-engine-linux-arm64": "0.1.0-beta.2",
+        "dziry-engine-linux-x64": "0.1.0-beta.2",
+        "dziry-engine-win32-x64": "0.1.0-beta.2",
+      },
       "peerDependencies": {
         "@livestore/livestore": "^0.4.0",
       },
@@ -55,7 +62,7 @@
     },
     "packages/create-dziry": {
       "name": "create-dziry",
-      "version": "0.1.0-beta.1",
+      "version": "0.1.0-beta.2",
       "bin": {
         "create-dziry": "./index.ts",
       },

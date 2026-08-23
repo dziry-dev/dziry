@@ -1,0 +1,120 @@
+# Publish a release to npm: five engine packages, then dziry, then create-dziry.
+#
+# Each platform runner builds its own engine, runs the full cargo suite as the
+# release gate, and stages a publishable `dziry-engine-<platform>-<arch>`
+# package (scripts/stage-engine-package.ts). The publish job then pushes the
+# engine packages first — `dziry` lists them as exact-version
+# optionalDependencies, so they must exist before anyone can install the
+# release that references them.
+#
+# Auth is a granular npm token in the NPM_TOKEN secret (the account's 2FA is a
+# passkey, which no CI can answer). `--provenance` additionally signs each
+# publish with this workflow's OIDC identity, which is what the id-token
+# permission is for.
+#
+# Versions are read from the manifests, not from the tag: bump the three
+# version fields (root, create-dziry, and the optionalDependencies block),
+# push, then run this — via the Actions tab or a v* tag.
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  engines:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win32-x64
+          - os: macos-latest
+            target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: native-src/dziry-engine
+
+      - name: linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
+            libxfixes-dev libxrender-dev libxss-dev libxkbcommon-dev \
+            libwayland-dev libegl1-mesa-dev libgl1-mesa-dev \
+            libasound2-dev libpulse-dev libdbus-1-dev libudev-dev \
+            libfontconfig1-dev libfreetype-dev libxtst-dev libxinerama-dev
+
+      # The release gate: a binary whose suite is red does not ship.
+      - name: engine tests
+        run: cargo test --release
+        working-directory: native-src/dziry-engine
+        env:
+          SDL_VIDEODRIVER: dummy
+
+      - name: stage the engine package
+        run: bun run stage:engine
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-package-${{ matrix.target }}
+          path: dist/engine-packages/
+          if-no-files-found: error
+
+  publish:
+    needs: engines
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: engine-package-*
+          path: dist/engine-packages/
+          merge-multiple: true
+
+      # Engine packages first: dziry's exact-version optionalDependencies
+      # point at them, so an install of the main package 404s until they land.
+      - name: publish engine packages
+        run: |
+          for dir in dist/engine-packages/*/; do
+            npm publish "$dir" --access public --provenance
+          done
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: publish dziry
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: publish create-dziry
+        run: npm publish --access public --provenance
+        working-directory: packages/create-dziry
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

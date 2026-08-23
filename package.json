@@ -1,6 +1,6 @@
 {
   "name": "dziry",
-  "version": "0.1.0-beta.1",
+  "version": "0.1.0-beta.2",
   "type": "module",
   "license": "MIT",
   "keywords": [
@@ -70,16 +70,29 @@
       "optional": true
     }
   },
+  "//optionalDependencies": [
+    "One tiny package per platform, each carrying only the prebuilt engine binary",
+    "with os/cpu fields — the installer keeps the one that matches and skips the",
+    "rest. host.ts::enginePackagePath resolves the survivor. Versions are exact:",
+    "the engine and the runtime share a protocol version, so a binary from any",
+    "other release is not merely stale, it is a protocol mismatch."
+  ],
+  "optionalDependencies": {
+    "dziry-engine-win32-x64": "0.1.0-beta.2",
+    "dziry-engine-darwin-arm64": "0.1.0-beta.2",
+    "dziry-engine-darwin-x64": "0.1.0-beta.2",
+    "dziry-engine-linux-x64": "0.1.0-beta.2",
+    "dziry-engine-linux-arm64": "0.1.0-beta.2"
+  },
   "files": [
     "src",
-    "native",
     "LICENSE",
     "README.md",
     "!**/*.test.ts",
     "!**/*.test.tsx"
   ],
   "scripts": {
-    "prepack": "bun run scripts/prepack.ts",
+    "stage:engine": "bun run scripts/stage-engine-package.ts",
     "test": "bun test && bun run engine:test",
     "check": "tsc --noEmit",
     "lint": "cd native-src/dziry-engine && cargo fmt --check && cargo clippy --release --all-targets",
