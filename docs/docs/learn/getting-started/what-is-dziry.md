@@ -1,24 +1,24 @@
 ---
-title: What is dziry?
+title: What is Dziry?
 sidebar_position: 1
 ---
 
-# What is dziry?
+# What is Dziry?
 
-dziry is a framework for building desktop applications in TypeScript, HTML and
+Dziry is a framework for building desktop applications in TypeScript, HTML and
 CSS. It looks like a web framework when you write it, but it does not run in a
 browser: your code is compiled ahead of time, and a native engine — Rust, with
 Skia for painting and Taffy for layout — draws the window.
 
 If you want a desktop app with the authoring experience of the web and none of
-its runtime, dziry is for you. If you need a document renderer — arbitrary
-HTML from the network, floats, print — it is not: dziry renders applications,
+its runtime, Dziry is for you. If you need a document renderer — arbitrary
+HTML from the network, floats, print — it is not: Dziry renders applications,
 not documents.
 
 ## The compilation model
 
 Most UI frameworks do their work while the app runs: build a tree, diff it,
-match selectors, resolve the cascade, lay out boxes. dziry does that work once,
+match selectors, resolve the cascade, lay out boxes. Dziry does that work once,
 on your machine, before the app ships.
 
 When you build, the compiler imports your modules. That import runs your
@@ -54,7 +54,7 @@ instead.
 
 ## Reading state
 
-The one place dziry asks nothing of you is reading state:
+The one place Dziry asks nothing of you is reading state:
 
 ```tsx
 const count = signal(0);
@@ -68,7 +68,7 @@ directly. A build-time rewrite turns `count * 2` into `$(count) * 2`, where
 as `T & Ops<T>`, so the same expression also type-checks.
 
 The rewrite runs on your code, under `windows/`. It does not run on the
-framework's own modules, which is why you may see `.value` inside dziry's
+framework's own modules, which is why you may see `.value` inside Dziry's
 source and will not need it in yours.
 
 ## Performance

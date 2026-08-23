@@ -5,7 +5,7 @@ sidebar_position: 2
 
 # Windows
 
-A window in dziry is an OS window. Each subdirectory of `windows/` defines
+A window in Dziry is an OS window. Each subdirectory of `windows/` defines
 one, and its `index.tsx` default-exports a `<Window>` element.
 
 ```tsx no-check
@@ -56,7 +56,7 @@ export const route = signal("/");
 </Window>
 ```
 
-dziry has no global `currentRoute`, because a route belongs to a window and
+Dziry has no global `currentRoute`, because a route belongs to a window and
 two windows on different routes is the normal case. `<Outlet />` marks where
 the matched page renders. See [Routing](./routing.md) for the route table,
 navigation and typed parameters.

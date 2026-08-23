@@ -46,7 +46,7 @@ export const route = signal("/");
 
 The host subscribes to the signal, looks the path up in the route table, and
 updates visibility for the routes that entered or left. The signal is defined
-in your project rather than imported from dziry because a route belongs to a
+in your project rather than imported from Dziry because a route belongs to a
 window — see [Windows](./windows.md).
 
 ## The cost of navigating
@@ -73,7 +73,7 @@ const router = useRouter();
 `matches` is prefix-aware: `matches("products")` is true on `products/new`
 too, which is what a navigation entry that names a section wants.
 
-:::danger `router.path === "layout"` is always false
+:::danger[`router.path === "layout"` is always false]
 
 `router.path` is a signal, so comparing it to a string compares an object to a
 string — the result is `false` at build time and stays that way. The build

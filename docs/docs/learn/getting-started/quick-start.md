@@ -29,7 +29,7 @@ The starter is a working application, not a minimal hello-world: eleven routes
 demonstrating the Tailwind utility families, conditional classes, a keyed
 list, component-local state, forms, and nested routing. Each page shows one
 feature working, so you can open the corresponding source file and copy the
-pattern. The template always compiles against the version of dziry it ships
+pattern. The template always compiles against the version of Dziry it ships
 with.
 
 ```

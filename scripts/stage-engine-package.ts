@@ -49,7 +49,7 @@ const manifest = {
   name,
   version: root.version,
   description:
-    `The dziry native engine (SDL3 + Skia + Taffy), prebuilt for ` +
+    `The Dziry native engine (SDL3 + Skia + Taffy), prebuilt for ` +
     `${process.platform}-${process.arch}. Installed automatically as an ` +
     `optional dependency of dziry — not something to depend on directly.`,
   license: root.license,
@@ -67,7 +67,7 @@ await Bun.write(join(dest, "package.json"), JSON.stringify(manifest, null, 2) + 
 await Bun.write(
   join(dest, "README.md"),
   `# ${name}\n\n` +
-    `The [dziry](https://dziry.dev) native engine, prebuilt for ` +
+    `The [Dziry](https://dziry.dev) native engine, prebuilt for ` +
     `\`${process.platform}-${process.arch}\`.\n\n` +
     `This package is installed automatically as an optional dependency of ` +
     `[\`dziry\`](https://www.npmjs.com/package/dziry) — there is no reason to ` +

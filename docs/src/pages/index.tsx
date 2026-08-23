@@ -113,7 +113,7 @@ function Hero() {
               className="button button--secondary button--outline button--lg"
               to="/learn/getting-started/what-is-dziry"
             >
-              What is dziry?
+              What is Dziry?
             </Link>
           </div>
           <div className={styles.heroInstall}>
@@ -175,7 +175,7 @@ function Beta() {
   return (
     <section className={styles.beta}>
       <p>
-        dziry is in <strong>beta</strong> on Windows, macOS and Linux. Every
+        Dziry is in <strong>beta</strong> on Windows, macOS and Linux. Every
         API is tracked <em>done</em>, <em>partial</em> or <em>planned</em> in
         the <Link to="/reference">reference</Link>, and the status badges are
         generated from the project's tracking table at build time.

@@ -6,17 +6,17 @@ sidebar_position: 1
 # Using Effect
 
 [Effect](https://effect.website) is a TypeScript library for typed, composable
-programs — services, resource management, retries, streams. dziry integrates
+programs — services, resource management, retries, streams. Dziry integrates
 with it in five places: handlers, the window layer, validation, `source()`,
 and route loaders.
 
-The integration is structural and lazy. dziry recognizes Effect values by
+The integration is structural and lazy. Dziry recognizes Effect values by
 their shape at run time and imports the `effect` package only when your code
 actually hands one over — an app that never uses Effect loads none of it.
 
-:::note Installed, but only loaded on use
+:::note[Installed, but only loaded on use]
 
-dziry lists `effect` in its dependencies so its types always resolve (the
+Dziry lists `effect` in its dependencies so its types always resolve (the
 generated route types name `Effect<A, E, R>`), but the package is imported
 only when a handler returns an Effect, a layer is passed, a schema is used, or
 a `source()` returns a Stream.
@@ -38,14 +38,14 @@ export const addTodo = () =>
   });
 ```
 
-dziry detects the returned Effect, runs it to completion, prints the cause if
+Dziry detects the returned Effect, runs it to completion, prints the cause if
 it fails, and stays silent if it is interrupted. Nothing about Effect is
 required until a handler actually returns one.
 
 ## Providing services with the window layer
 
 Dependency injection has one root: the window. `<Window layer={layer}>` hands
-dziry a `Layer`; a `ManagedRuntime` is built from it at launch and disposed
+Dziry a `Layer`; a `ManagedRuntime` is built from it at launch and disposed
 when the window closes, so `Layer.scoped` resources — a store, a socket —
 open while the first frame paints and their finalizers run on quit.
 
@@ -85,7 +85,7 @@ unwrapped.
 ## Feeding a signal from a Stream
 
 `source()` creates a signal fed from outside the process. When its subscribe
-function returns an Effect `Stream`, dziry runs the stream with
+function returns an Effect `Stream`, Dziry runs the stream with
 `Stream.runForEach(stream, x => cell.set(x))`, forked in the window scope —
 quitting the window interrupts the stream and releases its subscription. The
 signal starts at the initial value, and each emission replaces it.
@@ -105,12 +105,12 @@ export const notifications = source<Notification[]>(() => live, []);
 
 Two details worth knowing:
 
-- **The explicit generic states the emission type.** dziry recognizes a
+- **The explicit generic states the emission type.** Dziry recognizes a
   `Stream` at run time but cannot name `Stream<A>` at the type level (the type
   parameter lives under a symbol only `effect` exports), so the initial value
   and the generic carry the type.
 - **The subscribe is a thunk** because a stream may need the window layer's
-  services, which do not exist while the module is being imported. dziry calls
+  services, which do not exist while the module is being imported. Dziry calls
   it once the layer is built.
 
 `source` also accepts a plain callback (`(set) => unsubscribe`) that involves

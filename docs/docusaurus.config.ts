@@ -43,7 +43,7 @@ const citations = [
 ];
 
 const config: Config = {
-  title: "dziry",
+  title: "Dziry",
   tagline: "A UI framework that does its work before the app runs",
   favicon: "img/favicon.svg",
 
@@ -109,7 +109,7 @@ const config: Config = {
   themeConfig: {
     colorMode: { defaultMode: "dark", respectPrefersColorScheme: true },
     navbar: {
-      title: "dziry",
+      title: "Dziry",
       items: [
         { type: "docSidebar", sidebarId: "learn", position: "left", label: "Docs" },
         { type: "docSidebar", sidebarId: "reference", position: "left", label: "Reference" },

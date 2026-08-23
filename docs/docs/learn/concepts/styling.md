@@ -5,7 +5,7 @@ sidebar_position: 5
 
 # Styling
 
-dziry apps are styled with real CSS, resolved at build time. Tailwind v4 is
+Dziry apps are styled with real CSS, resolved at build time. Tailwind v4 is
 the intended authoring layer, and the build runs the actual Tailwind — your
 project's own copy, not a reimplementation.
 
@@ -108,7 +108,7 @@ The cascade is resolved per pseudo-state from scratch rather than as a patch
 over the base state, which is what makes per-property `hover` + `focus`
 merging correct.
 
-:::note Predicates are per node; conditional classes are per style row
+:::note[Predicates are per node; conditional classes are per style row]
 
 The difference shows up in lists. Rows are compiled once and replicated, so
 every replica shares one style row — a conditional class on a row's input is
@@ -119,7 +119,7 @@ true for row 3 and false for row 4, and `cn("x", { on: sig })` cannot.
 
 ## CSS coverage
 
-dziry supports a subset of CSS, scoped to what Tailwind emits. A utility
+Dziry supports a subset of CSS, scoped to what Tailwind emits. A utility
 outside the subset produces a build warning naming the property, so an
 unsupported class is never a silent no-op. (The exact coverage is measured by
 scripts in the repository — see [Contributing](../../contributing/index.mdx).)
@@ -144,8 +144,8 @@ The gaps you are most likely to notice:
 
 ## The user-agent stylesheet
 
-dziry ships its own user-agent stylesheet rather than Tailwind's preflight —
-the preflight is written with selectors dziry does not implement (`:host`,
+Dziry ships its own user-agent stylesheet rather than Tailwind's preflight —
+the preflight is written with selectors Dziry does not implement (`:host`,
 `*`, `::before`, `[hidden]`) and is optional by design. The template's entry
 stylesheet therefore imports `theme.css` and `utilities.css` rather than the
 umbrella `@import "tailwindcss"`, and restricts scanning with `source(none)`

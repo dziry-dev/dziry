@@ -64,7 +64,7 @@ The route signal is passed in rather than imported from the framework: the
 host subscribes to it, looks the path up in the route table, and updates
 visibility for the routes that entered or left the active chain.
 
-A global `currentRoute` inside dziry would force every window to share one
+A global `currentRoute` inside Dziry would force every window to share one
 route, and two windows on different routes is the normal case. Passing the
 signal in makes the ownership explicit. Everything else about a route is
 resolved at compile time — see [Routing](./routing.mdx).

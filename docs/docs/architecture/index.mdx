@@ -8,7 +8,7 @@ sidebar_position: 1
 How a `<div>` becomes pixels, and where the boundary between TypeScript and
 the native engine sits.
 
-dziry's design follows one rule: **work is done at compile time unless it
+Dziry's design follows one rule: **work is done at compile time unless it
 provably cannot be.** Every feature is asked, in order: can the compiler
 resolve it? precompute it? enumerate its variants? If the answer is yes, no
 runtime code ships for it. What remains dynamic — current state values, list
@@ -16,7 +16,7 @@ contents, text measurement, hit-testing, the window size — is a short,
 deliberate list, and the runtime is held to a byte-count ratchet in CI to keep
 it that way.
 
-:::info Generated from checked data
+:::info[Generated from checked data]
 
 The pipeline stages, shared-memory table roles and guard lists on these pages
 are rendered from `guards/architecture/data.ts`, which `bun run arch:check`
@@ -34,7 +34,7 @@ Six stages, five of which happen before the app runs.
    compiled.
 3. **Resolve** — selectors match, specificity sorts, inheritance applies,
    shorthands expand, units convert. This is the step a browser redoes every
-   frame; dziry does it once, and the result is a set of numbers.
+   frame; Dziry does it once, and the result is a set of numbers.
 4. **Emit** — the numbers are written out as a TypeScript module of typed
    arrays: the in-memory representation itself, not a format that needs
    parsing.

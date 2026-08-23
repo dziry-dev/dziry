@@ -5,7 +5,7 @@ sidebar_position: 1
 
 # Reactivity
 
-State in dziry is built from two primitives: `signal` holds a value, and
+State in Dziry is built from two primitives: `signal` holds a value, and
 `computed` derives one. Reads are plain identifiers, writes go through `.set`,
 and updates reach the screen as direct memory writes rather than re-renders.
 
@@ -24,7 +24,7 @@ const shout = computed(() => `count is ${count}!`);
 ```
 
 Arithmetic, comparison, `===`, ternaries and template literals all work. At
-build time, dziry rewrites each identifier read into a call — `count * 2`
+build time, Dziry rewrites each identifier read into a call — `count * 2`
 becomes `$(count) * 2` — where `$` unwraps a signal and passes any other value
 through unchanged. Because `$` decides at run time, the rewrite needs no type
 information and is safe to apply everywhere: `$(t)` on a plain parameter simply
@@ -33,11 +33,11 @@ returns it.
 On the type level, `Signal<T>` is declared as `T & Ops<T>`, so the same
 expressions type-check.
 
-:::note Where the rewrite applies
+:::note[Where the rewrite applies]
 
 The rewrite runs on your code, under `windows/`. It does not run on the
 framework's own modules — that is where `$` is defined — so you may see
-`.value` inside dziry's source. You will not need it in yours.
+`.value` inside Dziry's source. You will not need it in yours.
 :::
 
 ## Writing a signal

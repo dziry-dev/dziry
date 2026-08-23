@@ -105,7 +105,7 @@ The engine ships inside the executable as an embedded asset and is unpacked to
 a per-user cache on first run — `dlopen` (and macOS code signing) require a
 real file on disk, so it cannot be loaded from the embedded filesystem.
 
-:::warning No cross-compilation yet
+:::warning[No cross-compilation yet]
 
 `bun build --compile --target` can cross-build the JavaScript half, but the
 embedded engine is the one built for the current machine, so a cross-built

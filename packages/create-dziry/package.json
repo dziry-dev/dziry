@@ -2,7 +2,7 @@
   "name": "create-dziry",
   "version": "0.1.0-beta.2",
   "type": "module",
-  "description": "Scaffold a dziry app — compiled UI on a native engine, no browser.",
+  "description": "Scaffold a Dziry app — compiled UI on a native engine, no browser.",
   "homepage": "https://dziry.dev",
   "repository": {
     "type": "git",

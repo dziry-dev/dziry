@@ -5,8 +5,9 @@ sidebar_position: 2
 
 # Signals
 
-The runtime's only state primitive. About sixty lines, written rather than imported,
-because the compiler needs to *recognise* signals by identity at build time.
+The runtime's state primitives. Implemented inside Dziry rather than imported
+from a signals library, because the compiler must recognize signals by
+identity at build time.
 
 ## signal
 
@@ -84,7 +85,7 @@ nothing to keep in sync.
 A `computed` is a signal to everything downstream — it can be interpolated, passed to
 `cn`, or read inside another `computed`.
 
-:::note Where a computed can live
+:::note[Where a computed can live]
 
 A `computed()` created inside a component has nowhere to go once components are
 erased: the generated module imports every cell by name, and an anonymous one has no
@@ -144,7 +145,7 @@ initial value. The subscribe runs once at launch (never while the compiler impor
 the module), and the unsubscribe runs on window close.
 
 What the subscribe **returns** decides the shape. Return an unsubscribe and it is a
-callback source that needs nothing. Return an Effect `Stream` and dziry runs it
+callback source that needs nothing. Return an Effect `Stream` and Dziry runs it
 with `Stream.runForEach`, importing `effect` lazily — see
 [Using Effect](../learn/guides/effect.md#feeding-a-signal-from-a-stream).
 
@@ -164,7 +165,7 @@ alert("Could not reach the server.", { level: "error", title: "Offline" });
 ```
 
 The platform's own modal message box — a Win32 task dialog, an `NSAlert`, the GTK box.
-`SDL_ShowSimpleMessageBox` behind an FFI call, so it is not something dziry draws; a dialog
+`SDL_ShowSimpleMessageBox` behind an FFI call, so it is not something Dziry draws; a dialog
 drawn by the framework would be the one part of your app that does not look like the system.
 
 `level` is an `AlertLevel` — `"info"` (the default), `"warning"` or `"error"` — and `title` defaults to your
@@ -181,7 +182,7 @@ stdin, so forgetting the import hangs your app thread on a terminal nobody is wa
 With no window there is nobody to notify, so it prints to stderr instead. That is what makes it
 safe in a handler you also screenshot.
 
-:::note No answer to wait for
+:::note[No answer to wait for]
 
 `confirm()` and `prompt()` are not built. The dialog runs on the engine thread — SDL will only
 show one from the thread that initialised video — so a call that waited for an answer would

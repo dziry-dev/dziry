@@ -5,7 +5,7 @@ sidebar_position: 3
 
 # Project structure
 
-A dziry project has a `windows/` directory, and each subdirectory of it is one
+A Dziry project has a `windows/` directory, and each subdirectory of it is one
 OS window.
 
 ```
@@ -66,7 +66,7 @@ Three things to notice:
   task switcher, and there is no sensible default. Sizes are compile-time
   integers in physical pixels.
 - **`route` is passed in, not imported from the framework.** A route belongs
-  to a window — two windows on different routes is the normal case — so dziry
+  to a window — two windows on different routes is the normal case — so Dziry
   has no global `currentRoute`.
 - **`<Outlet />`** is where the matched page renders.
 

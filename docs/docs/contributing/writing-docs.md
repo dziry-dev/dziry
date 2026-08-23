@@ -74,7 +74,7 @@ A clean run means "nothing dangling, nothing that fails to compile" — not
 - **Document what is done.** Check `API.md` first. A planned surface gets a badge and,
   if it needs prose at all, an admonition — not present-tense description of behaviour
   that does not exist.
-- **Explain the constraint, not just the rule.** Nearly every restriction in dziry
+- **Explain the constraint, not just the rule.** Nearly every restriction in Dziry
   follows from one thing: *anything the runtime reaches by name must have a name at
   build time*. A reader who has that can derive the rest.
 - **Name the failure.** "This compiles cleanly and never updates" is more useful than

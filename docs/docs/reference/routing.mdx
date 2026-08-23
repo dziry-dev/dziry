@@ -57,7 +57,7 @@ True while the active route is `path` or nested under it. Prefix-aware:
 `matches("products")` is true on `products/new` too, which is what a
 navigation entry naming a section wants.
 
-:::danger Do not compare `router.path` with `===`
+:::danger[Do not compare `router.path` with `===`]
 
 ```tsx no-check
 // Wrong: always false.
@@ -135,7 +135,7 @@ static segment is a type error.
 A static route contributes a string literal; a parameter contributes
 `${string}`, so both `"products/1"` and a template literal type-check.
 
-:::note Limits of the type
+:::note[Limits of the type]
 
 `${string}` spans slashes, so the type also accepts `products/a/b/c` —
 TypeScript catches typos, the compiler catches shape.

@@ -185,7 +185,7 @@ function libraryPath(): string {
   const checkout = existsSync(join(import.meta.dir, "..", "..", "native-src"));
   const advice = checkout
     ? `Run \`bun run engine\` to build it.`
-    : `dziry ships prebuilt engines for Windows x64, macOS (x64/arm64) and Linux (x64/arm64)\n` +
+    : `Dziry ships prebuilt engines for Windows x64, macOS (x64/arm64) and Linux (x64/arm64)\n` +
       `  as optional dependencies. None is installed for ${process.platform}-${process.arch}:\n` +
       `  either this platform is not supported yet, or the install skipped optional\n` +
       `  dependencies (--no-optional / --omit=optional) — reinstall without that flag.\n` +

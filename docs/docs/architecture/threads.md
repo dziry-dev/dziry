@@ -5,7 +5,7 @@ sidebar_position: 3
 
 # Two threads
 
-dziry runs application code and window servicing on separate threads so the
+Dziry runs application code and window servicing on separate threads so the
 app can never freeze the window. Everything on this page follows from that
 requirement.
 

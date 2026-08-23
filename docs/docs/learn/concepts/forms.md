@@ -5,7 +5,7 @@ sidebar_position: 6
 
 # Forms
 
-A form in dziry is markup, CSS and a schema. There is no form library and no
+A form in Dziry is markup, CSS and a schema. There is no form library and no
 per-field state to manage: the compiler sees the whole form, so it determines
 the payload's shape before the app runs.
 
@@ -91,12 +91,12 @@ layout `<div>` changes nothing.
 A wrapper holding a bare control *and* a named one would need to be a string
 and an object at once — that is a build error.
 
-:::note There is no bracket syntax
+:::note[There is no bracket syntax]
 
 `name="user[email]"` is the literal key `"user[email]"` everywhere in the web
 platform — in `FormData`, in the urlencoded body, in `URLSearchParams`. The
 bracket convention belongs to server-side parsers (PHP, Rack, `qs`), each with
-its own dialect. dziry nests by structure instead: nothing is parsed at run
+its own dialect. Dziry nests by structure instead: nothing is parsed at run
 time, and a conflicting path is reported at build time.
 :::
 
@@ -161,7 +161,7 @@ into it, and adding a row is an ordinary `signal.set`.
 It follows that reordering rows reorders the payload, a removed row is gone
 rather than blank, and the row type in the payload is the type you declared.
 
-:::note `bind:value` on a row property
+:::note[`bind:value` on a row property]
 
 Inside a `map()`, `bind:value` takes the row's own property rather than a
 signal. The callback runs once against a recording proxy, so `job.title` is a
@@ -226,7 +226,7 @@ There is no `:user-invalid` — it differs from `:invalid` only in *when* a
 browser lets it match, and that timing is already covered by `validateOn` and
 the pristine-field behavior.
 
-:::warning Specificity ties
+:::warning[Specificity ties]
 
 `input:invalid` and `input[type="text"]` are both specificity `(0,1,1)`, so
 source order decides. An `:invalid` rule written above the field's resting
@@ -246,7 +246,7 @@ export const Login = z.object({ email: z.email(), age: z.number().min(18) });
 
 `validate` accepts any **Standard Schema** (Zod 4, Valibot and ArkType
 implement it natively), any **Effect schema**, or a plain function returning
-issues. dziry depends on none of these libraries — Standard Schemas are used
+issues. Dziry depends on none of these libraries — Standard Schemas are used
 through their `~standard` property, and an Effect schema is converted with
 Effect's own helper behind a lazy import.
 
@@ -334,12 +334,12 @@ The class stays one per wrapper — `errorClassName` means "something under here
 is wrong", however many messages describe it. A marker naming a field that
 does not exist is a build warning, since it could never fill.
 
-:::warning Use the prefix form of the Tailwind variant
+:::warning[Use the prefix form of the Tailwind variant]
 
 `@custom-variant error (.group\/error &)` emits `.group\/error .error\:block`,
 a plain descendant selector. Tailwind's default form emits
 `:is(:where(.group\/error) *)`, and the `*` inside `:is()` is not a selector
-dziry parses.
+Dziry parses.
 :::
 
 Multiple fields can share the class name and stay independent — error patches
@@ -371,7 +371,7 @@ The checkbox keeps its compiler-declared cell, so `terms` remains in the
 payload. The `onChange` is a second reader of the same click; the cell is
 written before any handler runs, so the two cannot disagree.
 
-:::note `bind:checked` is planned
+:::note[`bind:checked` is planned]
 
 A named field's cell is deliberately unreachable from outside the generated
 module, so a field that drives something else on the page currently needs the
@@ -433,7 +433,7 @@ extension; `readFile` and `readFileText` load the whole file.
   in its bound signal; there is no `File` object. Read it with
   `fileInfo`/`readFile`/`readFileText`.
 - **A named submit button adds no entry of its own.** A browser includes
-  `name=value` for the button that submitted; dziry does not. In a two-button
+  `name=value` for the button that submitted; Dziry does not. In a two-button
   form, use two `onClick` handlers.
 
 `form="id"` **is** fully supported: a control it moves belongs to that form

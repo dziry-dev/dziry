@@ -24,7 +24,7 @@ export function useApiStatus(): ApiStatus {
   return usePluginData("dziry-api-status") as ApiStatus;
 }
 
-export default function Status({ of, note }: { of: string; note?: boolean }): React.JSX.Element {
+export default function Status({ of }: { of: string; note?: boolean }): React.JSX.Element {
   const data = useApiStatus();
   const entry = data.byKey[of];
 
@@ -38,19 +38,18 @@ export default function Status({ of, note }: { of: string; note?: boolean }): Re
     );
   }
 
-  return (
-    <>
-      <span className={`status status--${entry.status}`} title={entry.note || undefined}>
-        {LABEL[entry.status]}
-      </span>
-      {note && entry.note ? <em> — {entry.note}</em> : null}
-    </>
-  );
+  // The badge only. `API.md` notes are the maintainers' changelog; what a
+  // reader needs from a partial surface is said in the page's own prose.
+  return <span className={`status status--${entry.status}`}>{LABEL[entry.status]}</span>;
 }
 
 /**
  * The whole table, rendered. Used by the API index so there is exactly one list of
  * what works and it is the one in `API.md`.
+ *
+ * Surface and status only. The notes column of `API.md` is the maintainers'
+ * changelog — dates, internal file names, decision records — and none of that
+ * belongs on a public reference page.
  */
 export function StatusTable(): React.JSX.Element {
   const { rows } = useApiStatus();
@@ -60,7 +59,6 @@ export function StatusTable(): React.JSX.Element {
         <tr>
           <th>Surface</th>
           <th>Status</th>
-          <th>Notes</th>
         </tr>
       </thead>
       <tbody>
@@ -70,7 +68,6 @@ export function StatusTable(): React.JSX.Element {
             <td>
               <span className={`status status--${r.status}`}>{LABEL[r.status]}</span>
             </td>
-            <td dangerouslySetInnerHTML={{ __html: inlineCode(r.note) }} />
           </tr>
         ))}
       </tbody>

@@ -1,6 +1,6 @@
-# dziry
+# Dziry
 
-dziry is a framework for building desktop applications in TypeScript, HTML and
+Dziry is a framework for building desktop applications in TypeScript, HTML and
 CSS — compiled ahead of time, rendered by a native engine. No browser engine,
 no DOM, no webview.
 
@@ -86,9 +86,9 @@ The documentation lives at **[dziry.dev](https://dziry.dev)**: a quick start,
 the core concepts, the full API reference with per-feature status, and the
 architecture behind it.
 
-## What dziry is not
+## What Dziry is not
 
-dziry renders applications, not documents. Floats, tables, writing modes,
+Dziry renders applications, not documents. Floats, tables, writing modes,
 fragmentation and print are committed non-goals, and the CSS surface is scoped
 to what Tailwind emits — coverage is measured by a script in the repository
 rather than claimed. Accessibility today means real keyboard operability; an
