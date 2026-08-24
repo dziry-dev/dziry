@@ -48,7 +48,8 @@ const OUT_OF_SCOPE_GROUPS = [
   "css writing modes",
   "css ruby",
   "css speech",
-  "css table", // tables are a committed non-goal
+  // "css table" left this list 2026-08-24: tables are *planned*, no longer a
+  // non-goal, so their properties count as unsupported until they land.
   "filter effects",
   "css scroll snap",
   "css houdini",
@@ -61,7 +62,6 @@ const OUT_OF_SCOPE_NAMES = [
   /^(column-|columns$)/,
   /^ruby-/,
   /^(speak|voice-|pause|rest|cue)/,
-  /^(table-layout|border-collapse|border-spacing|caption-side|empty-cells)$/,
   // The two form-control properties ROADMAP C2 declares non-goals. `resize` needs
   // drag handles on a textarea and multi-line editing is deferred indefinitely, so
   // it could never do anything; `field-sizing: content` makes layout depend on the
@@ -221,5 +221,6 @@ if (SHOW_MISSING) {
 
 console.log(
   `\nThe in-scope number is the only actionable one. "out of scope" is ROADMAP's committed` +
-    `\nnon-goals — floats, tables, writing modes, fragmentation, multi-column, print.`,
+    `\nnon-goals — floats, writing modes, fragmentation, multi-column, print. Tables are` +
+    `\nplanned, so their properties count as unsupported rather than out of scope.`,
 );

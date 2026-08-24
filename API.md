@@ -136,6 +136,7 @@ Anything that trades robustness for capability stays a proposal.
 | handlers may return an `Effect` — run on the window's runtime | **done** (2026-08-15) — every dispatch path (`click`/`change`/`focus`/`blur`, list items, form `submit`/`invalid`) hands the return to `runDispatched`; failures print the full Cause, interruption is silent. `effect` recognised structurally and imported lazily; apps without it load none of it | — |
 | `Redirect` / `Cancel` navigation tags | **done** (2026-08-15) — exported from `dziry`, dependency-free classes failable from Effects and throwable from plain functions; the router that *interprets* them rides M7/M8 with `loader` | — |
 | `defineQuery` / `defineMutation` | planned | — |
+| `<table>` — table layout and elements | planned (2026-08-24, left the non-goals list: apps need data grids; the document-flow machinery around tables stays out) | — |
 | `import "./app.css"` from a window module | **done** — module-graph order, `src/compiler/css-imports.ts` | — |
 | Tailwind as an ordinary project dependency | **done** — the project's `tailwindcss`, run in-process, `src/compiler/stylesheet.ts` | — |
 | `<style>` in an `.html` document | **done** — raw text, extracted before the cascade; refused in JSX | — |

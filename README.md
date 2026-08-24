@@ -88,12 +88,12 @@ architecture behind it.
 
 ## What Dziry is not
 
-Dziry renders applications, not documents. Floats, tables, writing modes,
+Dziry renders applications, not documents. Floats, writing modes,
 fragmentation and print are committed non-goals, and the CSS surface is scoped
 to what Tailwind emits — coverage is measured by a script in the repository
-rather than claimed. Accessibility today means real keyboard operability; an
-assistive-technology surface (UIAutomation/NSAccessibility/AT-SPI) is planned
-and not yet built.
+rather than claimed. Tables and an assistive-technology surface
+(UIAutomation/NSAccessibility/AT-SPI) are planned and not yet built;
+accessibility today means real keyboard operability.
 
 ## License
 
